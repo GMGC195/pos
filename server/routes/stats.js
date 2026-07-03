@@ -1,0 +1,106 @@
+const express = require('express');
+const router = express.Router();
+const pool = require('../db');
+const { authenticateToken } = require('../middleware/auth');
+
+// GET comprehensive stats for Dashboard
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    // Total Saleh (Today's completed orders grand total)
+    const totalSaleResult = await pool.query(`
+      SELECT COALESCE(SUM(grand_total), 0) as total_sale
+      FROM orders
+      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed'
+    `);
+
+    // Daily Revenue (Today's Sales - Produce Cost)
+    const dailyRevenueResult = await pool.query(`
+      WITH recipe_costs AS (
+        SELECT 
+          r.item_id,
+          SUM(r.quantity_used * s.price_per_unit) as produce_cost_per_unit
+        FROM recipes r
+        JOIN stock s ON r.stock_id = s.id
+        GROUP BY r.item_id
+      ),
+      day_items AS (
+        SELECT 
+          oi.item_id,
+          SUM(oi.qty) as total_qty,
+          SUM(oi.qty * oi.unit_price) as total_price,
+          SUM(CASE 
+            WHEN o.subtotal > 0 THEN (oi.qty * oi.unit_price / o.subtotal) * o.discount 
+            ELSE 0 
+          END) as total_discount
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.status = 'Completed'
+          AND DATE(o.created_at) = CURRENT_DATE
+        GROUP BY oi.item_id
+      )
+      SELECT 
+        COALESCE(SUM((s.total_price - s.total_discount) - (COALESCE(rc.produce_cost_per_unit, 0) * s.total_qty)), 0) as revenue,
+        COALESCE(SUM(COALESCE(rc.produce_cost_per_unit, 0) * s.total_qty), 0) as product_cost
+      FROM day_items s
+      LEFT JOIN recipe_costs rc ON s.item_id = rc.item_id
+    `);
+
+    // Total fulfilled orders today
+    const totalOrdersResult = await pool.query(`
+      SELECT COUNT(*) as count FROM orders
+      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed'
+    `);
+
+    // Guest Today (Today's total orders excluding cancelled)
+    const guestsTodayResult = await pool.query(`
+      SELECT COUNT(*) as count FROM orders
+      WHERE DATE(created_at) = CURRENT_DATE AND status != 'Cancelled'
+    `);
+
+    // Last 7 days sales data guaranteed using Postgres generate_series
+    const last7DaysQuery = await pool.query(`
+      SELECT 
+        TO_CHAR(d.date, 'Mon DD') as label,
+        COALESCE(SUM(o.grand_total), 0) as total
+      FROM (
+        SELECT CURRENT_DATE - i as date
+        FROM generate_series(6, 0, -1) i
+      ) d
+      LEFT JOIN orders o 
+        ON DATE(o.created_at) = d.date AND o.status = 'Completed'
+      GROUP BY d.date
+      ORDER BY d.date ASC
+    `);
+
+    const days = last7DaysQuery.rows.map(r => ({
+      label: r.label,
+      total: parseFloat(r.total)
+    }));
+
+    // Top selling items overall
+    const topItems = await pool.query(`
+      SELECT item_name, SUM(qty) as total_qty
+      FROM order_items
+      GROUP BY item_name
+      ORDER BY total_qty DESC
+      LIMIT 6
+    `);
+
+    res.json({
+      totalSale: parseFloat(totalSaleResult.rows[0].total_sale),
+      dailyRevenue: parseFloat(dailyRevenueResult.rows[0].revenue),
+      totalProductCost: parseFloat(dailyRevenueResult.rows[0].product_cost),
+      totalOrders: parseInt(totalOrdersResult.rows[0].count),
+      guestsToday: parseInt(guestsTodayResult.rows[0].count),
+      last7Days: days,
+      topItems: topItems.rows.map(r => ({
+        name: r.item_name,
+        value: parseInt(r.total_qty),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;

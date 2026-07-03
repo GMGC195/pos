@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Background circle in dark teal -->
+  <circle cx="32" cy="32" r="32" fill="#103C43"/>
+  <!-- Sauce bottle body (yellow) -->
+  <rect x="24" y="22" width="16" height="24" rx="5" ry="5" fill="#F4B400"/>
+  <!-- Bottle neck -->
+  <rect x="28" y="14" width="8" height="10" rx="3" ry="3" fill="#F4B400"/>
+  <!-- Bottle cap (dark teal) -->
+  <rect x="27" y="10" width="10" height="6" rx="2" ry="2" fill="#0a2428"/>
+  <!-- Sauce drip -->
+  <ellipse cx="40" cy="34" rx="3" ry="5" fill="#F4B400" transform="rotate(-15 40 34)"/>
+  <!-- Happy face eyes -->
+  <circle cx="28.5" cy="32" r="2" fill="#103C43"/>
+  <circle cx="35.5" cy="32" r="2" fill="#103C43"/>
+  <!-- Happy smile -->
+  <path d="M27 37 Q32 42 37 37" stroke="#103C43" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>
