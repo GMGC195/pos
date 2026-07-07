@@ -8,6 +8,7 @@
     "build": "npm run build:client",
     "dev:client": "npm run dev --prefix client",
     "dev:server": "npm run dev --prefix server",
+    "dev": "npm run dev:client",
     "start:server": "npm run start --prefix server",
     "lint:client": "npm run lint --prefix client",
     "lint": "npm run lint:client"

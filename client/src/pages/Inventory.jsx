@@ -15,7 +15,7 @@ import {
 
 import { usePOS } from '../contexts/POSContext'
 
-const SIZES = ['S', 'M', 'L' , 'XL', 'REGULAR']
+const SIZES = ['S', 'M', 'L' , 'XL', 'XXL', 'REGULAR']
 
 const emptyForm = {
   name: '', category_id: '', price: '', image_url: '',
@@ -136,16 +136,44 @@ export default function Inventory() {
     }
   }
 
-  const handleDelete = async id => {
-    if (!window.confirm('Delete this item?')) return
-    try {
-      await axios.delete(`/api/items/${id}`)
-      setItems(prev => prev.filter(i => i.id !== id))
-      toast.success('Item deleted')
-      await loadData(true)
-    } catch (err) {
-      toast.error('Delete failed: ' + (err?.response?.data?.error || err.message))
-    }
+  const handleDelete = id => {
+    toast((t) => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '4px 0' }}>
+        <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
+          Are you sure you want to delete this item?
+        </span>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            className="btn btn-sm btn-secondary"
+            style={{ padding: '4px 10px', fontSize: '12px' }}
+            onClick={() => toast.dismiss(t.id)}
+          >
+            Cancel
+          </button>
+          <button
+            className="btn btn-sm btn-danger"
+            style={{ padding: '4px 10px', fontSize: '12px', background: 'var(--red)', color: 'white', border: 'none' }}
+            onClick={async () => {
+              toast.dismiss(t.id);
+              const loadingToast = toast.loading('Deleting...');
+              try {
+                await axios.delete(`/api/items/${id}`);
+                setItems(prev => prev.filter(i => i.id !== id));
+                toast.success('Item deleted', { id: loadingToast });
+                await loadData(true);
+              } catch (err) {
+                toast.error('Delete failed: ' + (err?.response?.data?.error || err.message), { id: loadingToast });
+              }
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    ), {
+      duration: 6000,
+      position: 'top-center',
+    });
   }
 
   return (

@@ -498,6 +498,11 @@ export default function POS() {
                   sizeOptionsParsed = [{ name: 'Regular', price: parseFloat(item.price) || 0 }];
                 }
 
+                const smallOpt = sizeOptionsParsed.find(x => x.name.toUpperCase() === 'S');
+                const displayPrice = smallOpt 
+                  ? smallOpt.price 
+                  : Math.min(...sizeOptionsParsed.map(x => x.price));
+
                 return (
                   <div key={item.id} className="product-card" title={item.name} onClick={() => {
                     setSizeModalItem({ ...item, sizeOptionsParsed });
@@ -537,8 +542,10 @@ export default function POS() {
                       )}
                       <div className="product-card-bottom">
                         <span className="product-price">
-                          {sizeOptionsParsed.length > 0 && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>From </span>}
-                          {CURRENCY}{parseFloat(item.price).toFixed(2)}
+                          {item.size_options && item.size_options.length > 0 && (
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>From </span>
+                          )}
+                          {CURRENCY}{displayPrice.toFixed(2)}
                         </span>
                         <button className="add-btn">+</button>
                       </div>
