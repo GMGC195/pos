@@ -33,6 +33,7 @@ export default function Reports({ isTodaySales = false }) {
   const [transactions, setTransactions] = useState([])
   const [summary, setSummary] = useState([])
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('All')
   const [loading, setLoading] = useState(true)
   const [showTodaySummary, setShowTodaySummary] = useState(false)
   const [showDetailsInModal, setShowDetailsInModal] = useState(false)
@@ -68,11 +69,12 @@ export default function Reports({ isTodaySales = false }) {
     setShowTodaySummary(false)
     setCurrentPage(1)
     setModalPage(1)
+    setStatusFilter('All')
   }, [isTodaySales])
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [from, to, search])
+  }, [from, to, search, statusFilter])
 
   const cashRow = summary.find(r => r.payment_method === 'Cash')
   const cardRow = summary.find(r => r.payment_method === 'Card')
@@ -319,9 +321,11 @@ export default function Reports({ isTodaySales = false }) {
     }
   }
 
-  const filteredTransactions = transactions.filter(t => 
-    search ? t.order_id.toString().includes(search.trim()) : true
-  )
+  const filteredTransactions = transactions.filter(t => {
+    const matchesSearch = search ? t.order_id.toString().includes(search.trim()) : true;
+    const matchesStatus = statusFilter === 'All' ? true : t.order_status === statusFilter;
+    return matchesSearch && matchesStatus;
+  })
 
   const paginatedTransactions = filteredTransactions.slice(
     (currentPage - 1) * pageSize,
@@ -435,6 +439,17 @@ export default function Reports({ isTodaySales = false }) {
               className="pos-search-input"
               style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
             />
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
+            >
+              <option value="All">All Statuses</option>
+              <option value="Completed">Completed (Delivered)</option>
+              <option value="Hold">Hold / Pending</option>
+              <option value="Cancelled">Cancelled</option>
+              <option value="Returned">Returned</option>
+            </select>
           </div>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
         </div>
