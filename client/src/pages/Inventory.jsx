@@ -223,9 +223,9 @@ export default function Inventory() {
                       ))}
                     </tr>
                   ))
-                : filteredItems.map(item => (
+                : filteredItems.map((item, index) => (
                     <tr key={item.id}>
-                      <td style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{item.id}</td>
+                      <td style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{index + 1}</td>
                       <td>
                         {item.image_url ? (
                           <img
