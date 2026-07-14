@@ -29,7 +29,8 @@ import {
   Database,
   Calculator,
   AlertTriangle,
-  X
+  X,
+  PlusCircle
 } from 'lucide-react'
 
 const navGroups = [
@@ -53,9 +54,9 @@ const navGroups = [
   {
     title: 'Item Management',
     items: [
-      { to: '/inventory', icon: <Package size={18} strokeWidth={2.2} />, label: 'Inventory' },
-      { to: '/stock-management', icon: <Database size={18} strokeWidth={2.2} />, label: 'Stock & Pricing', roles: ['Admin'] },
-      { to: '/product-cost', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Production Cost', roles: ['Admin'] },
+      { to: '/inventory', icon: <PlusCircle size={18} strokeWidth={2.2} />, label: 'Add Item' },
+      { to: '/stock-management', icon: <Database size={18} strokeWidth={2.2} />, label: 'Stock Mangement', roles: ['Admin'] },
+      { to: '/product-cost', icon: <Package size={18} strokeWidth={2.2} />, label: 'Inventory Management', roles: ['Admin'] },
     ]
   }
 ]
@@ -129,14 +130,14 @@ export default function Layout() {
   const pageTitle = {
     '/': 'Dashboard Overview',
     '/pos': 'Point of Sale & Billing',
-    '/inventory': 'Inventory Tracking',
+    '/inventory': 'Add Item',
     '/hold-payments': 'Hold Payment Queue',
     '/today-sales': "Today Sale Analysis",
     '/sales-item': 'Sales Item & Revenue Report',
     '/reports': 'Reports & Analytics',
     '/cancel-requests': 'Cancellation Request Management',
-    '/stock-management': 'Stock & Pricing Management',
-    '/product-cost': 'Production Cost Analysis',
+    '/stock-management': 'Add New Stock & Pricing Management',
+    '/product-cost': 'Inventory Management and Production Cost Calculation',
     '/settings': 'System Settings',
     '/help-support': 'Help & Support Center'
   }[location.pathname] || `${BRAND_NAME} Pro`

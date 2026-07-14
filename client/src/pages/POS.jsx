@@ -306,7 +306,7 @@ export default function POS() {
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 2px 20px 6px 5px;
+      padding: 2px 10px 6px 15px;
     }
     .center { text-align: center; }
     h2 { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
@@ -674,7 +674,7 @@ export default function POS() {
       </div>
 
       {/* Thermal Receipt - hidden, printing is done via printThermalSlip() popup */}
-      <div className="receipt-section" ref={receiptRef} style={{ width: '80mm', padding: '2px 20px 6px 5px' }}>
+      <div className="receipt-section" ref={receiptRef} style={{ width: '80mm', padding: '2px 10px 6px 15px' }}>
         <div className="receipt-header" style={{ textAlign: 'center' }}>
           <img src={logo} alt="Logo" style={{ width: '50%', maxHeight: 80, objectFit: 'contain', marginTop: 0, marginBottom: 2 }} />
           <p>Free Home Delivery</p>

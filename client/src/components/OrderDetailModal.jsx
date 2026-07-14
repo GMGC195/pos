@@ -34,7 +34,7 @@ export default function OrderDetailModal({ order, onClose }) {
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 2px 20px 6px 5px;
+      padding: 2px 10px 6px 15px;
     }
     .center { text-align: center; }
     h2 { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
