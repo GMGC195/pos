@@ -18,6 +18,7 @@ import HelpSupport from './pages/HelpSupport'
 import Employees from './pages/Employees'
 import AttendanceTracker from './pages/AttendanceTracker'
 import AttendanceReports from './pages/AttendanceReports'
+import TodayAttendance from './pages/TodayAttendance'
 import { POSProvider } from './contexts/POSContext'
 import './index.css'
 
@@ -52,6 +53,7 @@ export default function App() {
             {/* Employee & Attendance Routes */}
             <Route path="/employees" element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><Employees /></ProtectedRoute>} />
             <Route path="/attendance" element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><AttendanceTracker /></ProtectedRoute>} />
+            <Route path="/today-attendance" element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><TodayAttendance /></ProtectedRoute>} />
             <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><AttendanceReports /></ProtectedRoute>} />
             
             {/* Everyone with a role can access settings and help */}

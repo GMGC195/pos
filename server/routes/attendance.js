@@ -6,61 +6,61 @@ const { authenticateToken } = require('../middleware/auth');
 // Get today's attendance status for all active employees
 router.get('/today', authenticateToken, async (req, res) => {
   try {
-    // Get latest attendance session of today for each employee
-    const result = await pool.query(`
-      SELECT DISTINCT ON (e.id)
-             e.id as employee_id,
-             e.name,
-             e.role,
-             e.shift,
-             e.shift_hours,
-             e.status as employee_status,
-             ea.id as attendance_id,
-             ea.check_in,
-             ea.check_out,
-             ea.status as attendance_status,
-             ea.on_break,
-             ea.break_start,
-             ea.total_break_duration_seconds
-      FROM employees e
-      LEFT JOIN employee_attendance ea ON e.id = ea.employee_id AND ea.date = CURRENT_DATE
-      WHERE e.status = 'Active'
-      ORDER BY e.id, ea.check_in DESC NULLS LAST
+    // Fetch all active employees
+    const activeEmps = await pool.query(`
+      SELECT id as employee_id, name, role, shift, shift_hours, status as employee_status, employee_id as employee_code
+      FROM employees
+      WHERE status = 'Active'
+      ORDER BY id ASC
     `);
-    
-    // Also calculate today's total hours worked so far for each employee
-    const hoursResult = await pool.query(`
-      SELECT employee_id, 
-             check_in, 
-             check_out, 
-             total_break_duration_seconds,
-             on_break,
-             break_start
+
+    // Fetch all today's attendance sessions
+    const sessions = await pool.query(`
+      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds
       FROM employee_attendance
       WHERE date = CURRENT_DATE
+      ORDER BY check_in ASC
     `);
 
-    // Group work hours by employee
-    const hoursMap = {};
-    hoursResult.rows.forEach(row => {
-      if (!hoursMap[row.employee_id]) {
-        hoursMap[row.employee_id] = 0;
+    // Group sessions by employee ID
+    const sessionsMap = {};
+    sessions.rows.forEach(row => {
+      if (!sessionsMap[row.employee_id]) {
+        sessionsMap[row.employee_id] = [];
       }
-      const checkInTime = new Date(row.check_in).getTime();
-      const checkOutTime = row.check_out ? new Date(row.check_out).getTime() : Date.now();
-      
-      let breakSecs = row.total_break_duration_seconds || 0;
-      if (row.on_break && row.break_start) {
-        breakSecs += Math.floor((Date.now() - new Date(row.break_start).getTime()) / 1000);
-      }
-      
-      const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
-      hoursMap[row.employee_id] += Math.max(0, sessionMs / (1000 * 60 * 60)); // convert to hours
+      sessionsMap[row.employee_id].push(row);
     });
 
-    const employeesWithAttendance = result.rows.map(emp => {
-      emp.total_hours_today = hoursMap[emp.employee_id] || 0;
-      return emp;
+    const employeesWithAttendance = activeEmps.rows.map(emp => {
+      const empSessions = sessionsMap[emp.employee_id] || [];
+      
+      // Calculate today's total hours worked so far across all sessions
+      let totalHoursToday = 0;
+      empSessions.forEach(row => {
+        const checkInTime = new Date(row.check_in).getTime();
+        const checkOutTime = row.check_out ? new Date(row.check_out).getTime() : Date.now();
+        let breakSecs = row.total_break_duration_seconds || 0;
+        if (row.on_break && row.break_start) {
+          breakSecs += Math.floor((Date.now() - new Date(row.break_start).getTime()) / 1000);
+        }
+        const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
+        totalHoursToday += Math.max(0, sessionMs / (1000 * 60 * 60));
+      });
+
+      // Get current active state: last session status
+      const lastSession = empSessions[empSessions.length - 1] || null;
+
+      return {
+        ...emp,
+        sessions: empSessions, // Return all sessions to show stacked inside one row
+        attendance_id: lastSession ? lastSession.attendance_id : null,
+        check_in: lastSession ? lastSession.check_in : null,
+        check_out: lastSession ? lastSession.check_out : null,
+        attendance_status: lastSession ? lastSession.attendance_status : null,
+        on_break: lastSession ? lastSession.on_break : false,
+        break_start: lastSession ? lastSession.break_start : null,
+        total_hours_today: totalHoursToday
+      };
     });
 
     res.json(employeesWithAttendance);
@@ -245,12 +245,49 @@ router.post('/toggle-break', authenticateToken, async (req, res) => {
   }
 });
 
+// Create or Update holiday endpoint
+router.post('/holiday', authenticateToken, async (req, res) => {
+  const { date, employee_id, is_global } = req.body;
+  if (!date) {
+    return res.status(400).json({ error: 'Date is required' });
+  }
+
+  try {
+    if (is_global) {
+      // Get all active employees
+      const activeEmps = await pool.query("SELECT id FROM employees WHERE status = 'Active'");
+      for (const emp of activeEmps.rows) {
+        // Delete existing check-ins on this date
+        await pool.query('DELETE FROM employee_attendance WHERE employee_id = $1 AND date = $2', [emp.id, date]);
+        // Insert holiday log
+        await pool.query(
+          "INSERT INTO employee_attendance (employee_id, check_in, status, date) VALUES ($1, $2, 'Holiday', $3)",
+          [emp.id, `${date}T00:00:00.000Z`, date]
+        );
+      }
+      res.json({ message: 'Global holiday set successfully' });
+    } else {
+      if (!employee_id) {
+        return res.status(400).json({ error: 'Employee ID is required for individual holiday' });
+      }
+      await pool.query('DELETE FROM employee_attendance WHERE employee_id = $1 AND date = $2', [employee_id, date]);
+      await pool.query(
+        "INSERT INTO employee_attendance (employee_id, check_in, status, date) VALUES ($1, $2, 'Holiday', $3)",
+        [employee_id, `${date}T00:00:00.000Z`, date]
+      );
+      res.json({ message: 'Holiday set successfully for employee' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get attendance reports
 router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.*, e.name, e.role, e.shift, e.shift_hours
+      SELECT ea.*, e.name, e.role, e.shift, e.shift_hours, e.employee_id as employee_code
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE 1=1
@@ -262,12 +299,12 @@ router.get('/reports', authenticateToken, async (req, res) => {
       query += ` AND ea.date::text LIKE $${params.length}`;
     }
 
-    if (employee_id) {
+    if (employee_id && employee_id !== 'All') {
       params.push(employee_id);
       query += ` AND ea.employee_id = $${params.length}`;
     }
 
-    query += ' ORDER BY ea.date DESC, ea.check_in DESC';
+    query += ' ORDER BY ea.date ASC, ea.check_in ASC';
 
     const result = await pool.query(query, params);
     
@@ -280,11 +317,26 @@ router.get('/reports', authenticateToken, async (req, res) => {
       let otHours = 0;
       const shiftHours = parseFloat(row.shift_hours || 12.0);
       
+      if (row.status === 'Holiday') {
+        return {
+          ...row,
+          hours_worked: 0,
+          shift_hours: shiftHours,
+          ot_hours: 0
+        };
+      }
+      
       if (checkOutTime) {
         const breakSecs = row.total_break_duration_seconds || 0;
         const netMs = checkOutTime - checkInTime - (breakSecs * 1000);
         durationHours = Math.max(0, netMs / (1000 * 60 * 60));
-        otHours = Math.max(0, durationHours - shiftHours);
+        otHours = durationHours - shiftHours;
+      } else {
+        // Active session
+        const breakSecs = row.total_break_duration_seconds || 0;
+        const netMs = Date.now() - checkInTime - (breakSecs * 1000);
+        durationHours = Math.max(0, netMs / (1000 * 60 * 60));
+        otHours = durationHours - shiftHours;
       }
       
       return {
@@ -307,7 +359,7 @@ router.get('/analytics', authenticateToken, async (req, res) => {
     const weeklyQuery = await pool.query(`
       SELECT date, COUNT(DISTINCT employee_id) as present_count 
       FROM employee_attendance 
-      WHERE date >= CURRENT_DATE - INTERVAL '6 days' 
+      WHERE date >= CURRENT_DATE - INTERVAL '6 days' AND status != 'Holiday'
       GROUP BY date 
       ORDER BY date ASC
     `);
@@ -366,9 +418,12 @@ router.get('/stats', authenticateToken, async (req, res) => {
     let present = 0;
     let late = 0;
     let onBreak = 0;
+    let holidays = 0;
 
     todayLogs.rows.forEach(log => {
-      if (!log.check_out) {
+      if (log.status === 'Holiday') {
+        holidays++;
+      } else if (!log.check_out) {
         if (log.on_break) {
           onBreak++;
         } else {
@@ -380,7 +435,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       }
     });
 
-    const checkedOut = todayLogs.rows.filter(log => log.check_out).length;
+    const checkedOut = todayLogs.rows.filter(log => log.check_out && log.status !== 'Holiday').length;
     const absent = Math.max(0, totalEmployees - todayLogs.rows.length);
 
     res.json({
@@ -389,7 +444,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
       late_today: late,
       on_break: onBreak,
       checked_out: checkedOut,
-      absent: absent
+      absent: absent,
+      holidays: holidays
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -397,3 +453,4 @@ router.get('/stats', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
+

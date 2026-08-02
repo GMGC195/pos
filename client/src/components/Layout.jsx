@@ -67,7 +67,8 @@ const navGroups = [
     items: [
       { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin', 'Operator'] },
       { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Operator'] },
-      { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Reports', roles: ['Admin', 'Operator'] },
+      { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Operator'] },
+      { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Operator'] },
     ]
   }
 ]
@@ -149,6 +150,10 @@ export default function Layout() {
     '/cancel-requests': 'Cancellation Request Management',
     '/stock-management': 'Add New Stock & Pricing Management',
     '/product-cost': 'Inventory Management and Production Cost Calculation',
+    '/employees': 'Manage Employees',
+    '/attendance': 'Mark Attendance Panel',
+    '/today-attendance': "Today's Attendance Panel",
+    '/attendance-reports': 'Attendance Sheet',
     '/settings': 'System Settings',
     '/help-support': 'Help & Support Center'
   }[location.pathname] || `${BRAND_NAME} Pro`
