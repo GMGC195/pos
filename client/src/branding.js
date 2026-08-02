@@ -1,11 +1,11 @@
 
-import BRAND_LOGO from './assets/SaucyBite.png'
+import BRAND_LOGO from '/1 al rasaq.png'
 
 // ── Brand Identity ────────────────────────────────────────────────
-export const BRAND_NAME       = 'SAUCY BITE'
-export const BRAND_TAGLINE    = 'THE TASTE SPECIALIST'
-export const BRAND_VERSION    = 'v2.0.0'
-export const BRAND_BROWSER_TITLE = 'SAUCY BITE — Restaurant ERP'
+export const BRAND_NAME       = 'AL RASAQ'
+export const BRAND_TAGLINE    = 'PAKISTAN RESTAURANT'
+export const BRAND_VERSION    = ''
+export const BRAND_BROWSER_TITLE = 'AL RASAQ — Pakistan Restaurant ERP'
 
 // ── Color Palette ─────────────────────────────────────────────────
 export const BRAND_PRIMARY    = '#F4B400'  // Mustard Yellow  — buttons, active nav, accents
@@ -27,8 +27,8 @@ export const BRAND_CURRENCY   = 'Rs.'
 export const BRAND_TAX_NUMBER = ''
 
 // ── Print Templates ───────────────────────────────────────────────
-export const BRAND_RECEIPT_FOOTER  = 'SAUCY BITE — THE TASTE SPECIALIST'
-export const BRAND_INVOICE_FOOTER  = 'Thank you for dining with SAUCY BITE!'
+export const BRAND_RECEIPT_FOOTER  = 'AL RASAQ — PAKISTAN RESTAURANT'
+export const BRAND_INVOICE_FOOTER  = 'Thank you for dining with AL RASAQ!'
 
 // ── Login Page ────────────────────────────────────────────────────
 export const BRAND_LOGIN_BG_FROM  = '#0a2428'   // Very dark teal

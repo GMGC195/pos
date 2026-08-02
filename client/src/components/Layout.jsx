@@ -277,8 +277,8 @@ export default function Layout() {
           >
             <LogOut size={16} strokeWidth={2.5} /> Logout
           </button>
-          <div className="nav-link" style={{ cursor: 'default', color: 'rgba(255,255,255,0.3)', fontSize: 12, marginTop: 8 }}>
-            <span>{BRAND_VERSION} · {BRAND_NAME} Pro</span>
+          <div className="nav-link" style={{ cursor: 'default', color: 'rgba(255,255,255,0.3)', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+            <span>{BRAND_NAME} Pro</span>
           </div>
         </div>
       </aside>

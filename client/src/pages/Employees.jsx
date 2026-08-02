@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet } from 'lucide-react'
+import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
 
@@ -32,6 +32,18 @@ export default function Employees() {
     employee_id: ''
   })
 
+  // Shifts configuration state
+  const [shifts, setShifts] = useState([])
+  const [showShiftConfig, setShowShiftConfig] = useState(false)
+  const [newShiftForm, setNewShiftForm] = useState({ name: '', start_time: '10:00 AM', end_time: '11:00 PM', hours: 13.0 })
+  const [editingShiftId, setEditingShiftId] = useState(null)
+
+  const loadShifts = () => {
+    axios.get('/api/employees/shifts/list')
+      .then(res => setShifts(res.data))
+      .catch(() => toast.error('Error loading shifts'))
+  }
+
   const loadEmployees = (showSpinner = false) => {
     if (showSpinner) setLoading(true)
     axios.get('/api/employees')
@@ -53,6 +65,7 @@ export default function Employees() {
   useEffect(() => {
     const hasCache = !!localStorage.getItem('pizza_shop_employees')
     loadEmployees(!hasCache)
+    loadShifts()
   }, [])
 
   const handleOpenAdd = () => {
@@ -62,8 +75,8 @@ export default function Employees() {
       role: 'Operator',
       salary: 0,
       status: 'Active',
-      shift: 'R1',
-      shift_hours: 13.0,
+      shift: shifts[0]?.name || 'R1',
+      shift_hours: parseFloat(shifts[0]?.hours || 13.0),
       department: '',
       position: '',
       employee_id: ''
@@ -94,9 +107,8 @@ export default function Employees() {
 
   const handleShiftChange = (e) => {
     const val = e.target.value
-    let hours = 12.0
-    if (val === 'R1') hours = 13.0
-    if (val === 'R3') hours = 13.0
+    const matchedShift = shifts.find(s => s.name === val)
+    const hours = matchedShift ? parseFloat(matchedShift.hours) : 12.0
     setFormData(prev => ({ ...prev, shift: val, shift_hours: hours }))
   }
 
@@ -165,6 +177,9 @@ export default function Employees() {
         </div>
 
         <div style={{ display: 'flex', gap: 12 }}>
+          <button className="btn btn-secondary" onClick={() => setShowShiftConfig(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42 }}>
+            <Settings size={18} /> Manage Shifts
+          </button>
           <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42 }}>
             <FileSpreadsheet size={18} /> Import Employees
           </button>
@@ -350,7 +365,7 @@ export default function Employees() {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Assigned Shift</label>
                     <select 
@@ -358,9 +373,9 @@ export default function Employees() {
                       onChange={handleShiftChange}
                       style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
                     >
-                      <option value="R1">R1 (10:00 AM)</option>
-                      <option value="R2">R2 (09:00 AM)</option>
-                      <option value="R3">R3 (03:00 PM)</option>
+                      {shifts.map(s => (
+                        <option key={s.id} value={s.name}>{s.name} ({s.start_time} - {s.end_time})</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -381,6 +396,144 @@ export default function Employees() {
                 <button type="submit" className="btn btn-primary">Save Details</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Shift Configuration Management Modal */}
+      {showShiftConfig && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 520, padding: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--surface-2)' }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Manage Shift Timings</h3>
+              <button onClick={() => { setShowShiftConfig(false); setEditingShiftId(null); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div style={{ padding: 24 }}>
+              {/* Shift Form */}
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  if (editingShiftId) {
+                    await axios.put(`/api/employees/shifts/list/${editingShiftId}`, newShiftForm)
+                    toast.success('Shift config updated!')
+                  } else {
+                    await axios.post('/api/employees/shifts/list', newShiftForm)
+                    toast.success('New shift configured!')
+                  }
+                  setNewShiftForm({ name: '', start_time: '10:00 AM', end_time: '11:00 PM', hours: 13.0 })
+                  setEditingShiftId(null)
+                  loadShifts()
+                } catch (err) {
+                  toast.error(err?.response?.data?.error || 'Failed to save shift')
+                }
+              }} style={{ marginBottom: 20, background: 'var(--surface-1)', padding: 16, borderRadius: 10, border: '1px solid var(--surface-2)' }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 700 }}>{editingShiftId ? 'Edit Shift Config' : 'Configure New Shift'}</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Shift Name (e.g. R4)</label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="R4"
+                      value={newShiftForm.name}
+                      onChange={e => setNewShiftForm({ ...newShiftForm, name: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Standard Hours</label>
+                    <input 
+                      type="number" 
+                      step="0.5"
+                      required
+                      value={newShiftForm.hours}
+                      onChange={e => setNewShiftForm({ ...newShiftForm, hours: parseFloat(e.target.value) || 0 })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Start Time</label>
+                    <input 
+                      type="text" 
+                      placeholder="10:00 AM"
+                      required
+                      value={newShiftForm.start_time}
+                      onChange={e => setNewShiftForm({ ...newShiftForm, start_time: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>End Time</label>
+                    <input 
+                      type="text" 
+                      placeholder="11:00 PM"
+                      required
+                      value={newShiftForm.end_time}
+                      onChange={e => setNewShiftForm({ ...newShiftForm, end_time: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  {editingShiftId && (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
+                      setNewShiftForm({ name: '', start_time: '10:00 AM', end_time: '11:00 PM', hours: 13.0 });
+                      setEditingShiftId(null);
+                    }}>Cancel Edit</button>
+                  )}
+                  <button type="submit" className="btn btn-primary btn-sm">{editingShiftId ? 'Save Changes' : 'Add Shift'}</button>
+                </div>
+              </form>
+
+              {/* Configured Shifts List */}
+              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--surface-2)', textAlign: 'left', background: 'var(--surface-2)' }}>
+                      <th style={{ padding: 8, fontSize: 12 }}>Name</th>
+                      <th style={{ padding: 8, fontSize: 12 }}>Timing</th>
+                      <th style={{ padding: 8, fontSize: 12 }}>Duty Hrs</th>
+                      <th style={{ padding: 8, fontSize: 12, textAlign: 'center' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shifts.map(s => (
+                      <tr key={s.id} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                        <td style={{ padding: 8, fontSize: 12, fontWeight: 700 }}>{s.name}</td>
+                        <td style={{ padding: 8, fontSize: 12 }}>{s.start_time} - {s.end_time}</td>
+                        <td style={{ padding: 8, fontSize: 12 }}>{s.hours} hrs</td>
+                        <td style={{ padding: 8, textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px 6px' }} onClick={() => {
+                              setEditingShiftId(s.id);
+                              setNewShiftForm({ name: s.name, start_time: s.start_time, end_time: s.end_time, hours: parseFloat(s.hours) });
+                            }}><Edit2 size={12} /></button>
+                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px 6px', color: 'var(--red)' }} onClick={async () => {
+                              if (!window.confirm('Are you sure you want to delete this shift configuration?')) return;
+                              try {
+                                await axios.delete(`/api/employees/shifts/list/${s.id}`)
+                                toast.success('Shift config deleted!')
+                                loadShifts()
+                              } catch {
+                                toast.error('Failed to delete shift')
+                              }
+                            }}><Trash2 size={12} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       )}

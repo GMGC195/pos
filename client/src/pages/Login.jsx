@@ -25,10 +25,10 @@ import {
   BRAND_NAME,
   BRAND_TAGLINE,
   BRAND_VERSION,
-  BRAND_LOGO,
   BRAND_PRIMARY,
   BRAND_EMAIL
 } from '../branding'
+import BRAND_LOGIN_LOGO from '../assets/al rawaq.png'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
@@ -495,12 +495,13 @@ export default function Login() {
           initial="hidden"
           animate={isFlipped ? "success" : "show"}
         >
-          <img src={BRAND_LOGO} alt={BRAND_NAME} className="lp-logo" />
+          <img src={BRAND_LOGIN_LOGO} alt={BRAND_NAME} className="lp-logo" />
           <p className="lp-welcome">Welcome to</p>
-          <h1 className="lp-brand-name">SAUCY <span>BITE</span></h1>
+          <h1 className="lp-brand-name">AL <span>RASAQ</span></h1>
           <p className="lp-tagline">{BRAND_TAGLINE}</p>
           <div className="lp-divider" />
-
+          
+          {/* features, slogans... */}
           <div className="lp-features">
             {features.map((feat) => {
               const Icon = feat.icon
@@ -536,7 +537,7 @@ export default function Login() {
           animate={isFlipped ? "success" : "show"}
         >
           <div className="lp-card">
-            <img src={BRAND_LOGO} alt={BRAND_NAME} className="lp-card-logo" />
+            <img src={BRAND_LOGIN_LOGO} alt={BRAND_NAME} className="lp-card-logo" />
 
             <h2 className="lp-card-title">
               {step === 'login' && 'Welcome Back!'}

@@ -34,6 +34,27 @@ const pool = require('./db');
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_hours NUMERIC(4, 2) DEFAULT 12.0
     `);
 
+    // Create employee_shifts config table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_shifts (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(50) UNIQUE NOT NULL,
+        start_time VARCHAR(20) NOT NULL DEFAULT '10:00 AM',
+        end_time VARCHAR(20) NOT NULL DEFAULT '11:00 PM',
+        hours NUMERIC(4, 2) NOT NULL DEFAULT 13.0
+      )
+    `);
+
+    // Seed default shifts if not already seeded
+    await pool.query(`
+      INSERT INTO employee_shifts (name, start_time, end_time, hours)
+      VALUES 
+        ('R1', '10:00 AM', '11:00 PM', 13.0),
+        ('R2', '09:00 AM', '09:00 PM', 12.0),
+        ('R3', '03:00 PM', '04:00 AM', 13.0)
+      ON CONFLICT (name) DO NOTHING
+    `);
+
     // Add employee_id column if not exists
     await pool.query(`
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS employee_id VARCHAR(50) UNIQUE

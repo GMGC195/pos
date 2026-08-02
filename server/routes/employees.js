@@ -208,4 +208,59 @@ router.post('/import', authenticateToken, async (req, res) => {
   }
 });
 
+// GET all configured shifts
+router.get('/shifts/list', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM employee_shifts ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST new custom shift
+router.post('/shifts/list', authenticateToken, async (req, res) => {
+  const { name, start_time, end_time, hours } = req.body;
+  if (!name || !start_time || !end_time) {
+    return res.status(400).json({ error: 'Name, Start Time, and End Time are required' });
+  }
+  try {
+    const hoursNum = parseFloat(hours) || 12.0;
+    const result = await pool.query(
+      'INSERT INTO employee_shifts (name, start_time, end_time, hours) VALUES ($1, $2, $3, $4) RETURNING *',
+      [name.toUpperCase(), start_time, end_time, hoursNum]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT update configured shift
+router.put('/shifts/list/:id', authenticateToken, async (req, res) => {
+  const { name, start_time, end_time, hours } = req.body;
+  try {
+    const hoursNum = parseFloat(hours) || 12.0;
+    const result = await pool.query(
+      'UPDATE employee_shifts SET name=$1, start_time=$2, end_time=$3, hours=$4 WHERE id=$5 RETURNING *',
+      [name.toUpperCase(), start_time, end_time, hoursNum, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Shift config not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE shift config
+router.delete('/shifts/list/:id', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM employee_shifts WHERE id = $1 RETURNING *', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Shift config not found' });
+    res.json({ message: 'Shift configuration deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -204,27 +204,27 @@ export default function AttendanceReports() {
         <div style={{ overflowX: 'auto', width: '100%', maxHeight: '680px' }}>
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '1200px' }}>
             <thead>
-              <tr style={{ background: 'var(--surface-1)' }}>
+              <tr style={{ background: 'var(--surface-1)', position: 'sticky', top: 0, zIndex: 11 }}>
                 {/* Non-sticky Code header */}
-                <th style={{ background: 'var(--surface-1)', minWidth: '100px', borderRight: '1px solid var(--surface-2)', padding: '12px 14px', fontSize: 12, fontWeight: 700 }}>Code</th>
+                <th style={{ background: 'var(--surface-1)', minWidth: '100px', borderBottom: '2px solid var(--surface-2)', borderRight: '1px solid var(--surface-2)', padding: '12px 14px', fontSize: 12, fontWeight: 700 }}>Code</th>
                 {/* Sticky Name header */}
-                <th style={{ position: 'sticky', left: 0, background: 'var(--surface-1)', zIndex: 10, minWidth: '150px', borderRight: '2px solid var(--surface-2)', padding: '12px 14px', fontSize: 12, fontWeight: 700, boxShadow: '2px 0 5px rgba(0,0,0,0.05)' }}>Employee Name</th>
+                <th style={{ position: 'sticky', left: 0, background: 'var(--surface-1)', zIndex: 13, minWidth: '150px', borderBottom: '2px solid var(--surface-2)', borderRight: '2px solid var(--surface-2)', padding: '12px 14px', fontSize: 12, fontWeight: 700, boxShadow: '2px 0 5px rgba(0,0,0,0.05)' }}>Employee Name</th>
                 
                 {/* Day columns */}
                 {daysInMonth.map(day => (
-                  <th key={day.getDate()} style={{ minWidth: '85px', textAlign: 'center', borderRight: '1px solid var(--surface-2)', padding: '8px', fontSize: 11, fontWeight: 600 }}>
+                  <th key={day.getDate()} style={{ minWidth: '85px', textAlign: 'center', borderBottom: '2px solid var(--surface-2)', borderRight: '1px solid var(--surface-2)', padding: '8px', fontSize: 11, fontWeight: 600 }}>
                     <div style={{ color: 'var(--text-muted)' }}>{day.toLocaleDateString([], { weekday: 'short' })}</div>
                     <div style={{ fontSize: 13, fontWeight: 750, color: 'var(--text)' }}>{day.getDate()}</div>
                   </th>
                 ))}
 
                 {/* Summary columns */}
-                <th style={{ minWidth: '60px', textAlign: 'center', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>P</th>
-                <th style={{ minWidth: '60px', textAlign: 'center', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>A</th>
-                <th style={{ minWidth: '60px', textAlign: 'center', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>L</th>
-                <th style={{ minWidth: '60px', textAlign: 'center', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>H</th>
-                <th style={{ minWidth: '90px', textAlign: 'center', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>Total Hours</th>
-                <th style={{ minWidth: '80px', textAlign: 'center', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>Overtime</th>
+                <th style={{ minWidth: '60px', textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>P</th>
+                <th style={{ minWidth: '60px', textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>A</th>
+                <th style={{ minWidth: '60px', textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>L</th>
+                <th style={{ minWidth: '60px', textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>H</th>
+                <th style={{ minWidth: '90px', textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>Total Hours</th>
+                <th style={{ minWidth: '80px', textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700 }}>Overtime</th>
               </tr>
             </thead>
             <tbody>

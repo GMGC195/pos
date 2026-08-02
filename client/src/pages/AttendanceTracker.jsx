@@ -385,6 +385,7 @@ export default function AttendanceTracker() {
             const isCheckedIn = emp.attendance_id && !emp.check_out;
             const isOnBreak = emp.on_break;
  
+            const staffRole = emp.role && emp.role.toLowerCase() !== 'operator' ? emp.role : 'Staff';
             return (
               <div key={emp.employee_id} className="card" style={{ 
                 padding: 20, 
@@ -400,7 +401,7 @@ export default function AttendanceTracker() {
                     <div>
                       <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{emp.name}</h4>
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {emp.role || 'Staff'} • <strong>Shift {emp.shift || 'R1'}</strong>
+                        {staffRole} • <strong>Shift {emp.shift || 'R1'}</strong>
                       </span>
                     </div>
                     <span style={{ 
