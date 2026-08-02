@@ -2,10 +2,10 @@
 import BRAND_LOGO from '/1 al rasaq.png'
 
 // ── Brand Identity ────────────────────────────────────────────────
-export const BRAND_NAME       = 'AL RASAQ'
+export const BRAND_NAME       = 'AL RAWAQ'
 export const BRAND_TAGLINE    = 'PAKISTAN RESTAURANT'
 export const BRAND_VERSION    = ''
-export const BRAND_BROWSER_TITLE = 'AL RASAQ — Pakistan Restaurant ERP'
+export const BRAND_BROWSER_TITLE = 'AL RAWAQ — Pakistan Restaurant ERP'
 
 // ── Color Palette ─────────────────────────────────────────────────
 export const BRAND_PRIMARY    = '#F4B400'  // Mustard Yellow  — buttons, active nav, accents
@@ -27,8 +27,8 @@ export const BRAND_CURRENCY   = 'Rs.'
 export const BRAND_TAX_NUMBER = ''
 
 // ── Print Templates ───────────────────────────────────────────────
-export const BRAND_RECEIPT_FOOTER  = 'AL RASAQ — PAKISTAN RESTAURANT'
-export const BRAND_INVOICE_FOOTER  = 'Thank you for dining with AL RASAQ!'
+export const BRAND_RECEIPT_FOOTER  = 'AL RAWAQ — PAKISTAN RESTAURANT'
+export const BRAND_INVOICE_FOOTER  = 'Thank you for dining with AL RAWAQ!'
 
 // ── Login Page ────────────────────────────────────────────────────
 export const BRAND_LOGIN_BG_FROM  = '#0a2428'   // Very dark teal

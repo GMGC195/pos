@@ -276,7 +276,7 @@ export default function AttendanceReports() {
       html += `      MONTH: ${selectedMonth}`
       html += `    </th>`
       html += `    <th colspan="${daysInMonth.length + 5}" style="background-color: #103C43; color: #FFFFFF; font-size: 10pt; text-align: right; padding: 12px; font-weight: bold; border: none;">`
-      html += `      AL RASAQ PAKISTAN RESTAURANT • Exported: ${new Date().toLocaleDateString()}`
+      html += `      AL RAWAQ PAKISTAN RESTAURANT • Exported: ${new Date().toLocaleDateString()}`
       html += `    </th>`
       html += `  </tr>`
       

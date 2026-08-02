@@ -496,7 +496,7 @@ export default function Login() {
         >
           <img src={BRAND_LOGIN_LOGO} alt={BRAND_NAME} className="lp-logo" />
           <p className="lp-welcome">Welcome to</p>
-          <h1 className="lp-brand-name">AL <span>RASAQ</span></h1>
+          <h1 className="lp-brand-name">AL <span>RAWAQ</span></h1>
           <p className="lp-tagline">{BRAND_TAGLINE}</p>
           <div className="lp-divider" />
           
