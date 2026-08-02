@@ -177,6 +177,35 @@ router.post('/check-out', authenticateToken, async (req, res) => {
   }
 });
 
+// Bulk break endpoint for all active checked-in staff
+router.post('/bulk-break', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE employee_attendance SET on_break = true, break_start = NOW() WHERE check_out IS NULL AND (on_break = false OR on_break IS NULL) RETURNING *'
+    );
+    res.json({ message: `Successfully put ${result.rowCount} employees on break.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bulk end break endpoint for all checked-in staff currently on break
+router.post('/bulk-end-break', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE employee_attendance 
+       SET on_break = false, 
+           total_break_duration_seconds = COALESCE(total_break_duration_seconds, 0) + EXTRACT(EPOCH FROM (NOW() - break_start))::integer,
+           break_start = null 
+       WHERE check_out IS NULL AND on_break = true 
+       RETURNING *`
+    );
+    res.json({ message: `Successfully ended break for ${result.rowCount} employees.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Break toggle endpoint
 router.post('/toggle-break', authenticateToken, async (req, res) => {
   const { employee_id } = req.body;
