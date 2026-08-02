@@ -30,7 +30,10 @@ import {
   Calculator,
   AlertTriangle,
   X,
-  PlusCircle
+  PlusCircle,
+  Users,
+  Fingerprint,
+  CalendarRange
 } from 'lucide-react'
 
 const navGroups = [
@@ -57,6 +60,14 @@ const navGroups = [
       { to: '/inventory', icon: <PlusCircle size={18} strokeWidth={2.2} />, label: 'Add Item' },
       { to: '/stock-management', icon: <Database size={18} strokeWidth={2.2} />, label: 'Stock Mangement', roles: ['Admin'] },
       { to: '/product-cost', icon: <Package size={18} strokeWidth={2.2} />, label: 'Inventory Management', roles: ['Admin'] },
+    ]
+  },
+  {
+    title: 'Employees & Attendance',
+    items: [
+      { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin'] },
+      { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance' },
+      { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Reports', roles: ['Admin'] },
     ]
   }
 ]

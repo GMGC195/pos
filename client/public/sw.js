@@ -61,9 +61,11 @@ self.addEventListener('fetch', (event) => {
     // For now, let's keep it simple: runtime navigation caching
   }
 
-  // Network-First for Orders, Transactions, and Stats (Auto-Reload logic)
+  // Network-First for Orders, Transactions, Stats, Employees, and Attendance (Auto-Reload logic)
   if (url.pathname.includes('/api/orders') || 
       url.pathname.includes('/api/transactions') || 
+      url.pathname.includes('/api/employees') || 
+      url.pathname.includes('/api/attendance') || 
       url.pathname.includes('/api/stats')) {
     event.respondWith(
       fetch(event.request)

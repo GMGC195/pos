@@ -15,6 +15,9 @@ import CancelRequests from './pages/CancelRequests'
 import StockManagement from './pages/StockManagement'
 import ProductCostManagement from './pages/ProductCostManagement'
 import HelpSupport from './pages/HelpSupport'
+import Employees from './pages/Employees'
+import AttendanceTracker from './pages/AttendanceTracker'
+import AttendanceReports from './pages/AttendanceReports'
 import { POSProvider } from './contexts/POSContext'
 import './index.css'
 
@@ -45,6 +48,11 @@ export default function App() {
             <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Admin']}><CancelRequests /></ProtectedRoute>} />
             <Route path="/stock-management" element={<ProtectedRoute allowedRoles={['Admin']}><StockManagement /></ProtectedRoute>} />
             <Route path="/product-cost" element={<ProtectedRoute allowedRoles={['Admin']}><ProductCostManagement /></ProtectedRoute>} />
+            
+            {/* Employee & Attendance Routes */}
+            <Route path="/employees" element={<ProtectedRoute allowedRoles={['Admin']}><Employees /></ProtectedRoute>} />
+            <Route path="/attendance" element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><AttendanceTracker /></ProtectedRoute>} />
+            <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin']}><AttendanceReports /></ProtectedRoute>} />
             
             {/* Everyone with a role can access settings and help */}
             <Route path="/settings" element={<Settings />} />

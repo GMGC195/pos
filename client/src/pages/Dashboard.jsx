@@ -7,7 +7,7 @@ import {
   ArcElement, Title, Tooltip, Legend, Filler,
 } from 'chart.js'
 import { Line, Doughnut } from 'react-chartjs-2'
-import { CircleDollarSign, Receipt, Clock, Users, TrendingUp, Flame, Printer, Download, RefreshCw } from 'lucide-react'
+import { CircleDollarSign, Receipt, Clock, Users, TrendingUp, Flame, Printer, Download, RefreshCw, Fingerprint, Coffee, UserX } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler)
 
@@ -45,11 +45,14 @@ function StatCard({ stat, value, loading }) {
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
+  const [attendanceStats, setAttendanceStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const TARGET_REVENUE = 15000
 
   const loadStats = () => {
     setLoading(true)
+    
+    // Fetch stats
     axios.get('/api/stats')
       .then(r => setStats(r.data))
       .catch(() => setStats({
@@ -57,6 +60,11 @@ export default function Dashboard() {
         last7Days: Array.from({ length: 7 }, (_, i) => ({ label: `Day ${i+1}`, total: 0 })),
         topItems: [],
       }))
+
+    // Fetch attendance stats
+    axios.get('/api/attendance/stats')
+      .then(r => setAttendanceStats(r.data))
+      .catch(() => setAttendanceStats(null))
       .finally(() => setLoading(false))
   }
 
@@ -221,6 +229,32 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Staff Attendance Summary */}
+      {attendanceStats && (
+        <div className="card" style={{ marginBottom: 24, marginTop: 24 }}>
+          <div className="card-header">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+              <Fingerprint size={20} style={{ color: 'var(--primary)' }} /> Staff Presence Today
+            </h3>
+          </div>
+          <div className="summary-grid" style={{ marginTop: 10 }}>
+            {[
+              { label: 'Active Staff Now', val: attendanceStats.present_now, color: 'var(--green)' },
+              { label: 'On Break', val: attendanceStats.on_break, color: 'var(--primary)' },
+              { label: 'Late Arrivals Today', val: attendanceStats.late_today, color: '#F97316' },
+              { label: 'Checked Out', val: attendanceStats.checked_out, color: 'var(--text-muted)' },
+              { label: 'Absent Staff', val: attendanceStats.absent, color: 'var(--red)' },
+              { label: 'Total Registered Staff', val: attendanceStats.total_employees, color: 'var(--text-secondary)' },
+            ].map(item => (
+              <div key={item.label} style={{ background: 'var(--surface)', borderRadius: 12, padding: '20px 24px', border: '1px solid var(--surface-2)' }}>
+                <div style={{ fontSize: 26, fontWeight: 800, color: item.color }}>{loading ? '...' : item.val}</div>
+                <div style={{ fontWeight: 600, marginTop: 4, color: 'var(--text-secondary)', fontSize: 13 }}>{item.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Today's Summary */}
       <div className="card">

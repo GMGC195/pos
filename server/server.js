@@ -7,6 +7,71 @@ const pool = require('./db');
 (async () => {
   try {
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE');
+    
+    // Create employees table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employees (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        email VARCHAR(150) UNIQUE,
+        phone VARCHAR(50),
+        role VARCHAR(50),
+        salary NUMERIC(10, 2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'Active',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    // Add shift column if not exists
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift VARCHAR(20) DEFAULT 'R1'
+    `);
+    
+    // Add shift_hours column if not exists
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_hours NUMERIC(4, 2) DEFAULT 12.0
+    `);
+
+    // Add employee_id column if not exists
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS employee_id VARCHAR(50) UNIQUE
+    `);
+
+    // Add department column if not exists
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS department VARCHAR(100)
+    `);
+
+    // Add position column if not exists
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS position VARCHAR(100)
+    `);
+
+    // Backfill existing employees without an employee_id
+    await pool.query(`
+      UPDATE employees SET employee_id = 'EMP-' || LPAD(id::text, 4, '0') WHERE employee_id IS NULL
+    `);
+    
+    // Create employee_attendance table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_attendance (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        check_in TIMESTAMPTZ NOT NULL,
+        check_out TIMESTAMPTZ,
+        status VARCHAR(20) NOT NULL DEFAULT 'Present',
+        on_break BOOLEAN DEFAULT FALSE,
+        break_start TIMESTAMPTZ,
+        total_break_duration_seconds INTEGER DEFAULT 0,
+        date DATE DEFAULT CURRENT_DATE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Create indexes
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_employee ON employee_attendance(employee_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON employee_attendance(date)`);
+
     // Ensure all stock alert columns exist
     await pool.query('ALTER TABLE stock ADD COLUMN IF NOT EXISTS low_stock_threshold NUMERIC(10,3) DEFAULT 0');
     await pool.query('ALTER TABLE stock ADD COLUMN IF NOT EXISTS low_stock_at TIMESTAMP');
@@ -94,6 +159,8 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/recipes', require('./routes/recipes'));
 app.use('/api/support', require('./routes/support'));
+app.use('/api/employees', require('./routes/employees'));
+app.use('/api/attendance', require('./routes/attendance'));
 
 // Health check
 app.get('/api/health', (req, res) => {
