@@ -22,6 +22,10 @@
   --dark-2: #1a5c66;
   --dark-3: #0a2428;
 
+  /* ─── Success Colors ─── */
+  --green: #10B981;
+  --green-light: #D1FAE5;
+
   /* ─── Neutral Surface ─── */
   --surface: #F8F8F6;
   --surface-2: #EEEEED;

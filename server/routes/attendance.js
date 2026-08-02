@@ -330,13 +330,13 @@ router.get('/reports', authenticateToken, async (req, res) => {
         const breakSecs = row.total_break_duration_seconds || 0;
         const netMs = checkOutTime - checkInTime - (breakSecs * 1000);
         durationHours = Math.max(0, netMs / (1000 * 60 * 60));
-        otHours = durationHours - shiftHours;
+        otHours = Math.max(0, durationHours - shiftHours);
       } else {
         // Active session
         const breakSecs = row.total_break_duration_seconds || 0;
         const netMs = Date.now() - checkInTime - (breakSecs * 1000);
         durationHours = Math.max(0, netMs / (1000 * 60 * 60));
-        otHours = durationHours - shiftHours;
+        otHours = Math.max(0, durationHours - shiftHours);
       }
       
       return {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from '../api'
-import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings } from 'lucide-react'
+import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function AttendanceReports() {
@@ -153,11 +153,13 @@ export default function AttendanceReports() {
             leaves++
           } else {
             presents++
-            // Sum all hours worked on this day
+            // Sum all hours worked on this day and calculate daily overtime
+            let dayHours = 0
             sessions.forEach(s => {
-              totalHours += s.hours_worked || 0
-              totalOvertime += s.ot_hours || 0
+              dayHours += s.hours_worked || 0
             })
+            totalHours += dayHours
+            totalOvertime += Math.max(0, dayHours - emp.shift_hours)
           }
         } else {
           // If no log exists for a past date, it's considered an absent day
@@ -199,6 +201,174 @@ export default function AttendanceReports() {
     }
   }
 
+  // Export Monthly Sheet to Excel (with identical layout and check-in/out cell formats)
+  // Export Monthly Sheet to Excel with full color formatting, custom alignments, and auto-adjusted widths
+  const exportToExcel = () => {
+    try {
+      const headers = ['Code', 'Employee Name']
+      daysInMonth.forEach(day => {
+        headers.push(`${day.getDate()} (${day.toLocaleDateString([], { weekday: 'short' })})`)
+      })
+      headers.push('P', 'A', 'L', 'H', 'Total Hours', 'Overtime')
+
+      // Build HTML content representing the Excel sheet with inline styles and worksheet configuration
+      let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`
+      html += `<head><meta charset="utf-8"/>`
+      html += `<!--[if gte mso 9]>`
+      html += `<xml>`
+      html += `  <x:ExcelWorkbook>`
+      html += `    <x:ExcelWorksheets>`
+      html += `      <x:ExcelWorksheet>`
+      html += `        <x:Name>Attendance ${selectedMonth}</x:Name>`
+      html += `        <x:WorksheetOptions>`
+      html += `          <x:DisplayGridlines/>`
+      html += `        </x:WorksheetOptions>`
+      html += `      </x:ExcelWorksheet>`
+      html += `    </x:ExcelWorksheets>`
+      html += `  </x:ExcelWorkbook>`
+      html += `</xml>`
+      html += `<![endif]-->`
+      html += `<style>`
+      html += `  table { border-collapse: collapse; }`
+      html += `  th, td { border: 0.5pt solid #CBD5E1; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10pt; padding: 8px 12px; vertical-align: middle; }`
+      // Highlight top row (Day and Date) with Brand Dark Teal #103C43 and white text
+      html += `  th { background-color: #103C43; color: #FFFFFF; font-weight: bold; text-align: center; }`
+      html += `  th.emp-header { background-color: #F4B400; color: #000000; }` // Mustard Yellow for code/name headers
+      // Highlight Employee Code and Employee Name columns with Light Yellow #FEF3C7
+      html += `  .highlight-col { background-color: #FEF3C7; font-weight: bold; color: #1E293B; }`
+      html += `  .code-cell { text-align: center; }`
+      html += `  .name-cell { text-align: left; }`
+      // Alternating rows: even rows white, odd rows very light gray/yellow tint
+      html += `  .row-even { background-color: #FFFFFF; }`
+      html += `  .row-odd { background-color: #FAFBFD; }`
+      // Center-align all attendance data, check-in/outs, present/absents, totals
+      html += `  .center-text { text-align: center; white-space: nowrap; }`
+      html += `  .present-cell { color: #16A34A; font-weight: bold; }`
+      html += `  .absent-cell { color: #DC2626; font-weight: bold; }`
+      html += `  .leave-cell { color: #EA580C; font-weight: bold; }`
+      html += `  .holiday-cell { color: #2563EB; font-weight: bold; }`
+      html += `</style>`
+      html += `</head>`
+      html += `<body>`
+      html += `<table>`
+
+      // Column widths config: Code (100px), Name (180px), Day cells (180px for checkin/out visibility), PALH (60px), Totals (100px)
+      html += `<colgroup>`
+      html += `  <col width="90" />`
+      html += `  <col width="180" />`
+      daysInMonth.forEach(() => {
+        html += `  <col width="170" />`
+      })
+      html += `  <col width="50" />`
+      html += `  <col width="50" />`
+      html += `  <col width="50" />`
+      html += `  <col width="50" />`
+      html += `  <col width="90" />`
+      html += `  <col width="90" />`
+      html += `</colgroup>`
+
+      // Write table header with top info row, empty spacer row, and main column headers
+      html += `<thead>`
+      
+      // Top info row: Month and brand details with a dark teal background
+      html += `  <tr>`
+      html += `    <th colspan="3" style="background-color: #103C43; color: #FFFFFF; font-weight: bold; font-size: 11pt; text-align: left; padding: 12px; border: none;">`
+      html += `      MONTH: ${selectedMonth}`
+      html += `    </th>`
+      html += `    <th colspan="${daysInMonth.length + 5}" style="background-color: #103C43; color: #FFFFFF; font-size: 10pt; text-align: right; padding: 12px; font-weight: bold; border: none;">`
+      html += `      AL RASAQ PAKISTAN RESTAURANT • Exported: ${new Date().toLocaleDateString()}`
+      html += `    </th>`
+      html += `  </tr>`
+      
+      // Empty spacer row between the info row and the column headers
+      html += `  <tr style="height: 16px;">`
+      html += `    <th colspan="${daysInMonth.length + 8}" style="border: none; background-color: #FFFFFF; height: 16px;"></th>`
+      html += `  </tr>`
+
+      // Column headers row
+      html += `  <tr>`
+      headers.forEach((h, i) => {
+        if (i < 2) {
+          html += `<th class="emp-header">${h}</th>`
+        } else {
+          html += `<th>${h}</th>`
+        }
+      })
+      html += `  </tr>`
+      html += `</thead>`
+
+      // Write table body
+      html += `<tbody>`
+      groupedData.forEach((emp, index) => {
+        const rowClass = index % 2 === 0 ? 'row-even' : 'row-odd'
+        html += `<tr class="${rowClass}">`
+        
+        // Highlight Employee Code and Employee Name columns
+        html += `<td class="highlight-col code-cell">${emp.employee_code}</td>`
+        html += `<td class="highlight-col name-cell">${emp.name}</td>`
+
+        // Day cells (Center aligned data)
+        daysInMonth.forEach(day => {
+          const dateStr = day.toISOString().split('T')[0]
+          const sessions = emp.days[dateStr] || []
+          
+          let cellText = ''
+          let cellClass = 'center-text'
+          if (sessions.length > 0) {
+            const main = sessions[0]
+            if (main.status === 'Holiday') {
+              cellText = 'H'
+              cellClass += ' holiday-cell'
+            } else if (main.status === 'Leave') {
+              cellText = 'L'
+              cellClass += ' leave-cell'
+            } else {
+              cellText = sessions.map(s => {
+                const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                const outStr = s.check_out ? new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'
+                return `In: ${inStr} Out: ${outStr}`
+              }).join('<br/>') // separate by breaks
+              cellClass += ' present-cell'
+            }
+          } else {
+            const todayStr = new Date().toISOString().split('T')[0]
+            if (dateStr < todayStr) {
+              cellText = 'A'
+              cellClass += ' absent-cell'
+            } else {
+              cellText = '-'
+            }
+          }
+          html += `<td class="${cellClass}">${cellText}</td>`
+        })
+
+        // Summary columns (Center aligned)
+        html += `<td class="center-text present-cell">${emp.presents}</td>`
+        html += `<td class="center-text absent-cell">${emp.absents}</td>`
+        html += `<td class="center-text leave-cell">${emp.leaves}</td>`
+        html += `<td class="center-text holiday-cell">${emp.holidays}</td>`
+        html += `<td class="center-text" style="font-weight: bold; color: #16A34A;">${parseFloat(emp.totalHours || 0).toFixed(2)}</td>`
+        html += `<td class="center-text" style="font-weight: bold;">${parseFloat(emp.totalOvertime || 0).toFixed(2)}</td>`
+
+        html += `</tr>`
+      })
+      html += `</tbody></table></body></html>`
+
+      // Trigger download of the spreadsheet file
+      const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.setAttribute('download', `Monthly_Attendance_Sheet_${selectedMonth}.xls`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      toast.success('Excel exported successfully!')
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to export Excel report')
+    }
+  }
+
   return (
     <div className="page-content attendance-sheet-page">
 
@@ -230,6 +400,30 @@ export default function AttendanceReports() {
 
             <button className="btn btn-secondary" onClick={loadReports} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}>
               <RefreshCw size={14} /> Refresh
+            </button>
+
+            <button 
+              className="btn" 
+              onClick={exportToExcel} 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 6, 
+                height: 38, 
+                fontSize: 13, 
+                background: 'var(--green)', 
+                color: 'white', 
+                fontWeight: 650, 
+                border: 'none', 
+                borderRadius: 8, 
+                padding: '0 14px', 
+                cursor: 'pointer',
+                transition: 'opacity 0.15s'
+              }}
+              onMouseOver={e => e.currentTarget.style.opacity = '0.9'}
+              onMouseOut={e => e.currentTarget.style.opacity = '1'}
+            >
+              <Download size={14} /> Export Excel
             </button>
           </div>
         </div>
