@@ -1,5 +1,5 @@
 import axios from '../api';
-import * as XLSX from 'xlsx';
+// XLSX is loaded on-demand via dynamic import() — not in the initial bundle
 
 /**
  * Sends a bulk import request to the server.
@@ -19,8 +19,10 @@ export const bulkImportEmployees = async (employees, duplicateResolution) => {
  * Creates and downloads an Excel file listing the failed/skipped import rows.
  * @param {Array} failedRows - Array of objects with name, department, position, shift, reason.
  */
-export const downloadErrorReport = (failedRows) => {
+export const downloadErrorReport = async (failedRows) => {
   if (!failedRows || failedRows.length === 0) return;
+
+  const XLSX = await import('xlsx');
 
   const data = failedRows.map(row => ({
     'Employee Name': row.name || 'N/A',

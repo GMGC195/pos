@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 import { 
   CircleDollarSign, 
@@ -127,7 +126,8 @@ export default function Reports({ isTodaySales = false }) {
     })
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(filteredTransactions.map(t => ({
       'Transaction ID': t.id,
       'Order ID': t.order_id,

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../contexts/AuthContext'
 import {
   Chart as ChartJS,
@@ -120,8 +119,9 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [isDeveloper])
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
     if (!isDeveloper) return
+    const XLSX = await import('xlsx')
     const data = [
       { Metric: "Today Total Sale", Value: stats?.totalSale || 0 },
       { Metric: "Today Total Order Delivered", Value: stats?.totalOrders || 0 },

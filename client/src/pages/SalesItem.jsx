@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 import { 
   ClipboardList, 
@@ -45,7 +44,8 @@ export default function SalesItem() {
     return () => clearInterval(interval)
   }, [from, to])
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(filteredData.map(item => ({
       'Category': item.category_name || 'Uncategorized',
       'Item Name': item.item_name,

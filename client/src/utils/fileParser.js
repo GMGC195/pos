@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+// XLSX is loaded on-demand via dynamic import() — not in the initial bundle
 
 // Dictionaries for auto-mapping headers
 const HEADER_MAPPINGS = {
@@ -16,8 +16,9 @@ const HEADER_MAPPINGS = {
 export const parseFile = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await import('xlsx');
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];

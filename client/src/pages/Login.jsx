@@ -5,11 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard,
-  Receipt,
-  Package,
-  BarChart3,
   Users,
-  Bell,
   User,
   Lock,
   Mail,
@@ -20,6 +16,9 @@ import {
   Send,
   ShieldCheck,
   KeyRound,
+  Fingerprint,
+  CalendarRange,
+  Clock,
 } from 'lucide-react'
 import {
   BRAND_NAME,
@@ -28,17 +27,15 @@ import {
   BRAND_PRIMARY,
   BRAND_EMAIL
 } from '../branding'
-import BRAND_LOGIN_LOGO from '../assets/al rawaq.png'
+import BRAND_LOGIN_LOGO from '../assets/1 al rasaq.png'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 const features = [
-  { icon: LayoutDashboard, title: 'Smart Dashboard',       desc: 'Real-time insights for smarter decisions' },
-  { icon: Receipt,         title: 'POS & Billing',         desc: 'Fast, easy & accurate billing at your fingertips' },
-  { icon: Package,         title: 'Inventory Control',     desc: 'Track stock in real-time & avoid shortages' },
-  { icon: BarChart3,       title: 'Revenue Reports',       desc: 'Detailed reports to grow your business' },
-  { icon: Users,           title: 'Customer Management',   desc: 'Build stronger relationships with your customers' },
-  { icon: Bell,            title: 'Low-stock Alerts',      desc: 'Get notified & never run out of stock' },
+  { icon: LayoutDashboard, title: 'Smart Dashboard',            desc: 'Real-time insights for smarter decisions' },
+  { icon: Fingerprint,     title: 'Mark Attendance',            desc: 'Easy check-in & check-out tracking for staff' },
+  { icon: CalendarRange,   title: 'Monthly Attendance Reports', desc: 'Aggregated attendance sheets at a glance' },
+  { icon: Clock,           title: "Today's Attendance",         desc: 'Monitor active shifts and breaks in real time' },
 ]
 
 export default function Login() {
@@ -315,9 +312,11 @@ export default function Login() {
         .lp-card-logo {
           display: block;
           width: 76px; height: 76px;
-          object-fit: cover;
+          object-fit: contain;
           border-radius: 15px;
           margin: 0 auto 16px;
+          background: #103C43;
+          padding: 6px;
           box-shadow: 0 4px 16px rgba(0,0,0,0.1);
         }
 
