@@ -223,6 +223,9 @@ export default function AttendanceTracker() {
   }
 
   const handleToggleBreak = async (empId) => {
+    const actionKey = `toggle-break-${empId}`;
+    if (pendingActions[actionKey]) return;
+    setPendingActions(prev => ({ ...prev, [actionKey]: true }));
     try {
       const res = await axios.post('/api/attendance/toggle-break', { employee_id: empId })
       toast.success(res.data.on_break ? 'Break Started!' : 'Break Ended!')
@@ -242,6 +245,8 @@ export default function AttendanceTracker() {
       } else {
         toast.error(err?.response?.data?.error || 'Failed to toggle break')
       }
+    } finally {
+      setPendingActions(prev => ({ ...prev, [actionKey]: false }));
     }
   }
 
@@ -442,16 +447,17 @@ export default function AttendanceTracker() {
                       disabled={pendingActions[`check-in-${emp.employee_id}`]}
                       style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: pendingActions[`check-in-${emp.employee_id}`] ? 0.6 : 1 }}
                     >
-                      <Play size={14} /> Check In
+                      {pendingActions[`check-in-${emp.employee_id}`] ? 'Checking In...' : <><Play size={14} /> Check In</>}
                     </button>
                   ) : (
                     <>
                       <button 
                         className={`btn ${isOnBreak ? 'btn-primary' : 'btn-secondary'}`} 
                         onClick={() => handleToggleBreak(emp.employee_id)}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px' }}
+                        disabled={pendingActions[`toggle-break-${emp.employee_id}`]}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: pendingActions[`toggle-break-${emp.employee_id}`] ? 0.6 : 1 }}
                       >
-                        <Coffee size={14} /> {isOnBreak ? 'End Break' : 'Break'}
+                        {pendingActions[`toggle-break-${emp.employee_id}`] ? 'Loading...' : <><Coffee size={14} /> {isOnBreak ? 'End Break' : 'Break'}</>}
                       </button>
                       <button 
                         className="btn btn-secondary" 
@@ -459,7 +465,7 @@ export default function AttendanceTracker() {
                         disabled={pendingActions[`check-out-${emp.employee_id}`]}
                         style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)', opacity: pendingActions[`check-out-${emp.employee_id}`] ? 0.6 : 1 }}
                       >
-                        <Square size={14} /> Check Out
+                        {pendingActions[`check-out-${emp.employee_id}`] ? 'Checking Out...' : <><Square size={14} /> Check Out</>}
                       </button>
                     </>
                   )}

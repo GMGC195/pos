@@ -3,6 +3,15 @@ import axios from '../api'
 import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+const formatLocalDate = (date) => {
+  if (!date) return ''
+  const d = new Date(date)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export default function AttendanceReports() {
   const [reports, setReports] = useState([])
   const [employeesList, setEmployeesList] = useState([])
@@ -10,11 +19,19 @@ export default function AttendanceReports() {
   
   // Holiday state
   const [showHolidayModal, setShowHolidayModal] = useState(false)
-  const [holidayDate, setHolidayDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [holidayDate, setHolidayDate] = useState(() => formatLocalDate(new Date()))
   const [holidayEmployeeId, setHolidayEmployeeId] = useState('Global')
+  const [submittingHoliday, setSubmittingHoliday] = useState(null)
 
   // Detailed Modal State
   const [selectedEmployeeLogs, setSelectedEmployeeLogs] = useState(null)
+
+  const getHolidayDayName = () => {
+    if (!holidayDate) return ''
+    const [year, month, day] = holidayDate.split('-').map(Number)
+    const date = new Date(year, month - 1, day)
+    return date.toLocaleDateString('en-US', { weekday: 'long' })
+  }
 
   // Scroll ref — used to toggle active CSS classes on the grid container
   const scrollRef = useRef(null)
@@ -125,7 +142,7 @@ export default function AttendanceReports() {
         }
       }
 
-      const logDate = new Date(log.date).toISOString().split('T')[0]
+      const logDate = typeof log.date === 'string' && log.date.includes('-') ? log.date.split('T')[0] : formatLocalDate(log.date)
       if (!map[empId].days[logDate]) {
         map[empId].days[logDate] = []
       }
@@ -142,7 +159,7 @@ export default function AttendanceReports() {
       let totalOvertime = 0
 
       daysInMonth.forEach(day => {
-        const dateStr = day.toISOString().split('T')[0]
+        const dateStr = formatLocalDate(day)
         const sessions = emp.days[dateStr] || []
 
         if (sessions.length > 0) {
@@ -163,7 +180,7 @@ export default function AttendanceReports() {
           }
         } else {
           // If no log exists for a past date, it's considered an absent day
-          const todayStr = new Date().toISOString().split('T')[0]
+          const todayStr = formatLocalDate(new Date())
           if (dateStr < todayStr) {
             absents++
           }
@@ -186,6 +203,8 @@ export default function AttendanceReports() {
 
   // Set Holiday API Call
   const handleSaveHoliday = async () => {
+    if (submittingHoliday) return
+    setSubmittingHoliday('saving')
     try {
       const isGlobal = holidayEmployeeId === 'Global'
       await axios.post('/api/attendance/holiday', {
@@ -198,6 +217,31 @@ export default function AttendanceReports() {
       loadReports()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to mark holiday')
+    } finally {
+      setSubmittingHoliday(null)
+    }
+  }
+
+  // Remove Holiday API Call
+  const handleRemoveHoliday = async () => {
+    if (submittingHoliday) return
+    setSubmittingHoliday('removing')
+    try {
+      const isGlobal = holidayEmployeeId === 'Global'
+      await axios.delete('/api/attendance/holiday', {
+        data: {
+          date: holidayDate,
+          employee_id: isGlobal ? null : holidayEmployeeId,
+          is_global: isGlobal
+        }
+      })
+      toast.success('Holiday removed successfully!')
+      setShowHolidayModal(false)
+      loadReports()
+    } catch (err) {
+      toast.error(err?.response?.data?.error || 'Failed to remove holiday')
+    } finally {
+      setSubmittingHoliday(null)
     }
   }
 
@@ -309,7 +353,7 @@ export default function AttendanceReports() {
 
         // Day cells (Center aligned data)
         daysInMonth.forEach(day => {
-          const dateStr = day.toISOString().split('T')[0]
+          const dateStr = formatLocalDate(day)
           const sessions = emp.days[dateStr] || []
           
           let cellText = ''
@@ -331,7 +375,7 @@ export default function AttendanceReports() {
               cellClass += ' present-cell'
             }
           } else {
-            const todayStr = new Date().toISOString().split('T')[0]
+            const todayStr = formatLocalDate(new Date())
             if (dateStr < todayStr) {
               cellText = 'A'
               cellClass += ' absent-cell'
@@ -395,7 +439,7 @@ export default function AttendanceReports() {
               onClick={() => setShowHolidayModal(true)}
               style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}
             >
-              <Plus size={14} /> Add Holiday
+              <Settings size={14} /> Manage Holiday
             </button>
 
             <button className="btn btn-secondary" onClick={loadReports} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}>
@@ -542,7 +586,7 @@ export default function AttendanceReports() {
 
                         {/* Day cells */}
                         {daysInMonth.map(day => {
-                          const dateStr = day.toISOString().split('T')[0]
+                          const dateStr = formatLocalDate(day)
                           const sessions = emp.days[dateStr] || []
 
                           let cellContent = null
@@ -576,7 +620,7 @@ export default function AttendanceReports() {
                               cellBg = 'rgba(34, 197, 94, 0.03)'
                             }
                           } else {
-                            const todayStr = new Date().toISOString().split('T')[0]
+                            const todayStr = formatLocalDate(new Date())
                             if (dateStr < todayStr) {
                               cellContent = <span style={{ fontWeight: 750, color: 'var(--red)' }}>A</span>
                               cellBg = 'rgba(255, 69, 58, 0.08)'
@@ -623,11 +667,13 @@ export default function AttendanceReports() {
             <button onClick={() => setShowHolidayModal(false)} style={{ position: 'absolute', right: 16, top: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
               <X size={20} />
             </button>
-            <h4 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 750 }}>Set Holiday Configuration</h4>
+            <h4 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 750 }}>Manage Holiday Configuration</h4>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Select Date</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Select Date {holidayDate && `(${getHolidayDayName()})`}
+                </span>
                 <input 
                   type="date" 
                   value={holidayDate}
@@ -650,9 +696,34 @@ export default function AttendanceReports() {
                 </select>
               </div>
 
-              <button className="btn btn-primary" onClick={handleSaveHoliday} style={{ marginTop: 10, height: 42, fontWeight: 650 }}>
-                Set Holiday
-              </button>
+              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleSaveHoliday} 
+                  disabled={submittingHoliday !== null}
+                  style={{ flex: 1, height: 42, fontWeight: 650, opacity: submittingHoliday !== null ? 0.6 : 1 }}
+                >
+                  {submittingHoliday === 'saving' ? 'Saving...' : 'Set Holiday'}
+                </button>
+                <button 
+                  className="btn" 
+                  onClick={handleRemoveHoliday} 
+                  disabled={submittingHoliday !== null}
+                  style={{ 
+                    flex: 1, 
+                    height: 42, 
+                    fontWeight: 650, 
+                    background: '#EF4444', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 8, 
+                    cursor: 'pointer',
+                    opacity: submittingHoliday !== null ? 0.6 : 1
+                  }}
+                >
+                  {submittingHoliday === 'removing' ? 'Removing...' : 'Remove Holiday'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -708,11 +779,11 @@ export default function AttendanceReports() {
                 </thead>
                 <tbody>
                   {daysInMonth.map(day => {
-                    const dateStr = day.toISOString().split('T')[0]
+                    const dateStr = formatLocalDate(day)
                     const sessions = selectedEmployeeLogs.days[dateStr] || []
 
                     if (sessions.length === 0) {
-                      const todayStr = new Date().toISOString().split('T')[0]
+                      const todayStr = formatLocalDate(new Date())
                       const isPast = dateStr < todayStr
                       return (
                         <tr key={dateStr} style={{ borderBottom: '1px solid var(--surface-2)', opacity: isPast ? 1 : 0.45 }}>

@@ -259,10 +259,10 @@ router.post('/holiday', authenticateToken, async (req, res) => {
       for (const emp of activeEmps.rows) {
         // Delete existing check-ins on this date
         await pool.query('DELETE FROM employee_attendance WHERE employee_id = $1 AND date = $2', [emp.id, date]);
-        // Insert holiday log
+        // Insert holiday log using local midnight string to prevent timezone shifts
         await pool.query(
           "INSERT INTO employee_attendance (employee_id, check_in, status, date) VALUES ($1, $2, 'Holiday', $3)",
-          [emp.id, `${date}T00:00:00.000Z`, date]
+          [emp.id, `${date} 00:00:00`, date]
         );
       }
       res.json({ message: 'Global holiday set successfully' });
@@ -273,9 +273,38 @@ router.post('/holiday', authenticateToken, async (req, res) => {
       await pool.query('DELETE FROM employee_attendance WHERE employee_id = $1 AND date = $2', [employee_id, date]);
       await pool.query(
         "INSERT INTO employee_attendance (employee_id, check_in, status, date) VALUES ($1, $2, 'Holiday', $3)",
-        [employee_id, `${date}T00:00:00.000Z`, date]
+        [employee_id, `${date} 00:00:00`, date]
       );
       res.json({ message: 'Holiday set successfully for employee' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete/Remove holiday endpoint
+router.delete('/holiday', authenticateToken, async (req, res) => {
+  const { date, employee_id, is_global } = req.body;
+  if (!date) {
+    return res.status(400).json({ error: 'Date is required' });
+  }
+
+  try {
+    if (is_global) {
+      const result = await pool.query(
+        "DELETE FROM employee_attendance WHERE date = $1 AND status = 'Holiday'",
+        [date]
+      );
+      res.json({ message: `Global holiday removed successfully (${result.rowCount} logs deleted)` });
+    } else {
+      if (!employee_id) {
+        return res.status(400).json({ error: 'Employee ID is required' });
+      }
+      const result = await pool.query(
+        "DELETE FROM employee_attendance WHERE employee_id = $1 AND date = $2 AND status = 'Holiday'",
+        [employee_id, date]
+      );
+      res.json({ message: 'Holiday removed successfully for employee' });
     }
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -287,7 +316,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.*, e.name, e.role, e.shift, e.shift_hours, e.employee_id as employee_code
+      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, e.name, e.role, e.shift, e.shift_hours, e.employee_id as employee_code
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE 1=1
