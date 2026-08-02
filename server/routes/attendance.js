@@ -481,5 +481,67 @@ router.get('/stats', authenticateToken, async (req, res) => {
   }
 });
 
+// Get all sessions for a specific employee on a specific date
+router.get('/employee-date', authenticateToken, async (req, res) => {
+  const { employee_id, date } = req.query;
+  if (!employee_id || !date) {
+    return res.status(400).json({ error: 'Employee ID and date are required' });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT id, check_in, check_out, status, total_break_duration_seconds FROM employee_attendance WHERE employee_id = $1 AND date = $2 ORDER BY check_in ASC',
+      [employee_id, date]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update a specific attendance session
+router.put('/session/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { check_in, check_out } = req.body;
+  if (!check_in) {
+    return res.status(400).json({ error: 'Check-in time is required' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE employee_attendance SET check_in = $1, check_out = $2 WHERE id = $3 RETURNING *',
+      [check_in, check_out || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendance log not found.' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a specific attendance session
+router.delete('/session/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      'DELETE FROM employee_attendance WHERE id = $1 RETURNING *',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendance log not found.' });
+    }
+
+    res.json({ message: 'Attendance log deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 

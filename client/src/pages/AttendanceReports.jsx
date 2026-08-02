@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from '../api'
-import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download } from 'lucide-react'
+import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
 
 const formatLocalDate = (date) => {
   if (!date) return ''
@@ -12,7 +13,65 @@ const formatLocalDate = (date) => {
   return `${year}-${month}-${day}`
 }
 
+const confirmAction = (message, onConfirm) => {
+  toast((t) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
+      <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>
+        {message}
+      </span>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button 
+          onClick={() => toast.dismiss(t.id)}
+          style={{
+            padding: '6px 12px',
+            background: 'transparent',
+            border: '1.5px solid var(--surface-3)',
+            borderRadius: 6,
+            fontSize: 12,
+            cursor: 'pointer',
+            color: 'var(--text-muted)'
+          }}
+        >
+          Cancel
+        </button>
+        <button 
+          onClick={() => {
+            toast.dismiss(t.id);
+            onConfirm();
+          }}
+          style={{
+            padding: '6px 12px',
+            background: 'var(--primary)',
+            border: 'none',
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            color: 'white'
+          }}
+        >
+          Confirm
+        </button>
+      </div>
+    </div>
+  ), {
+    duration: 10000,
+    position: 'top-center',
+    style: {
+      background: 'var(--surface)',
+      border: '1.5px solid var(--surface-2)',
+      borderRadius: 12,
+      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+      padding: '12px 16px',
+      minWidth: 280
+    }
+  });
+}
+
 export default function AttendanceReports() {
+  const { user } = useAuth()
+  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'developer'
+
   const [reports, setReports] = useState([])
   const [employeesList, setEmployeesList] = useState([])
   const [loading, setLoading] = useState(true)
@@ -22,6 +81,64 @@ export default function AttendanceReports() {
   const [holidayDate, setHolidayDate] = useState(() => formatLocalDate(new Date()))
   const [holidayEmployeeId, setHolidayEmployeeId] = useState('Global')
   const [submittingHoliday, setSubmittingHoliday] = useState(null)
+
+  // Edit Attendance State
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editEmployeeId, setEditEmployeeId] = useState('')
+  const [editDate, setEditDate] = useState(() => formatLocalDate(new Date()))
+  const [editSessions, setEditSessions] = useState([])
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [savingSessionId, setSavingSessionId] = useState(null)
+
+  const loadEditSessions = () => {
+    if (!editEmployeeId || !editDate) return
+    setLoadingSessions(true)
+    axios.get('/api/attendance/employee-date', {
+      params: { employee_id: editEmployeeId, date: editDate }
+    })
+      .then(res => setEditSessions(res.data))
+      .catch(() => toast.error('Error loading employee logs'))
+      .finally(() => setLoadingSessions(false))
+  }
+
+  useEffect(() => {
+    if (showEditModal) {
+      loadEditSessions()
+    }
+  }, [editEmployeeId, editDate, showEditModal])
+
+  const handleUpdateSession = async (sessionId, checkInStr, checkOutStr) => {
+    setSavingSessionId(sessionId)
+    try {
+      await axios.put(`/api/attendance/session/${sessionId}`, {
+        check_in: checkInStr,
+        check_out: checkOutStr || null
+      })
+      toast.success('Attendance session updated!')
+      setShowEditModal(false)
+      loadReports()
+    } catch (err) {
+      toast.error(err?.response?.data?.error || 'Failed to update session')
+    } finally {
+      setSavingSessionId(null)
+    }
+  }
+
+  const handleDeleteSession = async (sessionId) => {
+    confirmAction('Are you sure you want to delete this session?', async () => {
+      setSavingSessionId(sessionId)
+      try {
+        await axios.delete(`/api/attendance/session/${sessionId}`)
+        toast.success('Attendance session deleted!')
+        loadEditSessions()
+        loadReports()
+      } catch (err) {
+        toast.error(err?.response?.data?.error || 'Failed to delete session')
+      } finally {
+        setSavingSessionId(null)
+      }
+    })
+  }
 
   // Detailed Modal State
   const [selectedEmployeeLogs, setSelectedEmployeeLogs] = useState(null)
@@ -442,6 +559,16 @@ export default function AttendanceReports() {
               <Settings size={14} /> Manage Holiday
             </button>
 
+            {isAdmin && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowEditModal(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13, borderColor: 'var(--primary)', color: 'var(--text)' }}
+              >
+                <Edit size={14} style={{ color: 'var(--primary)' }} /> Edit Attendance
+              </button>
+            )}
+
             <button className="btn btn-secondary" onClick={loadReports} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}>
               <RefreshCw size={14} /> Refresh
             </button>
@@ -840,6 +967,143 @@ export default function AttendanceReports() {
           </div>
         </div>
       )}
+
+      {/* Edit Attendance Modal */}
+      {showEditModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }}>
+          <div className="card" style={{ width: 550, maxWidth: '90%', padding: 24, position: 'relative', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <button onClick={() => setShowEditModal(false)} style={{ position: 'absolute', right: 16, top: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <X size={20} />
+            </button>
+            <h4 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 750 }}>Edit Employee Attendance</h4>
+            
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Select Employee</span>
+                <select 
+                  value={editEmployeeId}
+                  onChange={e => setEditEmployeeId(e.target.value)}
+                  style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 8, outline: 'none', fontSize: 13 }}
+                >
+                  <option value="">-- Choose Employee --</option>
+                  {employeesList.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_id})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Select Date</span>
+                <input 
+                  type="date" 
+                  value={editDate}
+                  onChange={e => setEditDate(e.target.value)}
+                  style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 8, outline: 'none', fontSize: 13 }}
+                />
+              </div>
+            </div>
+
+            {/* Sessions list */}
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4, marginTop: 8 }}>
+              {loadingSessions ? (
+                <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--text-muted)' }}>
+                  Loading logs...
+                </div>
+              ) : !editEmployeeId ? (
+                <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Please select an employee to view logs.
+                </div>
+              ) : editSessions.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                  No attendance logs found for this employee on the selected date.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {editSessions.map((session, index) => {
+                    return (
+                      <SessionRow 
+                        key={session.id} 
+                        session={session} 
+                        index={index}
+                        onSave={handleUpdateSession}
+                        onDelete={handleDeleteSession}
+                        saving={savingSessionId === session.id}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SessionRow({ session, index, onSave, onDelete, saving }) {
+  // Convert TIMESTAMPTZ strings to local datetime-local format: YYYY-MM-DDTHH:MM
+  const toLocalDatetime = (dtStr) => {
+    if (!dtStr) return ''
+    const d = new Date(dtStr)
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hours = String(d.getHours()).padStart(2, '0')
+    const minutes = String(d.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hours}:${minutes}`
+  };
+
+  const [inVal, setInVal] = useState(() => toLocalDatetime(session.check_in))
+  const [outVal, setOutVal] = useState(() => toLocalDatetime(session.check_out))
+
+  return (
+    <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text-secondary)' }}>
+        Session #{index + 1} ({session.status})
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check In Time</span>
+            <input 
+              type="datetime-local" 
+              value={inVal}
+              onChange={e => setInVal(e.target.value)}
+              style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface-1)', color: 'var(--text)' }}
+            />
+          </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check Out Time</span>
+            <input 
+              type="datetime-local" 
+              value={outVal}
+              onChange={e => setOutVal(e.target.value)}
+              style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface-1)', color: 'var(--text)' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+          <button 
+            className="btn" 
+            onClick={() => onDelete(session.id)}
+            disabled={saving}
+            style={{ height: 32, fontSize: 12, padding: '0 12px', background: '#EF4444', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+          >
+            Delete
+          </button>
+          <button 
+            className="btn btn-primary" 
+            onClick={() => onSave(session.id, inVal, outVal)}
+            disabled={saving || !inVal}
+            style={{ height: 32, fontSize: 12, padding: '0 12px' }}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
