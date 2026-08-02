@@ -71,6 +71,7 @@ export default function AttendanceTracker() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [pendingActions, setPendingActions] = useState({})
+  const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
 
   const loadAttendance = (showSpinner = false) => {
     if (showSpinner) setLoading(true)
@@ -244,47 +245,17 @@ export default function AttendanceTracker() {
     }
   }
 
-  const handleBulkBreak = () => {
-    const activeCheckedIn = employees.filter(emp => emp.attendance_id && !emp.check_out);
-    if (activeCheckedIn.length === 0) {
-      toast.error('No employees are currently checked in.');
-      return;
-    }
-    const notOnBreak = activeCheckedIn.filter(emp => !emp.on_break);
-    if (notOnBreak.length === 0) {
-      toast.error('All checked-in employees are already on break.');
-      return;
-    }
-
-    confirmAction("Are you sure you want to put all active checked-in employees on break?", async () => {
-      try {
-        await axios.post('/api/attendance/bulk-break');
-        toast.success('All active staff are now on break!');
-        loadAttendance();
-      } catch (err) {
-        toast.error(err?.response?.data?.error || 'Failed to trigger bulk break');
+  const handleToggleRestaurantBreak = () => {
+    const nextState = !restaurantOnBreak;
+    confirmAction(
+      `Are you sure you want to ${nextState ? 'start' : 'end'} the Restaurant Break?`,
+      () => {
+        setRestaurantOnBreak(nextState);
+        localStorage.setItem('pizza_shop_restaurant_on_break', String(nextState));
+        toast.success(nextState ? 'Restaurant is now on Break!' : 'Restaurant Break Ended!');
       }
-    });
-  }
-
-  const handleBulkEndBreak = () => {
-    const activeCheckedIn = employees.filter(emp => emp.attendance_id && !emp.check_out);
-    const onBreak = activeCheckedIn.filter(emp => emp.on_break);
-    if (onBreak.length === 0) {
-      toast.error('No employees are currently on break.');
-      return;
-    }
-
-    confirmAction("Are you sure you want to end breaks for all employees currently on break?", async () => {
-      try {
-        await axios.post('/api/attendance/bulk-end-break');
-        toast.success('Ended breaks for all employees!');
-        loadAttendance();
-      } catch (err) {
-        toast.error(err?.response?.data?.error || 'Failed to end bulk break');
-      }
-    });
-  }
+    );
+  };
 
   // Get color and status text for badges
   const getStatusBadge = (emp) => {
@@ -318,20 +289,43 @@ export default function AttendanceTracker() {
         <h3 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Fingerprint size={24} style={{ color: 'var(--primary)' }} /> Today's Attendance Panel
         </h3>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {restaurantOnBreak && (
+            <span style={{ 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              gap: 6, 
+              padding: '6px 12px', 
+              borderRadius: 8, 
+              background: 'rgba(249, 115, 22, 0.1)', 
+              color: '#F97316', 
+              fontSize: 13, 
+              fontWeight: 600
+            }}>
+              <Coffee size={14} /> Restaurant in Break
+            </span>
+          )}
           <button 
             className="btn btn-secondary"
-            onClick={handleBulkBreak}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, borderColor: 'var(--primary)', color: 'var(--primary)' }}
+            onClick={handleToggleRestaurantBreak}
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 6, 
+              fontSize: 13, 
+              borderColor: restaurantOnBreak ? 'var(--green)' : 'var(--primary)', 
+              color: restaurantOnBreak ? 'var(--green)' : 'var(--primary)' 
+            }}
           >
-            <Coffee size={14} /> All Staff on Break
-          </button>
-          <button 
-            className="btn btn-secondary"
-            onClick={handleBulkEndBreak}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, borderColor: 'var(--primary)', color: 'var(--primary)' }}
-          >
-            <Play size={14} /> End All Staff Break
+            {restaurantOnBreak ? (
+              <>
+                <Play size={14} /> End Restaurant Break
+              </>
+            ) : (
+              <>
+                <Coffee size={14} /> Restaurant Break
+              </>
+            )}
           </button>
         </div>
       </div>
