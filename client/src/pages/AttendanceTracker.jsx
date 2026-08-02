@@ -4,23 +4,111 @@ import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle } fr
 import toast from 'react-hot-toast'
 
 export default function AttendanceTracker() {
-  const [employees, setEmployees] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [employees, setEmployees] = useState(() => {
+    const cached = localStorage.getItem('pizza_shop_attendance_today')
+    return cached ? JSON.parse(cached) : []
+  })
+  const [loading, setLoading] = useState(() => {
+    const cached = localStorage.getItem('pizza_shop_attendance_today')
+    return !cached // Only show spinner if no cache exists at all
+  })
   const [lateThreshold, setLateThreshold] = useState('09:00')
 
-  const loadAttendance = () => {
-    setLoading(true)
+  const loadAttendance = (showSpinner = false) => {
+    if (showSpinner) setLoading(true)
     axios.get('/api/attendance/today')
-      .then(res => setEmployees(res.data))
-      .catch(() => toast.error('Error loading attendance data'))
-      .finally(() => setLoading(false))
+      .then(res => {
+        setEmployees(res.data)
+        localStorage.setItem('pizza_shop_attendance_today', JSON.stringify(res.data))
+      })
+      .catch(() => {
+        const cached = localStorage.getItem('pizza_shop_attendance_today')
+        if (cached && employees.length === 0) {
+          setEmployees(JSON.parse(cached))
+        }
+      })
+      .finally(() => {
+        if (showSpinner) setLoading(false)
+      })
+  }
+
+  const queueAttendanceAction = (action) => {
+    const queue = JSON.parse(localStorage.getItem('pizza_shop_pending_attendance') || '[]')
+    queue.push({ ...action, timestamp: Date.now() })
+    localStorage.setItem('pizza_shop_pending_attendance', JSON.stringify(queue))
+  }
+
+  const optimisticUpdate = (empId, fields) => {
+    const cached = localStorage.getItem('pizza_shop_attendance_today')
+    const currentList = cached ? JSON.parse(cached) : employees
+    const updated = currentList.map(emp => {
+      if (emp.employee_id === empId) {
+        return { ...emp, ...fields }
+      }
+      return emp
+    })
+    setEmployees(updated)
+    localStorage.setItem('pizza_shop_attendance_today', JSON.stringify(updated))
+  }
+
+  const syncPendingAttendance = async () => {
+    const queue = JSON.parse(localStorage.getItem('pizza_shop_pending_attendance') || '[]')
+    if (queue.length === 0) return
+
+    toast.loading('Syncing offline attendance logs...', { id: 'attendance-sync' })
+    let successCount = 0
+    const remainingQueue = []
+
+    for (const action of queue) {
+      try {
+        if (action.type === 'check-in') {
+          await axios.post('/api/attendance/check-in', { employee_id: action.employee_id, late_threshold: action.late_threshold })
+        } else if (action.type === 'check-out') {
+          await axios.post('/api/attendance/check-out', { employee_id: action.employee_id })
+        } else if (action.type === 'toggle-break') {
+          await axios.post('/api/attendance/toggle-break', { employee_id: action.employee_id })
+        }
+        successCount++
+      } catch (err) {
+        if (err.response) {
+          console.warn('Sync rejected by server:', action, err.response.data)
+        } else {
+          remainingQueue.push(action)
+        }
+      }
+    }
+
+    localStorage.setItem('pizza_shop_pending_attendance', JSON.stringify(remainingQueue))
+    toast.dismiss('attendance-sync')
+    
+    if (successCount > 0) {
+      toast.success(`Synced ${successCount} attendance records online!`)
+      loadAttendance(false)
+    }
   }
 
   useEffect(() => {
-    loadAttendance()
-    // Poll every 30 seconds to keep timers/status updated
-    const interval = setInterval(loadAttendance, 30000)
-    return () => clearInterval(interval)
+    const hasCache = !!localStorage.getItem('pizza_shop_attendance_today')
+    loadAttendance(!hasCache)
+    
+    window.addEventListener('online', syncPendingAttendance)
+    
+    // Poll every 30 seconds if online
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        loadAttendance(false)
+        syncPendingAttendance()
+      }
+    }, 30000)
+
+    if (navigator.onLine) {
+      syncPendingAttendance()
+    }
+
+    return () => {
+      window.removeEventListener('online', syncPendingAttendance)
+      clearInterval(interval)
+    }
   }, [])
 
   const handleCheckIn = async (empId) => {
@@ -29,7 +117,18 @@ export default function AttendanceTracker() {
       toast.success('Successfully Checked In!')
       loadAttendance()
     } catch (err) {
-      toast.error(err?.response?.data?.error || 'Failed to check in')
+      if (!navigator.onLine || err.message === 'Network Error') {
+        queueAttendanceAction({ type: 'check-in', employee_id: empId, late_threshold: lateThreshold })
+        optimisticUpdate(empId, { 
+          attendance_id: 'temp-' + Date.now(), 
+          check_in: new Date().toISOString(),
+          attendance_status: 'Present', 
+          check_out: null 
+        })
+        toast.success('Offline Check-In saved locally!')
+      } else {
+        toast.error(err?.response?.data?.error || 'Failed to check in')
+      }
     }
   }
 
@@ -40,7 +139,15 @@ export default function AttendanceTracker() {
       toast.success('Successfully Checked Out!')
       loadAttendance()
     } catch (err) {
-      toast.error(err?.response?.data?.error || 'Failed to check out')
+      if (!navigator.onLine || err.message === 'Network Error') {
+        queueAttendanceAction({ type: 'check-out', employee_id: empId })
+        optimisticUpdate(empId, { 
+          check_out: new Date().toISOString()
+        })
+        toast.success('Offline Check-Out saved locally!')
+      } else {
+        toast.error(err?.response?.data?.error || 'Failed to check out')
+      }
     }
   }
 
@@ -50,7 +157,20 @@ export default function AttendanceTracker() {
       toast.success(res.data.on_break ? 'Break Started!' : 'Break Ended!')
       loadAttendance()
     } catch (err) {
-      toast.error(err?.response?.data?.error || 'Failed to toggle break')
+      if (!navigator.onLine || err.message === 'Network Error') {
+        queueAttendanceAction({ type: 'toggle-break', employee_id: empId })
+        
+        const emp = employees.find(e => e.employee_id === empId)
+        const isOnBreakNow = emp ? !emp.on_break : true
+        
+        optimisticUpdate(empId, { 
+          on_break: isOnBreakNow,
+          break_start: isOnBreakNow ? new Date().toISOString() : null
+        })
+        toast.success(isOnBreakNow ? 'Offline Break Started!' : 'Offline Break Ended!')
+      } else {
+        toast.error(err?.response?.data?.error || 'Failed to toggle break')
+      }
     }
   }
 

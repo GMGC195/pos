@@ -15,14 +15,12 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // POST new employee
 router.post('/', authenticateToken, async (req, res) => {
-  const { name, email, phone, role, salary, status, shift, shift_hours, department, position, employee_id } = req.body;
+  const { name, role, salary, status, shift, shift_hours, department, position, employee_id } = req.body;
   try {
     const result = await pool.query(
-      'INSERT INTO employees (name, email, phone, role, salary, status, shift, shift_hours, department, position, employee_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+      'INSERT INTO employees (name, role, salary, status, shift, shift_hours, department, position, employee_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
       [
         name, 
-        email || null, 
-        phone || null, 
         role || 'Operator', 
         salary || 0, 
         status || 'Active', 
@@ -50,14 +48,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // PUT update employee
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { name, email, phone, role, salary, status, shift, shift_hours, department, position, employee_id } = req.body;
+  const { name, role, salary, status, shift, shift_hours, department, position, employee_id } = req.body;
   try {
     const result = await pool.query(
-      'UPDATE employees SET name=$1, email=$2, phone=$3, role=$4, salary=$5, status=$6, shift=$7, shift_hours=$8, department=$9, position=$10, employee_id=$11 WHERE id=$12 RETURNING *',
+      'UPDATE employees SET name=$1, role=$2, salary=$3, status=$4, shift=$5, shift_hours=$6, department=$7, position=$8, employee_id=$9 WHERE id=$10 RETURNING *',
       [
         name, 
-        email || null, 
-        phone || null, 
         role || 'Operator', 
         salary || 0, 
         status || 'Active', 
@@ -119,8 +115,6 @@ router.post('/import', authenticateToken, async (req, res) => {
         continue;
       }
 
-      const email = emp.email ? String(emp.email).trim() : null;
-      const phone = emp.phone ? String(emp.phone).trim() : null;
       const role = emp.role ? String(emp.role).trim() : 'Operator';
       const salary = parseFloat(emp.salary) || 0;
       const status = 'Active';
@@ -136,18 +130,10 @@ router.post('/import', authenticateToken, async (req, res) => {
       const position = emp.position ? String(emp.position).trim() : null;
       const employee_id = emp.employee_id ? String(emp.employee_id).trim() : null;
 
-      // Duplicate Check priority
+      // Duplicate Check priority (Employee ID -> Name + Department)
       let existing = null;
       if (employee_id) {
         const check = await client.query('SELECT * FROM employees WHERE employee_id = $1', [employee_id]);
-        if (check.rows.length > 0) existing = check.rows[0];
-      }
-      if (!existing && email) {
-        const check = await client.query('SELECT * FROM employees WHERE email = $1', [email]);
-        if (check.rows.length > 0) existing = check.rows[0];
-      }
-      if (!existing && phone) {
-        const check = await client.query('SELECT * FROM employees WHERE phone = $1', [phone]);
         if (check.rows.length > 0) existing = check.rows[0];
       }
       if (!existing) {
@@ -176,9 +162,9 @@ router.post('/import', authenticateToken, async (req, res) => {
           // Update existing employee
           await client.query(
             `UPDATE employees 
-             SET name=$1, email=$2, phone=$3, role=$4, salary=$5, status=$6, shift=$7, shift_hours=$8, department=$9, position=$10
-             WHERE id=$11`,
-            [name, email, phone, role, salary, status, shift, shift_hours, department, position, existing.id]
+             SET name=$1, role=$2, salary=$3, status=$4, shift=$5, shift_hours=$6, department=$7, position=$8
+             WHERE id=$9`,
+            [name, role, salary, status, shift, shift_hours, department, position, existing.id]
           );
           updatedCount++;
         } else {
@@ -194,13 +180,13 @@ router.post('/import', authenticateToken, async (req, res) => {
       } else {
         // Insert new employee
         const insertRes = await client.query(
-          `INSERT INTO employees (name, email, phone, role, salary, status, shift, shift_hours, department, position)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-          [name, email, phone, role, salary, status, shift, shift_hours, department, position]
+          `INSERT INTO employees (name, role, salary, status, shift, shift_hours, department, position)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+          [name, role, salary, status, shift, shift_hours, department, position]
         );
         const newId = insertRes.rows[0].id;
         const generatedId = `EMP-${String(newId).padStart(4, '0')}`;
-        await client.query('UPDATE employees SET employee_id = $1 WHERE id = $2', [generatedId, newId]);
+        await pool.query('UPDATE employees SET employee_id = $1 WHERE id = $2', [generatedId, newId]);
         successCount++;
       }
     }

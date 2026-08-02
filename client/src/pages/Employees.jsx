@@ -5,8 +5,14 @@ import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
 
 export default function Employees() {
-  const [employees, setEmployees] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [employees, setEmployees] = useState(() => {
+    const cached = localStorage.getItem('pizza_shop_employees')
+    return cached ? JSON.parse(cached) : []
+  })
+  const [loading, setLoading] = useState(() => {
+    const cached = localStorage.getItem('pizza_shop_employees')
+    return !cached
+  })
   const [searchTerm, setSearchTerm] = useState('')
   const [roleFilter, setRoleFilter] = useState('All')
   
@@ -18,8 +24,6 @@ export default function Employees() {
   // Form state
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
-    phone: '',
     role: 'Operator',
     salary: 0,
     status: 'Active',
@@ -28,24 +32,33 @@ export default function Employees() {
     employee_id: ''
   })
 
-  const loadEmployees = () => {
-    setLoading(true)
+  const loadEmployees = (showSpinner = false) => {
+    if (showSpinner) setLoading(true)
     axios.get('/api/employees')
-      .then(res => setEmployees(res.data))
-      .catch(() => toast.error('Error loading employees'))
-      .finally(() => setLoading(false))
+      .then(res => {
+        setEmployees(res.data)
+        localStorage.setItem('pizza_shop_employees', JSON.stringify(res.data))
+      })
+      .catch(() => {
+        const cached = localStorage.getItem('pizza_shop_employees')
+        if (cached && employees.length === 0) {
+          setEmployees(JSON.parse(cached))
+        }
+      })
+      .finally(() => {
+        if (showSpinner) setLoading(false)
+      })
   }
 
   useEffect(() => {
-    loadEmployees()
+    const hasCache = !!localStorage.getItem('pizza_shop_employees')
+    loadEmployees(!hasCache)
   }, [])
 
   const handleOpenAdd = () => {
     setEditingEmployee(null)
     setFormData({
       name: '',
-      email: '',
-      phone: '',
       role: 'Operator',
       salary: 0,
       status: 'Active',
@@ -62,8 +75,6 @@ export default function Employees() {
     setEditingEmployee(emp)
     setFormData({
       name: emp.name,
-      email: emp.email || '',
-      phone: emp.phone || '',
       role: emp.role || 'Operator',
       salary: emp.salary || 0,
       status: emp.status || 'Active',
@@ -123,10 +134,9 @@ export default function Employees() {
 
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (emp.email && emp.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                          (emp.phone && emp.phone.includes(searchTerm))
-    const matchesRole = roleFilter === 'All' || emp.role === roleFilter
-    return matchesSearch && matchesRole
+                          (emp.department && emp.department.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                          (emp.position && emp.position.toLowerCase().includes(searchTerm.toLowerCase()))
+    return matchesSearch
   })
 
   return (
@@ -171,27 +181,11 @@ export default function Employees() {
             <Search size={18} style={{ color: 'var(--text-muted)' }} />
             <input 
               type="text" 
-              placeholder="Search by name, email, or phone..." 
+              placeholder="Search by name, department, or position..." 
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               style={{ width: '100%', border: 'none', outline: 'none', padding: '10px 8px', background: 'transparent', color: 'var(--text)' }}
             />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>Role Filter:</span>
-            <select 
-              value={roleFilter} 
-              onChange={e => setRoleFilter(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-            >
-              <option value="All">All Roles</option>
-              <option value="Admin">Admin</option>
-              <option value="Operator">Operator</option>
-              <option value="Delivery">Delivery Rider</option>
-              <option value="Chef">Chef / Kitchen Staff</option>
-              <option value="Cashier">Cashier</option>
-            </select>
           </div>
         </div>
       </div>
@@ -205,10 +199,9 @@ export default function Employees() {
                 <th>Emp ID</th>
                 <th>Name</th>
                 <th>Department</th>
-                <th>Role / Position</th>
+                <th>Position</th>
                 <th>Shift</th>
-                <th>Contact</th>
-                <th>Salary (Monthly)</th>
+                <th>Duty Time</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -216,13 +209,13 @@ export default function Employees() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="9" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
                     Loading employees...
                   </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan="9" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
                     No employees found matching filter criteria.
                   </td>
                 </tr>
@@ -240,27 +233,17 @@ export default function Employees() {
                       {emp.department || <span style={{ color: 'var(--text-muted)' }}>--</span>}
                     </td>
                     <td>
-                      <div style={{ fontWeight: 550 }}>{emp.position || emp.role}</div>
-                      {emp.position && emp.position !== emp.role && (
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'rgba(156, 163, 175, 0.1)', padding: '2px 6px', borderRadius: 4 }}>
-                          {emp.role}
-                        </span>
-                      )}
+                      <div style={{ fontWeight: 550 }}>{emp.position || 'Staff'}</div>
                     </td>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>
                         {emp.shift || 'R1'}
                       </div>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    </td>
+                    <td>
+                      <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
                         {parseFloat(emp.shift_hours || 12.0).toFixed(1)} Hrs
                       </span>
-                    </td>
-                    <td>
-                      <div style={{ fontSize: 13 }}>{emp.email || 'N/A'}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{emp.phone || 'N/A'}</div>
-                    </td>
-                    <td>
-                      <span style={{ fontWeight: 600 }}>Rs. {parseFloat(emp.salary || 0).toLocaleString()}</span>
                     </td>
                     <td>
                       <span className={`badge ${emp.status === 'Active' ? 'badge-success' : 'badge-danger'}`} style={{
@@ -318,52 +301,9 @@ export default function Employees() {
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Email</label>
-                    <input 
-                      type="email" 
-                      value={formData.email}
-                      onChange={e => setFormData({ ...formData, email: e.target.value })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number</label>
-                    <input 
-                      type="text" 
-                      value={formData.phone}
-                      onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                    />
-                  </div>
-                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Role</label>
-                    <select 
-                      value={formData.role}
-                      onChange={e => setFormData({ ...formData, role: e.target.value })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                    >
-                      <option value="Operator">Operator</option>
-                      <option value="Admin">Admin</option>
-                      <option value="Delivery">Delivery Rider</option>
-                      <option value="Chef">Chef / Kitchen Staff</option>
-                      <option value="Cashier">Cashier</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Salary (Monthly)</label>
-                    <input 
-                      type="number" 
-                      value={formData.salary}
-                      onChange={e => setFormData({ ...formData, salary: parseFloat(e.target.value) || 0 })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                    />
-                  </div>
-                </div>
+
+
 
                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>

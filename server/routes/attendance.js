@@ -11,8 +11,6 @@ router.get('/today', authenticateToken, async (req, res) => {
       SELECT DISTINCT ON (e.id)
              e.id as employee_id,
              e.name,
-             e.email,
-             e.phone,
              e.role,
              e.shift,
              e.shift_hours,
@@ -207,7 +205,7 @@ router.post('/toggle-break', authenticateToken, async (req, res) => {
     } else {
       // Start break
       result = await pool.query(
-        'UPDATE employee_attendance SET on_break = true, break_start = NOW() WHERE id = $2 RETURNING *',
+        'UPDATE employee_attendance SET on_break = true, break_start = NOW() WHERE id = $1 RETURNING *',
         [session.id]
       );
     }
@@ -223,7 +221,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.*, e.name, e.role, e.email, e.shift, e.shift_hours
+      SELECT ea.*, e.name, e.role, e.shift, e.shift_hours
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE 1=1
@@ -257,7 +255,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
         const breakSecs = row.total_break_duration_seconds || 0;
         const netMs = checkOutTime - checkInTime - (breakSecs * 1000);
         durationHours = Math.max(0, netMs / (1000 * 60 * 60));
-        otHours = durationHours - shiftHours;
+        otHours = Math.max(0, durationHours - shiftHours);
       }
       
       return {

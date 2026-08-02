@@ -13,14 +13,16 @@ const pool = require('./db');
       CREATE TABLE IF NOT EXISTS employees (
         id SERIAL PRIMARY KEY,
         name VARCHAR(150) NOT NULL,
-        email VARCHAR(150) UNIQUE,
-        phone VARCHAR(50),
         role VARCHAR(50),
         salary NUMERIC(10, 2) DEFAULT 0,
         status VARCHAR(20) DEFAULT 'Active',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // Drop email and phone columns if they exist
+    await pool.query('ALTER TABLE employees DROP COLUMN IF EXISTS email CASCADE');
+    await pool.query('ALTER TABLE employees DROP COLUMN IF EXISTS phone CASCADE');
     
     // Add shift column if not exists
     await pool.query(`
