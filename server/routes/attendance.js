@@ -272,6 +272,52 @@ router.get('/reports', authenticateToken, async (req, res) => {
   }
 });
 
+// Get attendance analytics (weekly rates)
+router.get('/analytics', authenticateToken, async (req, res) => {
+  try {
+    const weeklyQuery = await pool.query(`
+      SELECT date, COUNT(DISTINCT employee_id) as present_count 
+      FROM employee_attendance 
+      WHERE date >= CURRENT_DATE - INTERVAL '6 days' 
+      GROUP BY date 
+      ORDER BY date ASC
+    `);
+    
+    const totalEmployeesRes = await pool.query("SELECT COUNT(*) FROM employees WHERE status = 'Active'");
+    const totalEmployees = parseInt(totalEmployeesRes.rows[0].count) || 1;
+
+    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const last7Days = [];
+    
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = daysOfWeek[d.getDay()];
+      
+      const dayData = weeklyQuery.rows.find(row => {
+        const rowDate = new Date(row.date).toISOString().split('T')[0];
+        return rowDate === dateStr;
+      });
+      
+      const present = dayData ? parseInt(dayData.present_count) : 0;
+      const rate = Math.min(100, Math.round((present / totalEmployees) * 100));
+      
+      last7Days.push({
+        label: dayName,
+        rate: rate
+      });
+    }
+
+    res.json({
+      weekly: last7Days,
+      monthly: last7Days
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get dashboard statistics
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
