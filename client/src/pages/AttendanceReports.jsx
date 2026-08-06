@@ -314,8 +314,8 @@ export default function AttendanceReports() {
               dayHours += s.hours_worked || 0
             })
             dayHours = Math.min(24, dayHours) // Cap to 24 hours max per day
-            totalHours += dayHours
-            totalOvertime += Math.max(0, dayHours - emp.shift_hours)
+            totalHours += Math.min(emp.shift_hours || 12.0, dayHours)
+            totalOvertime += Math.max(0, dayHours - (emp.shift_hours || 12.0))
           }
         } else {
           // If no log exists for a past date, it's considered an absent day
@@ -395,7 +395,7 @@ export default function AttendanceReports() {
       daysInMonth.forEach(day => {
         headers.push(`${day.getDate()} (${day.toLocaleDateString([], { weekday: 'short' })})`)
       })
-      headers.push('P', 'A', 'L', 'H', 'Late Arrival', 'Total Hours', 'Overtime')
+      headers.push('P', 'A', 'L', 'H', 'Late Arrival', 'Duty Hours', 'Overtime')
 
       // Build HTML content representing the Excel sheet with inline styles and worksheet configuration
       let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`
@@ -532,7 +532,7 @@ export default function AttendanceReports() {
               }
               
               cellText = [...sessionLines, ...paddingLines].join('<br/>')
-              cellText += `<br/><span style="font-size: 8pt; color: #475569; font-weight: bold;">Total Duty: ${formatHoursToText(dayHours)}${dayOvertime > 0 ? `<br/>Overtime: +${formatHoursToText(dayOvertime)}` : ''}</span>`
+              cellText += `<br/><span style="font-size: 8pt; color: #475569; font-weight: bold;">Total Duty: ${formatHoursToText(Math.min(emp.shift_hours || 12.0, dayHours))}${dayOvertime > 0 ? `<br/>Overtime: +${formatHoursToText(dayOvertime)}` : ''}</span>`
               cellClass += ' present-cell'
             }
           } else {
@@ -710,7 +710,7 @@ export default function AttendanceReports() {
                   <th style={{ minWidth: 60, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>L</th>
                   <th style={{ minWidth: 60, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>H</th>
                   <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Late Arrival</th>
-                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Total Hours</th>
+                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Duty Hours</th>
                   <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Overtime</th>
                 </tr>
               </thead>
@@ -812,7 +812,7 @@ export default function AttendanceReports() {
                                     fontSize: '8.5px',
                                     color: 'var(--text-muted)'
                                   }}>
-                                    <div><strong>Total Duty:</strong> {formatHoursToText(dayHours)}</div>
+                                    <div><strong>Duty Hours:</strong> {formatHoursToText(Math.min(emp.shift_hours || 12.0, dayHours))}</div>
                                     {dayOvertime > 0 && (
                                       <div style={{ color: 'var(--green)', fontWeight: 650 }}><strong>Overtime:</strong> +{formatHoursToText(dayOvertime)}</div>
                                     )}
@@ -1071,7 +1071,7 @@ export default function AttendanceReports() {
                           <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : checkOut}</td>
                           <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : `${breakMins} mins`}</td>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
-                            {session.status === 'Holiday' ? '0 min' : formatHoursToText(session.hours_worked)}
+                            {session.status === 'Holiday' ? '0 min' : formatHoursToText(Math.min(selectedEmployeeLogs.shift_hours || 12.0, session.hours_worked))}
                             {sIdx === 0 && dayOvertime > 0 && (
                               <div style={{ fontSize: 10, color: '#F97316', fontWeight: 650, marginTop: 2 }}>
                                 Overtime: +{formatHoursToText(dayOvertime)}

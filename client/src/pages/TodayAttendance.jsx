@@ -129,7 +129,7 @@ export default function TodayAttendance() {
           'Check-In Sessions': checkInTimes || '--',
           'Check-Out Sessions': checkOutTimes || '--',
           'Status': statusText,
-          'Hours Worked': decimalHoursToText(parseFloat(emp.total_hours_today || 0)),
+          'Hours Worked': decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0))),
           'Overtime': decimalHoursToText(otHours)
         }
       })
@@ -405,7 +405,7 @@ export default function TodayAttendance() {
                         )}
                       </td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--green)', textAlign: 'center' }}>
-                        {decimalHoursToText(parseFloat(emp.total_hours_today || 0))}
+                        {decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)))}
                       </td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
                         {decimalHoursToText(Math.max(0, parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0)))}

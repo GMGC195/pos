@@ -652,9 +652,15 @@ export default function AttendanceTracker() {
                         <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--text-muted)' }}>Hours Worked:</span>
-                        <span style={{ fontWeight: 600, color: 'var(--green)' }}>{parseFloat(emp.total_hours_today || 0).toFixed(2)} hrs</span>
+                        <span style={{ color: 'var(--text-muted)' }}>Duty Hours:</span>
+                        <span style={{ fontWeight: 600, color: 'var(--green)' }}>{Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)).toFixed(2)} hrs</span>
                       </div>
+                      {parseFloat(emp.total_hours_today || 0) > (parseFloat(emp.shift_hours) || 12.0) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Overtime:</span>
+                          <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{(parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0)).toFixed(2)} hrs</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
