@@ -132,21 +132,39 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       const currentMins = now.getMinutes();
 
       let isLate = false;
-      if (shift === 'R1') {
-        // R1: 10:00 AM start. Late threshold: 10:15 AM
-        if (currentHours > 10 || (currentHours === 10 && currentMins > 15)) {
-          isLate = true;
+      let startHour = 10;
+      let startMin = 0;
+      
+      const shiftDetails = await pool.query('SELECT * FROM employee_shifts WHERE name = $1', [shift]);
+      if (shiftDetails.rows.length > 0) {
+        const startTimeStr = shiftDetails.rows[0].start_time;
+        const timeMatch = startTimeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+        if (timeMatch) {
+          let hrs = parseInt(timeMatch[1]);
+          const mins = parseInt(timeMatch[2]);
+          const ampm = timeMatch[3].toUpperCase();
+          if (ampm === 'PM' && hrs < 12) hrs += 12;
+          if (ampm === 'AM' && hrs === 12) hrs = 0;
+          startHour = hrs;
+          startMin = mins;
         }
-      } else if (shift === 'R2') {
-        // R2: 09:00 AM start. Late threshold: 09:15 AM
-        if (currentHours > 9 || (currentHours === 9 && currentMins > 15)) {
-          isLate = true;
+      } else {
+        if (shift === 'R2') {
+          startHour = 9;
+        } else if (shift === 'R3') {
+          startHour = 15;
         }
-      } else if (shift === 'R3') {
-        // R3: 03:00 PM start. Late threshold: 03:15 PM (15:15)
-        if (currentHours > 15 || (currentHours === 15 && currentMins > 15)) {
-          isLate = true;
-        }
+      }
+      
+      let thresholdMins = startMin + 15;
+      let thresholdHour = startHour;
+      if (thresholdMins >= 60) {
+        thresholdHour += 1;
+        thresholdMins -= 60;
+      }
+      
+      if (currentHours > thresholdHour || (currentHours === thresholdHour && currentMins > thresholdMins)) {
+        isLate = true;
       }
 
       if (isLate) {

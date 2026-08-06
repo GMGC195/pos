@@ -5,6 +5,50 @@ import toast from 'react-hot-toast'
 
 
 
+const format12to24 = (time12h) => {
+  if (!time12h) return '10:00';
+  const match = time12h.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+  if (!match) return '10:00';
+  let hrs = parseInt(match[1]);
+  const mins = match[2];
+  const ampm = match[3].toUpperCase();
+  if (ampm === 'PM' && hrs < 12) hrs += 12;
+  if (ampm === 'AM' && hrs === 12) hrs = 0;
+  return `${String(hrs).padStart(2, '0')}:${mins}`;
+};
+
+const format24to12 = (time24h) => {
+  if (!time24h) return '10:00 AM';
+  const [hrsStr, minsStr] = time24h.split(':');
+  let hrs = parseInt(hrsStr);
+  const ampm = hrs >= 12 ? 'PM' : 'AM';
+  if (hrs > 12) hrs -= 12;
+  if (hrs === 0) hrs = 12;
+  return `${String(hrs).padStart(2, '0')}:${minsStr} ${ampm}`;
+};
+
+const calculateHoursDiff = (startTime24, endTime24) => {
+  if (!startTime24 || !endTime24) return 12.0;
+  const [startH, startM] = startTime24.split(':').map(Number);
+  const [endH, endM] = endTime24.split(':').map(Number);
+  
+  let diffMins = (endH * 60 + endM) - (startH * 60 + startM);
+  if (diffMins < 0) {
+    diffMins += 1440;
+  }
+  return parseFloat((diffMins / 60).toFixed(2));
+};
+
+const decimalHoursToText = (hoursDec) => {
+  if (isNaN(hoursDec) || hoursDec === null || hoursDec === undefined) return '';
+  const totalMins = Math.round(hoursDec * 60);
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hrs > 0 && mins > 0) return `${hrs} hr ${mins} min`;
+  if (hrs > 0) return `${hrs} hr`;
+  return `${mins} min`;
+};
+
 export default function AttendanceTracker() {
   const [employees, setEmployees] = useState(() => {
     const cached = localStorage.getItem('pizza_shop_attendance_today')
@@ -29,7 +73,10 @@ export default function AttendanceTracker() {
   const [selectedEmpForShiftEdit, setSelectedEmpForShiftEdit] = useState(null)
   const [editShiftVal, setEditShiftVal] = useState('R1')
   const [editShiftHoursVal, setEditShiftHoursVal] = useState(13.0)
+  const [editStartTimeVal, setEditStartTimeVal] = useState('10:00 AM')
+  const [editEndTimeVal, setEditEndTimeVal] = useState('11:00 PM')
   const [isCustomShiftEdit, setIsCustomShiftEdit] = useState(false)
+  const [shiftsList, setShiftsList] = useState([])
 
   const loadAttendance = (showSpinner = false) => {
     if (showSpinner) setLoading(true)
@@ -50,8 +97,15 @@ export default function AttendanceTracker() {
       })
   }
 
-  // Close dropdown on click outside
+  const loadShifts = () => {
+    axios.get('/api/employees/shifts/list')
+      .then(res => setShiftsList(res.data))
+      .catch(() => toast.error('Error loading shifts'))
+  }
+
+  // Close dropdown on click outside and load shifts
   useEffect(() => {
+    loadShifts()
     const handleOutsideClick = () => {
       setActiveDropdownId(null)
     }
@@ -59,17 +113,40 @@ export default function AttendanceTracker() {
     return () => window.removeEventListener('click', handleOutsideClick)
   }, [])
 
+  const handleTimeChangeTracker = (field, val24h) => {
+    const val12h = format24to12(val24h)
+    if (field === 'editStartTimeVal') {
+      setEditStartTimeVal(val12h)
+      setEditShiftHoursVal(calculateHoursDiff(val24h, format12to24(editEndTimeVal)))
+    } else {
+      setEditEndTimeVal(val12h)
+      setEditShiftHoursVal(calculateHoursDiff(format12to24(editStartTimeVal), val24h))
+    }
+  }
+
   const handleUpdateShift = async () => {
     if (!selectedEmpForShiftEdit) return
     try {
-      const shiftHours = editShiftVal === 'R2' ? 12.0 : 13.0
+      const targetName = editShiftVal.trim().toUpperCase()
+      const exists = shiftsList.some(s => s.name.toUpperCase() === targetName)
+
+      if (isCustomShiftEdit && !exists) {
+        await axios.post('/api/employees/shifts/list', {
+          name: targetName,
+          start_time: editStartTimeVal,
+          end_time: editEndTimeVal,
+          hours: editShiftHoursVal
+        })
+      }
+
       await axios.patch(`/api/employees/${selectedEmpForShiftEdit.employee_id}/shift`, {
-        shift: editShiftVal,
-        shift_hours: shiftHours
+        shift: targetName,
+        shift_hours: editShiftHoursVal
       })
-      toast.success(`Shift updated to ${editShiftVal} for ${selectedEmpForShiftEdit.name}!`)
+      toast.success(`Shift updated to ${targetName} for ${selectedEmpForShiftEdit.name}!`)
       setShowShiftModal(false)
       loadAttendance()
+      loadShifts()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to update shift')
     }
@@ -515,9 +592,12 @@ export default function AttendanceTracker() {
                                   setActiveDropdownId(null)
                                   setSelectedEmpForShiftEdit(emp)
                                   const currentShift = emp.shift || 'R1'
-                                  const isPredefined = ['R1', 'R2', 'R3'].includes(currentShift)
+                                  const matchedShift = shiftsList.find(s => s.name === currentShift)
+                                  const isPredefined = !!matchedShift
                                   setEditShiftVal(currentShift)
                                   setEditShiftHoursVal(parseFloat(emp.shift_hours || 12.0))
+                                  setEditStartTimeVal(matchedShift ? matchedShift.start_time : '10:00 AM')
+                                  setEditEndTimeVal(matchedShift ? matchedShift.end_time : '11:00 PM')
                                   setIsCustomShiftEdit(!isPredefined)
                                   setShowShiftModal(true)
                                 }}
@@ -712,24 +792,29 @@ export default function AttendanceTracker() {
                     const val = e.target.value
                     if (val === 'Custom') {
                       setIsCustomShiftEdit(true)
-                      setEditShiftVal('Custom R1')
+                      setEditShiftVal('CUSTOM_R1')
                       setEditShiftHoursVal(12.0)
+                      setEditStartTimeVal('10:00 AM')
+                      setEditEndTimeVal('10:00 PM')
                     } else {
                       setIsCustomShiftEdit(false)
                       setEditShiftVal(val)
-                      setEditShiftHoursVal(val === 'R2' ? 12.0 : 13.0)
+                      const matched = shiftsList.find(s => s.name === val)
+                      setEditShiftHoursVal(matched ? parseFloat(matched.hours) : 12.0)
+                      setEditStartTimeVal(matched ? matched.start_time : '10:00 AM')
+                      setEditEndTimeVal(matched ? matched.end_time : '11:00 PM')
                     }
                   }}
                   style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
                 >
-                  <option value="R1">Shift R1 (10:00 AM - 13 hrs)</option>
-                  <option value="R2">Shift R2 (09:00 AM - 12 hrs)</option>
-                  <option value="R3">Shift R3 (03:00 PM - 13 hrs)</option>
+                  {shiftsList.map(s => (
+                    <option key={s.id} value={s.name}>{s.name} ({s.start_time} - {s.end_time})</option>
+                  ))}
                   <option value="Custom">Custom Shift...</option>
                 </select>
               </div>
 
-              {isCustomShiftEdit && (
+              {isCustomShiftEdit ? (
                 <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Custom Shift Name</span>
@@ -742,16 +827,50 @@ export default function AttendanceTracker() {
                     />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Custom Shift Hours</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Start Time</span>
                     <input 
-                      type="number" 
-                      step="0.5"
-                      value={editShiftHoursVal}
-                      onChange={e => setEditShiftHoursVal(parseFloat(e.target.value) || 0)}
+                      type="time" 
+                      value={format12to24(editStartTimeVal)}
+                      onChange={e => handleTimeChangeTracker('editStartTimeVal', e.target.value)}
                       style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
                     />
                   </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>End Time</span>
+                    <input 
+                      type="time" 
+                      value={format12to24(editEndTimeVal)}
+                      onChange={e => handleTimeChangeTracker('editEndTimeVal', e.target.value)}
+                      style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Custom Shift Hours {editShiftHoursVal ? `(${decimalHoursToText(editShiftHoursVal)})` : ''}
+                    </span>
+                    <input 
+                      type="text" 
+                      readOnly
+                      value={decimalHoursToText(editShiftHoursVal)}
+                      style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', borderRadius: 8, padding: 10, outline: 'none' }}
+                    />
+                  </div>
                 </>
+              ) : (
+                <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span>Start Time:</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{editStartTimeVal}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span>End Time:</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{editEndTimeVal}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Standard Hours:</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{editShiftHoursVal} hrs</span>
+                  </div>
+                </div>
               )}
 
               <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>

@@ -4,6 +4,50 @@ import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet
 import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
 
+const format12to24 = (time12h) => {
+  if (!time12h) return '10:00';
+  const match = time12h.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+  if (!match) return '10:00';
+  let hrs = parseInt(match[1]);
+  const mins = match[2];
+  const ampm = match[3].toUpperCase();
+  if (ampm === 'PM' && hrs < 12) hrs += 12;
+  if (ampm === 'AM' && hrs === 12) hrs = 0;
+  return `${String(hrs).padStart(2, '0')}:${mins}`;
+};
+
+const format24to12 = (time24h) => {
+  if (!time24h) return '10:00 AM';
+  const [hrsStr, minsStr] = time24h.split(':');
+  let hrs = parseInt(hrsStr);
+  const ampm = hrs >= 12 ? 'PM' : 'AM';
+  if (hrs > 12) hrs -= 12;
+  if (hrs === 0) hrs = 12;
+  return `${String(hrs).padStart(2, '0')}:${minsStr} ${ampm}`;
+};
+
+const calculateHoursDiff = (startTime24, endTime24) => {
+  if (!startTime24 || !endTime24) return 12.0;
+  const [startH, startM] = startTime24.split(':').map(Number);
+  const [endH, endM] = endTime24.split(':').map(Number);
+  
+  let diffMins = (endH * 60 + endM) - (startH * 60 + startM);
+  if (diffMins < 0) {
+    diffMins += 1440;
+  }
+  return parseFloat((diffMins / 60).toFixed(2));
+};
+
+const decimalHoursToText = (hoursDec) => {
+  if (isNaN(hoursDec) || hoursDec === null || hoursDec === undefined) return '';
+  const totalMins = Math.round(hoursDec * 60);
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hrs > 0 && mins > 0) return `${hrs} hr ${mins} min`;
+  if (hrs > 0) return `${hrs} hr`;
+  return `${mins} min`;
+};
+
 export default function Employees() {
   const [employees, setEmployees] = useState(() => {
     const cached = localStorage.getItem('pizza_shop_employees')
@@ -27,10 +71,15 @@ export default function Employees() {
     role: 'Operator',
     salary: 0,
     status: 'Active',
+    shift: 'R1',
+    shift_hours: 13.0,
+    shift_start_time: '10:00 AM',
+    shift_end_time: '11:00 PM',
     department: '',
     position: '',
     employee_id: ''
   })
+  const [isCustomShift, setIsCustomShift] = useState(false)
 
   // Shifts configuration state
   const [shifts, setShifts] = useState([])
@@ -70,6 +119,7 @@ export default function Employees() {
 
   const handleOpenAdd = () => {
     setEditingEmployee(null)
+    setIsCustomShift(false)
     setFormData({
       name: '',
       role: 'Operator',
@@ -77,6 +127,8 @@ export default function Employees() {
       status: 'Active',
       shift: shifts[0]?.name || 'R1',
       shift_hours: parseFloat(shifts[0]?.hours || 13.0),
+      shift_start_time: shifts[0]?.start_time || '10:00 AM',
+      shift_end_time: shifts[0]?.end_time || '11:00 PM',
       department: '',
       position: '',
       employee_id: ''
@@ -86,13 +138,20 @@ export default function Employees() {
 
   const handleOpenEdit = (emp) => {
     setEditingEmployee(emp)
+    const currentShift = emp.shift || 'R1'
+    const matchedShift = shifts.find(s => s.name === currentShift)
+    const isPredefined = !!matchedShift
+    
+    setIsCustomShift(!isPredefined)
     setFormData({
       name: emp.name,
       role: emp.role || 'Operator',
       salary: emp.salary || 0,
       status: emp.status || 'Active',
-      shift: emp.shift || 'R1',
+      shift: currentShift,
       shift_hours: parseFloat(emp.shift_hours || 12.0),
+      shift_start_time: matchedShift ? matchedShift.start_time : '10:00 AM',
+      shift_end_time: matchedShift ? matchedShift.end_time : '11:00 PM',
       department: emp.department || '',
       position: emp.position || '',
       employee_id: emp.employee_id || ''
@@ -105,11 +164,15 @@ export default function Employees() {
     setEditingEmployee(null)
   }
 
-  const handleShiftChange = (e) => {
-    const val = e.target.value
-    const matchedShift = shifts.find(s => s.name === val)
-    const hours = matchedShift ? parseFloat(matchedShift.hours) : 12.0
-    setFormData(prev => ({ ...prev, shift: val, shift_hours: hours }))
+  const handleTimeChange = (field, val24h) => {
+    const val12h = format24to12(val24h)
+    setFormData(prev => {
+      const updated = { ...prev, [field]: val12h }
+      const start24 = field === 'shift_start_time' ? val24h : format12to24(prev.shift_start_time)
+      const end24 = field === 'shift_end_time' ? val24h : format12to24(prev.shift_end_time)
+      updated.shift_hours = calculateHoursDiff(start24, end24)
+      return updated
+    })
   }
 
   const handleSubmit = async (e) => {
@@ -117,17 +180,35 @@ export default function Employees() {
     if (!formData.name) return toast.error('Name is required')
 
     try {
+      const targetShiftName = formData.shift.trim().toUpperCase()
+      const exists = shifts.some(s => s.name.toUpperCase() === targetShiftName)
+      
+      if (isCustomShift && !exists) {
+        await axios.post('/api/employees/shifts/list', {
+          name: targetShiftName,
+          start_time: formData.shift_start_time,
+          end_time: formData.shift_end_time,
+          hours: formData.shift_hours
+        })
+      }
+
+      const payload = {
+        ...formData,
+        shift: targetShiftName
+      }
+
       if (editingEmployee) {
         // Update
-        await axios.put(`/api/employees/${editingEmployee.id}`, formData)
+        await axios.put(`/api/employees/${editingEmployee.id}`, payload)
         toast.success('Employee updated successfully!')
       } else {
         // Create
-        await axios.post('/api/employees', formData)
+        await axios.post('/api/employees', payload)
         toast.success('Employee added successfully!')
       }
       handleCloseModal()
       loadEmployees()
+      loadShifts()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to save employee')
     }
@@ -361,15 +442,28 @@ export default function Employees() {
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Assigned Shift</label>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <select 
-                        value={shifts.some(s => s.name === formData.shift) ? formData.shift : (formData.shift ? 'Custom' : (shifts[0]?.name || 'R1'))}
+                        value={isCustomShift ? 'Custom' : formData.shift}
                         onChange={(e) => {
                           const val = e.target.value
                           if (val === 'Custom') {
-                            setFormData(prev => ({ ...prev, shift: 'Custom R1', shift_hours: 12.0 }))
+                            setIsCustomShift(true)
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              shift: 'CUSTOM_R1', 
+                              shift_hours: 12.0,
+                              shift_start_time: '10:00 AM',
+                              shift_end_time: '10:00 PM'
+                            }))
                           } else {
+                            setIsCustomShift(false)
                             const matchedShift = shifts.find(s => s.name === val)
-                            const hours = matchedShift ? parseFloat(matchedShift.hours) : 12.0
-                            setFormData(prev => ({ ...prev, shift: val, shift_hours: hours }))
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              shift: val, 
+                              shift_hours: matchedShift ? parseFloat(matchedShift.hours) : 12.0,
+                              shift_start_time: matchedShift ? matchedShift.start_time : '10:00 AM',
+                              shift_end_time: matchedShift ? matchedShift.end_time : '11:00 PM'
+                            }))
                           }
                         }}
                         style={{ flex: 1, border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
@@ -379,29 +473,57 @@ export default function Employees() {
                         ))}
                         <option value="Custom">Custom Shift...</option>
                       </select>
-                      
-                      {(!shifts.some(s => s.name === formData.shift) || (formData.shift && formData.shift.startsWith('Custom'))) && (
-                        <input 
-                          type="text"
-                          placeholder="Shift Name"
-                          value={formData.shift}
-                          onChange={e => setFormData(prev => ({ ...prev, shift: e.target.value }))}
-                          style={{ width: 120, border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                        />
-                      )}
                     </div>
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Shift Standard Hours</label>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
+                      Shift Standard Hours {formData.shift_hours ? `(${decimalHoursToText(formData.shift_hours)})` : ''}
+                    </label>
                     <input 
-                      type="number" 
-                      step="0.5"
-                      value={formData.shift_hours}
-                      onChange={e => setFormData({ ...formData, shift_hours: parseFloat(e.target.value) || 0 })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                      type="text" 
+                      readOnly
+                      value={decimalHoursToText(formData.shift_hours)}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-2)', color: 'var(--text-muted)', outline: 'none' }}
                     />
                   </div>
                 </div>
+
+                {isCustomShift && (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Custom Shift Name</label>
+                        <input 
+                          type="text"
+                          placeholder="e.g. R4"
+                          value={formData.shift}
+                          onChange={e => setFormData(prev => ({ ...prev, shift: e.target.value }))}
+                          style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Start Time</label>
+                        <input 
+                          type="time"
+                          value={format12to24(formData.shift_start_time)}
+                          onChange={e => handleTimeChange('shift_start_time', e.target.value)}
+                          style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>End Time</label>
+                        <input 
+                          type="time"
+                          value={format12to24(formData.shift_end_time)}
+                          onChange={e => handleTimeChange('shift_end_time', e.target.value)}
+                          style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24, borderTop: '1px solid var(--surface-2)', paddingTop: 16 }}>
