@@ -21,8 +21,9 @@ api.interceptors.response.use(
   response => response,
   error => {
     const status = error?.response?.status
+    const errMsg = error?.response?.data?.error
     // 401 = no/missing token, 403 = invalid/expired token
-    if (status === 401 || status === 403) {
+    if (status === 401 || (status === 403 && errMsg === 'Invalid token')) {
       const hasToken = localStorage.getItem(STORAGE_TOKEN_KEY)
       // Only force logout if we actually had a token that was rejected
       if (hasToken) {

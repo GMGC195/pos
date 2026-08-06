@@ -130,10 +130,13 @@ export default function Layout() {
   };
 
   useEffect(() => {
-    fetchAlerts()
-    const interval = setInterval(fetchAlerts, 5 * 60 * 1000) // Refresh every 5 mins
-    return () => clearInterval(interval)
-  }, [])
+    const role = user?.role?.toLowerCase()
+    if (role === 'admin' || role === 'developer') {
+      fetchAlerts()
+      const interval = setInterval(fetchAlerts, 5 * 60 * 1000) // Refresh every 5 mins
+      return () => clearInterval(interval)
+    }
+  }, [user])
 
   useEffect(() => {
     if (isNotifOpen) {
@@ -313,77 +316,79 @@ export default function Layout() {
             <input type="text" placeholder="Search anything..." />
           </div> */}
           <div className="topbar-right">
-            <div className="notif-wrapper" style={{ position: 'relative' }}>
-              <button
-                className={`icon-btn ${isNotifOpen ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsProfileOpen(false);
-                  setIsNotifOpen(!isNotifOpen);
-                }}
-                title="Notifications"
-              >
-                <Bell size={20} strokeWidth={2} />
-                {hasNewAlerts && alerts.length > 0 && <span className="notif-badge">{alerts.length}</span>}
-              </button>
+            {(user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'developer') && (
+              <div className="notif-wrapper" style={{ position: 'relative' }}>
+                <button
+                  className={`icon-btn ${isNotifOpen ? 'active' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsProfileOpen(false);
+                    setIsNotifOpen(!isNotifOpen);
+                  }}
+                  title="Notifications"
+                >
+                  <Bell size={20} strokeWidth={2} />
+                  {hasNewAlerts && alerts.length > 0 && <span className="notif-badge">{alerts.length}</span>}
+                </button>
 
-              {isNotifOpen && (
-                <div className="notif-dropdown" onClick={(e) => e.stopPropagation()}>
-                  <div className="notif-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <h3>Notifications</h3>
-                      <span className="badge" style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(227, 24, 55, 0.1)', color: 'var(--red)' }}>
-                        {alerts.length}
-                      </span>
-                    </div>
-                    {alerts.length > 0 && (
-                      <button className="notif-clear-all" onClick={handleClearAll}>
-                        Clear All
-                      </button>
-                    )}
-                  </div>
-                  <div className="notif-list">
-                    {alerts.length === 0 ? (
-                      <div className="notif-empty">
-                        <Package size={32} style={{ opacity: 0.2, marginBottom: 8 }} />
-                        <p>No new notifications</p>
+                {isNotifOpen && (
+                  <div className="notif-dropdown" onClick={(e) => e.stopPropagation()}>
+                    <div className="notif-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <h3>Notifications</h3>
+                        <span className="badge" style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(227, 24, 55, 0.1)', color: 'var(--red)' }}>
+                          {alerts.length}
+                        </span>
                       </div>
-                    ) : (
-                      alerts.map(item => (
-                        <div 
-                          key={item.id} 
-                          className="notif-item"
-                          onClick={() => {
-                            navigate('/stock-management');
-                            setIsNotifOpen(false);
-                          }}
-                        >
-                          <button 
-                            className="notif-item-clear"
-                            onClick={(e) => handleClearItem(e, item.id)}
-                            title="Clear this notification"
-                          >
-                            <X size={14} />
-                          </button>
-                          <div className="notif-item-icon">
-                            <AlertTriangle size={18} />
-                          </div>
-                          <div className="notif-item-content">
-                            <span className="notif-item-title">Low Stock: {item.name}</span>
-                            <span className="notif-item-desc">
-                              Currently {Number(item.quantity).toFixed(2)} {item.unit}
-                            </span>
-                            <span className="notif-item-time">
-                              {formatNotifTime(item.low_stock_at)}
-                            </span>
-                          </div>
+                      {alerts.length > 0 && (
+                        <button className="notif-clear-all" onClick={handleClearAll}>
+                          Clear All
+                        </button>
+                      )}
+                    </div>
+                    <div className="notif-list">
+                      {alerts.length === 0 ? (
+                        <div className="notif-empty">
+                          <Package size={32} style={{ opacity: 0.2, marginBottom: 8 }} />
+                          <p>No new notifications</p>
                         </div>
-                      ))
-                    )}
+                      ) : (
+                        alerts.map(item => (
+                          <div 
+                            key={item.id} 
+                            className="notif-item"
+                            onClick={() => {
+                              navigate('/stock-management');
+                              setIsNotifOpen(false);
+                            }}
+                          >
+                            <button 
+                              className="notif-item-clear"
+                              onClick={(e) => handleClearItem(e, item.id)}
+                              title="Clear this notification"
+                            >
+                              <X size={14} />
+                            </button>
+                            <div className="notif-item-icon">
+                              <AlertTriangle size={18} />
+                            </div>
+                            <div className="notif-item-content">
+                              <span className="notif-item-title">Low Stock: {item.name}</span>
+                              <span className="notif-item-desc">
+                                Currently {Number(item.quantity).toFixed(2)} {item.unit}
+                              </span>
+                              <span className="notif-item-time">
+                                {formatNotifTime(item.low_stock_at)}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
             
             {/* <button className="icon-btn" title="Full screen"><Maximize size={20} strokeWidth={2} /></button> */}
             <div className="profile-wrapper" style={{ position: 'relative' }}>
