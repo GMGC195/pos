@@ -13,6 +13,15 @@ const formatLocalDate = (date) => {
   return `${year}-${month}-${day}`
 }
 
+const formatHoursToText = (decimalHours) => {
+  if (!decimalHours || decimalHours <= 0) return '0 min'
+  const hrs = Math.floor(decimalHours)
+  const mins = Math.round((decimalHours - hrs) * 60)
+  if (hrs > 0 && mins > 0) return `${hrs} hr ${mins} min`
+  if (hrs > 0) return `${hrs} hr`
+  return `${mins} min`
+}
+
 const confirmAction = (message, onConfirm) => {
   toast((t) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
@@ -80,6 +89,7 @@ export default function AttendanceReports() {
   const [showHolidayModal, setShowHolidayModal] = useState(false)
   const [holidayDate, setHolidayDate] = useState(() => formatLocalDate(new Date()))
   const [holidayEmployeeId, setHolidayEmployeeId] = useState('Global')
+  const [holidayShift, setHolidayShift] = useState('All')
   const [submittingHoliday, setSubmittingHoliday] = useState(null)
 
   // Edit Attendance State
@@ -142,6 +152,13 @@ export default function AttendanceReports() {
 
   // Detailed Modal State
   const [selectedEmployeeLogs, setSelectedEmployeeLogs] = useState(null)
+
+  const handleEditFromPopup = (empId, dateStr) => {
+    setSelectedEmployeeLogs(null)
+    setEditEmployeeId(empId)
+    setEditDate(dateStr)
+    setShowEditModal(true)
+  }
 
   const getHolidayDayName = () => {
     if (!holidayDate) return ''
@@ -272,6 +289,7 @@ export default function AttendanceReports() {
       let absents = 0
       let leaves = 0
       let holidays = 0
+      let lates = 0
       let totalHours = 0
       let totalOvertime = 0
 
@@ -287,11 +305,15 @@ export default function AttendanceReports() {
             leaves++
           } else {
             presents++
+            if (mainSession.status === 'Late') {
+              lates++
+            }
             // Sum all hours worked on this day and calculate daily overtime
             let dayHours = 0
             sessions.forEach(s => {
               dayHours += s.hours_worked || 0
             })
+            dayHours = Math.min(24, dayHours) // Cap to 24 hours max per day
             totalHours += dayHours
             totalOvertime += Math.max(0, dayHours - emp.shift_hours)
           }
@@ -310,6 +332,7 @@ export default function AttendanceReports() {
         absents,
         leaves,
         holidays,
+        lates,
         totalHours,
         totalOvertime
       }
@@ -326,8 +349,9 @@ export default function AttendanceReports() {
       const isGlobal = holidayEmployeeId === 'Global'
       await axios.post('/api/attendance/holiday', {
         date: holidayDate,
-        employee_id: isGlobal ? null : holidayEmployeeId,
-        is_global: isGlobal
+        employee_id: (isGlobal || holidayEmployeeId === 'ShiftGlobal') ? null : holidayEmployeeId,
+        is_global: isGlobal,
+        shift: holidayShift !== 'All' ? holidayShift : null
       })
       toast.success('Holiday marked successfully!')
       setShowHolidayModal(false)
@@ -348,8 +372,9 @@ export default function AttendanceReports() {
       await axios.delete('/api/attendance/holiday', {
         data: {
           date: holidayDate,
-          employee_id: isGlobal ? null : holidayEmployeeId,
-          is_global: isGlobal
+          employee_id: (isGlobal || holidayEmployeeId === 'ShiftGlobal') ? null : holidayEmployeeId,
+          is_global: isGlobal,
+          shift: holidayShift !== 'All' ? holidayShift : null
         }
       })
       toast.success('Holiday removed successfully!')
@@ -370,7 +395,7 @@ export default function AttendanceReports() {
       daysInMonth.forEach(day => {
         headers.push(`${day.getDate()} (${day.toLocaleDateString([], { weekday: 'short' })})`)
       })
-      headers.push('P', 'A', 'L', 'H', 'Total Hours', 'Overtime')
+      headers.push('P', 'A', 'L', 'H', 'Late Arrival', 'Total Hours', 'Overtime')
 
       // Build HTML content representing the Excel sheet with inline styles and worksheet configuration
       let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`
@@ -418,12 +443,13 @@ export default function AttendanceReports() {
       html += `  <col width="90" />`
       html += `  <col width="180" />`
       daysInMonth.forEach(() => {
-        html += `  <col width="170" />`
+        html += `  <col width="230" />`
       })
       html += `  <col width="50" />`
       html += `  <col width="50" />`
       html += `  <col width="50" />`
       html += `  <col width="50" />`
+      html += `  <col width="90" />`
       html += `  <col width="90" />`
       html += `  <col width="90" />`
       html += `</colgroup>`
@@ -436,14 +462,14 @@ export default function AttendanceReports() {
       html += `    <th colspan="3" style="background-color: #103C43; color: #FFFFFF; font-weight: bold; font-size: 11pt; text-align: left; padding: 12px; border: none;">`
       html += `      MONTH: ${selectedMonth}`
       html += `    </th>`
-      html += `    <th colspan="${daysInMonth.length + 5}" style="background-color: #103C43; color: #FFFFFF; font-size: 10pt; text-align: right; padding: 12px; font-weight: bold; border: none;">`
+      html += `    <th colspan="${daysInMonth.length + 6}" style="background-color: #103C43; color: #FFFFFF; font-size: 10pt; text-align: right; padding: 12px; font-weight: bold; border: none;">`
       html += `      AL RAWAQ PAKISTAN RESTAURANT • Exported: ${new Date().toLocaleDateString()}`
       html += `    </th>`
       html += `  </tr>`
       
       // Empty spacer row between the info row and the column headers
       html += `  <tr style="height: 16px;">`
-      html += `    <th colspan="${daysInMonth.length + 8}" style="border: none; background-color: #FFFFFF; height: 16px;"></th>`
+      html += `    <th colspan="${daysInMonth.length + 9}" style="border: none; background-color: #FFFFFF; height: 16px;"></th>`
       html += `  </tr>`
 
       // Column headers row
@@ -484,11 +510,29 @@ export default function AttendanceReports() {
               cellText = 'L'
               cellClass += ' leave-cell'
             } else {
-              cellText = sessions.map(s => {
+              const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
+              const dayOvertime = Math.max(0, dayHours - emp.shift_hours)
+              
+              const sessionLines = sessions.map(s => {
                 const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                const outStr = s.check_out ? new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'
+                const isSystem = s.remarks === 'System Checkout'
+                const outStr = s.forgot_checkout 
+                  ? 'Forgot' 
+                  : s.check_out 
+                    ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystem ? ' (Sys)' : ''}` 
+                    : 'Active'
                 return `In: ${inStr} Out: ${outStr}`
-              }).join('<br/>') // separate by breaks
+              })
+              
+              // Pad cells to align Total Duty text horizontally in Excel
+              const maxSessionsToPad = 4 // pad up to 4 sessions to ensure uniform alignment
+              const paddingLines = []
+              for (let i = sessionLines.length; i < maxSessionsToPad; i++) {
+                paddingLines.push('&nbsp;')
+              }
+              
+              cellText = [...sessionLines, ...paddingLines].join('<br/>')
+              cellText += `<br/><span style="font-size: 8pt; color: #475569; font-weight: bold;">Total Duty: ${formatHoursToText(dayHours)}${dayOvertime > 0 ? `<br/>Overtime: +${formatHoursToText(dayOvertime)}` : ''}</span>`
               cellClass += ' present-cell'
             }
           } else {
@@ -504,12 +548,13 @@ export default function AttendanceReports() {
         })
 
         // Summary columns (Center aligned)
-        html += `<td class="center-text present-cell">${emp.presents}</td>`
-        html += `<td class="center-text absent-cell">${emp.absents}</td>`
-        html += `<td class="center-text leave-cell">${emp.leaves}</td>`
-        html += `<td class="center-text holiday-cell">${emp.holidays}</td>`
-        html += `<td class="center-text" style="font-weight: bold; color: #16A34A;">${parseFloat(emp.totalHours || 0).toFixed(2)}</td>`
-        html += `<td class="center-text" style="font-weight: bold;">${parseFloat(emp.totalOvertime || 0).toFixed(2)}</td>`
+        html += `<td class="center-text">${emp.presents}</td>`
+        html += `<td class="center-text">${emp.absents}</td>`
+        html += `<td class="center-text">${emp.leaves}</td>`
+        html += `<td class="center-text">${emp.holidays}</td>`
+        html += `<td class="center-text">${emp.lates}</td>`
+        html += `<td class="center-text" style="font-weight: bold; color: #16A34A;">${formatHoursToText(emp.totalHours)}</td>`
+        html += `<td class="center-text" style="font-weight: bold;">${emp.totalOvertime > 0 ? `+${formatHoursToText(emp.totalOvertime)}` : '--'}</td>`
 
         html += `</tr>`
       })
@@ -662,6 +707,7 @@ export default function AttendanceReports() {
                   <th style={{ minWidth: 60, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>A</th>
                   <th style={{ minWidth: 60, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>L</th>
                   <th style={{ minWidth: 60, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>H</th>
+                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Late Arrival</th>
                   <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Total Hours</th>
                   <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Overtime</th>
                 </tr>
@@ -669,13 +715,13 @@ export default function AttendanceReports() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={daysInMonth.length + 8} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+                    <td colSpan={daysInMonth.length + 10} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
                       Loading monthly sheet...
                     </td>
                   </tr>
                 ) : groupedData.length === 0 ? (
                   <tr>
-                    <td colSpan={daysInMonth.length + 8} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+                    <td colSpan={daysInMonth.length + 9} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
                       No employees registered.
                     </td>
                   </tr>
@@ -728,11 +774,19 @@ export default function AttendanceReports() {
                               cellContent = <span style={{ fontWeight: 750, color: '#F97316' }}>L</span>
                               cellBg = 'rgba(249, 115, 22, 0.08)'
                             } else {
+                              const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
+                              const dayOvertime = Math.max(0, dayHours - emp.shift_hours)
+                              
                               cellContent = (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', fontSize: 9 }}>
                                   {sessions.map((s, idx) => {
                                     const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                    const outStr = s.check_out ? new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'
+                                    const isSystem = s.remarks === 'System Checkout'
+                                    const outStr = s.forgot_checkout 
+                                      ? 'Forgot' 
+                                      : s.check_out 
+                                        ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystem ? ' (Sys)' : ''}` 
+                                        : 'Active'
                                     return (
                                       <div key={idx} style={{ whiteSpace: 'nowrap', display: 'flex', gap: 3 }}>
                                         <span style={{ color: 'var(--green)', fontWeight: 700 }}>In:</span>
@@ -742,6 +796,25 @@ export default function AttendanceReports() {
                                       </div>
                                     )
                                   })}
+                                  <div style={{ 
+                                    position: 'absolute',
+                                    bottom: 4,
+                                    left: 4,
+                                    right: 4,
+                                    paddingTop: 3, 
+                                    borderTop: '1px dashed var(--surface-3)', 
+                                    display: 'flex', 
+                                    flexDirection: 'column', 
+                                    alignItems: 'center', 
+                                    gap: 1,
+                                    fontSize: '8.5px',
+                                    color: 'var(--text-muted)'
+                                  }}>
+                                    <div><strong>Total Duty:</strong> {formatHoursToText(dayHours)}</div>
+                                    {dayOvertime > 0 && (
+                                      <div style={{ color: 'var(--green)', fontWeight: 650 }}><strong>Overtime:</strong> +{formatHoursToText(dayOvertime)}</div>
+                                    )}
+                                  </div>
                                 </div>
                               )
                               cellBg = 'rgba(34, 197, 94, 0.03)'
@@ -754,13 +827,18 @@ export default function AttendanceReports() {
                             }
                           }
 
+                          const hasDutyInfo = sessions.length > 0 && sessions[0].status !== 'Holiday' && sessions[0].status !== 'Leave'
+
                           return (
                             <td key={dateStr} style={{
                               borderRight: '1px solid var(--surface-2)',
                               background: cellBg,
                               textAlign: 'center',
                               padding: '6px 8px',
-                              fontSize: 10
+                              paddingBottom: hasDutyInfo ? '42px' : '6px',
+                              fontSize: 10,
+                              position: 'relative',
+                              verticalAlign: hasDutyInfo ? 'top' : 'middle'
                             }}>
                               {cellContent}
                             </td>
@@ -772,9 +850,10 @@ export default function AttendanceReports() {
                         <td style={{ textAlign: 'center', fontWeight: 650, color: 'var(--red)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.absents}</td>
                         <td style={{ textAlign: 'center', fontWeight: 650, color: '#F97316', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.leaves}</td>
                         <td style={{ textAlign: 'center', fontWeight: 650, color: 'var(--primary)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.holidays}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.totalHours.toFixed(1)}h</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.lates}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)', fontSize: 12, whiteSpace: 'nowrap' }}>{formatHoursToText(emp.totalHours)}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: emp.totalOvertime > 0 ? 'var(--green)' : 'var(--text)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                          {emp.totalOvertime > 0 ? `+${emp.totalOvertime.toFixed(1)}h` : '--'}
+                          {emp.totalOvertime > 0 ? `+${formatHoursToText(emp.totalOvertime)}` : '--'}
                         </td>
                       </tr>
                     );
@@ -810,16 +889,49 @@ export default function AttendanceReports() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Select Shift (Optional)</span>
+                <select 
+                  value={holidayShift}
+                  onChange={e => {
+                    const selected = e.target.value
+                    setHolidayShift(selected)
+                    if (selected !== 'All') {
+                      setHolidayEmployeeId('ShiftGlobal')
+                    } else {
+                      setHolidayEmployeeId('Global')
+                    }
+                  }}
+                  style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
+                >
+                  <option value="All">All Shifts</option>
+                  <option value="R1">Shift R1</option>
+                  <option value="R2">Shift R2</option>
+                  <option value="R3">Shift R3</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Select Scope / Employee</span>
                 <select 
                   value={holidayEmployeeId}
                   onChange={e => setHolidayEmployeeId(e.target.value)}
                   style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
                 >
-                  <option value="Global">All Staff (Global Holiday)</option>
-                  {employeesList.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_id})</option>
-                  ))}
+                  {holidayShift === 'All' ? (
+                    <>
+                      <option value="Global">All Staff (Global Holiday)</option>
+                      {employeesList.map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_id})</option>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <option value="ShiftGlobal">All Staff on Shift {holidayShift}</option>
+                      {employeesList.filter(emp => (emp.shift || 'R1') === holidayShift).map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_id})</option>
+                      ))}
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -883,11 +995,11 @@ export default function AttendanceReports() {
               </div>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Working Hours</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--text)', fontWeight: 800 }}>{selectedEmployeeLogs.totalHours.toFixed(1)} hrs</h4>
+                <h4 style={{ margin: '4px 0 0 0', color: 'var(--text)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.totalHours)}</h4>
               </div>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Overtime</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{selectedEmployeeLogs.totalOvertime.toFixed(1)} hrs</h4>
+                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.totalOvertime)}</h4>
               </div>
             </div>
 
@@ -902,12 +1014,15 @@ export default function AttendanceReports() {
                     <th style={{ padding: 10, fontSize: 12 }}>Break Duration</th>
                     <th style={{ padding: 10, fontSize: 12 }}>Net Hours</th>
                     <th style={{ padding: 10, fontSize: 12 }}>Status</th>
+                    {isAdmin && <th style={{ padding: 10, fontSize: 12, textAlign: 'center' }}>Action</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {daysInMonth.map(day => {
                     const dateStr = formatLocalDate(day)
                     const sessions = selectedEmployeeLogs.days[dateStr] || []
+                    const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
+                    const dayOvertime = Math.max(0, dayHours - selectedEmployeeLogs.shift_hours)
 
                     if (sessions.length === 0) {
                       const todayStr = formatLocalDate(new Date())
@@ -915,7 +1030,7 @@ export default function AttendanceReports() {
                       return (
                         <tr key={dateStr} style={{ borderBottom: '1px solid var(--surface-2)', opacity: isPast ? 1 : 0.45 }}>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>{day.toLocaleDateString([], { month: 'short', day: 'numeric' })}</td>
-                          <td colSpan={4} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
+                          <td colSpan={isAdmin ? 5 : 4} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
                             {isPast ? 'Absent / Unmarked' : 'Future Day'}
                           </td>
                           <td style={{ padding: 10 }}>
@@ -926,8 +1041,12 @@ export default function AttendanceReports() {
                     }
 
                     return sessions.map((session, sIdx) => {
-                      const checkIn = new Date(session.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      const checkOut = session.check_out ? new Date(session.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'
+                      const isSystemCheckout = session.remarks === 'System Checkout'
+                      const checkOut = session.forgot_checkout 
+                        ? 'Forgot' 
+                        : session.check_out 
+                          ? `${new Date(session.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystemCheckout ? ' (System)' : ''}` 
+                          : 'Active'
                       
                       const breakMins = Math.floor((session.total_break_duration_seconds || 0) / 60)
                       
@@ -946,17 +1065,43 @@ export default function AttendanceReports() {
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>
                             {sIdx === 0 ? day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}
                           </td>
-                          <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : checkIn}</td>
+                          <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : new Date(session.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                           <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : checkOut}</td>
                           <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : `${breakMins} mins`}</td>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
-                            {session.status === 'Holiday' ? '0.0h' : `${parseFloat(session.hours_worked || 0).toFixed(1)}h`}
+                            {session.status === 'Holiday' ? '0 min' : formatHoursToText(session.hours_worked)}
+                            {sIdx === 0 && dayOvertime > 0 && (
+                              <div style={{ fontSize: 10, color: '#F97316', fontWeight: 650, marginTop: 2 }}>
+                                Overtime: +{formatHoursToText(dayOvertime)}
+                              </div>
+                            )}
                           </td>
                           <td style={{ padding: 10 }}>
                             <span style={{ background: badgeBg, color: badgeColor, padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600 }}>
                               {session.status}
                             </span>
                           </td>
+                          {isAdmin && (
+                            <td style={{ padding: 10, textAlign: 'center' }}>
+                              <button 
+                                onClick={() => handleEditFromPopup(selectedEmployeeLogs.employee_id, dateStr)}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--primary)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  padding: 4,
+                                  borderRadius: 4
+                                }}
+                                title="Edit this day's attendance"
+                              >
+                                <Edit size={14} />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       )
                     })

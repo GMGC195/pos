@@ -91,6 +91,9 @@ const pool = require('./db');
       )
     `);
 
+    // Ensure employee_attendance has remarks column
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS remarks VARCHAR(100)');
+
     // Create indexes
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_employee ON employee_attendance(employee_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON employee_attendance(date)`);

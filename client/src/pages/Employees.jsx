@@ -356,18 +356,40 @@ export default function Employees() {
                   </div>
                 </div>
 
-                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Assigned Shift</label>
-                    <select 
-                      value={formData.shift}
-                      onChange={handleShiftChange}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                    >
-                      {shifts.map(s => (
-                        <option key={s.id} value={s.name}>{s.name} ({s.start_time} - {s.end_time})</option>
-                      ))}
-                    </select>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <select 
+                        value={shifts.some(s => s.name === formData.shift) ? formData.shift : (formData.shift ? 'Custom' : (shifts[0]?.name || 'R1'))}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          if (val === 'Custom') {
+                            setFormData(prev => ({ ...prev, shift: 'Custom R1', shift_hours: 12.0 }))
+                          } else {
+                            const matchedShift = shifts.find(s => s.name === val)
+                            const hours = matchedShift ? parseFloat(matchedShift.hours) : 12.0
+                            setFormData(prev => ({ ...prev, shift: val, shift_hours: hours }))
+                          }
+                        }}
+                        style={{ flex: 1, border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                      >
+                        {shifts.map(s => (
+                          <option key={s.id} value={s.name}>{s.name} ({s.start_time} - {s.end_time})</option>
+                        ))}
+                        <option value="Custom">Custom Shift...</option>
+                      </select>
+                      
+                      {(!shifts.some(s => s.name === formData.shift) || (formData.shift && formData.shift.startsWith('Custom'))) && (
+                        <input 
+                          type="text"
+                          placeholder="Shift Name"
+                          value={formData.shift}
+                          onChange={e => setFormData(prev => ({ ...prev, shift: e.target.value }))}
+                          style={{ width: 120, border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                        />
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Shift Standard Hours</label>

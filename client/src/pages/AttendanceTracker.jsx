@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle } from 'lucide-react'
+import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle, MoreVertical, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 
@@ -22,6 +22,14 @@ export default function AttendanceTracker() {
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
   const [confirmModal, setConfirmModal] = useState(null)
+  
+  // Shift Edit State
+  const [activeDropdownId, setActiveDropdownId] = useState(null)
+  const [showShiftModal, setShowShiftModal] = useState(false)
+  const [selectedEmpForShiftEdit, setSelectedEmpForShiftEdit] = useState(null)
+  const [editShiftVal, setEditShiftVal] = useState('R1')
+  const [editShiftHoursVal, setEditShiftHoursVal] = useState(13.0)
+  const [isCustomShiftEdit, setIsCustomShiftEdit] = useState(false)
 
   const loadAttendance = (showSpinner = false) => {
     if (showSpinner) setLoading(true)
@@ -40,6 +48,31 @@ export default function AttendanceTracker() {
       .finally(() => {
         if (showSpinner) setLoading(false)
       })
+  }
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleOutsideClick = () => {
+      setActiveDropdownId(null)
+    }
+    window.addEventListener('click', handleOutsideClick)
+    return () => window.removeEventListener('click', handleOutsideClick)
+  }, [])
+
+  const handleUpdateShift = async () => {
+    if (!selectedEmpForShiftEdit) return
+    try {
+      const shiftHours = editShiftVal === 'R2' ? 12.0 : 13.0
+      await axios.patch(`/api/employees/${selectedEmpForShiftEdit.employee_id}/shift`, {
+        shift: editShiftVal,
+        shift_hours: shiftHours
+      })
+      toast.success(`Shift updated to ${editShiftVal} for ${selectedEmpForShiftEdit.name}!`)
+      setShowShiftModal(false)
+      loadAttendance()
+    } catch (err) {
+      toast.error(err?.response?.data?.error || 'Failed to update shift')
+    }
   }
 
   const queueAttendanceAction = (action) => {
@@ -428,17 +461,88 @@ export default function AttendanceTracker() {
                     <div>
                       <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{emp.name}</h4>
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {staffRole} • <strong>Shift {emp.shift || 'R1'}</strong>
+                        <strong style={{ color: 'var(--primary)' }}>{emp.employee_code}</strong> • {staffRole} • <strong>Shift {emp.shift || 'R1'}</strong>
                       </span>
                     </div>
-                    <span style={{ 
-                      color: badge.color, 
-                      background: badge.bg, 
-                      padding: '3px 8px', 
-                      borderRadius: 6, 
-                      fontSize: 11, 
-                      fontWeight: 600 
-                    }}>{badge.text}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ 
+                        color: badge.color, 
+                        background: badge.bg, 
+                        padding: '3px 8px', 
+                        borderRadius: 6, 
+                        fontSize: 11, 
+                        fontWeight: 600 
+                      }}>{badge.text}</span>
+                      
+                      {/* Three dots dropdown menu - only show if NOT checked in */}
+                      {!isCheckedIn && (
+                        <div style={{ position: 'relative' }}>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setActiveDropdownId(activeDropdownId === emp.employee_id ? null : emp.employee_id)
+                            }}
+                            style={{ 
+                              background: 'transparent', 
+                              border: 'none', 
+                              cursor: 'pointer', 
+                              padding: 4, 
+                              display: 'inline-flex', 
+                              alignItems: 'center',
+                              color: 'var(--text-muted)' 
+                            }}
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                          
+                          {activeDropdownId === emp.employee_id && (
+                            <div style={{ 
+                              position: 'absolute', 
+                              right: 0, 
+                              top: '100%', 
+                              background: 'var(--surface)', 
+                              border: '1.5px solid var(--surface-2)', 
+                              borderRadius: 8, 
+                              boxShadow: '0 4px 16px rgba(0,0,0,0.12)', 
+                              zIndex: 100, 
+                              minWidth: 120,
+                              marginTop: 4,
+                              overflow: 'hidden'
+                            }}>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActiveDropdownId(null)
+                                  setSelectedEmpForShiftEdit(emp)
+                                  const currentShift = emp.shift || 'R1'
+                                  const isPredefined = ['R1', 'R2', 'R3'].includes(currentShift)
+                                  setEditShiftVal(currentShift)
+                                  setEditShiftHoursVal(parseFloat(emp.shift_hours || 12.0))
+                                  setIsCustomShiftEdit(!isPredefined)
+                                  setShowShiftModal(true)
+                                }}
+                                style={{ 
+                                  display: 'block', 
+                                  width: '100%', 
+                                  padding: '10px 14px', 
+                                  background: 'transparent', 
+                                  border: 'none', 
+                                  cursor: 'pointer', 
+                                  fontSize: 13, 
+                                  textAlign: 'left', 
+                                  color: 'var(--text)',
+                                  fontWeight: 500
+                                }}
+                                onMouseOver={e => e.currentTarget.style.background = 'var(--surface-1)'}
+                                onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                              >
+                                Edit Shift
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
  
                   {!isCheckedIn && (
@@ -582,6 +686,90 @@ export default function AttendanceTracker() {
               >
                 Confirm
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Shift Modal */}
+      {showShiftModal && selectedEmpForShiftEdit && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, animation: 'fadeIn 0.2s ease-out' }}>
+          <div className="card" style={{ width: 350, padding: 24, position: 'relative', animation: 'scaleUp 0.2s ease-out' }}>
+            <button onClick={() => setShowShiftModal(false)} style={{ position: 'absolute', right: 16, top: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <X size={20} />
+            </button>
+            <h4 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 750 }}>Edit Shift details</h4>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+              Set shift details for <strong>{selectedEmpForShiftEdit.name}</strong> ({selectedEmpForShiftEdit.employee_code})
+            </p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Select Shift</span>
+                <select 
+                  value={isCustomShiftEdit ? 'Custom' : editShiftVal}
+                  onChange={e => {
+                    const val = e.target.value
+                    if (val === 'Custom') {
+                      setIsCustomShiftEdit(true)
+                      setEditShiftVal('Custom R1')
+                      setEditShiftHoursVal(12.0)
+                    } else {
+                      setIsCustomShiftEdit(false)
+                      setEditShiftVal(val)
+                      setEditShiftHoursVal(val === 'R2' ? 12.0 : 13.0)
+                    }
+                  }}
+                  style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
+                >
+                  <option value="R1">Shift R1 (10:00 AM - 13 hrs)</option>
+                  <option value="R2">Shift R2 (09:00 AM - 12 hrs)</option>
+                  <option value="R3">Shift R3 (03:00 PM - 13 hrs)</option>
+                  <option value="Custom">Custom Shift...</option>
+                </select>
+              </div>
+
+              {isCustomShiftEdit && (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Custom Shift Name</span>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. R4"
+                      value={editShiftVal}
+                      onChange={e => setEditShiftVal(e.target.value)}
+                      style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Custom Shift Hours</span>
+                    <input 
+                      type="number" 
+                      step="0.5"
+                      value={editShiftHoursVal}
+                      onChange={e => setEditShiftHoursVal(parseFloat(e.target.value) || 0)}
+                      style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                <button 
+                  className="btn btn-secondary" 
+                  onClick={() => setShowShiftModal(false)}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleUpdateShift} 
+                  style={{ flex: 1 }}
+                >
+                  Save Shift
+                </button>
+              </div>
             </div>
           </div>
         </div>

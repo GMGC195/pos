@@ -72,6 +72,24 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// PATCH update employee shift only
+router.patch('/:id/shift', authenticateToken, async (req, res) => {
+  const { shift, shift_hours } = req.body;
+  if (!shift) {
+    return res.status(400).json({ error: 'Shift is required' });
+  }
+  try {
+    const result = await pool.query(
+      'UPDATE employees SET shift=$1, shift_hours=$2 WHERE id=$3 RETURNING *',
+      [shift, shift_hours || (shift === 'R2' ? 12.0 : 13.0), req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Employee not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE employee
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
