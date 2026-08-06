@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { Mail, MessageSquare, Image as ImageIcon, Send, Phone } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { BRAND_EMAIL } from '../branding'
+import api from '../api'
 
 export default function HelpSupport() {
   const { user } = useAuth()
@@ -15,8 +16,7 @@ export default function HelpSupport() {
     screenshot: null
   })
 
-  // Basic check for VITE_API_URL or fallback to localhost:5000
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+
 
   const handleFileChange = (e) => {
     const file = e.target.files[0]
@@ -38,19 +38,15 @@ export default function HelpSupport() {
     setLoading(true)
 
     try {
-      const response = await fetch(`${API_URL}/api/support/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          // Re-affirm name/email/phone from state
-          name: formData.name || user?.username || 'Admin',
-          email: formData.email || user?.email || BRAND_EMAIL,
-          phone: formData.phone || 'Not Provided'
-        })
+      const response = await api.post('/api/support/send', {
+        ...formData,
+        // Re-affirm name/email/phone from state
+        name: formData.name || user?.username || 'Admin',
+        email: formData.email || user?.email || BRAND_EMAIL,
+        phone: formData.phone || 'Not Provided'
       })
 
-      const data = await response.json()
+      const data = response.data
       if (data.success) {
         toast.success('Support request sent successfully!')
         setFormData(prev => ({ ...prev, reason: '', screenshot: null }))

@@ -16,12 +16,10 @@ import {
   EyeOff
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import axios from 'axios'
-
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+import api from '../api'
 
 export default function Settings() {
-  const { user, updateUser, getToken } = useAuth()
+  const { user, updateUser } = useAuth()
   const [activeTab, setActiveTab] = useState('account')
   const [loading, setLoading] = useState(false)
   
@@ -49,10 +47,7 @@ export default function Settings() {
     // Refresh context user data to ensure we have the role
     const refreshProfile = async () => {
       try {
-        const res = await axios.get(`${API}/api/auth/profile`, {
-          headers: { Authorization: `Bearer ${getToken()}` }
-        })
-        console.log('Profile Refreshed:', res.data);
+        const res = await api.get('/api/auth/profile')
         if (res.data) {
           updateUser(res.data)
           setProfileForm(prev => ({
@@ -78,9 +73,7 @@ export default function Settings() {
 
   const fetchUsers = async () => {
     try {
-      const res = await axios.get(`${API}/api/auth/users`, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      })
+      const res = await api.get('/api/auth/users')
       setUsers(res.data)
     } catch {
       toast.error('Failed to fetch users')
@@ -95,9 +88,7 @@ export default function Settings() {
     
     setLoading(true)
     try {
-      const res = await axios.put(`${API}/api/auth/profile`, profileForm, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      })
+      const res = await api.put('/api/auth/profile', profileForm)
       updateUser(res.data.user)
       toast.success('Profile updated successfully')
       setProfileForm(prev => ({ ...prev, password: '', confirmPassword: '' }))
@@ -112,9 +103,7 @@ export default function Settings() {
     e.preventDefault()
     setLoading(true)
     try {
-      await axios.post(`${API}/api/auth/users`, userForm, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      })
+      await api.post('/api/auth/users', userForm)
       toast.success('User created successfully')
       setIsAddingUser(false)
       setUserForm({ username: '', email: '', password: '', role: 'Operator' })
@@ -130,9 +119,7 @@ export default function Settings() {
     e.preventDefault()
     setLoading(true)
     try {
-      await axios.put(`${API}/api/auth/users/${editingUser.id}`, userForm, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      })
+      await api.put(`/api/auth/users/${editingUser.id}`, userForm)
       toast.success('User updated successfully')
       setEditingUser(null)
       setUserForm({ username: '', email: '', password: '', role: 'Operator' })
@@ -147,9 +134,7 @@ export default function Settings() {
   const handleDeleteUser = async (userId) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return
     try {
-      await axios.delete(`${API}/api/auth/users/${userId}`, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      })
+      await api.delete(`/api/auth/users/${userId}`)
       toast.success('User deleted')
       fetchUsers()
     } catch (err) {

@@ -129,6 +129,61 @@ const pool = require('./db');
       END $$;
     `);
 
+    // Add payroll schema tables and column updates
+    await pool.query(`
+      ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT TRUE
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS payroll_settings (
+        id SERIAL PRIMARY KEY,
+        key VARCHAR(100) UNIQUE NOT NULL,
+        value TEXT
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_payroll_settings (
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE UNIQUE,
+        overtime_rate NUMERIC(10, 2),
+        base_salary NUMERIC(10, 2),
+        allowed_leaves INTEGER
+      )
+    `);
+
+    // Seed default settings
+    await pool.query(`
+      INSERT INTO payroll_settings (key, value)
+      VALUES 
+        ('global_overtime_rate', '150.00'),
+        ('allowed_leaves', '2')
+      ON CONFLICT (key) DO NOTHING
+    `);
+
+    // Create payroll records table to store finalized logs & manual adjustments
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_payroll_records (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        month VARCHAR(7) NOT NULL,
+        base_salary NUMERIC(10, 2) NOT NULL,
+        presents INTEGER DEFAULT 0,
+        absents INTEGER DEFAULT 0,
+        leaves INTEGER DEFAULT 0,
+        holidays INTEGER DEFAULT 0,
+        overtime_hours NUMERIC(10, 2) DEFAULT 0,
+        overtime_pay NUMERIC(10, 2) DEFAULT 0,
+        deductions NUMERIC(10, 2) DEFAULT 0,
+        other_adjustments NUMERIC(10, 2) DEFAULT 0,
+        net_salary NUMERIC(10, 2) NOT NULL,
+        paid_amount NUMERIC(10, 2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'Pending',
+        paid_date TIMESTAMPTZ,
+        notes TEXT,
+        UNIQUE(employee_id, month)
+      )
+    `);
+
     console.log('✅ Database schema verified: all columns and constraints up to date.');
   } catch (err) {
     console.warn('⚠️ Database schema verification warning:', err.message);
@@ -145,6 +200,7 @@ const ALLOWED_ORIGINS = [
   // Vercel deployments
   'https://ddnjj.vercel.app',
   'https://1-mu-pink.vercel.app',
+  'https://alrawaq.vercel.app',
   // Allow any Vercel preview URLs for this project
   /https:\/\/.*\.vercel\.app$/,
   // Custom FRONTEND_URL from env (if set)
@@ -171,6 +227,14 @@ app.options('*', cors());
 
 app.use(express.json({ limit: '10mb' }));
 
+// Disable caching for all API responses
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/categories', require('./routes/categories'));
@@ -184,6 +248,7 @@ app.use('/api/recipes', require('./routes/recipes'));
 app.use('/api/support', require('./routes/support'));
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/payroll', require('./routes/payroll'));
 
 // Health check
 app.get('/api/health', (req, res) => {

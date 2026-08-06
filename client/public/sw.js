@@ -3,8 +3,6 @@ const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/pizza-placeholder.png',
-  // Vite assets will be added here if we use a build tool or precache list
-  // For now, we rely on runtime caching
 ];
 
 self.addEventListener('install', (event) => {
@@ -31,116 +29,96 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Helper: only cache GET responses
+function safeCachePut(request, response) {
+  if (request.method !== 'GET') return;
+  if (!response || response.status !== 200) return;
+  caches.open(CACHE_NAME).then((cache) => {
+    cache.put(request, response);
+  });
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  const isGET = event.request.method === 'GET';
 
-  // API Caching: Categories and Items (Rate Lists)
+  // ── Never intercept non-GET API mutations (POST/PUT/PATCH/DELETE) ─────────
+  // The Cache API cannot store non-GET requests.
+  // Let POST/PUT/PATCH/DELETE go straight to the network with no SW interference.
+  if (event.request.method !== 'GET' && url.pathname.startsWith('/api/')) {
+    return; // fall through to browser default network handling
+  }
+
+  // ── Cache-first for Categories and Items (read-only rate lists) ───────────
   if (url.pathname.includes('/api/categories') || url.pathname.includes('/api/items')) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response && response.status === 200) {
-            const clonedResponse = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clonedResponse);
-            });
-          }
+          if (isGET) safeCachePut(event.request, response.clone());
           return response;
         })
-        .catch(() => {
-          return caches.match(event.request);
-        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }
 
-  // Handle Order Posting Offline
-  if (url.pathname.startsWith('/api/orders') && event.request.method === 'POST') {
-    // We don't intercept POST directly in sw.js because we want POS.jsx to handle the UX
-    // But we could use Background Sync here if we wanted.
-    // For now, let's keep it simple: runtime navigation caching
-  }
-
-  // Network-First for Orders, Transactions, Stats, Employees, and Attendance (Auto-Reload logic)
-  if (url.pathname.includes('/api/orders') || 
-      url.pathname.includes('/api/transactions') || 
-      url.pathname.includes('/api/employees') || 
-      url.pathname.includes('/api/attendance') || 
-      url.pathname.includes('/api/stats')) {
+  // ── Network-first for Orders, Transactions, Stats, Employees, Attendance ──
+  if (
+    url.pathname.includes('/api/orders') ||
+    url.pathname.includes('/api/transactions') ||
+    url.pathname.includes('/api/employees') ||
+    url.pathname.includes('/api/attendance') ||
+    url.pathname.includes('/api/stats')
+  ) {
     event.respondWith(
       fetch(event.request)
         .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clonedResponse = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clonedResponse);
-            });
-          }
+          if (isGET) safeCachePut(event.request, networkResponse.clone());
           return networkResponse;
         })
-        .catch(() => {
-          return caches.match(event.request);
-        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }
 
-  // Improved Navigation Handling for SPA: Always serve index.html for navigation requests
+  // ── SPA Navigation: always serve index.html ───────────────────────────────
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
         .then((networkResponse) => {
-          // If we got a valid response, cache it and return it
           if (networkResponse && networkResponse.ok) {
-            const clonedResponse = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clonedResponse);
-            });
+            safeCachePut(event.request, networkResponse.clone());
             return networkResponse;
           }
-          // If it's a 404 (common on refresh in non-configured servers), fallback to main shell
           if (networkResponse.status === 404) {
             return caches.match('/index.html') || caches.match('/') || networkResponse;
           }
           return networkResponse;
         })
-        .catch(() => {
-          // If network fails completely (offline), fallback to main shell
-          return caches.match('/index.html') || caches.match('/');
-        })
+        .catch(() => caches.match('/index.html') || caches.match('/'))
     );
     return;
   }
 
+  // ── Stale-while-revalidate for static assets ──────────────────────────────
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Return cached, but refresh in background
+        // Return cached immediately, refresh in background
         fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clonedResponse = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clonedResponse);
-            });
-          }
+          safeCachePut(event.request, networkResponse.clone());
         }).catch(() => {});
         return cachedResponse;
       }
       return fetch(event.request).then((networkResponse) => {
-        // Cache new assets on the fly
-        if (event.request.method === 'GET' && networkResponse.status === 200) {
-          const clonedResponse = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clonedResponse);
-          });
-        }
+        safeCachePut(event.request, networkResponse.clone());
         return networkResponse;
       });
     })
   );
 });
 
-// Background Sync (Optional, requires registration in main.jsx)
+// Background Sync
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-orders') {
     event.waitUntil(syncOrders());
@@ -148,7 +126,5 @@ self.addEventListener('sync', (event) => {
 });
 
 async function syncOrders() {
-  // This would ideally call the sync logic, but we'll implement it in the UI/App level 
-  // for better control over toasts and state.
   console.log('[SW] Background sync triggered');
 }

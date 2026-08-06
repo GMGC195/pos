@@ -12,7 +12,7 @@ export default function TodayAttendance() {
 
   const loadTodayAttendance = () => {
     setLoading(true)
-    axios.get('/api/attendance/today')
+    axios.get(`/api/attendance/today?_t=${Date.now()}`)
       .then(res => {
         setEmployees(res.data)
       })

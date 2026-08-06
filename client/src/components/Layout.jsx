@@ -69,6 +69,7 @@ const navGroups = [
       { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Operator'] },
       { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Operator'] },
       { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Operator'] },
+      { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Operator'] },
     ]
   }
 ]
@@ -154,6 +155,7 @@ export default function Layout() {
     '/attendance': 'Mark Attendance Panel',
     '/today-attendance': "Today's Attendance Panel",
     '/attendance-reports': 'Attendance Sheet',
+    '/payroll': 'Employee Payroll & Slips',
     '/settings': 'System Settings',
     '/help-support': 'Help & Support Center'
   }[location.pathname] || `${BRAND_NAME} Pro`

@@ -3,60 +3,7 @@ import axios from '../api'
 import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const confirmAction = (message, onConfirm) => {
-  toast((t) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
-      <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>
-        {message}
-      </span>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button 
-          onClick={() => toast.dismiss(t.id)}
-          style={{
-            padding: '6px 12px',
-            background: 'transparent',
-            border: '1.5px solid var(--surface-3)',
-            borderRadius: 6,
-            fontSize: 12,
-            cursor: 'pointer',
-            color: 'var(--text-muted)'
-          }}
-        >
-          Cancel
-        </button>
-        <button 
-          onClick={() => {
-            toast.dismiss(t.id);
-            onConfirm();
-          }}
-          style={{
-            padding: '6px 12px',
-            background: 'var(--primary)',
-            border: 'none',
-            borderRadius: 6,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            color: 'white'
-          }}
-        >
-          Confirm
-        </button>
-      </div>
-    </div>
-  ), {
-    duration: 10000,
-    position: 'top-center',
-    style: {
-      background: 'var(--surface)',
-      border: '1.5px solid var(--surface-2)',
-      borderRadius: 12,
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-      padding: '12px 16px',
-      minWidth: 280
-    }
-  });
-};
+
 
 export default function AttendanceTracker() {
   const [employees, setEmployees] = useState(() => {
@@ -72,19 +19,21 @@ export default function AttendanceTracker() {
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
+  const [confirmModal, setConfirmModal] = useState(null)
 
   const loadAttendance = (showSpinner = false) => {
     if (showSpinner) setLoading(true)
-    axios.get('/api/attendance/today')
+    return axios.get(`/api/attendance/today?_t=${Date.now()}`)
       .then(res => {
         setEmployees(res.data)
         localStorage.setItem('pizza_shop_attendance_today', JSON.stringify(res.data))
       })
-      .catch(() => {
+      .catch((err) => {
         const cached = localStorage.getItem('pizza_shop_attendance_today')
         if (cached && employees.length === 0) {
           setEmployees(JSON.parse(cached))
         }
+        throw err
       })
       .finally(() => {
         if (showSpinner) setLoading(false)
@@ -170,15 +119,18 @@ export default function AttendanceTracker() {
     }
   }, [])
 
-  const handleCheckIn = async (empId) => {
+  const handleCheckIn = async (empId, name) => {
     const actionKey = `check-in-${empId}`;
     if (pendingActions[actionKey]) return;
     setPendingActions(prev => ({ ...prev, [actionKey]: true }));
+    
     try {
       await axios.post('/api/attendance/check-in', { employee_id: empId, late_threshold: lateThreshold })
-      toast.success('Successfully Checked In!')
-      loadAttendance()
+      await loadAttendance()
+      toast.dismiss()
+      toast.success(`${name} Successfully Checked In!`, { duration: 2000 })
     } catch (err) {
+      toast.dismiss()
       if (!navigator.onLine || err.message === 'Network Error') {
         queueAttendanceAction({ type: 'check-in', employee_id: empId, late_threshold: lateThreshold })
         optimisticUpdate(empId, { 
@@ -187,9 +139,9 @@ export default function AttendanceTracker() {
           attendance_status: 'Present', 
           check_out: null 
         })
-        toast.success('Offline Check-In saved locally!')
+        toast.error('Offline Mode: Check-In saved locally (pending sync)', { duration: 2500 })
       } else {
-        toast.error(err?.response?.data?.error || 'Failed to check in')
+        toast.error(err?.response?.data?.error || 'Failed to check in', { duration: 2500 })
       }
     } finally {
       setPendingActions(prev => ({ ...prev, [actionKey]: false }));
@@ -200,50 +152,56 @@ export default function AttendanceTracker() {
     const actionKey = `check-out-${empId}`;
     if (pendingActions[actionKey]) return;
     
-    confirmAction(`Are you sure you want to Check Out "${name}"?`, async () => {
-      setPendingActions(prev => ({ ...prev, [actionKey]: true }));
-      try {
-        await axios.post('/api/attendance/check-out', { employee_id: empId })
-        toast.success('Successfully Checked Out!')
-        loadAttendance()
-      } catch (err) {
-        if (!navigator.onLine || err.message === 'Network Error') {
-          queueAttendanceAction({ type: 'check-out', employee_id: empId })
-          optimisticUpdate(empId, { 
-            check_out: new Date().toISOString()
-          })
-          toast.success('Offline Check-Out saved locally!')
-        } else {
-          toast.error(err?.response?.data?.error || 'Failed to check out')
+    setConfirmModal({
+      message: `Are you sure you want to Check Out "${name}"?`,
+      onConfirm: async () => {
+        setPendingActions(prev => ({ ...prev, [actionKey]: true }));
+        try {
+          await axios.post('/api/attendance/check-out', { employee_id: empId })
+          await loadAttendance()
+          toast.dismiss()
+          toast.success(`${name} Successfully Checked Out!`, { duration: 2000 })
+        } catch (err) {
+          toast.dismiss()
+          if (!navigator.onLine || err.message === 'Network Error') {
+            queueAttendanceAction({ type: 'check-out', employee_id: empId })
+            optimisticUpdate(empId, { 
+              check_out: new Date().toISOString()
+            })
+            toast.error('Offline Mode: Check-Out saved locally (pending sync)', { duration: 2500 })
+          } else {
+            toast.error(err?.response?.data?.error || 'Failed to check out', { duration: 2500 })
+          }
+        } finally {
+          setPendingActions(prev => ({ ...prev, [actionKey]: false }));
         }
-      } finally {
-        setPendingActions(prev => ({ ...prev, [actionKey]: false }));
       }
     });
   }
 
-  const handleToggleBreak = async (empId) => {
+  const handleToggleBreak = async (empId, name) => {
     const actionKey = `toggle-break-${empId}`;
     if (pendingActions[actionKey]) return;
     setPendingActions(prev => ({ ...prev, [actionKey]: true }));
+    
     try {
       const res = await axios.post('/api/attendance/toggle-break', { employee_id: empId })
-      toast.success(res.data.on_break ? 'Break Started!' : 'Break Ended!')
-      loadAttendance()
+      await loadAttendance()
+      toast.dismiss()
+      toast.success(res.data.on_break ? `${name} Break Started!` : `${name} Break Ended!`, { duration: 2000 })
     } catch (err) {
+      toast.dismiss()
       if (!navigator.onLine || err.message === 'Network Error') {
         queueAttendanceAction({ type: 'toggle-break', employee_id: empId })
-        
         const emp = employees.find(e => e.employee_id === empId)
         const isOnBreakNow = emp ? !emp.on_break : true
-        
         optimisticUpdate(empId, { 
           on_break: isOnBreakNow,
           break_start: isOnBreakNow ? new Date().toISOString() : null
         })
-        toast.success(isOnBreakNow ? 'Offline Break Started!' : 'Offline Break Ended!')
+        toast.error(isOnBreakNow ? 'Offline Mode: Break started locally (pending sync)' : 'Offline Mode: Break ended locally (pending sync)', { duration: 2500 })
       } else {
-        toast.error(err?.response?.data?.error || 'Failed to toggle break')
+        toast.error(err?.response?.data?.error || 'Failed to toggle break', { duration: 2500 })
       }
     } finally {
       setPendingActions(prev => ({ ...prev, [actionKey]: false }));
@@ -252,14 +210,15 @@ export default function AttendanceTracker() {
 
   const handleToggleRestaurantBreak = () => {
     const nextState = !restaurantOnBreak;
-    confirmAction(
-      `Are you sure you want to ${nextState ? 'start' : 'end'} the Restaurant Break?`,
-      () => {
+    setConfirmModal({
+      message: `Are you sure you want to ${nextState ? 'start' : 'end'} the Restaurant Break?`,
+      onConfirm: () => {
         setRestaurantOnBreak(nextState);
         localStorage.setItem('pizza_shop_restaurant_on_break', String(nextState));
-        toast.success(nextState ? 'Restaurant is now on Break!' : 'Restaurant Break Ended!');
+        toast.dismiss()
+        toast.success(nextState ? 'Restaurant is now on Break!' : 'Restaurant Break Ended!', { duration: 2000 });
       }
-    );
+    });
   };
 
   // Get color and status text for badges
@@ -443,7 +402,7 @@ export default function AttendanceTracker() {
                   {!isCheckedIn ? (
                     <button 
                       className="btn btn-primary" 
-                      onClick={() => handleCheckIn(emp.employee_id)}
+                      onClick={() => handleCheckIn(emp.employee_id, emp.name)}
                       disabled={pendingActions[`check-in-${emp.employee_id}`]}
                       style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: pendingActions[`check-in-${emp.employee_id}`] ? 0.6 : 1 }}
                     >
@@ -453,7 +412,7 @@ export default function AttendanceTracker() {
                     <>
                       <button 
                         className={`btn ${isOnBreak ? 'btn-primary' : 'btn-secondary'}`} 
-                        onClick={() => handleToggleBreak(emp.employee_id)}
+                        onClick={() => handleToggleBreak(emp.employee_id, emp.name)}
                         disabled={pendingActions[`toggle-break-${emp.employee_id}`]}
                         style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: pendingActions[`toggle-break-${emp.employee_id}`] ? 0.6 : 1 }}
                       >
@@ -475,6 +434,105 @@ export default function AttendanceTracker() {
           })}
         </div>
       )}
+      {confirmModal && (
+        <div 
+          onClick={() => setConfirmModal(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.4)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            animation: 'fadeIn 0.2s ease-out'
+          }}
+        >
+          <div 
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--white)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 16,
+              padding: '24px',
+              width: '90%',
+              maxWidth: 360,
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              animation: 'scaleUp 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{
+                background: 'rgba(244, 180, 0, 0.1)',
+                color: 'var(--primary)',
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <AlertCircle size={20} />
+              </div>
+              <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Confirm Action</h4>
+            </div>
+            
+            <p style={{ margin: '0 0 20px 0', fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              {confirmModal.message}
+            </p>
+            
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => setConfirmModal(null)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--surface-2)',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: 'var(--text-secondary)',
+                  transition: 'background 0.2s'
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  const cb = confirmModal.onConfirm;
+                  setConfirmModal(null);
+                  cb();
+                }}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--primary)',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: 'white',
+                  transition: 'opacity 0.2s'
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes scaleUp {
+          from { transform: scale(0.95); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
     </div>
   )
 }

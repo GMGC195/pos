@@ -24,6 +24,7 @@ const Employees            = lazy(() => import('./pages/Employees'))
 const AttendanceTracker    = lazy(() => import('./pages/AttendanceTracker'))
 const AttendanceReports    = lazy(() => import('./pages/AttendanceReports'))
 const TodayAttendance      = lazy(() => import('./pages/TodayAttendance'))
+const Payroll              = lazy(() => import('./pages/Payroll'))
 
 // Minimal full-screen spinner shown while a page chunk is loading
 function PageLoader() {
@@ -84,6 +85,7 @@ export default function App() {
                 <Route path="/attendance"         element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><AttendanceTracker /></ProtectedRoute>} />
                 <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><TodayAttendance /></ProtectedRoute>} />
                 <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><AttendanceReports /></ProtectedRoute>} />
+                <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><Payroll /></ProtectedRoute>} />
 
                 {/* Universal */}
                 <Route path="/settings"     element={<Settings />} />

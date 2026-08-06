@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import axios from '../api'
+import { STORAGE_TOKEN_KEY } from '../branding'
 import { 
   getCategories as getCachedCategories, 
   saveCategories as saveCachedCategories,
@@ -22,6 +23,10 @@ export function POSProvider({ children }) {
 
   const loadData = useCallback(async (force = false) => {
     if (isDataLoaded && !force) return
+
+    // Don't attempt API calls without an auth token — avoids 403 on login page
+    const token = localStorage.getItem(STORAGE_TOKEN_KEY)
+    if (!token) return
     
     setLoading(true)
     try {
