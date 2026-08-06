@@ -13,7 +13,8 @@ import {
   Shield,
   ShieldCheck,
   Eye,
-  EyeOff
+  EyeOff,
+  RefreshCw
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -36,6 +37,7 @@ export default function Settings() {
   const [users, setUsers] = useState([])
   const [isAddingUser, setIsAddingUser] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
+  const [showUserPass, setShowUserPass] = useState(false)
   const [userForm, setUserForm] = useState({
     username: '',
     email: '',
@@ -107,6 +109,7 @@ export default function Settings() {
       toast.success('User created successfully')
       setIsAddingUser(false)
       setUserForm({ username: '', email: '', password: '', role: 'Operator' })
+      setShowUserPass(false)
       fetchUsers()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Creation failed')
@@ -123,6 +126,7 @@ export default function Settings() {
       toast.success('User updated successfully')
       setEditingUser(null)
       setUserForm({ username: '', email: '', password: '', role: 'Operator' })
+      setShowUserPass(false)
       fetchUsers()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Update failed')
@@ -316,19 +320,28 @@ export default function Settings() {
                         >
                           <option value="Admin">Admin</option>
                           <option value="Operator">Operator</option>
+                          <option value="Management">Management</option>
+                          <option value="Employee">Employee</option>
                           {user?.role?.toLowerCase() === 'developer' && <option value="Developer">Developer</option>}
                         </select>
                       </div>
                       <div className="form-group">
                         <label>{editingUser ? 'New Password (Optional)' : 'Password'}</label>
-                        <input 
-                          type="password" 
-                          value={userForm.password} 
-                          onChange={e => setUserForm({...userForm, password: e.target.value})}
-                          required={!editingUser}
-                          placeholder={editingUser ? 'Leave blank to keep current' : ''}
-                          disabled={editingUser?.role?.toLowerCase() === 'developer' && user.role?.toLowerCase() !== 'developer'}
-                        />
+                        <div className="input-with-icon">
+                          <Lock size={16} />
+                          <input 
+                            type={showUserPass ? 'text' : 'password'} 
+                            value={userForm.password} 
+                            onChange={e => setUserForm({...userForm, password: e.target.value})}
+                            required={!editingUser}
+                            placeholder={editingUser ? 'Leave blank to keep current' : ''}
+                            disabled={editingUser?.role?.toLowerCase() === 'developer' && user.role?.toLowerCase() !== 'developer'}
+                            style={{ paddingRight: 36 }}
+                          />
+                          <button type="button" className="eye-toggle" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowUserPass(!showUserPass); }}>
+                            {showUserPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
@@ -342,6 +355,7 @@ export default function Settings() {
                           setIsAddingUser(false)
                           setEditingUser(null)
                           setUserForm({ username: '', email: '', password: '', role: 'Operator' })
+                          setShowUserPass(false)
                         }}
                       >
                         Cancel
@@ -356,9 +370,30 @@ export default function Settings() {
                       <h2>Team Members</h2>
                       <p>Manage access levels and account status</p>
                     </div>
-                    <button className="btn-add-user" onClick={() => setIsAddingUser(true)}>
-                      <UserPlus size={18} /> Add User
-                    </button>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <button 
+                        className="btn-cancel" 
+                        onClick={fetchUsers} 
+                        style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: 6, 
+                          height: 38, 
+                          padding: '0 12px', 
+                          fontSize: 13, 
+                          background: 'var(--surface-1)', 
+                          color: 'var(--text)', 
+                          border: '1.5px solid var(--surface-2)', 
+                          borderRadius: 8, 
+                          cursor: 'pointer' 
+                        }}
+                      >
+                        <RefreshCw size={14} /> Refresh
+                      </button>
+                      <button className="btn-add-user" onClick={() => setIsAddingUser(true)}>
+                        <UserPlus size={18} /> Add User
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="users-table-wrap">
@@ -754,6 +789,8 @@ export default function Settings() {
         .role-badge.admin { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--red); }
         .role-badge.developer { background: color-mix(in srgb, #6366f1 10%, transparent); color: #6366f1; }
         .role-badge.operator { background: rgba(74,144,226,0.1); color: #4A90E2; }
+        .role-badge.management { background: rgba(244,180,0,0.1); color: #F4B400; }
+        .role-badge.employee { background: rgba(16,185,129,0.1); color: #10B981; }
 
         .user-actions {
           display: flex;

@@ -73,9 +73,18 @@ export default function Dashboard() {
   const [analyticsData, setAnalyticsData] = useState(null)
   const [timeRange, setTimeRange] = useState('weekly')
   const [loading, setLoading] = useState(true)
+  const [personalStats, setPersonalStats] = useState(null)
 
   const loadStats = () => {
     setLoading(true)
+
+    if (user?.role?.toLowerCase() === 'employee') {
+      axios.get('/api/attendance/personal-stats')
+        .then(r => setPersonalStats(r.data))
+        .catch(() => setPersonalStats(null))
+        .finally(() => setLoading(false))
+      return;
+    }
     
     // Only fetch sales stats if the user is a developer
     if (isDeveloper) {
@@ -399,6 +408,164 @@ export default function Dashboard() {
         ticks: { callback: v => `${v}%` }
       },
     },
+  }
+
+  if (user?.role?.toLowerCase() === 'employee') {
+    return (
+      <div className="page-content" style={{ paddingTop: 0 }}>
+        {/* Welcome Banner */}
+        <div style={{ marginBottom: 24, marginTop: -60, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Welcome, {personalStats?.name || user?.username} 👋</h2>
+            <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: 13 }}>Personal Attendance & Progress Dashboard</p>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+            Loading your stats...
+          </div>
+        ) : (
+          <>
+            {/* KPI Cards */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: 16,
+              marginBottom: 24
+            }}>
+              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 20 }}>
+                <div style={{ background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)', padding: 12, borderRadius: 10 }}>
+                  <UserCheck size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{personalStats?.days_present || 0}</h3>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Days Present</p>
+                </div>
+              </div>
+
+              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 20 }}>
+                <div style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', padding: 12, borderRadius: 10 }}>
+                  <Clock size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{personalStats?.total_hours || 0} hrs</h3>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Hours Worked</p>
+                </div>
+              </div>
+
+              <div style={{ borderLeft: '3px solid var(--primary)' }} className="card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 20 }}>
+                  <div style={{ background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)', padding: 12, borderRadius: 10 }}>
+                    <TrendingUp size={24} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{personalStats?.overtime || 0} hrs</h3>
+                    <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Overtime</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 20 }}>
+                <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', padding: 12, borderRadius: 10 }}>
+                  <UserX size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{personalStats?.days_late || 0}</h3>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Days Late</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Profile Info & Logs */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
+              <div className="card" style={{ padding: 24 }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 800 }}>Employee Details</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--surface-2)', paddingBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Employee ID:</span>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{personalStats?.employee_id || '--'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--surface-2)', paddingBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Designation:</span>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{personalStats?.position || '--'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--surface-2)', paddingBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Department:</span>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{personalStats?.department || '--'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Assigned Shift:</span>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>Shift {personalStats?.shift || '--'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card" style={{ padding: 24 }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 800 }}>Attendance Status Summary</h3>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 120 }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <h1 style={{ fontSize: 36, fontWeight: 900, color: 'var(--green)', margin: 0 }}>
+                      {personalStats?.days_present ? Math.round(((personalStats.days_present - personalStats.days_late) / personalStats.days_present) * 100) : 100}%
+                    </h1>
+                    <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--text-muted)' }}>Punctuality Rate This Month</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Monthly Log table */}
+            <div className="card" style={{ padding: 0, marginTop: 24, overflow: 'hidden' }}>
+              <div style={{ padding: 18, borderBottom: '1px solid var(--surface-2)' }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>This Month's Attendance Records</h3>
+              </div>
+              <div className="table-wrap">
+                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-1)' }}>
+                      <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Date</th>
+                      <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Check-In</th>
+                      <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Check-Out</th>
+                      <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Status</th>
+                      <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(personalStats?.monthly_logs || []).map((log, idx) => {
+                      const rowBg = idx % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)'
+                      return (
+                        <tr key={log.id} style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>
+                            {new Date(log.date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>
+                            {new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>
+                            {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            <span style={{
+                              color: log.status === 'Late' ? 'var(--primary)' : 'var(--green)',
+                              background: log.status === 'Late' ? 'rgba(var(--primary-rgb), 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                              padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600
+                            }}>{log.status}</span>
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--text-muted)' }}>{log.remarks || '--'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    )
   }
 
   // Filter Today activity list to present, break, late and absent lists

@@ -618,5 +618,136 @@ router.delete('/session/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Edit attendance record and log it in audit history
+router.post('/edit', authenticateToken, async (req, res) => {
+  const { attendance_id, new_check_in, new_check_out, reason } = req.body;
+  const edited_by = req.user.username;
+
+  if (!attendance_id || !reason) {
+    return res.status(400).json({ error: 'Attendance ID and reason are required' });
+  }
+
+  try {
+    // Fetch original check_in and check_out
+    const originalRes = await pool.query(
+      'SELECT employee_id, check_in, check_out FROM employee_attendance WHERE id = $1',
+      [attendance_id]
+    );
+
+    if (originalRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendance record not found' });
+    }
+
+    const { employee_id, check_in: original_check_in, check_out: original_check_out } = originalRes.rows[0];
+
+    // Log the edit
+    await pool.query(
+      `INSERT INTO edited_attendance 
+       (attendance_id, employee_id, original_check_in, original_check_out, new_check_in, new_check_out, edited_by, reason) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [attendance_id, employee_id, original_check_in, original_check_out, new_check_in || null, new_check_out || null, edited_by, reason]
+    );
+
+    // Update employee_attendance
+    await pool.query(
+      `UPDATE employee_attendance 
+       SET check_in = $1, check_out = $2, remarks = 'Edited' 
+       WHERE id = $3`,
+      [new_check_in || null, new_check_out || null, attendance_id]
+    );
+
+    res.json({ message: 'Attendance record updated and logged successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all edited attendance audit logs (Admin/Developer only)
+router.get('/edited-logs', authenticateToken, async (req, res) => {
+  try {
+    const userRole = req.user.role?.toLowerCase();
+    if (userRole !== 'admin' && userRole !== 'developer') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const result = await pool.query(`
+      SELECT ea.*, emp.name as employee_name, emp.employee_id as employee_code
+      FROM edited_attendance ea
+      JOIN employees emp ON ea.employee_id = emp.id
+      ORDER BY ea.edited_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get personal attendance stats for currently logged in employee
+router.get('/personal-stats', authenticateToken, async (req, res) => {
+  const usernameLower = req.user.username.toLowerCase();
+  
+  try {
+    // Find employee by employee_code (employee_id) or by name
+    const empRes = await pool.query(
+      `SELECT * FROM employees WHERE LOWER(employee_id) = $1 OR LOWER(name) = $1`,
+      [usernameLower]
+    );
+    
+    if (empRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+    
+    const employee = empRes.rows[0];
+    const employeeId = employee.id;
+    
+    // Fetch all logs of this employee for the current month
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1; // 1-indexed
+    
+    const logsRes = await pool.query(
+      `SELECT * FROM employee_attendance 
+       WHERE employee_id = $1 
+         AND EXTRACT(YEAR FROM date) = $2 
+         AND EXTRACT(MONTH FROM date) = $3
+       ORDER BY date ASC`,
+      [employeeId, currentYear, currentMonth]
+    );
+    
+    // Calculate stats
+    const totalDays = logsRes.rows.length;
+    const daysPresent = new Set(logsRes.rows.filter(log => log.status === 'Present' || log.status === 'Late').map(log => log.date.toISOString().split('T')[0])).size;
+    const daysLate = new Set(logsRes.rows.filter(log => log.status === 'Late').map(log => log.date.toISOString().split('T')[0])).size;
+    
+    let totalHours = 0;
+    logsRes.rows.forEach(log => {
+      const checkInTime = new Date(log.check_in).getTime();
+      const checkOutTime = log.check_out ? new Date(log.check_out).getTime() : new Date().getTime();
+      const breakSecs = log.total_break_duration_seconds || 0;
+      const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
+      totalHours += Math.max(0, sessionMs / (1000 * 60 * 60));
+    });
+    
+    // Standard shifts hours
+    const standardHoursPerShift = parseFloat(employee.shift_hours) || 12.0;
+    const expectedHours = daysPresent * standardHoursPerShift;
+    const overtime = Math.max(0, totalHours - expectedHours);
+    
+    res.json({
+      employee_id: employee.employee_id,
+      name: employee.name,
+      shift: employee.shift,
+      department: employee.department,
+      position: employee.position,
+      days_present: daysPresent,
+      days_late: daysLate,
+      total_hours: parseFloat(totalHours.toFixed(2)),
+      overtime: parseFloat(overtime.toFixed(2)),
+      monthly_logs: logsRes.rows
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 

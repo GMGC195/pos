@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import axios from '../api'
 import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle, MoreVertical, X } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
 
 
 
@@ -50,6 +51,7 @@ const decimalHoursToText = (hoursDec) => {
 };
 
 export default function AttendanceTracker() {
+  const { user } = useAuth()
   const [employees, setEmployees] = useState(() => {
     const cached = localStorage.getItem('pizza_shop_attendance_today')
     return cached ? JSON.parse(cached) : []
@@ -352,6 +354,15 @@ export default function AttendanceTracker() {
 
   // Filter employees by search query, department, shift, and status
   const filteredEmployees = employees.filter(emp => {
+    if (user?.role?.toLowerCase() === 'employee') {
+      const usernameLower = (user?.username || '').toLowerCase();
+      const codeLower = (emp.employee_code || emp.employee_id || '').toLowerCase();
+      const nameLower = (emp.name || '').toLowerCase();
+      if (usernameLower !== codeLower && usernameLower !== nameLower) {
+        return false;
+      }
+    }
+
     const matchesSearch = (emp.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
                           String(emp.employee_id || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
@@ -400,28 +411,30 @@ export default function AttendanceTracker() {
               <Coffee size={14} /> Restaurant in Break
             </span>
           )}
-          <button 
-            className="btn btn-secondary"
-            onClick={handleToggleRestaurantBreak}
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 6, 
-              fontSize: 13, 
-              borderColor: restaurantOnBreak ? 'var(--green)' : 'var(--primary)', 
-              color: restaurantOnBreak ? 'var(--green)' : 'var(--primary)' 
-            }}
-          >
-            {restaurantOnBreak ? (
-              <>
-                <Play size={14} /> End Restaurant Break
-              </>
-            ) : (
-              <>
-                <Coffee size={14} /> Restaurant Break
-              </>
-            )}
-          </button>
+          {['admin', 'operator', 'developer'].includes(user?.role?.toLowerCase()) && (
+            <button 
+              className="btn btn-secondary"
+              onClick={handleToggleRestaurantBreak}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 6, 
+                fontSize: 13, 
+                borderColor: restaurantOnBreak ? 'var(--green)' : 'var(--primary)', 
+                color: restaurantOnBreak ? 'var(--green)' : 'var(--primary)' 
+              }}
+            >
+              {restaurantOnBreak ? (
+                <>
+                  <Play size={14} /> End Restaurant Break
+                </>
+              ) : (
+                <>
+                  <Coffee size={14} /> Restaurant Break
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -553,23 +566,25 @@ export default function AttendanceTracker() {
                       {/* Three dots dropdown menu - only show if NOT checked in */}
                       {!isCheckedIn && (
                         <div style={{ position: 'relative' }}>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setActiveDropdownId(activeDropdownId === emp.employee_id ? null : emp.employee_id)
-                            }}
-                            style={{ 
-                              background: 'transparent', 
-                              border: 'none', 
-                              cursor: 'pointer', 
-                              padding: 4, 
-                              display: 'inline-flex', 
-                              alignItems: 'center',
-                              color: 'var(--text-muted)' 
-                            }}
-                          >
-                            <MoreVertical size={16} />
-                          </button>
+                          {['admin', 'operator', 'developer'].includes(user?.role?.toLowerCase()) && (
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setActiveDropdownId(activeDropdownId === emp.employee_id ? null : emp.employee_id)
+                              }}
+                              style={{ 
+                                background: 'transparent', 
+                                border: 'none', 
+                                cursor: 'pointer', 
+                                padding: 4, 
+                                display: 'inline-flex', 
+                                alignItems: 'center',
+                                color: 'var(--text-muted)' 
+                              }}
+                            >
+                              <MoreVertical size={16} />
+                            </button>
+                          )}
                           
                           {activeDropdownId === emp.employee_id && (
                             <div style={{ 
@@ -649,8 +664,8 @@ export default function AttendanceTracker() {
                     <button 
                       className="btn btn-primary" 
                       onClick={() => handleCheckIn(emp.employee_id, emp.name)}
-                      disabled={pendingActions[`check-in-${emp.employee_id}`]}
-                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: pendingActions[`check-in-${emp.employee_id}`] ? 0.6 : 1 }}
+                      disabled={pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1 }}
                     >
                       {pendingActions[`check-in-${emp.employee_id}`] ? 'Checking In...' : <><Play size={14} /> Check In</>}
                     </button>
@@ -659,16 +674,16 @@ export default function AttendanceTracker() {
                       <button 
                         className={`btn ${isOnBreak ? 'btn-primary' : 'btn-secondary'}`} 
                         onClick={() => handleToggleBreak(emp.employee_id, emp.name)}
-                        disabled={pendingActions[`toggle-break-${emp.employee_id}`]}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: pendingActions[`toggle-break-${emp.employee_id}`] ? 0.6 : 1 }}
+                        disabled={pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1 }}
                       >
                         {pendingActions[`toggle-break-${emp.employee_id}`] ? 'Loading...' : <><Coffee size={14} /> {isOnBreak ? 'End Break' : 'Break'}</>}
                       </button>
                       <button 
                         className="btn btn-secondary" 
                         onClick={() => handleCheckOut(emp.employee_id, emp.name)}
-                        disabled={pendingActions[`check-out-${emp.employee_id}`]}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)', opacity: pendingActions[`check-out-${emp.employee_id}`] ? 0.6 : 1 }}
+                        disabled={pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)', opacity: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1 }}
                       >
                         {pendingActions[`check-out-${emp.employee_id}`] ? 'Checking Out...' : <><Square size={14} /> Check Out</>}
                       </button>

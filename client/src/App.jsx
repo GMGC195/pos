@@ -25,6 +25,7 @@ const AttendanceTracker    = lazy(() => import('./pages/AttendanceTracker'))
 const AttendanceReports    = lazy(() => import('./pages/AttendanceReports'))
 const TodayAttendance      = lazy(() => import('./pages/TodayAttendance'))
 const Payroll              = lazy(() => import('./pages/Payroll'))
+const EditAttendanceLogs   = lazy(() => import('./pages/EditAttendanceLogs'))
 
 // Minimal full-screen spinner shown while a page chunk is loading
 function PageLoader() {
@@ -81,11 +82,12 @@ export default function App() {
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer']}><ProductCostManagement /></ProtectedRoute>} />
 
                 {/* Employee & Attendance routes */}
-                <Route path="/employees"          element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><Employees /></ProtectedRoute>} />
-                <Route path="/attendance"         element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><AttendanceTracker /></ProtectedRoute>} />
-                <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><TodayAttendance /></ProtectedRoute>} />
-                <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><AttendanceReports /></ProtectedRoute>} />
-                <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><Payroll /></ProtectedRoute>} />
+                <Route path="/employees"          element={<ProtectedRoute allowedRoles={['Admin', 'Operator', 'Management']}><Employees /></ProtectedRoute>} />
+                <Route path="/attendance"         element={<ProtectedRoute allowedRoles={['Admin', 'Operator', 'Management', 'Employee']}><AttendanceTracker /></ProtectedRoute>} />
+                <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Operator', 'Management']}><TodayAttendance /></ProtectedRoute>} />
+                <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Management']}><AttendanceReports /></ProtectedRoute>} />
+                <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Management']}><Payroll /></ProtectedRoute>} />
+                <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin']}><EditAttendanceLogs /></ProtectedRoute>} />
 
                 {/* Universal */}
                 <Route path="/settings"     element={<Settings />} />

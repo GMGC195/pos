@@ -65,11 +65,12 @@ const navGroups = [
   {
     title: 'Employees & Attendance',
     items: [
-      { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin', 'Operator'] },
-      { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Operator'] },
-      { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Operator'] },
-      { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Operator'] },
-      { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Operator'] },
+      { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin', 'Operator', 'Management'] },
+      { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Operator', 'Management', 'Employee'] },
+      { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Operator', 'Management'] },
+      { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Management'] },
+      { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Management'] },
+      { to: '/edited-logs', icon: <AlertTriangle size={18} strokeWidth={2.2} />, label: 'Edit Attendance Logs', roles: ['Admin'] },
     ]
   }
 ]
@@ -157,7 +158,8 @@ export default function Layout() {
     '/attendance-reports': 'Attendance Sheet',
     '/payroll': 'Employee Payroll & Slips',
     '/settings': 'System Settings',
-    '/help-support': 'Help & Support Center'
+    '/help-support': 'Help & Support Center',
+    '/edited-logs': 'Edit Attendance Audit Logs'
   }[location.pathname] || `${BRAND_NAME} Pro`
 
   const handleLogout = () => {

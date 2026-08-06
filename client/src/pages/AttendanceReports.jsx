@@ -596,13 +596,15 @@ export default function AttendanceReports() {
               />
             </div>
 
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowHolidayModal(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}
-            >
-              <Settings size={14} /> Manage Holiday
-            </button>
+            {isAdmin && (
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowHolidayModal(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}
+              >
+                <Settings size={14} /> Manage Holiday
+              </button>
+            )}
 
             {isAdmin && (
               <button

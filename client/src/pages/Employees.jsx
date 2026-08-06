@@ -3,6 +3,7 @@ import axios from '../api'
 import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
+import { useAuth } from '../contexts/AuthContext'
 
 const format12to24 = (time12h) => {
   if (!time12h) return '10:00';
@@ -49,6 +50,7 @@ const decimalHoursToText = (hoursDec) => {
 };
 
 export default function Employees() {
+  const { user } = useAuth()
   const [employees, setEmployees] = useState(() => {
     const cached = localStorage.getItem('pizza_shop_employees')
     return cached ? JSON.parse(cached) : []
@@ -343,12 +345,18 @@ export default function Employees() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleOpenEdit(emp)} style={{ padding: '6px 8px' }}>
-                          <Edit2 size={14} />
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(emp.id, emp.name)} style={{ padding: '6px 8px', color: 'var(--red)' }}>
-                          <Trash2 size={14} />
-                        </button>
+                        {user?.role?.toLowerCase() !== 'management' ? (
+                          <>
+                            <button className="btn btn-secondary btn-sm" onClick={() => handleOpenEdit(emp)} style={{ padding: '6px 8px' }}>
+                              <Edit2 size={14} />
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(emp.id, emp.name)} style={{ padding: '6px 8px', color: 'var(--red)' }}>
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Read Only</span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -442,6 +450,7 @@ export default function Employees() {
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Assigned Shift</label>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <select 
+                        disabled={user?.role?.toLowerCase() === 'management'}
                         value={isCustomShift ? 'Custom' : formData.shift}
                         onChange={(e) => {
                           const val = e.target.value
