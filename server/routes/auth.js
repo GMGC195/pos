@@ -45,7 +45,7 @@ router.post('/login', async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email, role: user.role },
+      { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift },
       process.env.JWT_SECRET || 'fallback_secret',
       { expiresIn: '23h' }
     );
@@ -53,7 +53,7 @@ router.post('/login', async (req, res) => {
     res.json({
       message: 'Login successful',
       token,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role }
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift }
     });
   } catch (err) {
     console.error(err);
@@ -66,7 +66,7 @@ router.post('/login', async (req, res) => {
 // -------------------------------------------------------------
 router.get('/users', authenticateToken, isAdmin, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC');
+    const result = await pool.query('SELECT id, username, email, role, shift, created_at FROM users ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -78,7 +78,7 @@ router.get('/users', authenticateToken, isAdmin, async (req, res) => {
 // POST /api/auth/users (Admin only)
 // -------------------------------------------------------------
 router.post('/users', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role } = req.body;
+  const { username, email, password, role, shift } = req.body;
 
   try {
     // Check if user exists
@@ -89,8 +89,8 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
 
     const password_hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      'INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, username, email, role',
-      [username, email, password_hash, role || 'Operator']
+      'INSERT INTO users (username, email, password_hash, role, shift) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, role, shift',
+      [username, email, password_hash, role || 'Operator', shift || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -104,7 +104,7 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
 // PUT /api/auth/users/:id (Admin only)
 // -------------------------------------------------------------
 router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role } = req.body;
+  const { username, email, password, role, shift } = req.body;
   const { id } = req.params;
 
   try {
@@ -114,18 +114,18 @@ router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
       return res.status(403).json({ error: 'Only Developers can modify Developer accounts' });
     }
 
-    let query = 'UPDATE users SET username = $1, email = $2, role = $3';
-    const params = [username, email, role, id];
+    let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4';
+    const params = [username, email, role, shift || null, id];
 
     if (password) {
       const password_hash = await bcrypt.hash(password, 10);
-      query += ', password_hash = $5 WHERE id = $4';
+      query += ', password_hash = $6 WHERE id = $5';
       params.push(password_hash);
     } else {
-      query += ' WHERE id = $4';
+      query += ' WHERE id = $5';
     }
 
-    const result = await pool.query(query + ' RETURNING id, username, email, role', params);
+    const result = await pool.query(query + ' RETURNING id, username, email, role, shift', params);
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);

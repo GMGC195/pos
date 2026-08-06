@@ -70,7 +70,7 @@ const navGroups = [
       { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Operator', 'Management'] },
       { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Management'] },
       { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Management'] },
-      { to: '/edited-logs', icon: <AlertTriangle size={18} strokeWidth={2.2} />, label: 'Edit Attendance Logs', roles: ['Admin'] },
+      { to: '/edited-logs', icon: <AlertTriangle size={18} strokeWidth={2.2} />, label: 'Edit Attendance Logs', roles: ['Admin', 'Operator'] },
     ]
   }
 ]

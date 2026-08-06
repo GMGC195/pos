@@ -109,6 +109,10 @@ const pool = require('./db');
 
     // Ensure employee_attendance has remarks column
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS remarks VARCHAR(100)');
+    // Ensure employee_attendance has created_by column
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS created_by VARCHAR(150)');
+    // Ensure users has shift column
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS shift VARCHAR(50)');
 
     // Create indexes
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_employee ON employee_attendance(employee_id)`);

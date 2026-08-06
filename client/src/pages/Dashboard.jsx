@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -60,7 +61,14 @@ function StatCard({ stat, value, loading }) {
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const isDeveloper = user?.role?.toLowerCase() === 'developer'
+
+  useEffect(() => {
+    if (user?.role?.toLowerCase() === 'operator') {
+      navigate('/attendance', { replace: true })
+    }
+  }, [user, navigate])
 
   // Developer sales states
   const [stats, setStats] = useState(null)

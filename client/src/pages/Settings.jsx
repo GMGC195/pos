@@ -35,6 +35,7 @@ export default function Settings() {
 
   // User Management State
   const [users, setUsers] = useState([])
+  const [shifts, setShifts] = useState([])
   const [isAddingUser, setIsAddingUser] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [showUserPass, setShowUserPass] = useState(false)
@@ -42,8 +43,18 @@ export default function Settings() {
     username: '',
     email: '',
     password: '',
-    role: 'Operator'
+    role: 'Operator',
+    shift: ''
   })
+
+  const fetchShifts = async () => {
+    try {
+      const res = await api.get('/api/employees/shifts/list')
+      setShifts(res.data)
+    } catch {
+      toast.error('Failed to fetch shifts')
+    }
+  }
 
   useEffect(() => {
     // Refresh context user data to ensure we have the role
@@ -70,6 +81,7 @@ export default function Settings() {
     const isAdminRole = role === 'admin' || role === 'developer'
     if (activeTab === 'users' && isAdminRole) {
       fetchUsers()
+      fetchShifts()
     }
   }, [activeTab, user?.role])
 
@@ -108,7 +120,7 @@ export default function Settings() {
       await api.post('/api/auth/users', userForm)
       toast.success('User created successfully')
       setIsAddingUser(false)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
       setShowUserPass(false)
       fetchUsers()
     } catch (err) {
@@ -125,7 +137,7 @@ export default function Settings() {
       await api.put(`/api/auth/users/${editingUser.id}`, userForm)
       toast.success('User updated successfully')
       setEditingUser(null)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
       setShowUserPass(false)
       fetchUsers()
     } catch (err) {
@@ -152,7 +164,8 @@ export default function Settings() {
       username: u.username,
       email: u.email,
       password: '',
-      role: u.role
+      role: u.role,
+      shift: u.shift || ''
     })
     setIsAddingUser(true)
   }
@@ -316,7 +329,7 @@ export default function Settings() {
                         <label>Role</label>
                         <select 
                           value={userForm.role}
-                          onChange={e => setUserForm({...userForm, role: e.target.value})}
+                          onChange={e => setUserForm({...userForm, role: e.target.value, shift: e.target.value === 'Operator' ? userForm.shift : ''})}
                         >
                           <option value="Admin">Admin</option>
                           <option value="Operator">Operator</option>
@@ -325,6 +338,21 @@ export default function Settings() {
                           {user?.role?.toLowerCase() === 'developer' && <option value="Developer">Developer</option>}
                         </select>
                       </div>
+                      {userForm.role === 'Operator' && (
+                        <div className="form-group">
+                          <label>Assigned Shift</label>
+                          <select 
+                            value={userForm.shift || ''}
+                            onChange={e => setUserForm({...userForm, shift: e.target.value})}
+                            required
+                          >
+                            <option value="">Select Shift</option>
+                            {shifts.map(s => (
+                              <option key={s.id} value={s.name}>{s.name} ({s.start_time} - {s.end_time})</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                       <div className="form-group">
                         <label>{editingUser ? 'New Password (Optional)' : 'Password'}</label>
                         <div className="input-with-icon">
@@ -354,7 +382,7 @@ export default function Settings() {
                         onClick={() => {
                           setIsAddingUser(false)
                           setEditingUser(null)
-                          setUserForm({ username: '', email: '', password: '', role: 'Operator' })
+                          setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
                           setShowUserPass(false)
                         }}
                       >
@@ -402,6 +430,7 @@ export default function Settings() {
                         <tr>
                           <th>User</th>
                           <th>Role</th>
+                          <th>Shift</th>
                           <th>Date Joined</th>
                           <th style={{ textAlign: 'right' }}>Actions</th>
                         </tr>
@@ -426,6 +455,7 @@ export default function Settings() {
                                 {u.role}
                               </span>
                             </td>
+                            <td style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{u.role === 'Operator' ? (u.shift || 'None') : '--'}</td>
                             <td>{new Date(u.created_at).toLocaleDateString()}</td>
                             <td>
                               <div className="user-actions">

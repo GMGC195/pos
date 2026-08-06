@@ -87,7 +87,7 @@ export default function App() {
                 <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Operator', 'Management']}><TodayAttendance /></ProtectedRoute>} />
                 <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Management']}><AttendanceReports /></ProtectedRoute>} />
                 <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Management']}><Payroll /></ProtectedRoute>} />
-                <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin']}><EditAttendanceLogs /></ProtectedRoute>} />
+                <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin', 'Operator']}><EditAttendanceLogs /></ProtectedRoute>} />
 
                 {/* Universal */}
                 <Route path="/settings"     element={<Settings />} />

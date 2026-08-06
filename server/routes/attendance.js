@@ -29,12 +29,19 @@ router.use(autoCheckoutOldSessions);
 router.get('/today', authenticateToken, async (req, res) => {
   try {
     // Fetch all active employees
-    const activeEmps = await pool.query(`
+    let queryStr = `
       SELECT id as employee_id, name, role, shift, shift_hours, status as employee_status, employee_id as employee_code, department
       FROM employees
       WHERE status = 'Active'
-      ORDER BY id ASC
-    `);
+    `;
+    const queryParams = [];
+    const userRole = req.user.role?.toLowerCase();
+    if (userRole === 'operator' && req.user.shift) {
+      queryStr += ` AND COALESCE(shift, 'R1') = $1`;
+      queryParams.push(req.user.shift);
+    }
+    queryStr += ` ORDER BY id ASC`;
+    const activeEmps = await pool.query(queryStr, queryParams);
 
     // Fetch all today's attendance sessions
     const sessions = await pool.query(`
@@ -172,9 +179,15 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       }
     }
 
+    // Verify operator shift matches employee shift
+    const userRole = req.user.role?.toLowerCase();
+    if (userRole === 'operator' && req.user.shift && req.user.shift !== shift) {
+      return res.status(403).json({ error: `You are only allowed to mark attendance for employees in Shift ${req.user.shift}` });
+    }
+
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, check_in, status, date) VALUES ($1, NOW(), $2, CURRENT_DATE) RETURNING *',
-      [employee_id, status]
+      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by) VALUES ($1, NOW(), $2, CURRENT_DATE, $3) RETURNING *',
+      [employee_id, status, req.user.username]
     );
 
     res.status(201).json(result.rows[0]);
@@ -630,7 +643,7 @@ router.post('/edit', authenticateToken, async (req, res) => {
   try {
     // Fetch original check_in and check_out
     const originalRes = await pool.query(
-      'SELECT employee_id, check_in, check_out FROM employee_attendance WHERE id = $1',
+      'SELECT employee_id, check_in, check_out, created_by, date FROM employee_attendance WHERE id = $1',
       [attendance_id]
     );
 
@@ -638,7 +651,22 @@ router.post('/edit', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Attendance record not found' });
     }
 
-    const { employee_id, check_in: original_check_in, check_out: original_check_out } = originalRes.rows[0];
+    const { employee_id, check_in: original_check_in, check_out: original_check_out, created_by, date: recordDate } = originalRes.rows[0];
+
+    // Restrictions for Operator role
+    const userRole = req.user.role?.toLowerCase();
+    if (userRole === 'operator') {
+      // 1. Must be created by this operator
+      if (created_by !== req.user.username) {
+        return res.status(403).json({ error: 'Access denied: You can only edit attendance logs that you created.' });
+      }
+      // 2. Date of attendance must be today
+      const todayStr = new Date().toISOString().split('T')[0];
+      const recordDateStr = new Date(recordDate).toISOString().split('T')[0];
+      if (recordDateStr !== todayStr) {
+        return res.status(403).json({ error: 'Access denied: You can only edit attendance logs for today.' });
+      }
+    }
 
     // Log the edit
     await pool.query(
@@ -666,17 +694,65 @@ router.post('/edit', authenticateToken, async (req, res) => {
 router.get('/edited-logs', authenticateToken, async (req, res) => {
   try {
     const userRole = req.user.role?.toLowerCase();
-    if (userRole !== 'admin' && userRole !== 'developer') {
+    if (userRole !== 'admin' && userRole !== 'developer' && userRole !== 'operator') {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const result = await pool.query(`
+    let page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 10;
+    let offset = (page - 1) * limit;
+    let month = req.query.month; // format 'YYYY-MM'
+
+    let queryStr = `
       SELECT ea.*, emp.name as employee_name, emp.employee_id as employee_code
       FROM edited_attendance ea
       JOIN employees emp ON ea.employee_id = emp.id
-      ORDER BY ea.edited_at DESC
-    `);
-    res.json(result.rows);
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    // Filters
+    const conditions = [];
+    if (userRole === 'operator') {
+      conditions.push(`ea.edited_by = $${paramCount++}`);
+      params.push(req.user.username);
+    }
+    if (month) {
+      conditions.push(`TO_CHAR(ea.edited_at, 'YYYY-MM') = $${paramCount++}`);
+      params.push(month);
+    }
+
+    if (conditions.length > 0) {
+      queryStr += ` WHERE ` + conditions.join(' AND ');
+    }
+
+    // Sort order: Today's logs first, then remaining sorted descending
+    queryStr += ` ORDER BY CASE WHEN ea.edited_at::date = CURRENT_DATE THEN 0 ELSE 1 END ASC, ea.edited_at DESC`;
+
+    // Fetch total count for pagination
+    let countQuery = `
+      SELECT COUNT(*) 
+      FROM edited_attendance ea
+      JOIN employees emp ON ea.employee_id = emp.id
+    `;
+    if (conditions.length > 0) {
+      countQuery += ` WHERE ` + conditions.join(' AND ');
+    }
+    const countRes = await pool.query(countQuery, params);
+    const total = parseInt(countRes.rows[0].count);
+
+    // Apply pagination
+    queryStr += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+    params.push(limit, offset);
+
+    const result = await pool.query(queryStr, params);
+    
+    res.json({
+      logs: result.rows,
+      total,
+      page,
+      pages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

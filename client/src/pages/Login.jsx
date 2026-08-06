@@ -65,7 +65,11 @@ export default function Login() {
       login(data.user, data.token)
       setIsFlipped(true)
       setTimeout(() => {
-        navigate('/pos', { replace: true })
+        if (data.user?.role?.toLowerCase() === 'operator') {
+          navigate('/attendance', { replace: true })
+        } else {
+          navigate('/pos', { replace: true })
+        }
       }, 750)
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
