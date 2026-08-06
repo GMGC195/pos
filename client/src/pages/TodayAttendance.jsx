@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Fingerprint, Coffee, Clock, User, LogIn, Search, RefreshCw, FileText, MoreVertical, X, Download } from 'lucide-react'
+import { Fingerprint, Coffee, Clock, User, LogIn, Search, RefreshCw, FileText, MoreVertical, X, Download, Filter } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -30,6 +30,7 @@ export default function TodayAttendance() {
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All') // 'All', 'Present', 'CheckedOut', 'Late', 'Absent'
   const [shiftsList, setShiftsList] = useState([])
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
 
   const [showEditModal, setShowEditModal] = useState(false)
   const [selectedEmp, setSelectedEmp] = useState(null)
@@ -227,7 +228,7 @@ export default function TodayAttendance() {
       </div>
 
       {/* Filter Options */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+      <div className="attendance-search-row" style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
         <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
           <Search size={18} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input 
@@ -247,6 +248,26 @@ export default function TodayAttendance() {
             }}
           />
         </div>
+        <button 
+          className="btn btn-secondary mobile-filter-toggle-btn"
+          onClick={() => setShowMobileFilters(!showMobileFilters)}
+          style={{
+            display: 'none',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '10px',
+            borderRadius: 10,
+            height: 40,
+            width: 40,
+            borderColor: showMobileFilters ? 'var(--primary)' : 'var(--surface-2)',
+            color: showMobileFilters ? 'var(--primary)' : 'var(--text)'
+          }}
+        >
+          <Filter size={18} />
+        </button>
+      </div>
+
+      <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <select 
           value={selectedShift}
           onChange={e => setSelectedShift(e.target.value)}
@@ -257,7 +278,8 @@ export default function TodayAttendance() {
             borderRadius: 10,
             outline: 'none',
             fontSize: 13,
-            minWidth: 160
+            minWidth: 160,
+            flex: 1
           }}
         >
           {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
@@ -274,7 +296,8 @@ export default function TodayAttendance() {
             borderRadius: 10,
             outline: 'none',
             fontSize: 13,
-            minWidth: 160
+            minWidth: 160,
+            flex: 1
           }}
         >
           {departments.map(dept => (
@@ -301,6 +324,28 @@ export default function TodayAttendance() {
           <option value="Absent">Absent Today</option>
         </select>
       </div>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .mobile-filter-toggle-btn {
+            display: flex !important;
+          }
+          .attendance-filters-row {
+            display: none !important;
+            flex-direction: column;
+            gap: 12px !important;
+            width: 100%;
+            margin-bottom: 20px !important;
+          }
+          .attendance-filters-row.show-mobile {
+            display: flex !important;
+          }
+          .attendance-filters-row select {
+            width: 100%;
+            min-width: 0 !important;
+          }
+        }
+      `}</style>
 
       {/* Spreadsheet / Excel-Sheet View */}
       {loading ? (

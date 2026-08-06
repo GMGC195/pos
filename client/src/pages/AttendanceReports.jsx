@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from '../api'
-import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit } from 'lucide-react'
+import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -84,6 +84,11 @@ export default function AttendanceReports() {
   const [reports, setReports] = useState([])
   const [employeesList, setEmployeesList] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showFilters, setShowFilters] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedDepartment, setSelectedDepartment] = useState('All')
+  const [selectedStatus, setSelectedStatus] = useState('All')
   
   // Holiday state
   const [showHolidayModal, setShowHolidayModal] = useState(false)
@@ -257,6 +262,7 @@ export default function AttendanceReports() {
         role: emp.role,
         shift: emp.shift || 'R1',
         shift_hours: parseFloat(emp.shift_hours || 12.0),
+        department: emp.department || '',
         days: {}
       }
     })
@@ -272,6 +278,7 @@ export default function AttendanceReports() {
           role: log.role,
           shift: log.shift || 'R1',
           shift_hours: parseFloat(log.shift_hours || 12.0),
+          department: log.department || '',
           days: {}
         }
       }
@@ -340,6 +347,31 @@ export default function AttendanceReports() {
   }
 
   const groupedData = getGroupedData()
+
+  const departments = ['All', ...new Set(employeesList.map(emp => emp.department).filter(Boolean))]
+  const shifts = ['All', ...new Set(employeesList.map(emp => emp.shift).filter(Boolean))]
+
+  const filteredGroupedData = groupedData.filter(emp => {
+    const matchesSearch = emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          String(emp.employee_code || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
+    const matchesShift = selectedShift === 'All' || emp.shift === selectedShift;
+
+    let matchesStatus = true;
+    if (selectedStatus === 'Present') {
+      matchesStatus = emp.presents > 0;
+    } else if (selectedStatus === 'Absent') {
+      matchesStatus = emp.absents > 0;
+    } else if (selectedStatus === 'Late') {
+      matchesStatus = emp.lates > 0;
+    } else if (selectedStatus === 'Holiday') {
+      matchesStatus = emp.holidays > 0;
+    } else if (selectedStatus === 'Leave') {
+      matchesStatus = emp.leaves > 0;
+    }
+
+    return matchesSearch && matchesDept && matchesShift && matchesStatus;
+  });
 
   // Set Holiday API Call
   const handleSaveHoliday = async () => {
@@ -486,7 +518,7 @@ export default function AttendanceReports() {
 
       // Write table body
       html += `<tbody>`
-      groupedData.forEach((emp, index) => {
+      filteredGroupedData.forEach((emp, index) => {
         const rowClass = index % 2 === 0 ? 'row-even' : 'row-odd'
         html += `<tr class="${rowClass}">`
         
@@ -596,6 +628,22 @@ export default function AttendanceReports() {
               />
             </div>
 
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => setShowFilters(!showFilters)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                height: 38,
+                fontSize: 13,
+                borderColor: showFilters ? 'var(--primary)' : 'var(--surface-2)',
+                color: showFilters ? 'var(--primary)' : 'var(--text)'
+              }}
+            >
+              <Filter size={14} /> Filters
+            </button>
+
             {isAdmin && (
               <button
                 className="btn btn-primary"
@@ -646,6 +694,90 @@ export default function AttendanceReports() {
           </div>
         </div>
       </div>
+
+      {showFilters && (
+        <div style={{ padding: '0 32px', marginBottom: 20 }}>
+          <div className="attendance-controls-card" style={{ display: 'flex', gap: 16, padding: '16px 20px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <input 
+                type="text" 
+                placeholder="Search by name or code..." 
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: 'var(--surface-1)',
+                  border: '1.5px solid var(--surface-2)',
+                  borderRadius: 8,
+                  outline: 'none',
+                  fontSize: 13,
+                  color: 'var(--text)',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <select 
+              value={selectedShift}
+              onChange={e => setSelectedShift(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                background: 'var(--surface-1)',
+                border: '1.5px solid var(--surface-2)',
+                borderRadius: 8,
+                outline: 'none',
+                fontSize: 13,
+                minWidth: 150
+              }}
+            >
+              <option value="All">All Shifts</option>
+              {shifts.map(sh => (
+                <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
+              ))}
+            </select>
+
+            <select 
+              value={selectedDepartment}
+              onChange={e => setSelectedDepartment(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                background: 'var(--surface-1)',
+                border: '1.5px solid var(--surface-2)',
+                borderRadius: 8,
+                outline: 'none',
+                fontSize: 13,
+                minWidth: 150
+              }}
+            >
+              {departments.map(dept => (
+                <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
+              ))}
+            </select>
+
+            <select 
+              value={selectedStatus}
+              onChange={e => setSelectedStatus(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                background: 'var(--surface-1)',
+                border: '1.5px solid var(--surface-2)',
+                borderRadius: 8,
+                outline: 'none',
+                fontSize: 13,
+                minWidth: 150
+              }}
+            >
+              <option value="All">All Statuses</option>
+              <option value="Present">Present (At least 1 day)</option>
+              <option value="Absent">Absent (At least 1 day)</option>
+              <option value="Late">Late (At least 1 day)</option>
+              <option value="Holiday">Holiday (At least 1 day)</option>
+              <option value="Leave">Leave (At least 1 day)</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* ── Grid area ─ fills remaining height, only this scrolls ── */}
       <div className="attendance-grid-wrapper">
@@ -721,14 +853,14 @@ export default function AttendanceReports() {
                       Loading monthly sheet...
                     </td>
                   </tr>
-                ) : groupedData.length === 0 ? (
+                ) : filteredGroupedData.length === 0 ? (
                   <tr>
                     <td colSpan={daysInMonth.length + 9} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
-                      No employees registered.
+                      No employees registered or matching filter criteria.
                     </td>
                   </tr>
                 ) : (
-                  groupedData.map((emp, index) => {
+                  filteredGroupedData.map((emp, index) => {
                     const rowBg = index % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)'
                     return (
                       <tr

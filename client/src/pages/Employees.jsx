@@ -242,26 +242,62 @@ export default function Employees() {
           <Users size={24} style={{ color: 'var(--primary)' }} /> Employee Management
         </h3>
 
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Stats styled like buttons */}
-          <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, cursor: 'default', pointerEvents: 'none' }}>
-            <Users size={18} /> Total: {employees.length}
-          </div>
-          <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, cursor: 'default', pointerEvents: 'none' }}>
-            <Users size={18} /> Active: {employees.filter(e => e.status === 'Active').length}
+        <div className="employees-action-group" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Stats group */}
+          <div className="emp-stats-row" style={{ display: 'flex', gap: 8 }}>
+            <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, cursor: 'default', pointerEvents: 'none', justifyContent: 'center' }}>
+              <Users size={18} /> Total: {employees.length}
+            </div>
+            <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, cursor: 'default', pointerEvents: 'none', justifyContent: 'center' }}>
+              <Users size={18} /> Active: {employees.filter(e => e.status === 'Active').length}
+            </div>
           </div>
 
-          <button className="btn btn-secondary" onClick={() => setShowShiftConfig(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42 }}>
-            <Settings size={18} /> Manage Shifts
-          </button>
-          <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42 }}>
-            <FileSpreadsheet size={18} /> Import Employees
-          </button>
-          <button className="btn btn-primary" onClick={handleOpenAdd} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42 }}>
+          {/* Buttons group */}
+          <div className="emp-buttons-row" style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={() => setShowShiftConfig(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, justifyContent: 'center' }}>
+              <Settings size={18} /> Manage Shifts
+            </button>
+            <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, justifyContent: 'center' }}>
+              <FileSpreadsheet size={18} /> Import Employees
+            </button>
+          </div>
+
+          <button className="btn btn-primary emp-add-btn" onClick={handleOpenAdd} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, justifyContent: 'center' }}>
             <UserPlus size={18} /> Add Employee
           </button>
         </div>
       </div>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .employees-action-group {
+            width: 100%;
+            flex-direction: column;
+            align-items: stretch !important;
+            gap: 8px !important;
+          }
+          .emp-stats-row, .emp-buttons-row {
+            width: 100%;
+            display: grid !important;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px !important;
+            flex: none !important;
+          }
+          .emp-stats-row > div, .emp-buttons-row > button {
+            height: 38px !important;
+            font-size: 12px !important;
+            padding: 0 8px !important;
+            margin: 0 !important;
+            width: 100% !important;
+          }
+          .emp-add-btn {
+            width: 100%;
+            height: 38px !important;
+            font-size: 12px !important;
+          }
+        }
+      `}</style>
 
       {/* Filter and Search Bar */}
       <div className="card" style={{ padding: 18, marginBottom: 20 }}>
@@ -286,7 +322,7 @@ export default function Employees() {
             <thead>
               <tr>
                 <th>Emp ID</th>
-                <th>Name</th>
+                <th style={{ width: '150px' }}>Name</th>
                 <th>Department</th>
                 <th>Position</th>
                 <th>Shift</th>
@@ -314,7 +350,7 @@ export default function Employees() {
                     <td style={{ fontWeight: 600, color: 'var(--primary)' }}>
                       {emp.employee_id || `EMP-${String(emp.id).padStart(4, '0')}`}
                     </td>
-                    <td>
+                    <td style={{ maxWidth: '150px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                       <div style={{ fontWeight: 600 }}>{emp.name}</div>
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Joined {new Date(emp.created_at).toLocaleDateString()}</span>
                     </td>

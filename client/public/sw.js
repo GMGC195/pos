@@ -95,7 +95,11 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         })
-        .catch(() => caches.match('/index.html') || caches.match('/'))
+        .catch(() => 
+          caches.match('/index.html')
+            .then(cached => cached || caches.match('/'))
+            .then(cached => cached || new Response('Network error. Please reload the page.', { status: 503, headers: { 'Content-Type': 'text/plain' } }))
+        )
     );
     return;
   }

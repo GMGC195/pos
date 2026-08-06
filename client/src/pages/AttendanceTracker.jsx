@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle, MoreVertical, X } from 'lucide-react'
+import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle, MoreVertical, X, Filter } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -65,6 +65,7 @@ export default function AttendanceTracker() {
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedShift, setSelectedShift] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
   const [confirmModal, setConfirmModal] = useState(null)
@@ -439,7 +440,7 @@ export default function AttendanceTracker() {
       </div>
 
       {/* Search and Filters Bar */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+      <div className="attendance-search-row" style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <input 
             type="text" 
@@ -458,7 +459,26 @@ export default function AttendanceTracker() {
             }}
           />
         </div>
-        
+        <button 
+          className="btn btn-secondary mobile-filter-toggle-btn"
+          onClick={() => setShowMobileFilters(!showMobileFilters)}
+          style={{
+            display: 'none',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '10px',
+            borderRadius: 10,
+            height: 40,
+            width: 40,
+            borderColor: showMobileFilters ? 'var(--primary)' : 'var(--surface-2)',
+            color: showMobileFilters ? 'var(--primary)' : 'var(--text)'
+          }}
+        >
+          <Filter size={18} />
+        </button>
+      </div>
+
+      <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <select 
           value={selectedShift}
           onChange={e => setSelectedShift(e.target.value)}
@@ -469,7 +489,8 @@ export default function AttendanceTracker() {
             borderRadius: 10,
             outline: 'none',
             fontSize: 13,
-            minWidth: 160
+            minWidth: 160,
+            flex: 1
           }}
         >
           {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
@@ -487,7 +508,8 @@ export default function AttendanceTracker() {
             borderRadius: 10,
             outline: 'none',
             fontSize: 13,
-            minWidth: 160
+            minWidth: 160,
+            flex: 1
           }}
         >
           {departments.map(dept => (
@@ -505,7 +527,8 @@ export default function AttendanceTracker() {
             borderRadius: 10,
             outline: 'none',
             fontSize: 13,
-            minWidth: 160
+            minWidth: 160,
+            flex: 1
           }}
         >
           <option value="All">All Statuses</option>
@@ -515,6 +538,28 @@ export default function AttendanceTracker() {
           <option value="CheckedOut">Checked Out</option>
         </select>
       </div>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .mobile-filter-toggle-btn {
+            display: flex !important;
+          }
+          .attendance-filters-row {
+            display: none !important;
+            flex-direction: column;
+            gap: 12px !important;
+            width: 100%;
+            margin-bottom: 20px !important;
+          }
+          .attendance-filters-row.show-mobile {
+            display: flex !important;
+          }
+          .attendance-filters-row select {
+            width: 100%;
+            min-width: 0 !important;
+          }
+        }
+      `}</style>
 
       {/* Grid view of employees */}
       {loading && employees.length === 0 ? (
