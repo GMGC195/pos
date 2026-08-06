@@ -447,25 +447,29 @@ router.get('/stats', authenticateToken, async (req, res) => {
     let present = 0;
     let late = 0;
     let onBreak = 0;
+    let checkedOut = 0;
     let holidays = 0;
+    let leaves = 0;
 
     todayLogs.rows.forEach(log => {
       if (log.status === 'Holiday') {
         holidays++;
-      } else if (!log.check_out) {
-        if (log.on_break) {
-          onBreak++;
-        } else {
-          present++;
-        }
+      } else if (log.status === 'Leave') {
+        leaves++;
+      } else if (log.check_out) {
+        checkedOut++;
+      } else if (log.on_break) {
+        onBreak++;
+      } else {
+        present++;
       }
+
       if (log.status === 'Late') {
         late++;
       }
     });
 
-    const checkedOut = todayLogs.rows.filter(log => log.check_out && log.status !== 'Holiday').length;
-    const absent = Math.max(0, totalEmployees - todayLogs.rows.length);
+    const absent = Math.max(0, totalEmployees - present - onBreak - checkedOut);
 
     res.json({
       total_employees: totalEmployees,
@@ -474,7 +478,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
       on_break: onBreak,
       checked_out: checkedOut,
       absent: absent,
-      holidays: holidays
+      holidays: holidays,
+      leaves: leaves
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

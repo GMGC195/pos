@@ -62,30 +62,28 @@ export default function TodayAttendance() {
         <h3 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Fingerprint size={24} style={{ color: 'var(--primary)' }} /> Present Active Staff Today
         </h3>
-        <button className="btn btn-secondary" onClick={loadTodayAttendance} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {/* Compact Stats */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'default', pointerEvents: 'none' }}>
+              <span>Total:</span>
+              <span style={{ fontWeight: 700 }}>{employees.length}</span>
+            </div>
+            
+            <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'default', pointerEvents: 'none' }}>
+              <span>Active:</span>
+              <span style={{ fontWeight: 700 }}>{employees.filter(e => e.attendance_id && !e.check_out).length}</span>
+            </div>
 
-      {/* Stats Cards */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-        <div className="stat-card" style={{ '--card-color': 'var(--green)', minWidth: 200, padding: '16px 20px' }}>
-          <div className="stat-icon" style={{ background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)' }}>
-            <LogIn size={22} />
+            <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'default', pointerEvents: 'none' }}>
+              <span>Break:</span>
+              <span style={{ fontWeight: 700 }}>{employees.filter(e => e.on_break).length}</span>
+            </div>
           </div>
-          <div className="stat-info">
-            <p>Active Checked-in Staff</p>
-            <h3>{employees.length} Present</h3>
-          </div>
-        </div>
-        <div className="stat-card" style={{ '--card-color': 'var(--primary)', minWidth: 200, padding: '16px 20px' }}>
-          <div className="stat-icon" style={{ background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)' }}>
-            <Coffee size={22} />
-          </div>
-          <div className="stat-info">
-            <p>Currently on Break</p>
-            <h3>{employees.filter(e => e.on_break).length} Staff</h3>
-          </div>
+
+          <button className="btn btn-secondary" onClick={loadTodayAttendance} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw size={14} /> Refresh
+          </button>
         </div>
       </div>
 

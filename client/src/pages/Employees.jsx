@@ -155,28 +155,19 @@ export default function Employees() {
     <div className="page-content" style={{ paddingTop: 0 }}>
       {/* Header and Stats */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, marginTop: -60, flexWrap: 'wrap', gap: 16 }}>
-        <div style={{ display: 'flex', gap: 16 }}>
-          <div className="stat-card" style={{ '--card-color': 'var(--primary)', minWidth: 200, padding: '16px 20px' }}>
-            <div className="stat-icon" style={{ background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)' }}>
-              <Users size={22} />
-            </div>
-            <div className="stat-info">
-              <p>Total Employees</p>
-              <h3>{employees.length}</h3>
-            </div>
-          </div>
-          <div className="stat-card" style={{ '--card-color': 'var(--green)', minWidth: 200, padding: '16px 20px' }}>
-            <div className="stat-icon" style={{ background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)' }}>
-              <Users size={22} />
-            </div>
-            <div className="stat-info">
-              <p>Active Employees</p>
-              <h3>{employees.filter(e => e.status === 'Active').length}</h3>
-            </div>
-          </div>
-        </div>
+        <h3 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Users size={24} style={{ color: 'var(--primary)' }} /> Employee Management
+        </h3>
 
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Stats styled like buttons */}
+          <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, cursor: 'default', pointerEvents: 'none' }}>
+            <Users size={18} /> Total: {employees.length}
+          </div>
+          <div className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, cursor: 'default', pointerEvents: 'none' }}>
+            <Users size={18} /> Active: {employees.filter(e => e.status === 'Active').length}
+          </div>
+
           <button className="btn btn-secondary" onClick={() => setShowShiftConfig(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42 }}>
             <Settings size={18} /> Manage Shifts
           </button>

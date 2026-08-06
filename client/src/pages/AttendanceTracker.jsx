@@ -17,6 +17,8 @@ export default function AttendanceTracker() {
   const [lateThreshold, setLateThreshold] = useState('09:00')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
+  const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedStatus, setSelectedStatus] = useState('All')
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
   const [confirmModal, setConfirmModal] = useState(null)
@@ -238,12 +240,31 @@ export default function AttendanceTracker() {
   // Calculate unique departments from all employees
   const departments = ['All', ...new Set(employees.map(emp => emp.department).filter(Boolean))]
 
-  // Filter employees by search query and selected department
+  // Filter employees by search query, department, shift, and status
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = (emp.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
                           String(emp.employee_id || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
-    return matchesSearch && matchesDept;
+    const matchesShift = selectedShift === 'All' || (emp.shift || 'R1') === selectedShift;
+
+    // Status Filter
+    let matchesStatus = true;
+    const isCheckedIn = emp.attendance_id && !emp.check_out;
+    const isAbsent = !emp.attendance_id;
+    const isLate = emp.attendance_status === 'Late';
+    const isCheckedOut = emp.attendance_id && emp.check_out;
+
+    if (selectedStatus === 'Present') {
+      matchesStatus = isCheckedIn;
+    } else if (selectedStatus === 'Absent') {
+      matchesStatus = isAbsent;
+    } else if (selectedStatus === 'Late') {
+      matchesStatus = isLate;
+    } else if (selectedStatus === 'CheckedOut') {
+      matchesStatus = isCheckedOut;
+    }
+
+    return matchesSearch && matchesDept && matchesShift && matchesStatus;
   });
 
   return (
@@ -296,22 +317,44 @@ export default function AttendanceTracker() {
 
       {/* Search and Filters Bar */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-        <input 
-          type="text" 
-          placeholder="Search by name or ID..." 
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <input 
+            type="text" 
+            placeholder="Search by name or ID..." 
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 10,
+              outline: 'none',
+              fontSize: 13,
+              boxSizing: 'border-box'
+            }}
+          />
+        </div>
+        
+        <select 
+          value={selectedShift}
+          onChange={e => setSelectedShift(e.target.value)}
           style={{
-            flex: 1,
-            minWidth: 200,
             padding: '10px 14px',
             background: 'var(--surface)',
             border: '1.5px solid var(--surface-2)',
             borderRadius: 10,
             outline: 'none',
-            fontSize: 13
+            fontSize: 13,
+            minWidth: 160
           }}
-        />
+        >
+          <option value="All">All Shifts</option>
+          <option value="R1">Shift R1</option>
+          <option value="R2">Shift R2</option>
+          <option value="R3">Shift R3</option>
+        </select>
+
         <select 
           value={selectedDepartment}
           onChange={e => setSelectedDepartment(e.target.value)}
@@ -326,8 +369,28 @@ export default function AttendanceTracker() {
           }}
         >
           {departments.map(dept => (
-            <option key={dept} value={dept}>{dept}</option>
+            <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
           ))}
+        </select>
+
+        <select 
+          value={selectedStatus}
+          onChange={e => setSelectedStatus(e.target.value)}
+          style={{
+            padding: '10px 14px',
+            background: 'var(--surface)',
+            border: '1.5px solid var(--surface-2)',
+            borderRadius: 10,
+            outline: 'none',
+            fontSize: 13,
+            minWidth: 160
+          }}
+        >
+          <option value="All">All Statuses</option>
+          <option value="Present">Present (Active)</option>
+          <option value="Absent">Absent Today</option>
+          <option value="Late">Late Arrivals</option>
+          <option value="CheckedOut">Checked Out</option>
         </select>
       </div>
 
