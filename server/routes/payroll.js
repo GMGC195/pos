@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 
 
@@ -20,7 +20,7 @@ router.get('/settings', authenticateToken, async (req, res) => {
 });
 
 // POST update payroll settings
-router.post('/settings', authenticateToken, async (req, res) => {
+router.post('/settings', authenticateToken, isAdmin, async (req, res) => {
   const { global_overtime_rate, allowed_leaves } = req.body;
   try {
     if (global_overtime_rate !== undefined) {
@@ -52,7 +52,7 @@ router.get('/overrides', authenticateToken, async (req, res) => {
 });
 
 // POST save/update employee payroll overrides
-router.post('/overrides/:employee_id', authenticateToken, async (req, res) => {
+router.post('/overrides/:employee_id', authenticateToken, isAdmin, async (req, res) => {
   const employee_id = req.params.employee_id;
   const { overtime_rate, base_salary, allowed_leaves } = req.body;
   try {
@@ -291,7 +291,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 });
 
 // POST save/update a payroll record (finalized slip details, manual adjustments, actual paid amount)
-router.post('/record', authenticateToken, async (req, res) => {
+router.post('/record', authenticateToken, isAdmin, async (req, res) => {
   const {
     employee_id,
     month,

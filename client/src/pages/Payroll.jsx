@@ -26,6 +26,7 @@ import { useAuth } from '../contexts/AuthContext'
 export default function Payroll() {
   const { user } = useAuth()
   const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'developer'
+  const showActions = isAdmin
 
   // State Variables
   const [payrollData, setPayrollData] = useState([])
@@ -269,29 +270,33 @@ export default function Payroll() {
         </div>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button 
-            onClick={() => setShowLeaveModal(true)}
-            className="btn btn-secondary" 
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--secondary)', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
-          >
-            <Plus size={16} /> Log Leave
-          </button>
-          
-          <button 
-            onClick={() => setShowOverridesModal(true)}
-            className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: '1px solid var(--surface-2)', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
-          >
-            <User size={16} /> Override Salary
-          </button>
+          {isAdmin && (
+            <>
+              <button 
+                onClick={() => setShowLeaveModal(true)}
+                className="btn btn-secondary" 
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--secondary)', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                <Plus size={16} /> Log Leave
+              </button>
+              
+              <button 
+                onClick={() => setShowOverridesModal(true)}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: '1px solid var(--surface-2)', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                <User size={16} /> Override Salary
+              </button>
 
-          <button 
-            onClick={() => setShowSettingsModal(true)}
-            className="btn"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
-          >
-            <Settings size={16} /> Global Settings
-          </button>
+              <button 
+                onClick={() => setShowSettingsModal(true)}
+                className="btn"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+              >
+                <Settings size={16} /> Global Settings
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -386,20 +391,20 @@ export default function Payroll() {
                 <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right' }}>OT Pay</th>
                 <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right', color: '#F87171' }}>Deductions</th>
                 <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right', color: 'var(--primary)' }}>Net Salary</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>Actions</th>
+                {showActions && <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={13} style={{ padding: '60px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={showActions ? 13 : 12} style={{ padding: '60px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
                     <RefreshCw className="spin" style={{ margin: '0 auto 10px' }} size={24} />
                     Calculating payroll summaries...
                   </td>
                 </tr>
               ) : filteredPayroll.length === 0 ? (
                 <tr>
-                  <td colSpan={13} style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={showActions ? 13 : 12} style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No payroll calculations found for the selected criteria.
                   </td>
                 </tr>
@@ -454,30 +459,32 @@ export default function Payroll() {
                             {CURRENCY} {item.net_salary.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </button>
                         </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center', display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
-                          <button 
-                            onClick={() => openBreakdownModal(item)}
-                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '4px', color: 'var(--secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
-                            onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                            onMouseOut={e => e.currentTarget.style.background = 'transparent'}
-                            title="View Salary Breakdown"
-                          >
-                            <FileText size={16} />
-                          </button>
-                          <button 
-                            onClick={() => openOverrideModal(item.id)}
-                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '4px', color: 'var(--secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
-                            onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                            onMouseOut={e => e.currentTarget.style.background = 'transparent'}
-                            title="Configure specific settings"
-                          >
-                            <Settings size={16} />
-                          </button>
-                        </td>
+                        {showActions && (
+                          <td style={{ padding: '12px 16px', textAlign: 'center', display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                            <button 
+                              onClick={() => openBreakdownModal(item)}
+                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '4px', color: 'var(--secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
+                              onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                              onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                              title="View Salary Breakdown"
+                            >
+                              <FileText size={16} />
+                            </button>
+                            <button 
+                              onClick={() => openOverrideModal(item.id)}
+                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '4px', color: 'var(--secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
+                              onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                              onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                              title="Configure specific settings"
+                            >
+                              <Settings size={16} />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                       {item.status === 'Paid' && (
                         <tr style={{ background: 'rgba(16, 185, 129, 0.04)', borderBottom: '1px solid var(--surface-2)' }}>
-                          <td colSpan={13} style={{ padding: '8px 16px', textAlign: 'center', fontSize: '12px', fontWeight: 600, color: 'var(--secondary)' }}>
+                          <td colSpan={showActions ? 13 : 12} style={{ padding: '8px 16px', textAlign: 'center', fontSize: '12px', fontWeight: 600, color: 'var(--secondary)' }}>
                             🎉 <strong style={{ color: 'var(--text-primary)' }}>{item.name}</strong> • Salary Paid: <strong style={{ color: 'var(--green)' }}>{CURRENCY} {item.paid_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
                           </td>
                         </tr>

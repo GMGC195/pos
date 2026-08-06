@@ -665,7 +665,7 @@ export default function AttendanceTracker() {
                       className="btn btn-primary" 
                       onClick={() => handleCheckIn(emp.employee_id, emp.name)}
                       disabled={pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
-                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1 }}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
                     >
                       {pendingActions[`check-in-${emp.employee_id}`] ? 'Checking In...' : <><Play size={14} /> Check In</>}
                     </button>
@@ -675,7 +675,7 @@ export default function AttendanceTracker() {
                         className={`btn ${isOnBreak ? 'btn-primary' : 'btn-secondary'}`} 
                         onClick={() => handleToggleBreak(emp.employee_id, emp.name)}
                         disabled={pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1 }}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
                       >
                         {pendingActions[`toggle-break-${emp.employee_id}`] ? 'Loading...' : <><Coffee size={14} /> {isOnBreak ? 'End Break' : 'Break'}</>}
                       </button>
@@ -683,7 +683,7 @@ export default function AttendanceTracker() {
                         className="btn btn-secondary" 
                         onClick={() => handleCheckOut(emp.employee_id, emp.name)}
                         disabled={pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)', opacity: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1 }}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)', opacity: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
                       >
                         {pendingActions[`check-out-${emp.employee_id}`] ? 'Checking Out...' : <><Square size={14} /> Check Out</>}
                       </button>
