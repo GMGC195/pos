@@ -459,10 +459,9 @@ export default function AttendanceTracker() {
             minWidth: 160
           }}
         >
-          <option value="All">All Shifts</option>
-          <option value="R1">Shift R1</option>
-          <option value="R2">Shift R2</option>
-          <option value="R3">Shift R3</option>
+          {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
+            <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
+          ))}
         </select>
 
         <select 

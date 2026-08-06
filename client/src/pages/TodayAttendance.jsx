@@ -8,7 +8,9 @@ export default function TodayAttendance() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All') // 'All', 'Present', 'CheckedOut', 'Late', 'Absent'
+  const [shiftsList, setShiftsList] = useState([])
 
   const loadTodayAttendance = () => {
     setLoading(true)
@@ -20,17 +22,27 @@ export default function TodayAttendance() {
       .finally(() => setLoading(false))
   }
 
+  const loadShifts = () => {
+    axios.get('/api/employees/shifts/list')
+      .then(res => setShiftsList(res.data))
+      .catch(() => {})
+  }
+
   useEffect(() => {
     loadTodayAttendance()
+    loadShifts()
     // Poll every 30 seconds
     const interval = setInterval(loadTodayAttendance, 30000)
     return () => clearInterval(interval)
   }, [])
 
+  const departments = ['All', ...new Set(employees.map(emp => emp.department).filter(Boolean))]
+
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           String(emp.employee_id).toLowerCase().includes(searchQuery.toLowerCase());
     const matchesShift = selectedShift === 'All' || emp.shift === selectedShift;
+    const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
     
     // Status Filter
     let matchesStatus = true;
@@ -47,7 +59,7 @@ export default function TodayAttendance() {
       matchesStatus = !hasSessions;
     }
 
-    return matchesSearch && matchesShift && matchesStatus;
+    return matchesSearch && matchesShift && matchesDept && matchesStatus;
   }).sort((a, b) => {
     // Sort present (checked-in) employees to the top
     const aCheckedIn = a.attendance_id && !a.check_out ? 1 : 0;
@@ -121,10 +133,26 @@ export default function TodayAttendance() {
             minWidth: 160
           }}
         >
-          <option value="All">All Shifts</option>
-          <option value="R1">Shift R1</option>
-          <option value="R2">Shift R2</option>
-          <option value="R3">Shift R3</option>
+          {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
+            <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
+          ))}
+        </select>
+        <select 
+          value={selectedDepartment}
+          onChange={e => setSelectedDepartment(e.target.value)}
+          style={{
+            padding: '10px 14px',
+            background: 'var(--surface)',
+            border: '1.5px solid var(--surface-2)',
+            borderRadius: 10,
+            outline: 'none',
+            fontSize: 13,
+            minWidth: 160
+          }}
+        >
+          {departments.map(dept => (
+            <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
+          ))}
         </select>
         <select 
           value={selectedStatus}

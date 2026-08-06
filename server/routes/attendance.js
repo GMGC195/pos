@@ -30,7 +30,7 @@ router.get('/today', authenticateToken, async (req, res) => {
   try {
     // Fetch all active employees
     const activeEmps = await pool.query(`
-      SELECT id as employee_id, name, role, shift, shift_hours, status as employee_status, employee_id as employee_code
+      SELECT id as employee_id, name, role, shift, shift_hours, status as employee_status, employee_id as employee_code, department
       FROM employees
       WHERE status = 'Active'
       ORDER BY id ASC
