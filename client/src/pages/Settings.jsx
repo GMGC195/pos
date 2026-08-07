@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   Eye,
   EyeOff,
-  RefreshCw
+  RefreshCw,
+  MoreVertical
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -393,18 +394,19 @@ export default function Settings() {
                 </div>
               ) : (
                 <div className="settings-card">
-                  <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="card-header settings-team-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <h2>Team Members</h2>
                       <p>Manage access levels and account status</p>
                     </div>
-                    <div style={{ display: 'flex', gap: 12 }}>
+                    <div className="settings-team-actions" style={{ display: 'flex', gap: 12 }}>
                       <button 
                         className="btn-cancel" 
                         onClick={fetchUsers} 
                         style={{ 
                           display: 'flex', 
                           alignItems: 'center', 
+                          justifyContent: 'center',
                           gap: 6, 
                           height: 38, 
                           padding: '0 12px', 
@@ -418,69 +420,85 @@ export default function Settings() {
                       >
                         <RefreshCw size={14} /> Refresh
                       </button>
-                      <button className="btn-add-user" onClick={() => setIsAddingUser(true)}>
+                      <button className="btn-add-user" onClick={() => setIsAddingUser(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                         <UserPlus size={18} /> Add User
                       </button>
                     </div>
                   </div>
                   
-                  <div className="users-table-wrap" style={{ overflowX: 'auto', width: '100%' }}>
-                    <table className="users-table" style={{ width: '100%', minWidth: '600px' }}>
-                      <thead>
-                        <tr>
-                          <th>User</th>
-                          <th>Role</th>
-                          <th>Shift</th>
-                          <th>Date Joined</th>
-                          <th style={{ textAlign: 'right' }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {users.map(u => (
-                          <tr key={u.id}>
-                            <td>
-                              <div className="user-info-cell">
-                                <div className="user-avatar-sm">
-                                  {u.username[0].toUpperCase()}
-                                </div>
-                                <div>
-                                  <div className="user-name">{u.username}</div>
-                                  <div className="user-email">{u.email}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td>
-                              <span className={`role-badge ${u.role.toLowerCase()}`}>
-                                {u.role === 'Admin' ? <ShieldCheck size={14} /> : u.role === 'Developer' ? <Shield size={14} /> : <User size={14} />}
-                                {u.role}
-                              </span>
-                            </td>
-                            <td style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{u.role === 'Operator' ? (u.shift || 'None') : '--'}</td>
-                            <td>{new Date(u.created_at).toLocaleDateString()}</td>
-                            <td>
-                              <div className="user-actions">
-                                <button 
-                                  className="action-btn edit" 
-                                  onClick={() => openEdit(u)} 
-                                  title="Edit User"
-                                  disabled={u.role?.toLowerCase() === 'developer' && user.role?.toLowerCase() !== 'developer'}
-                                >
-                                  <Pencil size={16} />
-                                </button>
-                                <button 
-                                  className="action-btn delete" 
-                                  onClick={() => handleDeleteUser(u.id)} 
-                                  title="Delete User"
-                                  disabled={(u.id === user.id) || (u.role?.toLowerCase() === 'developer' && user.role?.toLowerCase() !== 'developer')}
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </td>
+                  {/* Desktop Table View */}
+                  <div className="users-table-wrap desktop-table-view">
+                    <div style={{ minWidth: '600px' }}>
+                      <table className="users-table" style={{ width: '100%' }}>
+                        <thead>
+                          <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Shift</th>
+                            <th>Date Joined</th>
+                            <th style={{ textAlign: 'right' }}>Actions</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {users.map(u => (
+                            <tr key={u.id}>
+                              <td>
+                                <div className="user-info-cell">
+                                  <div className="user-avatar-sm">
+                                    {u.username[0].toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div className="user-name">{u.username}</div>
+                                    <div className="user-email">{u.email}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`role-badge ${u.role.toLowerCase()}`}>
+                                  {u.role === 'Admin' ? <ShieldCheck size={14} /> : u.role === 'Developer' ? <Shield size={14} /> : <User size={14} />}
+                                  {u.role}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{u.role === 'Operator' ? (u.shift || 'None') : '--'}</td>
+                              <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                              <td>
+                                <div className="user-actions">
+                                  <button 
+                                    className="action-btn edit" 
+                                    onClick={() => openEdit(u)} 
+                                    title="Edit User"
+                                    disabled={u.role?.toLowerCase() === 'developer' && user.role?.toLowerCase() !== 'developer'}
+                                  >
+                                    <Pencil size={16} />
+                                  </button>
+                                  <button 
+                                    className="action-btn delete" 
+                                    onClick={() => handleDeleteUser(u.id)} 
+                                    title="Delete User"
+                                    disabled={(u.id === user.id) || (u.role?.toLowerCase() === 'developer' && user.role?.toLowerCase() !== 'developer')}
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Mobile Card Grid View */}
+                  <div className="users-mobile-grid" style={{ display: 'none', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
+                    {users.map(u => (
+                      <UserMobileCard 
+                        key={u.id} 
+                        u={u} 
+                        currentUser={user} 
+                        onEdit={openEdit} 
+                        onDelete={handleDeleteUser} 
+                      />
+                    ))}
                   </div>
                 </div>
               )}
@@ -883,7 +901,162 @@ export default function Settings() {
             grid-template-columns: 1fr;
           }
         }
+
+        @media (max-width: 768px) {
+          .desktop-table-view {
+            display: none !important;
+          }
+          .users-mobile-grid {
+            display: flex !important;
+          }
+          .settings-team-header {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 16px !important;
+          }
+          .settings-team-actions {
+            width: 100% !important;
+            gap: 8px !important;
+          }
+          .settings-team-actions button {
+            flex: 1 !important;
+          }
+        }
       `}</style>
+    </div>
+  )
+}
+
+function UserMobileCard({ u, currentUser, onEdit, onDelete }) {
+  const [showDropdown, setShowDropdown] = useState(false)
+
+  useEffect(() => {
+    const handleClose = () => setShowDropdown(false)
+    window.addEventListener('click', handleClose)
+    return () => window.removeEventListener('click', handleClose)
+  }, [])
+
+  const disabledEdit = u.role?.toLowerCase() === 'developer' && currentUser.role?.toLowerCase() !== 'developer'
+  const disabledDelete = (u.id === currentUser.id) || (u.role?.toLowerCase() === 'developer' && currentUser.role?.toLowerCase() !== 'developer')
+
+  return (
+    <div style={{
+      background: 'white',
+      border: '1.5px solid var(--surface-2)',
+      borderRadius: '16px',
+      padding: '16px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      position: 'relative',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{
+          width: '40px',
+          height: '40px',
+          borderRadius: '12px',
+          background: 'linear-gradient(135deg, var(--red), var(--orange))',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'white',
+          fontWeight: 'bold',
+          fontSize: '15px'
+        }}>
+          {u.username[0].toUpperCase()}
+        </div>
+        <div>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>{u.username}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px' }}>{u.email}</div>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <span className={`role-badge ${u.role.toLowerCase()}`} style={{ fontSize: '10px', padding: '2px 8px' }}>
+              {u.role}
+            </span>
+            {u.role === 'Operator' && (
+              <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                • Shift {u.shift || 'None'}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ position: 'relative' }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowDropdown(!showDropdown)
+          }}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '8px',
+            color: 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <MoreVertical size={20} />
+        </button>
+
+        {showDropdown && (
+          <div style={{
+            position: 'absolute',
+            right: 0,
+            top: '100%',
+            background: 'white',
+            border: '1.5px solid var(--surface-2)',
+            borderRadius: '10px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+            zIndex: 100,
+            minWidth: '120px',
+            marginTop: '4px',
+            overflow: 'hidden'
+          }}>
+            <button
+              onClick={() => onEdit(u)}
+              disabled={disabledEdit}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px 14px',
+                background: 'transparent',
+                border: 'none',
+                cursor: disabledEdit ? 'not-allowed' : 'pointer',
+                fontSize: '13px',
+                textAlign: 'left',
+                color: 'var(--text-primary)',
+                fontWeight: 500,
+                opacity: disabledEdit ? 0.4 : 1
+              }}
+            >
+              Edit User
+            </button>
+            <button
+              onClick={() => onDelete(u.id)}
+              disabled={disabledDelete}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px 14px',
+                background: 'transparent',
+                border: 'none',
+                cursor: disabledDelete ? 'not-allowed' : 'pointer',
+                fontSize: '13px',
+                textAlign: 'left',
+                color: '#EF4444',
+                fontWeight: 500,
+                opacity: disabledDelete ? 0.4 : 1
+              }}
+            >
+              Delete User
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

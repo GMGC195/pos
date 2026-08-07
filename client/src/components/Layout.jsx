@@ -198,7 +198,7 @@ export default function Layout() {
           </div>
           <div className="logo-text">
             <h2>{BRAND_NAME}</h2>
-            <span>{BRAND_TAGLINE}</span>
+            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--primary)', letterSpacing: '0.5px' }}>{BRAND_TAGLINE}</span>
           </div>
           <button 
             className={`sidebar-close-btn ${isSidebarOpen ? 'active' : ''}`}
@@ -284,9 +284,6 @@ export default function Layout() {
           >
             <LogOut size={16} strokeWidth={2.5} /> Logout
           </button>
-          <div className="nav-link" style={{ cursor: 'default', color: 'rgba(255,255,255,0.3)', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
-            <span>{BRAND_NAME} Pro</span>
-          </div>
         </div>
       </aside>
 

@@ -619,14 +619,22 @@ export default function Dashboard() {
 
       {/* Welcome Banner */}
       <div style={{ marginBottom: 24, marginTop: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-        <div>
+        <div style={{ paddingLeft: '8px' }}>
           <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Good evening, {user?.username} 👋</h2>
           <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: 13 }}>Restaurant Attendance & Operations Dashboard</p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
+        <button className="btn btn-secondary btn-sm dashboard-refresh-btn" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
           <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
         </button>
       </div>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .dashboard-refresh-btn {
+            display: none !important;
+          }
+        }
+      `}</style>
 
       {/* 6 Attendance KPI Cards */}
       <div className="attendance-cards-grid" style={{
