@@ -465,20 +465,16 @@ export default function Login() {
         }
 
         @media (max-width: 820px) {
-          .lp-root { flex-direction: column; }
-          .lp-left { padding: 36px 24px 24px; }
-          .lp-brand-name { font-size: 32px; }
-          .lp-features { max-width: 100%; }
-          .lp-right { width: 100%; padding: 0 16px 36px; margin-right: 0; }
+          .lp-root { flex-direction: column; justify-content: center; align-items: center; }
+          .lp-left { display: none !important; }
+          .lp-features { display: none !important; }
+          .lp-right { width: 100%; padding: 16px; margin-right: 0; }
           .lp-card { padding: 26px 22px 20px; border-radius: 20px; }
         }
 
         @media (max-width: 480px) {
-          .lp-left { padding: 28px 16px 20px; }
-          .lp-logo { width: 88px; height: 88px; }
-          .lp-brand-name { font-size: 26px; letter-spacing: 3px; }
-          .lp-features { grid-template-columns: 1fr; gap: 10px; }
-          .lp-right { padding: 0 12px 28px; }
+          .lp-left { display: none !important; }
+          .lp-right { padding: 12px; }
           .lp-card { padding: 22px 16px 16px; }
         }
       `}</style>

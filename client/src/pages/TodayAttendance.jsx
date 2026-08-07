@@ -201,44 +201,21 @@ export default function TodayAttendance() {
               <span style={{ fontWeight: 700 }}>{employees.filter(e => e.on_break).length}</span>
             </div>
           </div>
-
-          <button className="btn btn-secondary" onClick={loadTodayAttendance} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button 
-            className="btn" 
-            onClick={exportToExcel}
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 6, 
-              background: 'var(--green)', 
-              color: 'white', 
-              fontWeight: 650, 
-              border: 'none', 
-              borderRadius: 8, 
-              padding: '10px 14px', 
-              cursor: 'pointer',
-              fontSize: 13
-            }}
-          >
-            <Download size={14} /> Export Excel
-          </button>
         </div>
       </div>
 
       {/* Filter Options */}
-      <div className="attendance-search-row" style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
-        <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
-          <Search size={18} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+      <div className="attendance-search-row" style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 120, position: 'relative' }}>
+          <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input 
             type="text" 
-            placeholder="Search active staff by name or ID..." 
+            placeholder="Search active staff..." 
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             style={{
               width: '100%',
-              padding: '10px 14px 10px 38px',
+              padding: '10px 10px 10px 32px',
               background: 'var(--surface)',
               border: '1.5px solid var(--surface-2)',
               borderRadius: 10,
@@ -249,10 +226,10 @@ export default function TodayAttendance() {
           />
         </div>
         <button 
-          className="btn btn-secondary mobile-filter-toggle-btn"
+          className="btn btn-secondary"
           onClick={() => setShowMobileFilters(!showMobileFilters)}
           style={{
-            display: 'none',
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '10px',
@@ -260,10 +237,45 @@ export default function TodayAttendance() {
             height: 40,
             width: 40,
             borderColor: showMobileFilters ? 'var(--primary)' : 'var(--surface-2)',
-            color: showMobileFilters ? 'var(--primary)' : 'var(--text)'
+            color: showMobileFilters ? 'var(--primary)' : 'var(--text)',
+            flexShrink: 0
           }}
         >
           <Filter size={18} />
+        </button>
+        <button 
+          className="btn btn-secondary" 
+          onClick={loadTodayAttendance} 
+          style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            padding: '10px', 
+            borderRadius: 10, 
+            height: 40, 
+            width: 40, 
+            flexShrink: 0
+          }}
+          title="Refresh"
+        >
+          <RefreshCw size={16} />
+        </button>
+        <button 
+          className="btn btn-secondary" 
+          onClick={exportToExcel}
+          style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            padding: '10px', 
+            borderRadius: 10, 
+            height: 40, 
+            width: 40, 
+            flexShrink: 0
+          }}
+          title="Export Excel"
+        >
+          <Download size={16} />
         </button>
       </div>
 
@@ -326,9 +338,18 @@ export default function TodayAttendance() {
       </div>
 
       <style>{`
+        .attendance-filters-row {
+          display: flex;
+        }
         @media (max-width: 768px) {
-          .mobile-filter-toggle-btn {
-            display: flex !important;
+          .attendance-header-btn .btn-text {
+            display: none !important;
+          }
+          .attendance-header-btn {
+            padding: 10px !important;
+            width: 40px !important;
+            height: 40px !important;
+            justify-content: center !important;
           }
           .attendance-filters-row {
             display: none !important;
@@ -361,19 +382,19 @@ export default function TodayAttendance() {
       ) : (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="table-wrap">
-            <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '800px' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-1)' }}>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)' }}>Code</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)' }}>Employee Name</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)' }}>Shift</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Check-In Time</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Check-Out Time</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Status</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Hours Worked</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Overtime</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Code</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '220px' }}>Employee Name</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Shift</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-In Time</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-Out Time</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Status</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Hours Worked</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Overtime</th>
                   {['admin', 'operator', 'developer'].includes(user?.role?.toLowerCase()) && (
-                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Actions</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '80px' }}>Actions</th>
                   )}
                 </tr>
               </thead>
@@ -396,7 +417,7 @@ export default function TodayAttendance() {
                       onMouseOut={e => e.currentTarget.style.background = rowBg}
                     >
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{emp.employee_code || emp.employee_id}</td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700 }}>{emp.name}</td>
+                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '220px' }}>{emp.name}</td>
                       <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>{emp.shift || 'R1'}</td>
                       
                       {/* Check-In Column (Stacked list of all check-in sessions) */}

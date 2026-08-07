@@ -424,8 +424,8 @@ export default function Settings() {
                     </div>
                   </div>
                   
-                  <div className="users-table-wrap">
-                    <table className="users-table">
+                  <div className="users-table-wrap" style={{ overflowX: 'auto', width: '100%' }}>
+                    <table className="users-table" style={{ width: '100%', minWidth: '600px' }}>
                       <thead>
                         <tr>
                           <th>User</th>

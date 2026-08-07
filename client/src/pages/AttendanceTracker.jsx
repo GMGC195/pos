@@ -460,10 +460,10 @@ export default function AttendanceTracker() {
           />
         </div>
         <button 
-          className="btn btn-secondary mobile-filter-toggle-btn"
+          className="btn btn-secondary"
           onClick={() => setShowMobileFilters(!showMobileFilters)}
           style={{
-            display: 'none',
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '10px',
@@ -540,10 +540,10 @@ export default function AttendanceTracker() {
       </div>
 
       <style>{`
+        .attendance-filters-row {
+          display: flex;
+        }
         @media (max-width: 768px) {
-          .mobile-filter-toggle-btn {
-            display: flex !important;
-          }
           .attendance-filters-row {
             display: none !important;
             flex-direction: column;

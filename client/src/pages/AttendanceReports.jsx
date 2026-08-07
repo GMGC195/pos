@@ -612,112 +612,135 @@ export default function AttendanceReports() {
 
       {/* ── Controls bar ─ sticky, never moves ── */}
       <div className="attendance-controls-bar">
-        <div className="attendance-controls-card">
-          <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8, marginRight: 'auto' }}>
+        <div className="attendance-controls-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Top header row with Month selection */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               <FileText size={18} style={{ color: 'var(--primary)' }} /> Monthly Attendance Sheet
             </h3>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Month:</span>
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', fontSize: 13 }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Month:</span>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={e => setSelectedMonth(e.target.value)}
+                  style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '6px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', fontSize: 13 }}
+                />
+              </div>
+
+              {isAdmin && (
+                <button
+                  className="btn btn-primary attendance-header-btn"
+                  onClick={() => setShowHolidayModal(true)}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 34, fontSize: 13, padding: '0 12px' }}
+                  title="Manage Holiday"
+                >
+                  <Settings size={14} /> <span className="btn-text">Manage Holiday</span>
+                </button>
+              )}
+
+              {isAdmin && (
+                <button
+                  className="btn btn-secondary attendance-header-btn"
+                  onClick={() => setShowEditModal(true)}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 34, fontSize: 13, borderColor: 'var(--primary)', color: 'var(--text)', padding: '0 12px' }}
+                  title="Edit Attendance"
+                >
+                  <Edit size={14} style={{ color: 'var(--primary)' }} /> <span className="btn-text">Edit Attendance</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div style={{ height: '1.5px', background: 'var(--surface-2)', width: '100%' }} />
+
+          {/* Main search and icon actions row */}
+          <div className="attendance-search-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 120, position: 'relative' }}>
+              <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input 
+                type="text" 
+                placeholder="Search active staff..." 
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 10px 10px 32px',
+                  background: 'var(--surface)',
+                  border: '1.5px solid var(--surface-2)',
+                  borderRadius: 10,
+                  outline: 'none',
+                  fontSize: 13,
+                  boxSizing: 'border-box'
+                }}
               />
             </div>
-
+            
             <button 
               className="btn btn-secondary" 
               onClick={() => setShowFilters(!showFilters)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                height: 38,
-                fontSize: 13,
+                justifyContent: 'center',
+                padding: '10px',
+                borderRadius: 10,
+                height: 40,
+                width: 40,
                 borderColor: showFilters ? 'var(--primary)' : 'var(--surface-2)',
-                color: showFilters ? 'var(--primary)' : 'var(--text)'
+                color: showFilters ? 'var(--primary)' : 'var(--text)',
+                flexShrink: 0
               }}
+              title="Filters"
             >
-              <Filter size={14} /> Filters
-            </button>
-
-            {isAdmin && (
-              <button
-                className="btn btn-primary"
-                onClick={() => setShowHolidayModal(true)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}
-              >
-                <Settings size={14} /> Manage Holiday
-              </button>
-            )}
-
-            {isAdmin && (
-              <button
-                className="btn btn-secondary"
-                onClick={() => setShowEditModal(true)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13, borderColor: 'var(--primary)', color: 'var(--text)' }}
-              >
-                <Edit size={14} style={{ color: 'var(--primary)' }} /> Edit Attendance
-              </button>
-            )}
-
-            <button className="btn btn-secondary" onClick={loadReports} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, fontSize: 13 }}>
-              <RefreshCw size={14} /> Refresh
+              <Filter size={18} />
             </button>
 
             <button 
-              className="btn" 
-              onClick={exportToExcel} 
+              className="btn btn-secondary" 
+              onClick={loadReports} 
               style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: 6, 
-                height: 38, 
-                fontSize: 13, 
-                background: 'var(--green)', 
-                color: 'white', 
-                fontWeight: 650, 
-                border: 'none', 
-                borderRadius: 8, 
-                padding: '0 14px', 
-                cursor: 'pointer',
-                transition: 'opacity 0.15s'
+                justifyContent: 'center',
+                padding: '10px', 
+                borderRadius: 10, 
+                height: 40, 
+                width: 40, 
+                flexShrink: 0
               }}
-              onMouseOver={e => e.currentTarget.style.opacity = '0.9'}
-              onMouseOut={e => e.currentTarget.style.opacity = '1'}
+              title="Refresh"
             >
-              <Download size={14} /> Export Excel
+              <RefreshCw size={16} />
+            </button>
+
+            <button 
+              className="btn btn-secondary" 
+              onClick={exportToExcel}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                padding: '10px', 
+                borderRadius: 10, 
+                height: 40, 
+                width: 40, 
+                flexShrink: 0
+              }}
+              title="Export Excel"
+            >
+              <Download size={16} />
             </button>
           </div>
         </div>
       </div>
 
       {showFilters && (
-        <div style={{ padding: '0 32px', marginBottom: 20 }}>
+        <div style={{ padding: '0 28px', marginTop: 12 }}>
           <div className="attendance-controls-card" style={{ display: 'flex', gap: 16, padding: '16px 20px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <input 
-                type="text" 
-                placeholder="Search by name or code..." 
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  background: 'var(--surface-1)',
-                  border: '1.5px solid var(--surface-2)',
-                  borderRadius: 8,
-                  outline: 'none',
-                  fontSize: 13,
-                  color: 'var(--text)',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-
             <select 
               value={selectedShift}
               onChange={e => setSelectedShift(e.target.value)}
@@ -728,7 +751,8 @@ export default function AttendanceReports() {
                 borderRadius: 8,
                 outline: 'none',
                 fontSize: 13,
-                minWidth: 150
+                minWidth: 150,
+                flex: 1
               }}
             >
               <option value="All">All Shifts</option>
@@ -747,7 +771,8 @@ export default function AttendanceReports() {
                 borderRadius: 8,
                 outline: 'none',
                 fontSize: 13,
-                minWidth: 150
+                minWidth: 150,
+                flex: 1
               }}
             >
               {departments.map(dept => (
@@ -765,7 +790,8 @@ export default function AttendanceReports() {
                 borderRadius: 8,
                 outline: 'none',
                 fontSize: 13,
-                minWidth: 150
+                minWidth: 150,
+                flex: 1
               }}
             >
               <option value="All">All Statuses</option>
@@ -778,6 +804,20 @@ export default function AttendanceReports() {
           </div>
         </div>
       )}
+
+      <style>{`
+        @media (max-width: 768px) {
+          .attendance-header-btn .btn-text {
+            display: none !important;
+          }
+          .attendance-header-btn {
+            padding: 0 !important;
+            width: 34px !important;
+            height: 34px !important;
+            justify-content: center !important;
+          }
+        }
+      `}</style>
 
       {/* ── Grid area ─ fills remaining height, only this scrolls ── */}
       <div className="attendance-grid-wrapper">
@@ -1003,7 +1043,7 @@ export default function AttendanceReports() {
       {/* Holiday Configuration Modal */}
       {showHolidayModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }}>
-          <div className="card" style={{ width: 400, padding: 24, position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: 380, margin: '0 16px', padding: 24, position: 'relative' }}>
             <button onClick={() => setShowHolidayModal(false)} style={{ position: 'absolute', right: 16, top: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
               <X size={20} />
             </button>

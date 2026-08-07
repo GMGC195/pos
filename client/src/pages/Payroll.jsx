@@ -259,46 +259,29 @@ export default function Payroll() {
     <div className="page-container" style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
       
       {/* Header section */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '26px', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Calculator style={{ color: 'var(--primary)' }} size={28} /> Employee Payroll & Slips
+          <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+            <Calculator style={{ color: 'var(--primary)', marginTop: '2px', flexShrink: 0 }} size={26} /> <span>Employee Payroll & Slips</span>
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginTop: '4px' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px', maxWidth: '600px' }}>
             Calculate monthly salary, overtime rate, allowed paid leaves, and log employee leaves manually.
           </p>
         </div>
-
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {isAdmin && (
-            <>
-              <button 
-                onClick={() => setShowLeaveModal(true)}
-                className="btn btn-secondary" 
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--secondary)', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
-              >
-                <Plus size={16} /> Log Leave
-              </button>
-              
-              <button 
-                onClick={() => setShowOverridesModal(true)}
-                className="btn btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: '1px solid var(--surface-2)', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
-              >
-                <User size={16} /> Override Salary
-              </button>
-
-              <button 
-                onClick={() => setShowSettingsModal(true)}
-                className="btn"
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
-              >
-                <Settings size={16} /> Global Settings
-              </button>
-            </>
-          )}
-        </div>
       </header>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .payroll-header-btn-inline {
+            padding: 6px 8px !important;
+            font-size: 11px !important;
+          }
+          .payroll-header-btn-inline svg {
+            width: 13px !important;
+            height: 13px !important;
+          }
+        }
+      `}</style>
 
       {/* KPI Cards Grid */}
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px', marginBottom: '30px' }}>
@@ -348,27 +331,65 @@ export default function Payroll() {
       </section>
 
       {/* Filters and Controls */}
-      <section style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '16px', background: 'var(--white)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Select Payroll Month</label>
-            <input 
-              type="month" 
-              value={selectedMonth}
-              onChange={e => setSelectedMonth(e.target.value)}
-              style={{ padding: '8px 12px', border: '1px solid var(--surface-2)', borderRadius: '6px', fontSize: '14px', background: 'var(--surface)', fontWeight: 600, color: 'var(--text-primary)' }}
-            />
+      <section style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px', background: 'var(--white)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Select Payroll Month</label>
+              <input 
+                type="month" 
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
+                style={{ padding: '8px 12px', border: '1px solid var(--surface-2)', borderRadius: '6px', fontSize: '14px', background: 'var(--surface)', fontWeight: 600, color: 'var(--text-primary)' }}
+              />
+            </div>
+
+            {isAdmin && (
+              <button 
+                onClick={() => setShowSettingsModal(true)}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '40px', width: '40px', padding: '0', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+                title="Global Settings"
+              >
+                <Settings size={15} />
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
+            {isAdmin && (
+              <>
+                <button 
+                  onClick={() => setShowLeaveModal(true)}
+                  className="btn btn-secondary payroll-header-btn-inline" 
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: 'var(--secondary)', color: 'white', border: 'none', padding: '10px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', height: '40px', flex: 1 }}
+                >
+                  <CalendarDays size={15} /> <span className="btn-text">Special Leave</span>
+                </button>
+                
+                <button 
+                  onClick={() => setShowOverridesModal(true)}
+                  className="btn btn-secondary payroll-header-btn-inline"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: '1px solid var(--surface-2)', padding: '10px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', height: '40px', flex: 1 }}
+                >
+                  <DollarSign size={15} /> <span className="btn-text">Manage Salary</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        <div style={{ position: 'relative', width: '300px' }}>
-          <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={18} />
+        {/* Divider line between month/buttons and search input */}
+        <div style={{ height: '1.5px', background: 'var(--surface-2)', width: '100%' }} />
+
+        <div style={{ position: 'relative', width: '100%', maxWidth: '300px' }}>
+          <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={16} />
           <input 
             type="text"
-            placeholder="Search employee by name/code..."
+            placeholder="Search active staff..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            style={{ width: '100%', padding: '10px 12px 10px 40px', border: '1px solid var(--surface-2)', borderRadius: '8px', fontSize: '14px', outline: 'none' }}
+            style={{ width: '100%', padding: '10px 12px 10px 36px', border: '1px solid var(--surface-2)', borderRadius: '8px', fontSize: '13px', outline: 'none' }}
           />
         </div>
       </section>
@@ -468,15 +489,6 @@ export default function Payroll() {
                               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
                               title="View Salary Breakdown"
                             >
-                              <FileText size={16} />
-                            </button>
-                            <button 
-                              onClick={() => openOverrideModal(item.id)}
-                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '4px', color: 'var(--secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
-                              onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                              onMouseOut={e => e.currentTarget.style.background = 'transparent'}
-                              title="Configure specific settings"
-                            >
                               <Settings size={16} />
                             </button>
                           </td>
@@ -511,7 +523,7 @@ export default function Payroll() {
       {/* Global Settings Modal */}
       {showSettingsModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'var(--white)', borderRadius: '12px', width: '400px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
+          <div style={{ background: 'var(--white)', borderRadius: '12px', width: '100%', maxWidth: '380px', margin: '0 16px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ fontSize: '18px', fontWeight: 800 }}>Global Payroll Settings</h3>
               <button onClick={() => setShowSettingsModal(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
@@ -554,7 +566,7 @@ export default function Payroll() {
       {/* Employee Overrides Modal */}
       {showOverridesModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'var(--white)', borderRadius: '12px', width: '450px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
+          <div style={{ background: 'var(--white)', borderRadius: '12px', width: '100%', maxWidth: '420px', margin: '0 16px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ fontSize: '18px', fontWeight: 800 }}>Employee Salary Configuration</h3>
               <button onClick={() => setShowOverridesModal(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
@@ -628,9 +640,9 @@ export default function Payroll() {
       {/* Manual Leave Logging Modal */}
       {showLeaveModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'var(--white)', borderRadius: '12px', width: '400px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
+          <div style={{ background: 'var(--white)', borderRadius: '12px', width: '100%', maxWidth: '380px', margin: '0 16px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 800 }}>Log Employee Leave</h3>
+              <h3 style={{ fontSize: '18px', fontWeight: 800 }}>Log Special Leave</h3>
               <button onClick={() => setShowLeaveModal(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
             </div>
             <form onSubmit={handleSaveLeave}>
@@ -679,7 +691,7 @@ export default function Payroll() {
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                 <button type="button" onClick={() => setShowLeaveModal(false)} className="btn btn-secondary" style={{ padding: '10px 16px', borderRadius: '8px', border: '1.5px solid var(--surface-2)', background: 'transparent', cursor: 'pointer', fontWeight: 600 }}>Cancel</button>
                 <button type="submit" disabled={savingLeave} className="btn animate-pulse" style={{ padding: '10px 16px', borderRadius: '8px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', fontWeight: 700 }}>
-                  {savingLeave ? 'Saving...' : 'Mark Leave'}
+                  {savingLeave ? 'Saving...' : 'Mark Special Leave'}
                 </button>
               </div>
             </form>
@@ -692,8 +704,8 @@ export default function Payroll() {
         const calculatedNet = Math.max(0, selectedBreakdown.base_salary - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + parseFloat(breakdownOthers || 0))
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-            <div style={{ background: 'var(--white)', borderRadius: '16px', width: '460px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1.5px solid var(--surface-2)', paddingBottom: '12px' }}>
+            <div style={{ background: 'var(--white)', borderRadius: '16px', width: '100%', maxWidth: '460px', margin: '0 16px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1.5px solid var(--surface-2)', paddingBottom: '12px', flexShrink: 0 }}>
                 <div>
                   <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--secondary)' }}>Salary Breakdown</h3>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{selectedBreakdown.name} ({selectedBreakdown.employee_id})</span>
@@ -701,7 +713,7 @@ export default function Payroll() {
                 <button onClick={() => setSelectedBreakdown(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
                 {/* Step 1: Base Salary */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--surface-2)' }}>
                   <div>
@@ -805,7 +817,7 @@ export default function Payroll() {
 
               </div>
 
-              <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', flexShrink: 0 }}>
                 <button 
                   type="button" 
                   onClick={() => setSelectedBreakdown(null)}
