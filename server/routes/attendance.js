@@ -611,6 +611,24 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Create a new manual attendance session
+router.post('/session', authenticateToken, async (req, res) => {
+  const { employee_id, date, check_in, check_out, status } = req.body;
+  if (!employee_id || !date || !check_in) {
+    return res.status(400).json({ error: 'Employee ID, date, and check-in time are required' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Delete a specific attendance session
 router.delete('/session/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;

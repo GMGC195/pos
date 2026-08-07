@@ -1322,6 +1322,76 @@ export default function AttendanceReports() {
               </div>
             </div>
 
+            {/* Add New Session manually */}
+            {editEmployeeId && (
+              <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1.5px dashed var(--surface-3)', marginBottom: 12 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 8 }}>Add Manual Session</span>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 140 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check In</span>
+                    <input 
+                      type="datetime-local" 
+                      id="manualInTime"
+                      style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'white', color: 'var(--text)' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 140 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check Out</span>
+                    <input 
+                      type="datetime-local" 
+                      id="manualOutTime"
+                      style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'white', color: 'var(--text)' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 100 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Status</span>
+                    <select 
+                      id="manualStatus" 
+                      defaultValue="Present"
+                      style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '5px 8px', fontSize: 12, background: 'white', color: 'var(--text)', height: 29 }}
+                    >
+                      <option value="Present">Present</option>
+                      <option value="Late">Late</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button 
+                    className="btn btn-primary"
+                    style={{ height: 30, fontSize: 11, padding: '0 12px' }}
+                    onClick={async () => {
+                      const inVal = document.getElementById('manualInTime').value
+                      const outVal = document.getElementById('manualOutTime').value
+                      const statusVal = document.getElementById('manualStatus').value
+                      if (!inVal) {
+                        toast.error('Check In Time is required')
+                        return
+                      }
+                      try {
+                        await axios.post('/api/attendance/session', {
+                          employee_id: editEmployeeId,
+                          date: editDate,
+                          check_in: inVal,
+                          check_out: outVal || null,
+                          status: statusVal
+                        })
+                        toast.success('Manual attendance session created!')
+                        loadEditSessions()
+                        loadReports()
+                        // Reset manual inputs
+                        document.getElementById('manualInTime').value = ''
+                        document.getElementById('manualOutTime').value = ''
+                      } catch (err) {
+                        toast.error(err?.response?.data?.error || 'Failed to create manual log')
+                      }
+                    }}
+                  >
+                    Add Session
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Sessions list */}
             <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4, marginTop: 8 }}>
               {loadingSessions ? (
