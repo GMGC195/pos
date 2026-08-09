@@ -65,6 +65,7 @@ router.get('/today', authenticateToken, async (req, res) => {
       
       // Calculate today's total hours worked so far across all sessions
       let totalHoursToday = 0;
+      let totalBreakSecondsToday = 0;
       empSessions.forEach(row => {
         const checkInTime = new Date(row.check_in).getTime();
         const checkOutTime = row.check_out ? new Date(row.check_out).getTime() : Date.now();
@@ -72,6 +73,7 @@ router.get('/today', authenticateToken, async (req, res) => {
         if (row.on_break && row.break_start) {
           breakSecs += Math.floor((Date.now() - new Date(row.break_start).getTime()) / 1000);
         }
+        totalBreakSecondsToday += breakSecs;
         const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
         totalHoursToday += Math.max(0, sessionMs / (1000 * 60 * 60));
       });
@@ -88,7 +90,8 @@ router.get('/today', authenticateToken, async (req, res) => {
         attendance_status: lastSession ? lastSession.attendance_status : null,
         on_break: lastSession ? lastSession.on_break : false,
         break_start: lastSession ? lastSession.break_start : null,
-        total_hours_today: totalHoursToday
+        total_hours_today: totalHoursToday,
+        total_break_seconds_today: totalBreakSecondsToday
       };
     });
 
@@ -626,8 +629,8 @@ router.post('/session', authenticateToken, async (req, res) => {
 
   try {
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username]
+      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by, remarks) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username, 'Manual']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

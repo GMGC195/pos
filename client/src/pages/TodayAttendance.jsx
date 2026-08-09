@@ -21,6 +21,15 @@ const decimalHoursToText = (hoursDec) => {
   return `${mins} min`;
 }
 
+const formatBreakTime = (seconds) => {
+  if (!seconds || seconds <= 0) return '--';
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${hrs} h ${m} m` : `${hrs} h`;
+};
+
 const formatLocalDate = (date) => {
   const d = new Date(date)
   const year = d.getFullYear()
@@ -147,21 +156,20 @@ export default function TodayAttendance() {
   const handleAddSession = async () => {
     if (!newCheckIn) { toast.error('Check-In time is required'); return }
     if (!newCheckOut) { toast.error('Check-Out time is required'); return }
-    if (new Date(newCheckOut) <= new Date(newCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
+    const fullCheckIn = `${editDate}T${newCheckIn}`
+    const fullCheckOut = `${editDate}T${newCheckOut}`
+    if (new Date(fullCheckOut) <= new Date(fullCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
     const toISO = (v) => v ? new Date(v).toISOString() : null
     try {
       await axios.post('/api/attendance/session', {
         employee_id: editEmpId,
         date: editDate,
-        check_in: toISO(newCheckIn),
-        check_out: toISO(newCheckOut),
+        check_in: toISO(fullCheckIn),
+        check_out: toISO(fullCheckOut),
         status: newStatus
       })
       toast.success('Session added!')
-      setNewCheckIn('')
-      setNewCheckOut('')
-      setNewStatus('Present')
-      loadEditSessions(editEmpId, editDate)
+      closeEditModal()
       loadTodayAttendance()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to add session')
@@ -514,6 +522,7 @@ export default function TodayAttendance() {
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-Out Time</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Status</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Hours Worked</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Break Time</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Overtime</th>
                   {['admin', 'operator', 'developer'].includes(user?.role?.toLowerCase()) && (
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '80px' }}>Actions</th>
@@ -546,9 +555,17 @@ export default function TodayAttendance() {
                       <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600, textAlign: 'center', color: 'var(--green)' }}>
                         {sessions.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            {sessions.map((s, idx) => (
-                              <div key={idx}>In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                            ))}
+                            {sessions.map((s, idx) => {
+                              const isEdited = s.remarks === 'Edited';
+                              const isManual = s.remarks === 'Manual';
+                              const tag = isEdited ? <span style={{color: '#3B82F6', fontSize: 10, fontWeight: 700}}>(E)</span> : isManual ? <span style={{color: '#8B5CF6', fontSize: 10, fontWeight: 700}}>(M)</span> : null;
+                              const valColor = isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--green)';
+                              return (
+                                <div key={idx} style={{ color: valColor, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                                  In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {tag}
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : (
                           '--'
@@ -559,11 +576,17 @@ export default function TodayAttendance() {
                       <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600, textAlign: 'center', color: 'var(--text-muted)' }}>
                         {sessions.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            {sessions.map((s, idx) => (
-                              <div key={idx}>
-                                {s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active'}
-                              </div>
-                            ))}
+                            {sessions.map((s, idx) => {
+                              const isEdited = s.remarks === 'Edited';
+                              const isManual = s.remarks === 'Manual';
+                              const tag = isEdited ? <span style={{color: '#3B82F6', fontSize: 10, fontWeight: 700}}>(E)</span> : isManual ? <span style={{color: '#8B5CF6', fontSize: 10, fontWeight: 700}}>(M)</span> : null;
+                              const valColor = isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--text-muted)';
+                              return (
+                                <div key={idx} style={{ color: valColor, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                                  {s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active'} {s.check_out && tag}
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : (
                           '--'
@@ -594,6 +617,9 @@ export default function TodayAttendance() {
                       </td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--green)', textAlign: 'center' }}>
                         {decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)))}
+                      </td>
+                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
+                        {formatBreakTime(emp.total_break_seconds_today || 0)}
                       </td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
                         {decimalHoursToText(Math.max(0, parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0)))}
@@ -696,7 +722,11 @@ export default function TodayAttendance() {
                       {['today', 'previous'].map(mode => (
                         <button
                           key={mode}
-                          onClick={() => { setEditDateMode(mode); if (mode === 'today') setEditDate(formatLocalDate(new Date())) }}
+                          onClick={() => {
+                            setEditDateMode(mode);
+                            if (mode === 'today') setEditDate(formatLocalDate(new Date()));
+                            if (mode === 'previous') setEditDate(yesterdayStr);
+                          }}
                           style={{
                             flex: 1, padding: '12px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, border: '2px solid',
                             borderColor: editDateMode === mode ? 'var(--primary)' : 'var(--surface-2)',
@@ -764,13 +794,13 @@ export default function TodayAttendance() {
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
                       <div>
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-In Time *</label>
-                        <input type="datetime-local" value={newCheckIn} onChange={e => setNewCheckIn(e.target.value)}
+                        <input type="time" value={newCheckIn} onChange={e => setNewCheckIn(e.target.value)}
                           style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
                         />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-Out Time *</label>
-                        <input type="datetime-local" value={newCheckOut} onChange={e => setNewCheckOut(e.target.value)}
+                        <input type="time" value={newCheckOut} onChange={e => setNewCheckOut(e.target.value)}
                           style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
                         />
                       </div>
@@ -842,16 +872,28 @@ export default function TodayAttendance() {
 
 // ── Inline Session Edit Row ───────────────────────────────────────────────────
 function EditSessionRow({ session, index, saving, onSave, onDelete }) {
-  const toLocal = (iso) => {
+  const toLocalTime = (iso) => {
     if (!iso) return ''
     const d = new Date(iso)
-    const y = d.getFullYear(), mo = String(d.getMonth()+1).padStart(2,'0'), dy = String(d.getDate()).padStart(2,'0')
     const h = String(d.getHours()).padStart(2,'0'), mi = String(d.getMinutes()).padStart(2,'0')
-    return `${y}-${mo}-${dy}T${h}:${mi}`
+    return `${h}:${mi}`
   }
-  const [inVal, setInVal] = useState(() => toLocal(session.check_in))
-  const [outVal, setOutVal] = useState(() => toLocal(session.check_out))
+  const [inVal, setInVal] = useState(() => toLocalTime(session.check_in))
+  const [outVal, setOutVal] = useState(() => toLocalTime(session.check_out))
   const [reason, setReason] = useState('')
+
+  const handleSave = () => {
+    // Reconstruct full date string using the original session date
+    const baseDateIn = session.check_in ? new Date(session.check_in) : new Date()
+    const yIn = baseDateIn.getFullYear(), moIn = String(baseDateIn.getMonth()+1).padStart(2,'0'), dyIn = String(baseDateIn.getDate()).padStart(2,'0')
+    const fullInStr = `${yIn}-${moIn}-${dyIn}T${inVal}`
+
+    const baseDateOut = session.check_out ? new Date(session.check_out) : new Date()
+    const yOut = baseDateOut.getFullYear(), moOut = String(baseDateOut.getMonth()+1).padStart(2,'0'), dyOut = String(baseDateOut.getDate()).padStart(2,'0')
+    const fullOutStr = outVal ? `${yOut}-${moOut}-${dyOut}T${outVal}` : ''
+
+    onSave(session.id, fullInStr, fullOutStr, reason)
+  }
 
   return (
     <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -859,13 +901,13 @@ function EditSessionRow({ session, index, saving, onSave, onDelete }) {
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check-In</span>
-          <input type="datetime-local" value={inVal} onChange={e => setInVal(e.target.value)}
+          <input type="time" value={inVal} onChange={e => setInVal(e.target.value)}
             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
           />
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check-Out</span>
-          <input type="datetime-local" value={outVal} onChange={e => setOutVal(e.target.value)}
+          <input type="time" value={outVal} onChange={e => setOutVal(e.target.value)}
             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
           />
         </div>
@@ -880,7 +922,7 @@ function EditSessionRow({ session, index, saving, onSave, onDelete }) {
         <button className="btn" disabled={saving} onClick={() => onDelete(session.id)}
           style={{ height: 30, fontSize: 11, padding: '0 12px', background: '#EF4444', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}
         >{saving ? '...' : 'Delete'}</button>
-        <button className="btn btn-primary" disabled={saving || !inVal} onClick={() => onSave(session.id, inVal, outVal, reason)}
+        <button className="btn btn-primary" disabled={saving || !inVal} onClick={handleSave}
           style={{ height: 30, fontSize: 11, padding: '0 12px' }}
         >{saving ? 'Saving...' : 'Save'}</button>
       </div>

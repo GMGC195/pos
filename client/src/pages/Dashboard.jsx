@@ -855,13 +855,11 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Attendance Analytics Row (Stacked Charts on Left, List Columns on Right) */}
-      <div className="attendance-analytics-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24, width: '100%' }}>
+      {/* Attendance Analytics (Charts) */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16, width: '100%' }}>
         
-        {/* Left Side: Graphs Container */}
-        <div style={{ flex: '1 1 60%', display: 'flex', flexDirection: 'column', gap: 16, minWidth: 320 }}>
-          {/* Graph Card: Weekly Attendance Rate */}
-          <div className="card" style={{ padding: 20 }}>
+        {/* Graph Card: Weekly Attendance Rate */}
+        <div className="card" style={{ padding: 20, flex: '1 1 calc(50% - 16px)', minWidth: 320 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Weekly Attendance Rate</h3>
@@ -889,8 +887,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Graph Card: Today's Shift Attendance */}
-          <div className="card" style={{ padding: 20 }}>
+        {/* Graph Card: Today's Shift Attendance */}
+        <div className="card" style={{ padding: 20, flex: '1 1 calc(50% - 16px)', minWidth: 320 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Today's Shift Attendance</h3>
@@ -901,12 +899,12 @@ export default function Dashboard() {
               <Bar data={attendanceBarData} options={attendanceBarOpts} />
             </div>
           </div>
-        </div>
+      </div>
 
-        {/* Right Side: 5 Attendance List Columns Container */}
-        <div className="attendance-bottom-cards-container" style={{ flex: '1 1 35%', display: 'flex', flexWrap: 'wrap', gap: 16, minWidth: 280, alignContent: 'flex-start' }}>
-          {/* Column 1: Currently Present Column */}
-          <div className="card" style={{ padding: 20, width: '100%' }}>
+      {/* Attendance Status Cards Row */}
+      <div className="attendance-bottom-cards-container" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24, width: '100%' }}>
+        {/* Column 1: Currently Present Column */}
+        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                 Currently Present
@@ -952,8 +950,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Column 2: Late Arrivals Today */}
-          <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', width: '100%' }}>
+        {/* Column 2: Late Arrivals Today */}
+        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                 Late Arrivals
@@ -984,8 +982,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Column 3: Staff On Break Column */}
-          <div className="card" style={{ padding: 20, width: '100%' }}>
+        {/* Column 3: Staff On Break Column */}
+        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                 Staff On Break
@@ -1016,8 +1014,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Column 4: Checked Out Today Column */}
-          <div className="card" style={{ padding: 20, width: '100%' }}>
+        {/* Column 4: Checked Out Today Column */}
+        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                 Checked Out Today
@@ -1064,8 +1062,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Column 5: On Leave / Absent Column */}
-          <div className="card" style={{ padding: 20, width: '100%' }}>
+        {/* Column 5: On Leave / Absent Column */}
+        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                 On Leave / Absent
@@ -1095,8 +1093,6 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-        </div>
-
       </div>
 
 

@@ -22,6 +22,15 @@ const formatHoursToText = (decimalHours) => {
   return `${mins} min`
 }
 
+const formatBreakTime = (seconds) => {
+  if (!seconds || seconds <= 0) return '--';
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${hrs} h ${m} m` : `${hrs} h`;
+}
+
 const confirmAction = (message, onConfirm) => {
   toast((t) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
@@ -165,21 +174,20 @@ export default function AttendanceReports() {
   const handleAddNewSession = async () => {
     if (!addCheckIn) { toast.error('Check-In time is required'); return }
     if (!addCheckOut) { toast.error('Check-Out time is required'); return }
-    if (new Date(addCheckOut) <= new Date(addCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
+    const fullCheckIn = `${editDate}T${addCheckIn}`
+    const fullCheckOut = `${editDate}T${addCheckOut}`
+    if (new Date(fullCheckOut) <= new Date(fullCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
     const toISO = (v) => v ? new Date(v).toISOString() : null
     try {
       await axios.post('/api/attendance/session', {
         employee_id: editEmployeeId,
         date: editDate,
-        check_in: toISO(addCheckIn),
-        check_out: toISO(addCheckOut),
+        check_in: toISO(fullCheckIn),
+        check_out: toISO(fullCheckOut),
         status: addStatus
       })
       toast.success('Session added!')
-      setAddCheckIn('')
-      setAddCheckOut('')
-      setAddStatus('Present')
-      loadEditSessions(editEmployeeId, editDate)
+      closeEditModal()
       loadReports()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to add session')
@@ -365,6 +373,7 @@ export default function AttendanceReports() {
       let lates = 0
       let totalHours = 0
       let totalOvertime = 0
+      let totalBreakSeconds = 0
 
       daysInMonth.forEach(day => {
         const dateStr = formatLocalDate(day)
@@ -383,12 +392,15 @@ export default function AttendanceReports() {
             }
             // Sum all hours worked on this day and calculate daily overtime
             let dayHours = 0
+            let dayBreakSecs = 0
             sessions.forEach(s => {
               dayHours += s.hours_worked || 0
+              dayBreakSecs += parseInt(s.total_break_duration_seconds || 0)
             })
             dayHours = Math.min(24, dayHours) // Cap to 24 hours max per day
             totalHours += Math.min(emp.shift_hours || 12.0, dayHours)
             totalOvertime += Math.max(0, dayHours - (emp.shift_hours || 12.0))
+            totalBreakSeconds += dayBreakSecs
           }
         } else {
           // If no log exists for a past date, it's considered an absent day
@@ -407,7 +419,8 @@ export default function AttendanceReports() {
         holidays,
         lates,
         totalHours,
-        totalOvertime
+        totalOvertime,
+        totalBreakSeconds
       }
     })
   }
@@ -949,6 +962,7 @@ export default function AttendanceReports() {
                   <th style={{ minWidth: 60, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>H</th>
                   <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Late Arrival</th>
                   <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Duty Hours</th>
+                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Break Time</th>
                   <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Overtime</th>
                 </tr>
               </thead>
@@ -1016,23 +1030,29 @@ export default function AttendanceReports() {
                             } else {
                               const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
                               const dayOvertime = Math.max(0, dayHours - emp.shift_hours)
+                              const dayBreakSecs = sessions.reduce((acc, s) => acc + parseInt(s.total_break_duration_seconds || 0), 0)
                               
                               cellContent = (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', fontSize: 9 }}>
                                   {sessions.map((s, idx) => {
                                     const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                                     const isSystem = s.remarks === 'System Checkout'
+                                    const isEdited = s.remarks === 'Edited'
+                                    const isManual = s.remarks === 'Manual'
+                                    const valColor = isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--text)'
+                                    const tag = isEdited ? <span style={{color: '#3B82F6', fontSize: 9, fontWeight: 700}}>(E)</span> : isManual ? <span style={{color: '#8B5CF6', fontSize: 9, fontWeight: 700}}>(M)</span> : null
+                                    
                                     const outStr = s.forgot_checkout 
                                       ? 'Forgot' 
                                       : s.check_out 
                                         ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystem ? ' (Sys)' : ''}` 
                                         : 'Active'
                                     return (
-                                      <div key={idx} style={{ whiteSpace: 'nowrap', display: 'flex', gap: 3 }}>
+                                      <div key={idx} style={{ whiteSpace: 'nowrap', display: 'flex', gap: 3, alignItems: 'center' }}>
                                         <span style={{ color: 'var(--green)', fontWeight: 700 }}>In:</span>
-                                        <span style={{ color: 'var(--text)' }}>{inStr}</span>
+                                        <span style={{ color: valColor, display: 'flex', alignItems: 'center', gap: 2 }}>{inStr} {tag}</span>
                                         <span style={{ color: 'var(--red)', fontWeight: 700 }}>Out:</span>
-                                        <span style={{ color: 'var(--text)' }}>{outStr}</span>
+                                        <span style={{ color: valColor, display: 'flex', alignItems: 'center', gap: 2 }}>{outStr} {s.check_out && tag}</span>
                                       </div>
                                     )
                                   })}
@@ -1053,6 +1073,9 @@ export default function AttendanceReports() {
                                     <div><strong>Duty Hours:</strong> {formatHoursToText(Math.min(emp.shift_hours || 12.0, dayHours))}</div>
                                     {dayOvertime > 0 && (
                                       <div style={{ color: 'var(--green)', fontWeight: 650 }}><strong>Overtime:</strong> +{formatHoursToText(dayOvertime)}</div>
+                                    )}
+                                    {dayBreakSecs > 0 && (
+                                      <div style={{ color: 'var(--primary)', fontWeight: 650 }}><strong>Break Time:</strong> {formatBreakTime(dayBreakSecs)}</div>
                                     )}
                                   </div>
                                 </div>
@@ -1092,6 +1115,7 @@ export default function AttendanceReports() {
                         <td style={{ textAlign: 'center', fontWeight: 650, color: 'var(--primary)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.holidays}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.lates}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)', fontSize: 12, whiteSpace: 'nowrap' }}>{formatHoursToText(emp.totalHours)}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--primary)', fontSize: 12, whiteSpace: 'nowrap' }}>{formatBreakTime(emp.totalBreakSeconds)}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: emp.totalOvertime > 0 ? 'var(--green)' : 'var(--text)', fontSize: 12, whiteSpace: 'nowrap' }}>
                           {emp.totalOvertime > 0 ? `+${formatHoursToText(emp.totalOvertime)}` : '--'}
                         </td>
@@ -1422,7 +1446,11 @@ export default function AttendanceReports() {
                     <div style={{ display: 'flex', gap: 10 }}>
                       {['today', 'previous'].map(mode => (
                         <button key={mode}
-                          onClick={() => { setEditDateMode(mode); if (mode === 'today') setEditDate(formatLocalDate(new Date())) }}
+                          onClick={() => {
+                            setEditDateMode(mode);
+                            if (mode === 'today') setEditDate(formatLocalDate(new Date()));
+                            if (mode === 'previous') setEditDate(yesterdayStr);
+                          }}
                           style={{
                             flex: 1, padding: '12px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, border: '2px solid',
                             borderColor: editDateMode === mode ? 'var(--primary)' : 'var(--surface-2)',
@@ -1481,13 +1509,13 @@ export default function AttendanceReports() {
                       <div style={{ display: 'flex', gap: 12 }}>
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check In <span style={{ color: 'var(--red)' }}>*</span></span>
-                          <input type="datetime-local" value={addCheckIn} onChange={e => setAddCheckIn(e.target.value)}
+                          <input type="time" value={addCheckIn} onChange={e => setAddCheckIn(e.target.value)}
                             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
                           />
                         </div>
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check Out <span style={{ color: 'var(--red)' }}>*</span></span>
-                          <input type="datetime-local" value={addCheckOut} onChange={e => setAddCheckOut(e.target.value)}
+                          <input type="time" value={addCheckOut} onChange={e => setAddCheckOut(e.target.value)}
                             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
                           />
                         </div>
@@ -1559,21 +1587,28 @@ export default function AttendanceReports() {
 }
 
 function SessionRow({ session, index, onSave, onDelete, saving }) {
-  // Convert TIMESTAMPTZ strings to local datetime-local format: YYYY-MM-DDTHH:MM
-  const toLocalDatetime = (dtStr) => {
-    if (!dtStr) return ''
-    const d = new Date(dtStr)
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    const hours = String(d.getHours()).padStart(2, '0')
-    const minutes = String(d.getMinutes()).padStart(2, '0')
-    return `${year}-${month}-${day}T${hours}:${minutes}`
-  };
-
-  const [inVal, setInVal] = useState(() => toLocalDatetime(session.check_in))
-  const [outVal, setOutVal] = useState(() => toLocalDatetime(session.check_out))
+  const toLocalTime = (iso) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const h = String(d.getHours()).padStart(2,'0'), mi = String(d.getMinutes()).padStart(2,'0')
+    return `${h}:${mi}`
+  }
+  const [inVal, setInVal] = useState(() => toLocalTime(session.check_in))
+  const [outVal, setOutVal] = useState(() => toLocalTime(session.check_out))
   const [reason, setReason] = useState('')
+
+  const handleSave = () => {
+    // Reconstruct full date string using the original session date
+    const baseDateIn = session.check_in ? new Date(session.check_in) : new Date()
+    const yIn = baseDateIn.getFullYear(), moIn = String(baseDateIn.getMonth()+1).padStart(2,'0'), dyIn = String(baseDateIn.getDate()).padStart(2,'0')
+    const fullInStr = `${yIn}-${moIn}-${dyIn}T${inVal}`
+
+    const baseDateOut = session.check_out ? new Date(session.check_out) : new Date()
+    const yOut = baseDateOut.getFullYear(), moOut = String(baseDateOut.getMonth()+1).padStart(2,'0'), dyOut = String(baseDateOut.getDate()).padStart(2,'0')
+    const fullOutStr = outVal ? `${yOut}-${moOut}-${dyOut}T${outVal}` : ''
+
+    onSave(session.id, fullInStr, fullOutStr, reason)
+  }
 
   return (
     <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)' }}>
@@ -1586,7 +1621,7 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check In Time</span>
             <input 
-              type="datetime-local" 
+              type="time" 
               value={inVal}
               onChange={e => setInVal(e.target.value)}
               style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface-1)', color: 'var(--text)' }}
@@ -1595,7 +1630,7 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check Out Time</span>
             <input 
-              type="datetime-local" 
+              type="time" 
               value={outVal}
               onChange={e => setOutVal(e.target.value)}
               style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface-1)', color: 'var(--text)' }}
@@ -1625,7 +1660,7 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
           </button>
           <button 
             className="btn btn-primary" 
-            onClick={() => onSave(session.id, inVal, outVal, reason)}
+            onClick={handleSave}
             disabled={saving || !inVal}
             style={{ height: 32, fontSize: 12, padding: '0 12px' }}
           >
