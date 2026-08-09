@@ -100,7 +100,8 @@ export default function TodayAttendance() {
     loadTodayAttendance()
     loadShifts()
     loadEmployeesList()
-    const interval = setInterval(loadTodayAttendance, 30000)
+    // Refresh at most every 5 minutes (300000 ms) instead of 30 seconds
+    const interval = setInterval(loadTodayAttendance, 300000)
     return () => clearInterval(interval)
   }, [])
 

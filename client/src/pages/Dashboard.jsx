@@ -1236,6 +1236,7 @@ export default function Dashboard() {
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-Out Time</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Status</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Hours Worked</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Break Time</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Overtime</th>
                   </tr>
                 </thead>
@@ -1259,6 +1260,14 @@ export default function Dashboard() {
                         if (hrs > 0) return `${hrs} hr`;
                         return `${mins} min`;
                       }
+                      const formatBreakTime = (seconds) => {
+                        if (!seconds || seconds <= 0) return '--';
+                        const mins = Math.round(seconds / 60);
+                        if (mins < 60) return `${mins} min`;
+                        const hrs = Math.floor(mins / 60);
+                        const m = mins % 60;
+                        return m > 0 ? `${hrs} h ${m} m` : `${hrs} h`;
+                      };
                       return (
                         <tr
                           key={emp.employee_id}
@@ -1324,6 +1333,9 @@ export default function Dashboard() {
                           </td>
                           <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--green)', textAlign: 'center' }}>
                             {decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)))}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
+                            {formatBreakTime(emp.total_break_seconds_today || 0)}
                           </td>
                           <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
                             {decimalHoursToText(Math.max(0, parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0)))}

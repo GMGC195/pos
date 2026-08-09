@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from '../api'
-import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter } from 'lucide-react'
+import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -969,8 +969,11 @@ export default function AttendanceReports() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={daysInMonth.length + 10} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
-                      Loading monthly sheet...
+                    <td colSpan={daysInMonth.length + 10} style={{ textAlign: 'center', padding: '100px 0', color: 'var(--text-muted)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                        <Loader2 className="spin" size={32} style={{ color: 'var(--primary)' }} />
+                        <span style={{ fontSize: 14, fontWeight: 500 }}>Loading Attendance Sheet...</span>
+                      </div>
                     </td>
                   </tr>
                 ) : filteredGroupedData.length === 0 ? (

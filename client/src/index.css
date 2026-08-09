@@ -2401,3 +2401,13 @@ tbody tr:hover td {
   opacity: 0.08; /* Fade out to 8% opacity smoothly on hover */
   transform: translate(-50%, -50%) scale(0.94); /* Subtle shrink effect */
 }
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
