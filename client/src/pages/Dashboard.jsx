@@ -2,30 +2,33 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
+import { toast } from 'react-hot-toast'
 import {
   Chart as ChartJS,
-  CategoryScale, LinearScale, PointElement, LineElement,
+  CategoryScale, LinearScale, PointElement, LineElement, BarElement,
   ArcElement, Title, Tooltip, Legend, Filler,
 } from 'chart.js'
-import { Line, Doughnut } from 'react-chartjs-2'
-import { 
-  CircleDollarSign, 
-  Receipt, 
-  Clock, 
-  Users, 
-  TrendingUp, 
-  Flame, 
-  Printer, 
-  Download, 
-  RefreshCw, 
-  Fingerprint, 
-  Coffee, 
-  UserX, 
+import { Line, Doughnut, Bar } from 'react-chartjs-2'
+import {
+  CircleDollarSign,
+  Receipt,
+  Clock,
+  Users,
+  TrendingUp,
+  Flame,
+  Printer,
+  Download,
+  RefreshCw,
+  Fingerprint,
+  Coffee,
+  UserX,
   Check,
-  UserCheck
+  UserCheck,
+  Search,
+  Filter
 } from 'lucide-react'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler)
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler)
 
 import { CURRENCY } from '../config'
 import { BRAND_NAME, BRAND_PRIMARY, BRAND_SECONDARY, BRAND_LOGO } from '../branding'
@@ -82,6 +85,11 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState('weekly')
   const [loading, setLoading] = useState(true)
   const [personalStats, setPersonalStats] = useState(null)
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('')
+  const [attendanceSelectedShift, setAttendanceSelectedShift] = useState('All')
+  const [attendanceSelectedDepartment, setAttendanceSelectedDepartment] = useState('All')
+  const [attendanceSelectedStatus, setAttendanceSelectedStatus] = useState('All')
+  const [showAttendanceTable, setShowAttendanceTable] = useState(false)
 
   const loadStats = () => {
     setLoading(true)
@@ -93,14 +101,14 @@ export default function Dashboard() {
         .finally(() => setLoading(false))
       return;
     }
-    
+
     // Only fetch sales stats if the user is a developer
     if (isDeveloper) {
       axios.get('/api/stats')
         .then(r => setStats(r.data))
         .catch(() => setStats({
           totalSale: 0, dailyRevenue: 0, totalProductCost: 0, totalOrders: 0, guestsToday: 0,
-          last7Days: Array.from({ length: 7 }, (_, i) => ({ label: `Day ${i+1}`, total: 0 })),
+          last7Days: Array.from({ length: 7 }, (_, i) => ({ label: `Day ${i + 1}`, total: 0 })),
           topItems: [],
         }))
     }
@@ -212,8 +220,10 @@ export default function Dashboard() {
     plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
     scales: {
       x: { grid: { display: false } },
-      y: { grid: { color: 'rgba(0,0,0,0.05)' }, beginAtZero: true,
-        ticks: { callback: v => `${CURRENCY}${v}` } },
+      y: {
+        grid: { color: 'rgba(0,0,0,0.05)' }, beginAtZero: true,
+        ticks: { callback: v => `${CURRENCY}${v}` }
+      },
     },
   }
 
@@ -275,23 +285,23 @@ export default function Dashboard() {
                         justifyContent: 'center',
                         transition: 'all 0.25s ease-in-out',
                       }}>
-                        <img 
-                          src={BRAND_LOGO} 
-                          alt="Logo" 
-                          style={{ 
-                            width: 105, 
-                            height: 105, 
-                            objectFit: 'cover', 
-                            borderRadius: '50%', 
+                        <img
+                          src={BRAND_LOGO}
+                          alt="Logo"
+                          style={{
+                            width: 105,
+                            height: 105,
+                            objectFit: 'cover',
+                            borderRadius: '50%',
                             boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                             border: '3px solid white',
                             background: 'white'
-                          }} 
+                          }}
                         />
                       </div>
                     </>
                   )
-                  : <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'#9ca3af' }}>No sales data yet</div>
+                  : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af' }}>No sales data yet</div>
               }
             </div>
           </div>
@@ -330,10 +340,10 @@ export default function Dashboard() {
               <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}><Receipt size={20} /> Today's Summary</h3>
               <span className="badge badge-success">Live</span>
             </div>
-            
-            <div style={{ display:'flex', gap:10, flexWrap: 'wrap' }}>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading}>
-                <RefreshCw size={14} className={loading?'spin':''} /> Refresh
+                <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
               </button>
               <button className="btn btn-secondary btn-sm" onClick={exportPDF}>
                 <Printer size={14} /> Export PDF
@@ -344,18 +354,18 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="summary-grid" style={{ marginTop:10 }}>
+          <div className="summary-grid" style={{ marginTop: 10 }}>
             {[
-              { label:'Today Total Sale', val: stats ? `${CURRENCY}${stats.totalSale.toLocaleString()}` : '0', color:'var(--red)' },
-              { label:'Today Total Order Delivered', val: stats ? stats.totalOrders.toString() : '0', color:'#3b82f6' },
-              { label:'Today Total Product Cost', val: stats ? `${CURRENCY}${stats.totalProductCost.toLocaleString()}` : '0', color:'#f59e0b' },
-              { label:'Targeted Revenue', val: `${CURRENCY}${TARGET_REVENUE.toLocaleString()}`, color:'var(--text-muted)' },
-              { label:'Today Earned Revenue', val: stats ? `${CURRENCY}${stats.dailyRevenue.toLocaleString()}` : '0', color:'#10b981' },
-              { label:'Completion Revenue %', val: stats ? `${((stats.dailyRevenue / TARGET_REVENUE) * 100).toFixed(1)}%` : '0%', color:'#8b5cf6' },
+              { label: 'Today Total Sale', val: stats ? `${CURRENCY}${stats.totalSale.toLocaleString()}` : '0', color: 'var(--red)' },
+              { label: 'Today Total Order Delivered', val: stats ? stats.totalOrders.toString() : '0', color: '#3b82f6' },
+              { label: 'Today Total Product Cost', val: stats ? `${CURRENCY}${stats.totalProductCost.toLocaleString()}` : '0', color: '#f59e0b' },
+              { label: 'Targeted Revenue', val: `${CURRENCY}${TARGET_REVENUE.toLocaleString()}`, color: 'var(--text-muted)' },
+              { label: 'Today Earned Revenue', val: stats ? `${CURRENCY}${stats.dailyRevenue.toLocaleString()}` : '0', color: '#10b981' },
+              { label: 'Completion Revenue %', val: stats ? `${((stats.dailyRevenue / TARGET_REVENUE) * 100).toFixed(1)}%` : '0%', color: '#8b5cf6' },
             ].map(item => (
-              <div key={item.label} style={{ background:'var(--surface)', borderRadius:12, padding:'24px', border:'1px solid var(--surface-2)' }}>
-                <div style={{ fontSize:28, fontWeight:800, color: item.color }}>{loading ? '...' : item.val}</div>
-                <div style={{ fontWeight:600, marginTop:6, color:'var(--text-secondary)' }}>{item.label}</div>
+              <div key={item.label} style={{ background: 'var(--surface)', borderRadius: 12, padding: '24px', border: '1px solid var(--surface-2)' }}>
+                <div style={{ fontSize: 28, fontWeight: 800, color: item.color }}>{loading ? '...' : item.val}</div>
+                <div style={{ fontWeight: 600, marginTop: 6, color: 'var(--text-secondary)' }}>{item.label}</div>
               </div>
             ))}
           </div>
@@ -365,18 +375,24 @@ export default function Dashboard() {
   }
 
   // --- REGULAR ATTENDANCE DASHBOARD VIEW (ADMIN, OPERATOR, ETC.) ---
-  const presentCount = attendanceStats ? (attendanceStats.total_employees - attendanceStats.absent) : 0;
-  const attendanceRate = attendanceStats && attendanceStats.total_employees > 0
-    ? `${((presentCount / attendanceStats.total_employees) * 100).toFixed(0)}%`
+  const totalEmployeesCount = todayActivity.length;
+  const lateCount = todayActivity.filter(log => log.attendance_id && log.attendance_status === 'Late').length;
+  const currentlyPresentCount = todayActivity.filter(log => log.attendance_id && !log.check_out).length;
+  const absentCount = todayActivity.filter(log => !log.attendance_id || log.attendance_status === 'Leave' || log.attendance_status === 'Holiday').length;
+  const onBreakCount = todayActivity.filter(log => log.attendance_id && log.on_break && !log.check_out).length;
+  const checkedOutCount = todayActivity.filter(log => log.attendance_id && log.check_out).length;
+
+  const attendanceRate = totalEmployeesCount > 0
+    ? `${(((currentlyPresentCount + checkedOutCount) / totalEmployeesCount) * 100).toFixed(0)}%`
     : '0%';
 
   const attendanceStatCards = [
-    { key: 'total_employees', label: 'TOTAL STAFF', val: attendanceStats?.total_employees, icon: <Users size={18} />, color: '#4f46e5', subtext: 'Registered staff' },
-    { key: 'present_today', label: 'PRESENT TODAY', val: presentCount, icon: <UserCheck size={18} />, color: '#10b981', subtext: `${attendanceRate} attendance rate` },
-    { key: 'absent', label: 'ABSENT TODAY', val: attendanceStats?.absent, icon: <UserX size={18} />, color: '#ef4444', subtext: 'Excused & unexcused' },
-    { key: 'late_today', label: 'LATE ARRIVALS', val: attendanceStats?.late_today, icon: <Clock size={18} />, color: '#f59e0b', subtext: 'Delayed starts' },
-    { key: 'on_break', label: 'STAFF ON BREAK', val: attendanceStats?.on_break, icon: <Coffee size={18} />, color: '#3b82f6', subtext: 'Currently on break' },
-    { key: 'checked_out', label: 'CHECKED OUT', val: attendanceStats?.checked_out, icon: <Check size={18} />, color: '#9CA3AF', subtext: 'Completed shift today' }
+    { key: 'total_employees', label: 'TOTAL STAFF', val: totalEmployeesCount, icon: <Users size={18} />, color: '#4f46e5', subtext: 'Registered staff' },
+    { key: 'currently_present', label: 'CURRENTLY PRESENT', val: currentlyPresentCount, icon: <UserCheck size={18} />, color: '#10b981', subtext: `${currentlyPresentCount} active at work` },
+    { key: 'late_today', label: 'LATE ARRIVALS', val: lateCount, icon: <Clock size={18} />, color: '#f59e0b', subtext: 'Delayed starts' },
+    { key: 'on_break', label: 'STAFF ON BREAK', val: onBreakCount, icon: <Coffee size={18} />, color: '#3b82f6', subtext: 'Currently on break' },
+    { key: 'checked_out', label: 'CHECKED OUT', val: checkedOutCount, icon: <Check size={18} />, color: '#9CA3AF', subtext: 'Completed shift today' },
+    { key: 'absent', label: 'ABSENT TODAY', val: absentCount, icon: <UserX size={18} />, color: '#ef4444', subtext: 'Excused & unexcused' }
   ];
 
   // Attendance Analytics rate graph data
@@ -416,6 +432,60 @@ export default function Dashboard() {
         ticks: { callback: v => `${v}%` }
       },
     },
+  }
+
+  // Shift Attendance Bar Chart data
+  const shiftOrder = ['R1-D', 'R2-D', 'R3-D', 'R1-N', 'R2-N', 'R3-N'];
+  const employeeShifts = new Set((allEmployees.length > 0 ? allEmployees : todayActivity).map(e => e.shift).filter(Boolean));
+  // Always show all defined shifts; append any extra shifts found in data at the end
+  const extraShifts = [...employeeShifts].filter(s => !shiftOrder.includes(s)).sort((a, b) => a.localeCompare(b));
+  const uniqueShifts = [...shiftOrder, ...extraShifts];
+  const presentData = uniqueShifts.map(shiftName =>
+    todayActivity.filter(e => e.shift === shiftName && e.attendance_id).length
+  );
+  const enrolledData = uniqueShifts.map(shiftName =>
+    (allEmployees.length > 0 ? allEmployees : todayActivity).filter(e => e.shift === shiftName).length
+  );
+
+  const attendanceBarData = {
+    labels: uniqueShifts,
+    datasets: [
+      {
+        label: 'Present Today',
+        data: presentData,
+        backgroundColor: '#10b981', // green
+        borderRadius: 6,
+      },
+      {
+        label: 'Total Enrolled',
+        data: enrolledData,
+        backgroundColor: '#4f46e5', // indigo/blue
+        borderRadius: 6,
+      }
+    ]
+  };
+
+  const attendanceBarOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        labels: {
+          color: 'var(--text-muted)',
+          font: { size: 11, weight: 600 }
+        }
+      }
+    },
+    scales: {
+      x: { grid: { display: false } },
+      y: {
+        grid: { color: 'rgba(0,0,0,0.05)' },
+        beginAtZero: true,
+        ticks: { stepSize: 2 }
+      }
+    }
   }
 
   if (user?.role?.toLowerCase() === 'employee') {
@@ -578,31 +648,114 @@ export default function Dashboard() {
 
   // Filter Today activity list to present, break, late and absent lists
   const lateEmployees = todayActivity.filter(log => log.attendance_id && log.attendance_status === 'Late')
-  const currentlyPresentEmployees = todayActivity.filter(log => log.attendance_id && !log.check_out && log.attendance_status !== 'Leave' && log.attendance_status !== 'Holiday')
+  const currentlyPresentEmployees = todayActivity.filter(log => log.attendance_id && !log.check_out)
   const onBreakEmployees = todayActivity.filter(log => log.attendance_id && log.on_break && !log.check_out)
-  const checkedOutEmployees = todayActivity.filter(log => log.attendance_id && log.check_out && log.attendance_status !== 'Leave' && log.attendance_status !== 'Holiday')
+  const checkedOutEmployees = todayActivity.filter(log => log.attendance_id && log.check_out)
   const absentEmployees = todayActivity.filter(log => !log.attendance_id || log.attendance_status === 'Leave' || log.attendance_status === 'Holiday')
+
+  const departmentsList = ['All', ...new Set(todayActivity.map(emp => emp.department).filter(Boolean))].sort()
+  const shiftsDropdownList = ['All', ...new Set(todayActivity.map(emp => emp.shift).filter(Boolean))].sort()
+
+  const tableFilteredEmployees = todayActivity.filter(emp => {
+    const matchesSearch = emp.name.toLowerCase().includes(attendanceSearchQuery.toLowerCase()) ||
+      String(emp.employee_id).toLowerCase().includes(attendanceSearchQuery.toLowerCase());
+    const matchesShift = attendanceSelectedShift === 'All' || emp.shift === attendanceSelectedShift;
+    const matchesDept = attendanceSelectedDepartment === 'All' || emp.department === attendanceSelectedDepartment;
+
+    let matchesStatus = true;
+    const hasSessions = emp.sessions && emp.sessions.length > 0;
+    const isCurrentlyCheckedIn = emp.attendance_id && !emp.check_out;
+
+    if (attendanceSelectedStatus === 'Present') {
+      matchesStatus = isCurrentlyCheckedIn;
+    } else if (attendanceSelectedStatus === 'CheckedOut') {
+      matchesStatus = hasSessions && !isCurrentlyCheckedIn;
+    } else if (attendanceSelectedStatus === 'Late') {
+      matchesStatus = hasSessions && emp.attendance_status === 'Late';
+    } else if (attendanceSelectedStatus === 'Absent') {
+      matchesStatus = !hasSessions;
+    }
+
+    return matchesSearch && matchesShift && matchesDept && matchesStatus;
+  }).sort((a, b) => {
+    const aCheckedIn = a.attendance_id && !a.check_out ? 1 : 0;
+    const bCheckedIn = b.attendance_id && !b.check_out ? 1 : 0;
+    return bCheckedIn - aCheckedIn;
+  });
+  const exportAttendanceToExcel = async () => {
+    try {
+      const XLSX = await import('xlsx')
+
+      const decimalHoursToText = (hoursDec) => {
+        if (isNaN(hoursDec) || hoursDec === null || hoursDec === undefined || hoursDec <= 0) return '0 min';
+        const totalMins = Math.round(hoursDec * 60);
+        const hrs = Math.floor(totalMins / 60);
+        const mins = totalMins % 60;
+        if (hrs > 0 && mins > 0) return `${hrs} hr ${mins} min`;
+        if (hrs > 0) return `${hrs} hr`;
+        return `${mins} min`;
+      }
+
+      const data = tableFilteredEmployees.map(emp => {
+        const sessions = emp.sessions || []
+        const checkInTimes = sessions.map(s => `In: ${new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`).join('\n')
+        const checkOutTimes = sessions.map(s => s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active').join('\n')
+
+        let statusText = 'Absent'
+        if (sessions.length > 0) {
+          statusText = emp.on_break ? 'On Break' : emp.attendance_status === 'Late' ? 'Late' : 'Present'
+        }
+
+        const otHours = Math.max(0, parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0))
+
+        return {
+          'Code': emp.employee_code || emp.employee_id,
+          'Employee Name': emp.name,
+          'Shift': emp.shift || 'R1',
+          'Check-In Sessions': checkInTimes || '--',
+          'Check-Out Sessions': checkOutTimes || '--',
+          'Status': statusText,
+          'Hours Worked': decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0))),
+          'Overtime': decimalHoursToText(otHours)
+        }
+      })
+
+      const ws = XLSX.utils.json_to_sheet(data)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Today Attendance')
+      XLSX.writeFile(wb, `Today-Attendance-${new Date().toISOString().split('T')[0]}.xlsx`)
+      toast.success('Attendance logs exported successfully!')
+    } catch (err) {
+      toast.error('Failed to export logs')
+    }
+  }
 
   return (
     <>
       <style>{`
+        .attendance-cards-grid,
+        .attendance-analytics-row {
+          width: 100%;
+        }
+        .attendance-analytics-row {
+          display: flex !important;
+          flex-wrap: wrap;
+          gap: 16px;
+          justify-content: flex-start;
+        }
+        .attendance-bottom-cards-container > div {
+          width: 100% !important;
+          max-width: 280px !important;
+          flex: 1 1 240px;
+        }
         @media (min-width: 1024px) {
           .attendance-cards-grid {
             grid-template-columns: repeat(6, 1fr) !important;
           }
-          .attendance-analytics-row {
-            grid-template-columns: 2fr 1fr !important;
-          }
-          .attendance-bottom-row {
-            grid-template-columns: 1fr 1fr 1fr !important;
-          }
         }
-        @media (max-width: 1023px) {
+        @media (max-width: 767px) {
           .attendance-analytics-row {
-            grid-template-columns: 1fr !important;
-          }
-          .attendance-bottom-row {
-            grid-template-columns: 1fr !important;
+            justify-content: center !important;
           }
         }
         .custom-scrollbar::-webkit-scrollbar {
@@ -669,7 +822,7 @@ export default function Dashboard() {
               filter: 'blur(16px)',
               pointerEvents: 'none'
             }} />
-            
+
             {/* Icon on Left */}
             <div style={{
               width: 38,
@@ -702,126 +855,137 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Attendance Analytics Row (Graph + Late Arrivals) */}
-      <div className="attendance-analytics-row" style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: 16,
-        marginBottom: 24
-      }}>
-        {/* Graph Card */}
-        <div className="card" style={{ padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Weekly Attendance Rate</h3>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Avg. 93% across all staff</span>
-            </div>
-            <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 3 }}>
-              <button 
-                className="btn btn-sm" 
-                onClick={() => setTimeRange('weekly')}
-                style={{ fontSize: 11, padding: '4px 10px', minWidth: 'auto', background: timeRange === 'weekly' ? 'var(--primary)' : 'transparent', color: timeRange === 'weekly' ? '#fff' : 'var(--text-secondary)', border: 'none' }}
-              >
-                Weekly
-              </button>
-              <button 
-                className="btn btn-sm" 
-                onClick={() => setTimeRange('monthly')}
-                style={{ fontSize: 11, padding: '4px 10px', minWidth: 'auto', background: timeRange === 'monthly' ? 'var(--primary)' : 'transparent', color: timeRange === 'monthly' ? '#fff' : 'var(--text-secondary)', border: 'none' }}
-              >
-                Monthly
-              </button>
-            </div>
-          </div>
-          <div style={{ height: 200 }}>
-            <Line data={attendanceLineData} options={attendanceLineOpts} />
-          </div>
-        </div>
-
-        {/* Late Arrivals Column */}
-        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-              Late Arrivals Today
-            </h3>
-            <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(249, 115, 22, 0.1)', color: '#F97316', padding: '2px 8px', borderRadius: 10 }}>
-              {lateEmployees.length}
-            </span>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-            {loading && lateEmployees.length === 0 ? (
-              <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                Loading...
-              </div>
-            ) : lateEmployees.length === 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: 12, padding: '20px 0' }}>
-                No late arrivals today
-              </div>
-            ) : (
-              lateEmployees.map((log, idx) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{log.name}</span>
-                  <span style={{ fontSize: 11, color: '#F97316', background: 'rgba(249, 115, 22, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                    {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Late'}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Row: Present, On Break, Absent */}
-      <div className="attendance-bottom-row" style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-        gap: 16,
-        marginBottom: 24
-      }}>
+      {/* Attendance Analytics Row (Stacked Charts on Left, List Columns on Right) */}
+      <div className="attendance-analytics-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24, width: '100%' }}>
         
-        {/* Currently Present Column */}
-        <div className="card" style={{ padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-              Currently Present
-            </h3>
-            <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)', padding: '2px 8px', borderRadius: 10 }}>
-              {currentlyPresentEmployees.length}
-            </span>
+        {/* Left Side: Graphs Container */}
+        <div style={{ flex: '1 1 60%', display: 'flex', flexDirection: 'column', gap: 16, minWidth: 320 }}>
+          {/* Graph Card: Weekly Attendance Rate */}
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Weekly Attendance Rate</h3>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Avg. 93% across all staff</span>
+              </div>
+              <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 3 }}>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setTimeRange('weekly')}
+                  style={{ fontSize: 11, padding: '4px 10px', minWidth: 'auto', background: timeRange === 'weekly' ? 'var(--primary)' : 'transparent', color: timeRange === 'weekly' ? '#fff' : 'var(--text-secondary)', border: 'none' }}
+                >
+                  Weekly
+                </button>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setTimeRange('monthly')}
+                  style={{ fontSize: 11, padding: '4px 10px', minWidth: 'auto', background: timeRange === 'monthly' ? 'var(--primary)' : 'transparent', color: timeRange === 'monthly' ? '#fff' : 'var(--text-secondary)', border: 'none' }}
+                >
+                  Monthly
+                </button>
+              </div>
+            </div>
+            <div style={{ height: 240 }}>
+              <Line data={attendanceLineData} options={attendanceLineOpts} />
+            </div>
           </div>
-          <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-            {loading && currentlyPresentEmployees.length === 0 ? (
-              <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                Loading...
+
+          {/* Graph Card: Today's Shift Attendance */}
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Today's Shift Attendance</h3>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Present vs Enrolled Staff</span>
               </div>
-            ) : currentlyPresentEmployees.length === 0 ? (
-              <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                No active present staff
-              </div>
-            ) : (
-              currentlyPresentEmployees.map((log, idx) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{log.name}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {log.on_break && (
-                      <span style={{ fontSize: 10, color: 'var(--primary)', background: 'rgba(var(--primary-rgb), 0.1)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                        On Break
-                      </span>
-                    )}
-                    <span style={{ fontSize: 11, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                      {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Present'}
+            </div>
+            <div style={{ height: 240 }}>
+              <Bar data={attendanceBarData} options={attendanceBarOpts} />
+            </div>
+          </div>
+        </div>
+
+        {/* Right Side: 5 Attendance List Columns Container */}
+        <div className="attendance-bottom-cards-container" style={{ flex: '1 1 35%', display: 'flex', flexWrap: 'wrap', gap: 16, minWidth: 280, alignContent: 'flex-start' }}>
+          {/* Column 1: Currently Present Column */}
+          <div className="card" style={{ padding: 20, width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                Currently Present
+              </h3>
+              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)', padding: '2px 8px', borderRadius: 10 }}>
+                {currentlyPresentEmployees.length}
+              </span>
+            </div>
+            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+              {loading && currentlyPresentEmployees.length === 0 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                  Loading...
+                </div>
+              ) : currentlyPresentEmployees.length === 0 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                  No active present staff
+                </div>
+              ) : (
+                currentlyPresentEmployees.map((log, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Shift {log.shift || 'R1'}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      {log.on_break && (
+                        <span style={{ fontSize: 10, color: 'var(--primary)', background: 'rgba(var(--primary-rgb), 0.1)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          On Break
+                        </span>
+                      )}
+                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ fontSize: 11, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
+                          In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                        </span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                          {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Column 2: Late Arrivals Today */}
+          <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                Late Arrivals
+              </h3>
+              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(249, 115, 22, 0.1)', color: '#F97316', padding: '2px 8px', borderRadius: 10 }}>
+                {lateEmployees.length}
+              </span>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+              {loading && lateEmployees.length === 0 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                  Loading...
+                </div>
+              ) : lateEmployees.length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: 12, padding: '20px 0' }}>
+                  No late arrivals today
+                </div>
+              ) : (
+                lateEmployees.map((log, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{log.name}</span>
+                    <span style={{ fontSize: 11, color: '#F97316', background: 'rgba(249, 115, 22, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                      {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Late'}
                     </span>
                   </div>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* Staff On Break / Checked Out Column */}
-        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Staff On Break */}
-          <div>
+          {/* Column 3: Staff On Break Column */}
+          <div className="card" style={{ padding: 20, width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                 Staff On Break
@@ -830,7 +994,7 @@ export default function Dashboard() {
                 {onBreakEmployees.length}
               </span>
             </div>
-            <div style={{ overflowY: 'auto', maxHeight: 80, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
               {loading && onBreakEmployees.length === 0 ? (
                 <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
                   Loading...
@@ -852,10 +1016,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div style={{ borderTop: '1px solid var(--surface-2)' }}></div>
-
-          {/* Checked Out Today */}
-          <div>
+          {/* Column 4: Checked Out Today Column */}
+          <div className="card" style={{ padding: 20, width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                 Checked Out Today
@@ -864,7 +1026,7 @@ export default function Dashboard() {
                 {checkedOutEmployees.length}
               </span>
             </div>
-            <div style={{ overflowY: 'auto', maxHeight: 80, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
               {loading && checkedOutEmployees.length === 0 ? (
                 <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
                   Loading...
@@ -874,11 +1036,59 @@ export default function Dashboard() {
                   No checked out staff
                 </div>
               ) : (
-                checkedOutEmployees.map((log, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600 }}>{log.name}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                      {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Checked Out'}
+                checkedOutEmployees.map((log, idx) => {
+                  const otHours = Math.max(0, parseFloat(log.total_hours_today || 0) - (parseFloat(log.shift_hours) || 12.0));
+                  return (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Shift {log.shift || 'R1'}</span>
+                      </div>
+                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 2 }}>
+                          <span style={{ fontSize: 10, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
+                            In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
+                            Out: {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                          {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs {otHours > 0 && <span style={{ color: 'var(--primary)' }}>({otHours.toFixed(1)} OT)</span>}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Column 5: On Leave / Absent Column */}
+          <div className="card" style={{ padding: 20, width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                On Leave / Absent
+              </h3>
+              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', padding: '2px 8px', borderRadius: 10 }}>
+                {absentEmployees.length}
+              </span>
+            </div>
+            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+              {loading && absentEmployees.length === 0 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                  Loading...
+                </div>
+              ) : absentEmployees.length === 0 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                  All staff checked in
+                </div>
+              ) : (
+                absentEmployees.map((emp, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{emp.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                      Absent
                     </span>
                   </div>
                 ))
@@ -887,38 +1097,250 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* On Leave / Absent Column */}
-        <div className="card" style={{ padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-              On Leave / Absent
-            </h3>
-            <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', padding: '2px 8px', borderRadius: 10 }}>
-              {absentEmployees.length}
-            </span>
-          </div>
-          <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-            {loading && absentEmployees.length === 0 ? (
-              <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                Loading...
-              </div>
-            ) : absentEmployees.length === 0 ? (
-              <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                All staff checked in
-              </div>
-            ) : (
-              absentEmployees.map((emp, idx) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{emp.name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                    Absent
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
+      </div>
+
+
+
+      {/* Collapsible Today Attendance Table Section */}
+      <div className="card" style={{ width: '100%', marginTop: 24, padding: 0, overflow: 'hidden' }}>
+        <div
+          onClick={() => setShowAttendanceTable(!showAttendanceTable)}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '16px 20px',
+            cursor: 'pointer',
+            background: 'var(--surface-1)',
+            borderBottom: showAttendanceTable ? '1.5px solid var(--surface-2)' : 'none',
+            transition: 'background 0.2s'
+          }}
+          onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
+          onMouseOut={e => e.currentTarget.style.background = 'var(--surface-1)'}
+        >
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Users size={20} style={{ color: 'var(--primary)' }} /> Today's Attendance Table
+          </h3>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
+            {showAttendanceTable ? 'Click to Collapse ▲' : 'Click to Expand ▼'}
+          </span>
         </div>
 
+        {showAttendanceTable && (
+          <div style={{ padding: 20 }}>
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20, alignItems: 'center' }}>
+              <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+                <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search active staff..."
+                  value={attendanceSearchQuery}
+                  onChange={e => setAttendanceSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 10px 10px 32px',
+                    background: 'var(--surface)',
+                    border: '1.5px solid var(--surface-2)',
+                    borderRadius: 10,
+                    outline: 'none',
+                    fontSize: 13,
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <select
+                value={attendanceSelectedShift}
+                onChange={e => setAttendanceSelectedShift(e.target.value)}
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--surface)',
+                  border: '1.5px solid var(--surface-2)',
+                  borderRadius: 10,
+                  outline: 'none',
+                  fontSize: 13,
+                  minWidth: 140,
+                  cursor: 'pointer'
+                }}
+              >
+                {shiftsDropdownList.map(sh => (
+                  <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
+                ))}
+              </select>
+
+              <select
+                value={attendanceSelectedDepartment}
+                onChange={e => setAttendanceSelectedDepartment(e.target.value)}
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--surface)',
+                  border: '1.5px solid var(--surface-2)',
+                  borderRadius: 10,
+                  outline: 'none',
+                  fontSize: 13,
+                  minWidth: 140,
+                  cursor: 'pointer'
+                }}
+              >
+                {departmentsList.map(dept => (
+                  <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
+                ))}
+              </select>
+
+              <select
+                value={attendanceSelectedStatus}
+                onChange={e => setAttendanceSelectedStatus(e.target.value)}
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--surface)',
+                  border: '1.5px solid var(--surface-2)',
+                  borderRadius: 10,
+                  outline: 'none',
+                  fontSize: 13,
+                  minWidth: 140,
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="All">All Statuses</option>
+                <option value="Present">Present (Active)</option>
+                <option value="CheckedOut">Checked Out</option>
+                <option value="Late">Late Arrivals</option>
+                <option value="Absent">Absent Today</option>
+              </select>
+
+              <button
+                className="btn btn-secondary"
+                onClick={exportAttendanceToExcel}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '10px',
+                  borderRadius: 10,
+                  height: 40,
+                  width: 40,
+                  flexShrink: 0
+                }}
+                title="Export Excel"
+              >
+                <Download size={16} />
+              </button>
+            </div>
+
+            {/* Table */}
+            <div className="table-wrap">
+              <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '800px' }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface-1)' }}>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Code</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '220px' }}>Employee Name</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Shift</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-In Time</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-Out Time</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Status</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Hours Worked</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Overtime</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableFilteredEmployees.length === 0 ? (
+                    <tr>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                        No employees found matching filter criteria.
+                      </td>
+                    </tr>
+                  ) : (
+                    tableFilteredEmployees.map((emp, index) => {
+                      const rowBg = index % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)'
+                      const sessions = emp.sessions || []
+                      const decimalHoursToText = (hoursDec) => {
+                        if (isNaN(hoursDec) || hoursDec === null || hoursDec === undefined || hoursDec <= 0) return '0 min';
+                        const totalMins = Math.round(hoursDec * 60);
+                        const hrs = Math.floor(totalMins / 60);
+                        const mins = totalMins % 60;
+                        if (hrs > 0 && mins > 0) return `${hrs} hr ${mins} min`;
+                        if (hrs > 0) return `${hrs} hr`;
+                        return `${mins} min`;
+                      }
+                      return (
+                        <tr
+                          key={emp.employee_id}
+                          style={{
+                            background: rowBg,
+                            borderBottom: '1px solid var(--surface-2)',
+                            transition: 'background 0.2s'
+                          }}
+                          onMouseOver={e => e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.06)'}
+                          onMouseOut={e => e.currentTarget.style.background = rowBg}
+                        >
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{emp.employee_code || emp.employee_id}</td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '220px' }}>{emp.name}</td>
+                          <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>{emp.shift || 'R1'}</td>
+
+                          <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600, textAlign: 'center', color: 'var(--green)' }}>
+                            {sessions.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                {sessions.map((s, idx) => (
+                                  <div key={idx}>In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                ))}
+                              </div>
+                            ) : (
+                              '--'
+                            )}
+                          </td>
+
+                          <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600, textAlign: 'center', color: 'var(--text-muted)' }}>
+                            {sessions.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                {sessions.map((s, idx) => (
+                                  <div key={idx}>
+                                    {s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active'}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              '--'
+                            )}
+                          </td>
+
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            {sessions.length === 0 ? (
+                              <span style={{ color: 'var(--red)', background: 'rgba(255, 69, 58, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+                                Absent
+                              </span>
+                            ) : !emp.attendance_id || emp.check_out ? (
+                              <span style={{ color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+                                Checked Out
+                              </span>
+                            ) : (
+                              <span style={{
+                                color: emp.on_break ? 'var(--primary)' : 'var(--green)',
+                                background: emp.on_break ? 'rgba(var(--primary-rgb), 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                                padding: '3px 8px',
+                                borderRadius: 6,
+                                fontSize: 11,
+                                fontWeight: 600
+                              }}>
+                                {emp.on_break ? 'On Break' : emp.attendance_status === 'Late' ? 'Late' : 'Present'}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--green)', textAlign: 'center' }}>
+                            {decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)))}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
+                            {decimalHoursToText(Math.max(0, parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0)))}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </>
   )

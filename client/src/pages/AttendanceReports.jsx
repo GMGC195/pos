@@ -125,9 +125,12 @@ export default function AttendanceReports() {
   const handleUpdateSession = async (sessionId, checkInStr, checkOutStr) => {
     setSavingSessionId(sessionId)
     try {
+      // Convert datetime-local values (YYYY-MM-DDTHH:MM) to full ISO strings with timezone.
+      // Without this, PostgreSQL may interpret times as UTC and shift them by timezone offset.
+      const toISO = (localStr) => localStr ? new Date(localStr).toISOString() : null;
       await axios.put(`/api/attendance/session/${sessionId}`, {
-        check_in: checkInStr,
-        check_out: checkOutStr || null
+        check_in: toISO(checkInStr),
+        check_out: toISO(checkOutStr) || null
       })
       toast.success('Attendance session updated!')
       setShowEditModal(false)
@@ -1367,12 +1370,14 @@ export default function AttendanceReports() {
                         toast.error('Check In Time is required')
                         return
                       }
+                      // Convert datetime-local values to ISO strings to preserve timezone correctly
+                      const toISO = (localStr) => localStr ? new Date(localStr).toISOString() : null;
                       try {
                         await axios.post('/api/attendance/session', {
                           employee_id: editEmployeeId,
                           date: editDate,
-                          check_in: inVal,
-                          check_out: outVal || null,
+                          check_in: toISO(inVal),
+                          check_out: toISO(outVal),
                           status: statusVal
                         })
                         toast.success('Manual attendance session created!')

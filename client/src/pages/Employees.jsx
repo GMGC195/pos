@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings } from 'lucide-react'
+import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings, Filter } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
 import { useAuth } from '../contexts/AuthContext'
@@ -61,6 +61,11 @@ export default function Employees() {
   })
   const [searchTerm, setSearchTerm] = useState('')
   const [roleFilter, setRoleFilter] = useState('All')
+  const [selectedDept, setSelectedDept] = useState('All')
+  const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedPosition, setSelectedPosition] = useState('All')
+  const [selectedStatus, setSelectedStatus] = useState('All')
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
   
   // Modal state
   const [showModal, setShowModal] = useState(false)
@@ -227,11 +232,19 @@ export default function Employees() {
     }
   }
 
+  const departments = [...new Set(employees.map(e => e.department).filter(Boolean))].sort()
+  const positions = [...new Set(employees.map(e => e.position).filter(Boolean))].sort()
+  const shiftsList = [...new Set(employees.map(e => e.shift).filter(Boolean))].sort()
+
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           (emp.department && emp.department.toLowerCase().includes(searchTerm.toLowerCase())) ||
                           (emp.position && emp.position.toLowerCase().includes(searchTerm.toLowerCase()))
-    return matchesSearch
+    const matchesDept = selectedDept === 'All' || emp.department === selectedDept
+    const matchesPosition = selectedPosition === 'All' || emp.position === selectedPosition
+    const matchesShift = selectedShift === 'All' || emp.shift === selectedShift
+    const matchesStatus = selectedStatus === 'All' || emp.status === selectedStatus
+    return matchesSearch && matchesDept && matchesPosition && matchesShift && matchesStatus
   })
 
   return (
@@ -268,7 +281,6 @@ export default function Employees() {
           </button>
         </div>
       </div>
-
       <style>{`
         @media (max-width: 768px) {
           .employees-action-group {
@@ -296,21 +308,92 @@ export default function Employees() {
             height: 38px !important;
             font-size: 12px !important;
           }
+          .employee-filters {
+            width: 100%;
+            display: none !important;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px !important;
+          }
+          .employee-filters.show-mobile {
+            display: grid !important;
+          }
+          .employee-filters > select {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+          .filter-mobile-toggle-btn {
+            display: flex !important;
+          }
         }
       `}</style>
 
       {/* Filter and Search Bar */}
       <div className="card" style={{ padding: 18, marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 250, border: '1px solid var(--surface-2)', borderRadius: 8, padding: '0 12px', background: 'var(--surface-1)' }}>
-            <Search size={18} style={{ color: 'var(--text-muted)' }} />
-            <input 
-              type="text" 
-              placeholder="Search by name, department, or position..." 
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              style={{ width: '100%', border: 'none', outline: 'none', padding: '10px 8px', background: 'transparent', color: 'var(--text)' }}
-            />
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+          <div style={{ display: 'flex', gap: 8, flex: 1, minWidth: 250, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', flex: 1, border: '1px solid var(--surface-2)', borderRadius: 8, padding: '0 12px', background: 'var(--surface-1)' }}>
+              <Search size={18} style={{ color: 'var(--text-muted)' }} />
+              <input 
+                type="text" 
+                placeholder="Search by name, department, or position..." 
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                style={{ width: '100%', border: 'none', outline: 'none', padding: '10px 8px', background: 'transparent', color: 'var(--text)' }}
+              />
+            </div>
+            
+            <button 
+              className="btn btn-secondary filter-mobile-toggle-btn"
+              onClick={() => setShowMobileFilters(!showMobileFilters)}
+              style={{ display: 'none', alignItems: 'center', justifyContent: 'center', width: 42, height: 42, padding: 0, borderRadius: 8 }}
+            >
+              <Filter size={18} style={{ color: showMobileFilters ? 'var(--primary)' : 'var(--text)' }} />
+            </button>
+          </div>
+          
+          <div className={`employee-filters ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <select
+              value={selectedDept}
+              onChange={e => setSelectedDept(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 140 }}
+            >
+              <option value="All">All Departments</option>
+              {departments.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedPosition}
+              onChange={e => setSelectedPosition(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 140 }}
+            >
+              <option value="All">All Positions</option>
+              {positions.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedShift}
+              onChange={e => setSelectedShift(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+            >
+              <option value="All">All Shifts</option>
+              {shiftsList.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedStatus}
+              onChange={e => setSelectedStatus(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+            >
+              <option value="All">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
           </div>
         </div>
       </div>

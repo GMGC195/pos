@@ -205,136 +205,145 @@ export default function TodayAttendance() {
       </div>
 
       {/* Filter Options */}
-      <div className="attendance-search-row" style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
-        <div style={{ flex: 1, minWidth: 120, position: 'relative' }}>
-          <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input 
-            type="text" 
-            placeholder="Search active staff..." 
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+      {/* Filter Options */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20, width: '100%' }}>
+        <div style={{ display: 'flex', gap: 8, flex: 1, minWidth: 250, alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 120, position: 'relative' }}>
+            <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input 
+              type="text" 
+              placeholder="Search active staff..." 
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 10px 10px 32px',
+                background: 'var(--surface)',
+                border: '1.5px solid var(--surface-2)',
+                borderRadius: 10,
+                outline: 'none',
+                fontSize: 13,
+                boxSizing: 'border-box'
+              }}
+            />
+          </div>
+          
+          <button 
+            className="btn btn-secondary filter-mobile-toggle-btn"
+            onClick={() => setShowMobileFilters(!showMobileFilters)}
             style={{
-              width: '100%',
-              padding: '10px 10px 10px 32px',
+              display: 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              borderRadius: 10,
+              height: 40,
+              width: 40,
+              borderColor: showMobileFilters ? 'var(--primary)' : 'var(--surface-2)',
+              color: showMobileFilters ? 'var(--primary)' : 'var(--text)',
+              flexShrink: 0
+            }}
+          >
+            <Filter size={18} />
+          </button>
+
+          <button 
+            className="btn btn-secondary" 
+            onClick={loadTodayAttendance} 
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              padding: '10px', 
+              borderRadius: 10, 
+              height: 40, 
+              width: 40, 
+              flexShrink: 0
+            }}
+            title="Refresh"
+          >
+            <RefreshCw size={16} />
+          </button>
+
+          <button 
+            className="btn btn-secondary" 
+            onClick={exportToExcel}
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              padding: '10px', 
+              borderRadius: 10, 
+              height: 40, 
+              width: 40, 
+              flexShrink: 0
+            }}
+            title="Export Excel"
+          >
+            <Download size={16} />
+          </button>
+        </div>
+
+        <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select 
+            value={selectedShift}
+            onChange={e => setSelectedShift(e.target.value)}
+            style={{
+              padding: '10px 14px',
               background: 'var(--surface)',
               border: '1.5px solid var(--surface-2)',
               borderRadius: 10,
               outline: 'none',
               fontSize: 13,
-              boxSizing: 'border-box'
+              minWidth: 140,
+              cursor: 'pointer'
             }}
-          />
-        </div>
-        <button 
-          className="btn btn-secondary"
-          onClick={() => setShowMobileFilters(!showMobileFilters)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '10px',
-            borderRadius: 10,
-            height: 40,
-            width: 40,
-            borderColor: showMobileFilters ? 'var(--primary)' : 'var(--surface-2)',
-            color: showMobileFilters ? 'var(--primary)' : 'var(--text)',
-            flexShrink: 0
-          }}
-        >
-          <Filter size={18} />
-        </button>
-        <button 
-          className="btn btn-secondary" 
-          onClick={loadTodayAttendance} 
-          style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            padding: '10px', 
-            borderRadius: 10, 
-            height: 40, 
-            width: 40, 
-            flexShrink: 0
-          }}
-          title="Refresh"
-        >
-          <RefreshCw size={16} />
-        </button>
-        <button 
-          className="btn btn-secondary" 
-          onClick={exportToExcel}
-          style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            padding: '10px', 
-            borderRadius: 10, 
-            height: 40, 
-            width: 40, 
-            flexShrink: 0
-          }}
-          title="Export Excel"
-        >
-          <Download size={16} />
-        </button>
-      </div>
+          >
+            {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
+              <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
+            ))}
+          </select>
 
-      <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-        <select 
-          value={selectedShift}
-          onChange={e => setSelectedShift(e.target.value)}
-          style={{
-            padding: '10px 14px',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--surface-2)',
-            borderRadius: 10,
-            outline: 'none',
-            fontSize: 13,
-            minWidth: 160,
-            flex: 1
-          }}
-        >
-          {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
-            <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
-          ))}
-        </select>
-        <select 
-          value={selectedDepartment}
-          onChange={e => setSelectedDepartment(e.target.value)}
-          style={{
-            padding: '10px 14px',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--surface-2)',
-            borderRadius: 10,
-            outline: 'none',
-            fontSize: 13,
-            minWidth: 160,
-            flex: 1
-          }}
-        >
-          {departments.map(dept => (
-            <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
-          ))}
-        </select>
-        <select 
-          value={selectedStatus}
-          onChange={e => setSelectedStatus(e.target.value)}
-          style={{
-            padding: '10px 14px',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--surface-2)',
-            borderRadius: 10,
-            outline: 'none',
-            fontSize: 13,
-            minWidth: 160
-          }}
-        >
-          <option value="All">All Statuses</option>
-          <option value="Present">Present (Active)</option>
-          <option value="CheckedOut">Checked Out</option>
-          <option value="Late">Late Arrivals</option>
-          <option value="Absent">Absent Today</option>
-        </select>
+          <select 
+            value={selectedDepartment}
+            onChange={e => setSelectedDepartment(e.target.value)}
+            style={{
+              padding: '10px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 10,
+              outline: 'none',
+              fontSize: 13,
+              minWidth: 140,
+              cursor: 'pointer'
+            }}
+          >
+            {departments.map(dept => (
+              <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
+            ))}
+          </select>
+
+          <select 
+            value={selectedStatus}
+            onChange={e => setSelectedStatus(e.target.value)}
+            style={{
+              padding: '10px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 10,
+              outline: 'none',
+              fontSize: 13,
+              minWidth: 140,
+              cursor: 'pointer'
+            }}
+          >
+            <option value="All">All Statuses</option>
+            <option value="Present">Present (Active)</option>
+            <option value="CheckedOut">Checked Out</option>
+            <option value="Late">Late Arrivals</option>
+            <option value="Absent">Absent Today</option>
+          </select>
+        </div>
       </div>
 
       <style>{`
@@ -364,6 +373,9 @@ export default function TodayAttendance() {
           .attendance-filters-row select {
             width: 100%;
             min-width: 0 !important;
+          }
+          .filter-mobile-toggle-btn {
+            display: flex !important;
           }
         }
       `}</style>

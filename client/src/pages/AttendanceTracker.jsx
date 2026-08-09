@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle, MoreVertical, X, Filter } from 'lucide-react'
+import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle, MoreVertical, X, Filter, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -440,103 +440,88 @@ export default function AttendanceTracker() {
       </div>
 
       {/* Search and Filters Bar */}
-      <div className="attendance-search-row" style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <input 
-            type="text" 
-            placeholder="Search by name or ID..." 
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20, width: '100%' }}>
+        <div style={{ display: 'flex', gap: 8, flex: 1, minWidth: 250, alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', flex: 1, border: '1.5px solid var(--surface-2)', borderRadius: 10, padding: '0 12px', background: 'var(--surface)' }}>
+            <Search size={18} style={{ color: 'var(--text-muted)' }} />
+            <input 
+              type="text" 
+              placeholder="Search by name or ID..." 
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{ width: '100%', border: 'none', outline: 'none', padding: '10px 8px', background: 'transparent', color: 'var(--text)', fontSize: 13 }}
+            />
+          </div>
+          
+          <button 
+            className="btn btn-secondary filter-mobile-toggle-btn"
+            onClick={() => setShowMobileFilters(!showMobileFilters)}
+            style={{ display: 'none', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, padding: 0, borderRadius: 10, borderColor: showMobileFilters ? 'var(--primary)' : 'var(--surface-2)' }}
+          >
+            <Filter size={18} style={{ color: showMobileFilters ? 'var(--primary)' : 'var(--text)' }} />
+          </button>
+        </div>
+
+        <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select 
+            value={selectedShift}
+            onChange={e => setSelectedShift(e.target.value)}
             style={{
-              width: '100%',
               padding: '10px 14px',
               background: 'var(--surface)',
               border: '1.5px solid var(--surface-2)',
               borderRadius: 10,
               outline: 'none',
               fontSize: 13,
-              boxSizing: 'border-box'
+              minWidth: 140,
+              cursor: 'pointer'
             }}
-          />
+          >
+            {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
+              <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
+            ))}
+          </select>
+
+          <select 
+            value={selectedDepartment}
+            onChange={e => setSelectedDepartment(e.target.value)}
+            style={{
+              padding: '10px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 10,
+              outline: 'none',
+              fontSize: 13,
+              minWidth: 140,
+              cursor: 'pointer'
+            }}
+          >
+            {departments.map(dept => (
+              <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
+            ))}
+          </select>
+
+          <select 
+            value={selectedStatus}
+            onChange={e => setSelectedStatus(e.target.value)}
+            style={{
+              padding: '10px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 10,
+              outline: 'none',
+              fontSize: 13,
+              minWidth: 140,
+              cursor: 'pointer'
+            }}
+          >
+            <option value="All">All Statuses</option>
+            <option value="Present">Present (Active)</option>
+            <option value="Absent">Absent Today</option>
+            <option value="Late">Late Arrivals</option>
+            <option value="CheckedOut">Checked Out</option>
+          </select>
         </div>
-        <button 
-          className="btn btn-secondary"
-          onClick={() => setShowMobileFilters(!showMobileFilters)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '10px',
-            borderRadius: 10,
-            height: 40,
-            width: 40,
-            borderColor: showMobileFilters ? 'var(--primary)' : 'var(--surface-2)',
-            color: showMobileFilters ? 'var(--primary)' : 'var(--text)'
-          }}
-        >
-          <Filter size={18} />
-        </button>
-      </div>
-
-      <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-        <select 
-          value={selectedShift}
-          onChange={e => setSelectedShift(e.target.value)}
-          style={{
-            padding: '10px 14px',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--surface-2)',
-            borderRadius: 10,
-            outline: 'none',
-            fontSize: 13,
-            minWidth: 160,
-            flex: 1
-          }}
-        >
-          {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
-            <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
-          ))}
-        </select>
-
-        <select 
-          value={selectedDepartment}
-          onChange={e => setSelectedDepartment(e.target.value)}
-          style={{
-            padding: '10px 14px',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--surface-2)',
-            borderRadius: 10,
-            outline: 'none',
-            fontSize: 13,
-            minWidth: 160,
-            flex: 1
-          }}
-        >
-          {departments.map(dept => (
-            <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
-          ))}
-        </select>
-
-        <select 
-          value={selectedStatus}
-          onChange={e => setSelectedStatus(e.target.value)}
-          style={{
-            padding: '10px 14px',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--surface-2)',
-            borderRadius: 10,
-            outline: 'none',
-            fontSize: 13,
-            minWidth: 160,
-            flex: 1
-          }}
-        >
-          <option value="All">All Statuses</option>
-          <option value="Present">Present (Active)</option>
-          <option value="Absent">Absent Today</option>
-          <option value="Late">Late Arrivals</option>
-          <option value="CheckedOut">Checked Out</option>
-        </select>
       </div>
 
       <style>{`
@@ -557,6 +542,9 @@ export default function AttendanceTracker() {
           .attendance-filters-row select {
             width: 100%;
             min-width: 0 !important;
+          }
+          .filter-mobile-toggle-btn {
+            display: flex !important;
           }
         }
       `}</style>

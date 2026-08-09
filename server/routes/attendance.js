@@ -421,8 +421,14 @@ router.get('/reports', authenticateToken, async (req, res) => {
       let otHours = 0;
       const shiftHours = parseFloat(row.shift_hours || 12.0);
       
+      // row.date from PostgreSQL is a JS Date object (not a string).
+      // We must convert it to a local date string (YYYY-MM-DD) before comparing.
+      const rowDateStr = row.date instanceof Date
+        ? row.date.toLocaleDateString('en-CA')
+        : String(row.date).split('T')[0];
+
       let forgotCheckout = false;
-      if (!checkOutTime && row.date < todayStr) {
+      if (!checkOutTime && rowDateStr < todayStr) {
         checkOutTime = checkInTime; // Treat as checked out at check-in time (0 hours)
         forgotCheckout = true;
       }
