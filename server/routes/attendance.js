@@ -680,15 +680,9 @@ router.post('/edit', authenticateToken, async (req, res) => {
     // Restrictions for Operator role
     const userRole = req.user.role?.toLowerCase();
     if (userRole === 'operator') {
-      // 1. Must be created by this operator
+      // Must be created by this operator (can edit any past date)
       if (created_by !== req.user.username) {
         return res.status(403).json({ error: 'Access denied: You can only edit attendance logs that you created.' });
-      }
-      // 2. Date of attendance must be today
-      const todayStr = new Date().toISOString().split('T')[0];
-      const recordDateStr = new Date(recordDate).toISOString().split('T')[0];
-      if (recordDateStr !== todayStr) {
-        return res.status(403).json({ error: 'Access denied: You can only edit attendance logs for today.' });
       }
     }
 

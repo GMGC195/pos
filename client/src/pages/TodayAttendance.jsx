@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Fingerprint, Coffee, Clock, User, LogIn, Search, RefreshCw, FileText, MoreVertical, X, Download, Filter } from 'lucide-react'
+import { Fingerprint, Coffee, Clock, User, LogIn, Search, RefreshCw, FileText, MoreVertical, X, Download, Filter, Edit } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -21,24 +21,49 @@ const decimalHoursToText = (hoursDec) => {
   return `${mins} min`;
 }
 
+const formatLocalDate = (date) => {
+  const d = new Date(date)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export default function TodayAttendance() {
   const { user } = useAuth()
   const [employees, setEmployees] = useState([])
+  const [employeesList, setEmployeesList] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedShift, setSelectedShift] = useState('All')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
-  const [selectedStatus, setSelectedStatus] = useState('All') // 'All', 'Present', 'CheckedOut', 'Late', 'Absent'
+  const [selectedStatus, setSelectedStatus] = useState('All')
   const [shiftsList, setShiftsList] = useState([])
   const [showMobileFilters, setShowMobileFilters] = useState(false)
 
+  // ── Enhanced Edit Attendance Modal State ─────────────────────────────────
   const [showEditModal, setShowEditModal] = useState(false)
-  const [selectedEmp, setSelectedEmp] = useState(null)
-  const [selectedSessionId, setSelectedSessionId] = useState('')
+  // step: 'employee' | 'date' | 'mode'
+  const [editStep, setEditStep] = useState('employee')
+  const [editEmpId, setEditEmpId] = useState('')
+  const [editDateMode, setEditDateMode] = useState('today')   // 'today' | 'previous'
+  const [editDate, setEditDate] = useState('')
+  const [editMode, setEditMode] = useState('')               // 'add' | 'edit'
+  const [editSessions, setEditSessions] = useState([])
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [savingSessionId, setSavingSessionId] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  // Add-new-session form
   const [newCheckIn, setNewCheckIn] = useState('')
   const [newCheckOut, setNewCheckOut] = useState('')
+  const [newStatus, setNewStatus] = useState('Present')
+
+  // Quick-edit (reason) from row button
+  const [selectedEmp, setSelectedEmp] = useState(null)
+  const [selectedSessionId, setSelectedSessionId] = useState('')
   const [editReason, setEditReason] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  // ──────────────────────────────────────────────────────────────────────────
 
   const loadTodayAttendance = () => {
     setLoading(true)
@@ -56,57 +81,130 @@ export default function TodayAttendance() {
       .catch(() => {})
   }
 
+  const loadEmployeesList = () => {
+    axios.get('/api/employees')
+      .then(res => setEmployeesList(res.data || []))
+      .catch(() => {})
+  }
+
   useEffect(() => {
     loadTodayAttendance()
     loadShifts()
-    // Poll every 30 seconds
+    loadEmployeesList()
     const interval = setInterval(loadTodayAttendance, 30000)
     return () => clearInterval(interval)
   }, [])
 
-  useEffect(() => {
-    if (selectedEmp && selectedEmp.sessions) {
-      const activeSession = selectedEmp.sessions.find(s => String(s.attendance_id) === String(selectedSessionId)) || selectedEmp.sessions[0];
-      if (activeSession) {
-        setSelectedSessionId(activeSession.attendance_id);
-        setNewCheckIn(toDatetimeLocal(activeSession.check_in));
-        setNewCheckOut(toDatetimeLocal(activeSession.check_out));
-      } else {
-        setNewCheckIn('');
-        setNewCheckOut('');
-      }
-    }
-  }, [selectedSessionId, selectedEmp])
+  // Load sessions whenever employee + date are set in edit modal
+  const loadEditSessions = (empId, dateStr) => {
+    if (!empId || !dateStr) return
+    setLoadingSessions(true)
+    axios.get('/api/attendance/employee-date', { params: { employee_id: empId, date: dateStr } })
+      .then(res => setEditSessions(res.data))
+      .catch(() => toast.error('Error loading sessions'))
+      .finally(() => setLoadingSessions(false))
+  }
 
-  const handleSaveEdit = async () => {
-    if (!selectedSessionId) {
-      toast.error('Please select a session');
-      return;
-    }
-    if (!editReason || !editReason.trim()) {
-      toast.error('Must add reason');
-      return;
-    }
-    setSubmitting(true);
+  const openEditModal = (prefillEmpId = '') => {
+    const todayStr = formatLocalDate(new Date())
+    setEditEmpId(prefillEmpId || '')
+    setEditDateMode('today')
+    setEditDate(todayStr)
+    setEditMode('')
+    setEditSessions([])
+    setNewCheckIn('')
+    setNewCheckOut('')
+    setNewStatus('Present')
+    setEditReason('')
+    setSelectedSessionId('')
+    setEditStep(prefillEmpId ? 'date' : 'employee')
+    setShowEditModal(true)
+  }
+
+  const closeEditModal = () => {
+    setShowEditModal(false)
+    setEditStep('employee')
+    setEditEmpId('')
+    setEditMode('')
+    setEditSessions([])
+  }
+
+  const handleEditStep1Next = () => {
+    if (!editEmpId) { toast.error('Please select an employee'); return }
+    setEditStep('date')
+  }
+
+  const handleEditStep2Next = () => {
+    const dateStr = editDateMode === 'today' ? formatLocalDate(new Date()) : editDate
+    if (editDateMode === 'previous' && !editDate) { toast.error('Please select a date'); return }
+    setEditDate(dateStr)
+    setEditMode('')
+    setEditSessions([])
+    setEditStep('mode')
+    loadEditSessions(editEmpId, dateStr)
+  }
+
+  const handleAddSession = async () => {
+    if (!newCheckIn) { toast.error('Check-In time is required'); return }
+    if (!newCheckOut) { toast.error('Check-Out time is required'); return }
+    if (new Date(newCheckOut) <= new Date(newCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
+    const toISO = (v) => v ? new Date(v).toISOString() : null
     try {
-      await axios.post('/api/attendance/edit', {
-        attendance_id: selectedSessionId,
-        new_check_in: newCheckIn ? new Date(newCheckIn).toISOString() : null,
-        new_check_out: newCheckOut ? new Date(newCheckOut).toISOString() : null,
-        reason: editReason
-      });
-      toast.success('Attendance updated successfully');
-      setShowEditModal(false);
-      setSelectedEmp(null);
-      setSelectedSessionId('');
-      setEditReason('');
-      loadTodayAttendance();
+      await axios.post('/api/attendance/session', {
+        employee_id: editEmpId,
+        date: editDate,
+        check_in: toISO(newCheckIn),
+        check_out: toISO(newCheckOut),
+        status: newStatus
+      })
+      toast.success('Session added!')
+      setNewCheckIn('')
+      setNewCheckOut('')
+      setNewStatus('Present')
+      loadEditSessions(editEmpId, editDate)
+      loadTodayAttendance()
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to update attendance');
-    } finally {
-      setSubmitting(false);
+      toast.error(err?.response?.data?.error || 'Failed to add session')
     }
   }
+
+  const handleUpdateExistingSession = async (sessionId, inVal, outVal, reason) => {
+    if (!reason || !reason.trim()) { toast.error('Reason is required'); return }
+    setSavingSessionId(sessionId)
+    try {
+      const toISO = (v) => v ? new Date(v).toISOString() : null
+      await axios.post('/api/attendance/edit', {
+        attendance_id: sessionId,
+        new_check_in: toISO(inVal),
+        new_check_out: toISO(outVal),
+        reason
+      })
+      toast.success('Session updated!')
+      loadEditSessions(editEmpId, editDate)
+      loadTodayAttendance()
+    } catch (err) {
+      toast.error(err?.response?.data?.error || 'Failed to update session')
+    } finally {
+      setSavingSessionId(null)
+    }
+  }
+
+  const handleDeleteSession = async (sessionId) => {
+    setSavingSessionId(sessionId)
+    try {
+      await axios.delete(`/api/attendance/session/${sessionId}`)
+      toast.success('Session deleted!')
+      loadEditSessions(editEmpId, editDate)
+      loadTodayAttendance()
+    } catch (err) {
+      toast.error(err?.response?.data?.error || 'Failed to delete session')
+    } finally {
+      setSavingSessionId(null)
+    }
+  }
+
+  // Yesterday's date string for max= on Previous date picker (no future dates)
+  const yesterdayStr = formatLocalDate(new Date(Date.now() - 86400000))
 
   const exportToExcel = async () => {
     try {
@@ -201,6 +299,18 @@ export default function TodayAttendance() {
               <span style={{ fontWeight: 700 }}>{employees.filter(e => e.on_break).length}</span>
             </div>
           </div>
+
+          {/* Edit Attendance button */}
+          {['admin', 'operator', 'developer'].includes(user?.role?.toLowerCase()) && (
+            <button
+              className="btn btn-secondary attendance-header-btn"
+              onClick={() => openEditModal()}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 36, fontSize: 13, borderColor: 'var(--primary)', color: 'var(--text)', padding: '0 14px' }}
+            >
+              <Edit size={14} style={{ color: 'var(--primary)' }} />
+              <span className="btn-text">Edit Attendance</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -493,15 +603,7 @@ export default function TodayAttendance() {
                           <button 
                             className="btn btn-secondary" 
                             style={{ padding: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', width: 32, height: 32 }}
-                            onClick={() => {
-                              if (sessions.length === 0) {
-                                toast.error('Employee has no attendance sessions today');
-                                    return;
-                              }
-                              setSelectedEmp(emp);
-                              setSelectedSessionId(sessions[0].attendance_id);
-                              setShowEditModal(true);
-                            }}
+                            onClick={() => openEditModal(emp.employee_id)}
                           >
                             <MoreVertical size={16} />
                           </button>
@@ -516,129 +618,272 @@ export default function TodayAttendance() {
         </div>
       )}
 
-      {showEditModal && selectedEmp && (
+      {/* ── Enhanced Multi-Step Edit Attendance Modal ── */}
+      {showEditModal && (
         <div style={{
           position: 'fixed', inset: 0,
-          background: 'rgba(0, 0, 0, 0.6)',
-          backdropFilter: 'blur(4px)',
+          background: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(6px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 9999
+          zIndex: 9999, padding: 16
         }}>
-          <div className="card" style={{ width: '100%', maxWidth: 450, padding: 24, position: 'relative' }}>
-            <button 
-              onClick={() => { setShowEditModal(false); setSelectedEmp(null); }}
-              style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-            >
+          <div className="card" style={{ width: '100%', maxWidth: 480, padding: 28, position: 'relative', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            {/* Close */}
+            <button onClick={closeEditModal} style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
               <X size={20} />
             </button>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: 18, fontWeight: 800 }}>Edit Attendance Times</h3>
-            <p style={{ margin: '0 0 20px 0', fontSize: 13, color: 'var(--text-muted)' }}>
-              Editing logs for <strong>{selectedEmp.name}</strong>
-            </p>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select Session</label>
-                <select 
-                  value={selectedSessionId} 
-                  onChange={e => setSelectedSessionId(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    background: 'var(--surface)',
-                    border: '1.5px solid var(--surface-2)',
-                    borderRadius: 8,
-                    outline: 'none',
-                    fontSize: 13
-                  }}
-                >
-                  {(selectedEmp.sessions || []).map((s, idx) => (
-                    <option key={s.attendance_id} value={s.attendance_id}>
-                      Session {idx + 1}: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {s.check_out ? new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
-                    </option>
-                  ))}
-                </select>
-              </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-In Time</label>
-                <input 
-                  type="datetime-local" 
-                  value={newCheckIn} 
-                  onChange={e => setNewCheckIn(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    background: 'var(--surface)',
-                    border: '1.5px solid var(--surface-2)',
-                    borderRadius: 8,
-                    outline: 'none',
-                    fontSize: 13,
-                    boxSizing: 'border-box'
-                  }}
-                />
+            {/* Title */}
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit size={18} style={{ color: 'var(--primary)' }} /> Edit Attendance
+              </h3>
+              {/* Step indicator */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                {['Employee', 'Date', 'Action'].map((label, i) => {
+                  const stepKey = ['employee', 'date', 'mode'][i]
+                  const steps = ['employee', 'date', 'mode']
+                  const currentIdx = steps.indexOf(editStep)
+                  const isActive = editStep === stepKey
+                  const isDone = steps.indexOf(stepKey) < currentIdx
+                  return (
+                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 700,
+                        background: isDone ? 'var(--primary)' : isActive ? 'var(--primary)' : 'var(--surface-2)',
+                        color: (isDone || isActive) ? 'white' : 'var(--text-muted)'
+                      }}>{isDone ? '✓' : i + 1}</div>
+                      <span style={{ fontSize: 11, color: isActive ? 'var(--text)' : 'var(--text-muted)', fontWeight: isActive ? 600 : 400 }}>{label}</span>
+                      {i < 2 && <div style={{ width: 20, height: 2, background: isDone ? 'var(--primary)' : 'var(--surface-2)', marginLeft: 2 }} />}
+                    </div>
+                  )
+                })}
               </div>
+            </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-Out Time</label>
-                <input 
-                  type="datetime-local" 
-                  value={newCheckOut} 
-                  onChange={e => setNewCheckOut(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    background: 'var(--surface)',
-                    border: '1.5px solid var(--surface-2)',
-                    borderRadius: 8,
-                    outline: 'none',
-                    fontSize: 13,
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
 
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Reason for Edit *</label>
-                <textarea 
-                  placeholder="Enter reason for modifying attendance time..."
-                  value={editReason}
-                  onChange={e => setEditReason(e.target.value)}
-                  style={{
-                    width: '100%',
-                    height: 80,
-                    padding: '10px 12px',
-                    background: 'var(--surface)',
-                    border: '1.5px solid var(--surface-2)',
-                    borderRadius: 8,
-                    outline: 'none',
-                    fontSize: 13,
-                    resize: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                  required
-                />
-              </div>
+              {/* ── STEP 1: Select Employee ── */}
+              {editStep === 'employee' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select Employee</label>
+                    <select
+                      value={editEmpId}
+                      onChange={e => setEditEmpId(e.target.value)}
+                      style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13 }}
+                    >
+                      <option value="">-- Choose Employee --</option>
+                      {employeesList.filter(e => e.status === 'Active' || !e.status).map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_id})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                    <button className="btn btn-secondary" onClick={closeEditModal}>Cancel</button>
+                    <button className="btn btn-primary" onClick={handleEditStep1Next}>Next →</button>
+                  </div>
+                </div>
+              )}
 
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button 
-                  className="btn btn-secondary" 
-                  onClick={() => { setShowEditModal(false); setSelectedEmp(null); }}
-                >
-                  Cancel
-                </button>
-                <button 
-                  className="btn btn-primary" 
-                  onClick={handleSaveEdit}
-                  disabled={submitting}
-                >
-                  {submitting ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
+              {/* ── STEP 2: Select Date ── */}
+              {editStep === 'date' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>Select Date Range</label>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      {['today', 'previous'].map(mode => (
+                        <button
+                          key={mode}
+                          onClick={() => { setEditDateMode(mode); if (mode === 'today') setEditDate(formatLocalDate(new Date())) }}
+                          style={{
+                            flex: 1, padding: '12px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, border: '2px solid',
+                            borderColor: editDateMode === mode ? 'var(--primary)' : 'var(--surface-2)',
+                            background: editDateMode === mode ? 'var(--primary)' : 'var(--surface)',
+                            color: editDateMode === mode ? 'white' : 'var(--text)'
+                          }}
+                        >
+                          {mode === 'today' ? '📅 Today' : '🗓 Previous Day'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {editDateMode === 'previous' && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select Date <span style={{ color: 'var(--red)' }}>(no future dates)</span></label>
+                      <input
+                        type="date"
+                        value={editDate}
+                        max={yesterdayStr}
+                        onChange={e => setEditDate(e.target.value)}
+                        style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 8 }}>
+                    <button className="btn btn-secondary" onClick={() => setEditStep('employee')}>← Back</button>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button className="btn btn-secondary" onClick={closeEditModal}>Cancel</button>
+                      <button className="btn btn-primary" onClick={handleEditStep2Next}>Next →</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── STEP 3: Choose Mode ── */}
+              {editStep === 'mode' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                  {/* Mode selector */}
+                  {!editMode && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>What would you like to do?</label>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button
+                          onClick={() => setEditMode('add')}
+                          style={{ flex: 1, padding: '16px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, border: '2px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text)' }}
+                        >➕ Add New Session</button>
+                        <button
+                          onClick={() => setEditMode('edit')}
+                          style={{ flex: 1, padding: '16px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, border: '2px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text)' }}
+                        >✏️ Edit Sessions</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add new session form */}
+                  {editMode === 'add' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 14, fontWeight: 700 }}>➕ Add New Session</span>
+                        <button onClick={() => setEditMode('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>← Back</button>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-In Time *</label>
+                        <input type="datetime-local" value={newCheckIn} onChange={e => setNewCheckIn(e.target.value)}
+                          style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-Out Time *</label>
+                        <input type="datetime-local" value={newCheckOut} onChange={e => setNewCheckOut(e.target.value)}
+                          style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Status</label>
+                        <select value={newStatus} onChange={e => setNewStatus(e.target.value)}
+                          style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13 }}
+                        >
+                          <option value="Present">Present</option>
+                          <option value="Late">Late</option>
+                        </select>
+                      </div>
+                      <button className="btn btn-primary" onClick={handleAddSession} style={{ marginTop: 4 }}>
+                        Add Session
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Edit existing sessions */}
+                  {editMode === 'edit' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 14, fontWeight: 700 }}>✏️ Edit Sessions</span>
+                        <button onClick={() => setEditMode('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>← Back</button>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
+                      {loadingSessions ? (
+                        <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>Loading sessions...</div>
+                      ) : editSessions.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>No sessions found for this date.</div>
+                      ) : (
+                        editSessions.map((s, idx) => (
+                          <EditSessionRow
+                            key={s.id}
+                            session={s}
+                            index={idx}
+                            saving={savingSessionId === s.id}
+                            onSave={handleUpdateExistingSession}
+                            onDelete={handleDeleteSession}
+                          />
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* Back button when no mode selected */}
+                  {!editMode && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 8 }}>
+                      <button className="btn btn-secondary" onClick={() => setEditStep('date')}>← Back</button>
+                      <button className="btn btn-secondary" onClick={closeEditModal}>Cancel</button>
+                    </div>
+                  )}
+
+                  {editMode && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                      <button className="btn btn-secondary" onClick={closeEditModal}>Close</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Inline Session Edit Row ───────────────────────────────────────────────────
+function EditSessionRow({ session, index, saving, onSave, onDelete }) {
+  const toLocal = (iso) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const y = d.getFullYear(), mo = String(d.getMonth()+1).padStart(2,'0'), dy = String(d.getDate()).padStart(2,'0')
+    const h = String(d.getHours()).padStart(2,'0'), mi = String(d.getMinutes()).padStart(2,'0')
+    return `${y}-${mo}-${dy}T${h}:${mi}`
+  }
+  const [inVal, setInVal] = useState(() => toLocal(session.check_in))
+  const [outVal, setOutVal] = useState(() => toLocal(session.check_out))
+  const [reason, setReason] = useState('')
+
+  return (
+    <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Session #{index + 1} — {session.status}</div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check-In</span>
+          <input type="datetime-local" value={inVal} onChange={e => setInVal(e.target.value)}
+            style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
+          />
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check-Out</span>
+          <input type="datetime-local" value={outVal} onChange={e => setOutVal(e.target.value)}
+            style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
+          />
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Reason for Edit <span style={{ color: 'var(--red)' }}>*</span></span>
+        <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="Required reason..."
+          style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button className="btn" disabled={saving} onClick={() => onDelete(session.id)}
+          style={{ height: 30, fontSize: 11, padding: '0 12px', background: '#EF4444', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+        >{saving ? '...' : 'Delete'}</button>
+        <button className="btn btn-primary" disabled={saving || !inVal} onClick={() => onSave(session.id, inVal, outVal, reason)}
+          style={{ height: 30, fontSize: 11, padding: '0 12px' }}
+        >{saving ? 'Saving...' : 'Save'}</button>
+      </div>
     </div>
   )
 }
