@@ -134,17 +134,26 @@ export default function AttendanceReports() {
       .finally(() => setLoadingSessions(false))
   }
 
-  const openEditModal = (prefillEmpId = '', prefillDate = '') => {
+  const openEditModal = (prefillEmpId = '', prefillDate = '', forceMode = null) => {
     const todayStr = formatLocalDate(new Date())
     setEditEmployeeId(prefillEmpId || '')
-    setEditDateMode('today')
+    if (prefillDate) {
+      setEditDateMode(prefillDate === todayStr ? 'today' : 'previous')
+    } else {
+      setEditDateMode('today')
+    }
     setEditDate(prefillDate || todayStr)
-    setEditMode('')
+    setEditMode(forceMode || '')
     setEditSessions([])
     setAddCheckIn('')
     setAddCheckOut('')
     setAddStatus('Present')
-    setEditStep(prefillEmpId ? 'date' : 'employee')
+    if (prefillEmpId && prefillDate) {
+      setEditStep('mode')
+      loadEditSessions(prefillEmpId, prefillDate)
+    } else {
+      setEditStep(prefillEmpId ? 'date' : 'employee')
+    }
     setShowEditModal(true)
   }
 
@@ -243,9 +252,9 @@ export default function AttendanceReports() {
   // Detailed Modal State
   const [selectedEmployeeLogs, setSelectedEmployeeLogs] = useState(null)
 
-  const handleEditFromPopup = (empId, dateStr) => {
+  const handleEditFromPopup = (empId, dateStr, forceMode = null) => {
     setSelectedEmployeeLogs(null)
-    openEditModal(empId, dateStr)
+    openEditModal(empId, dateStr, forceMode)
   }
 
   const getHolidayDayName = () => {
@@ -1328,7 +1337,7 @@ export default function AttendanceReports() {
                       return (
                         <tr key={dateStr} style={{ borderBottom: '1px solid var(--surface-2)', opacity: isPast ? 1 : 0.45 }}>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>{day.toLocaleDateString([], { month: 'short', day: 'numeric' })}</td>
-                          <td colSpan={isAdmin ? 5 : 4} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
+                          <td colSpan={4} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
                             {isPast ? 'Absent / Unmarked' : 'Future Day'}
                           </td>
                           <td style={{ padding: 10 }}>
@@ -1338,7 +1347,7 @@ export default function AttendanceReports() {
                             <td style={{ padding: 10, textAlign: 'center' }}>
                               {isPast && (
                                 <button 
-                                  onClick={() => handleEditFromPopup(selectedEmployeeLogs.employee_id, dateStr)}
+                                  onClick={() => handleEditFromPopup(selectedEmployeeLogs.employee_id, dateStr, 'add')}
                                   style={{
                                     background: 'transparent',
                                     border: 'none',
@@ -1403,7 +1412,7 @@ export default function AttendanceReports() {
                           {isAdmin && (
                             <td style={{ padding: 10, textAlign: 'center' }}>
                               <button 
-                                onClick={() => handleEditFromPopup(selectedEmployeeLogs.employee_id, dateStr)}
+                                onClick={() => handleEditFromPopup(selectedEmployeeLogs.employee_id, dateStr, '')}
                                 style={{
                                   background: 'transparent',
                                   border: 'none',
