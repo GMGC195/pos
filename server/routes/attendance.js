@@ -25,6 +25,33 @@ const autoCheckoutOldSessions = async (req, res, next) => {
 
 router.use(autoCheckoutOldSessions);
 
+// Helper to evaluate if a shift has started based on current time
+const evaluateShiftStart = (shiftName, shiftsList) => {
+  const shift = shiftsList.find(s => s.name.toUpperCase() === (shiftName || 'R1').toUpperCase());
+  let startHour = 10, startMin = 0;
+  if (shift && shift.start_time) {
+    const timeMatch = shift.start_time.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+    if (timeMatch) {
+      let hrs = parseInt(timeMatch[1], 10);
+      const mins = parseInt(timeMatch[2], 10);
+      const ampm = timeMatch[3].toUpperCase();
+      if (ampm === 'PM' && hrs < 12) hrs += 12;
+      if (ampm === 'AM' && hrs === 12) hrs = 0;
+      startHour = hrs;
+      startMin = mins;
+    }
+  } else {
+    if (shiftName === 'R2') startHour = 9;
+    else if (shiftName === 'R3') startHour = 15;
+  }
+  
+  const now = new Date();
+  const currentHours = now.getHours();
+  const currentMins = now.getMinutes();
+  
+  return (currentHours > startHour) || (currentHours === startHour && currentMins >= startMin);
+};
+
 // Get today's attendance status for all active employees
 router.get('/today', authenticateToken, async (req, res) => {
   try {
@@ -50,6 +77,10 @@ router.get('/today', authenticateToken, async (req, res) => {
       WHERE date = CURRENT_DATE
       ORDER BY check_in ASC
     `);
+
+    // Fetch all shifts for shift timing checks
+    const shiftsData = await pool.query(`SELECT name, start_time FROM employee_shifts`);
+    const shiftsList = shiftsData.rows;
 
     // Group sessions by employee ID
     const sessionsMap = {};
@@ -80,6 +111,15 @@ router.get('/today', authenticateToken, async (req, res) => {
 
       // Get current active state: last session status
       const lastSession = empSessions[empSessions.length - 1] || null;
+      
+      let calculatedStatus = 'Absent';
+      if (empSessions.length > 0) {
+        if (lastSession.on_break) calculatedStatus = 'On Break';
+        else if (lastSession.attendance_status === 'Late') calculatedStatus = 'Late';
+        else calculatedStatus = 'Present';
+      } else if (!evaluateShiftStart(emp.shift, shiftsList)) {
+        calculatedStatus = 'Pending';
+      }
 
       return {
         ...emp,
@@ -91,7 +131,8 @@ router.get('/today', authenticateToken, async (req, res) => {
         on_break: lastSession ? lastSession.on_break : false,
         break_start: lastSession ? lastSession.break_start : null,
         total_hours_today: totalHoursToday,
-        total_break_seconds_today: totalBreakSecondsToday
+        total_break_seconds_today: totalBreakSecondsToday,
+        calculated_status: calculatedStatus
       };
     });
 
@@ -524,8 +565,13 @@ router.get('/analytics', authenticateToken, async (req, res) => {
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
     // Total employees count
-    const totalEmployeesRes = await pool.query("SELECT COUNT(*) FROM employees WHERE status = 'Active'");
-    const totalEmployees = parseInt(totalEmployeesRes.rows[0].count);
+    const activeEmpsRes = await pool.query("SELECT id, shift FROM employees WHERE status = 'Active'");
+    const activeEmps = activeEmpsRes.rows;
+    const totalEmployees = activeEmps.length;
+
+    // Fetch all shifts
+    const shiftsData = await pool.query(`SELECT name, start_time FROM employee_shifts`);
+    const shiftsList = shiftsData.rows;
 
     // Get today's attendance logs
     const todayLogs = await pool.query(`
@@ -543,7 +589,10 @@ router.get('/stats', authenticateToken, async (req, res) => {
     let holidays = 0;
     let leaves = 0;
 
+    const activeEmployeeIdsWithActivity = new Set();
+
     todayLogs.rows.forEach(log => {
+      activeEmployeeIdsWithActivity.add(log.employee_id);
       if (log.status === 'Holiday') {
         holidays++;
       } else if (log.status === 'Leave') {
@@ -561,7 +610,18 @@ router.get('/stats', authenticateToken, async (req, res) => {
       }
     });
 
-    const absent = Math.max(0, totalEmployees - present - onBreak - checkedOut);
+    let absent = 0;
+    let pending = 0;
+
+    activeEmps.forEach(emp => {
+      if (!activeEmployeeIdsWithActivity.has(emp.id)) {
+        if (evaluateShiftStart(emp.shift, shiftsList)) {
+          absent++;
+        } else {
+          pending++;
+        }
+      }
+    });
 
     res.json({
       total_employees: totalEmployees,
@@ -570,6 +630,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       on_break: onBreak,
       checked_out: checkedOut,
       absent: absent,
+      pending: pending,
       holidays: holidays,
       leaves: leaves
     });

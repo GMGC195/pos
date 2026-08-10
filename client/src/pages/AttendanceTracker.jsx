@@ -674,7 +674,16 @@ export default function AttendanceTracker() {
  
                   {!isCheckedIn && (
                     <div style={{ background: 'var(--surface-1)', padding: '8px 12px', border: '1px dashed var(--surface-3)', borderRadius: 8, fontSize: 12, marginBottom: 14, color: 'var(--text-secondary)' }}>
-                      <strong>Shift Details:</strong> {emp.shift === 'R2' ? 'R2 (09:00 AM - 12 hrs)' : emp.shift === 'R3' ? 'R3 (03:00 PM - 13 hrs)' : 'R1 (10:00 AM - 13 hrs)'}
+                      <strong>Shift Details:</strong> {
+                        (() => {
+                          const shiftName = emp.shift || 'R1';
+                          const s = shiftsList.find(s => s.name.toUpperCase() === shiftName.toUpperCase());
+                          if (s) {
+                            return `${s.name} (${s.start_time} - ${s.hours} hrs)`;
+                          }
+                          return `${shiftName} (Time not set - ${emp.shift_hours || 12} hrs)`;
+                        })()
+                      }
                     </div>
                   )}
  

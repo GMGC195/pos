@@ -378,7 +378,7 @@ export default function Dashboard() {
   const totalEmployeesCount = todayActivity.length;
   const lateCount = todayActivity.filter(log => log.attendance_id && log.attendance_status === 'Late').length;
   const currentlyPresentCount = todayActivity.filter(log => log.attendance_id && !log.check_out).length;
-  const absentCount = todayActivity.filter(log => !log.attendance_id || log.attendance_status === 'Leave' || log.attendance_status === 'Holiday').length;
+  const absentCount = todayActivity.filter(log => log.calculated_status === 'Absent' || log.calculated_status === 'Leave' || log.calculated_status === 'Holiday').length;
   const onBreakCount = todayActivity.filter(log => log.attendance_id && log.on_break && !log.check_out).length;
   const checkedOutCount = todayActivity.filter(log => log.attendance_id && log.check_out).length;
 
@@ -651,7 +651,7 @@ export default function Dashboard() {
   const currentlyPresentEmployees = todayActivity.filter(log => log.attendance_id && !log.check_out)
   const onBreakEmployees = todayActivity.filter(log => log.attendance_id && log.on_break && !log.check_out)
   const checkedOutEmployees = todayActivity.filter(log => log.attendance_id && log.check_out)
-  const absentEmployees = todayActivity.filter(log => !log.attendance_id || log.attendance_status === 'Leave' || log.attendance_status === 'Holiday')
+  const absentEmployees = todayActivity.filter(log => log.calculated_status === 'Absent' || log.calculated_status === 'Leave' || log.calculated_status === 'Holiday')
 
   const departmentsList = ['All', ...new Set(todayActivity.map(emp => emp.department).filter(Boolean))].sort()
   const shiftsDropdownList = ['All', ...new Set(todayActivity.map(emp => emp.shift).filter(Boolean))].sort()
@@ -673,7 +673,7 @@ export default function Dashboard() {
     } else if (attendanceSelectedStatus === 'Late') {
       matchesStatus = hasSessions && emp.attendance_status === 'Late';
     } else if (attendanceSelectedStatus === 'Absent') {
-      matchesStatus = !hasSessions;
+      matchesStatus = emp.calculated_status === 'Absent' || emp.calculated_status === 'Leave' || emp.calculated_status === 'Holiday';
     }
 
     return matchesSearch && matchesShift && matchesDept && matchesStatus;

@@ -880,6 +880,32 @@ export default function AttendanceReports() {
               <option value="Holiday">Holiday (At least 1 day)</option>
               <option value="Leave">Leave (At least 1 day)</option>
             </select>
+
+            {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All') && (
+              <button 
+                className="btn btn-secondary"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedShift('All');
+                  setSelectedDepartment('All');
+                  setSelectedStatus('All');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 14px',
+                  borderRadius: 8,
+                  height: 35,
+                  fontSize: 13,
+                  borderColor: 'var(--surface-2)',
+                  background: 'var(--surface)',
+                  color: 'var(--text)'
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         </div>
       )}

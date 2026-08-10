@@ -49,6 +49,61 @@ const decimalHoursToText = (hoursDec) => {
   return `${mins} min`;
 };
 
+const confirmAction = (message, onConfirm) => {
+  toast((t) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
+      <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>
+        {message}
+      </span>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button 
+          onClick={() => toast.dismiss(t.id)}
+          style={{
+            padding: '6px 12px',
+            background: 'transparent',
+            border: '1.5px solid var(--surface-3)',
+            borderRadius: 6,
+            fontSize: 12,
+            cursor: 'pointer',
+            color: 'var(--text-muted)'
+          }}
+        >
+          Cancel
+        </button>
+        <button 
+          onClick={() => {
+            toast.dismiss(t.id);
+            onConfirm();
+          }}
+          style={{
+            padding: '6px 12px',
+            background: 'var(--primary)',
+            border: 'none',
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            color: 'white'
+          }}
+        >
+          Confirm
+        </button>
+      </div>
+    </div>
+  ), {
+    duration: 10000,
+    position: 'top-center',
+    style: {
+      background: 'var(--surface)',
+      border: '1.5px solid var(--surface-2)',
+      borderRadius: 12,
+      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+      padding: '12px 16px',
+      minWidth: 280
+    }
+  });
+};
+
 export default function Employees() {
   const { user } = useAuth()
   const [employees, setEmployees] = useState(() => {
@@ -222,14 +277,15 @@ export default function Employees() {
   }
 
   const handleDelete = async (id, name) => {
-    if (!window.confirm(`Are you sure you want to remove employee "${name}"?`)) return
-    try {
-      await axios.delete(`/api/employees/${id}`)
-      toast.success('Employee deleted')
-      loadEmployees()
-    } catch (err) {
-      toast.error('Failed to delete employee')
-    }
+    confirmAction(`Are you sure you want to remove employee "${name}"?`, async () => {
+      try {
+        await axios.delete(`/api/employees/${id}`)
+        toast.success('Employee deleted')
+        loadEmployees()
+      } catch (err) {
+        toast.error('Failed to delete employee')
+      }
+    });
   }
 
   const departments = [...new Set(employees.map(e => e.department).filter(Boolean))].sort()
@@ -394,6 +450,33 @@ export default function Employees() {
               <option value="Active">Active</option>
               <option value="Inactive">Inactive</option>
             </select>
+
+            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedShift !== 'All' || selectedStatus !== 'All') && (
+              <button 
+                className="btn btn-secondary"
+                onClick={() => {
+                  setSearchTerm('');
+                  setSelectedDept('All');
+                  setSelectedPosition('All');
+                  setSelectedShift('All');
+                  setSelectedStatus('All');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 14px',
+                  borderRadius: 8,
+                  height: 40,
+                  fontSize: 13,
+                  borderColor: 'var(--surface-2)',
+                  background: 'var(--surface)',
+                  color: 'var(--text)'
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -779,15 +862,16 @@ export default function Employees() {
                               setEditingShiftId(s.id);
                               setNewShiftForm({ name: s.name, start_time: s.start_time, end_time: s.end_time, hours: parseFloat(s.hours) });
                             }}><Edit2 size={12} /></button>
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px 6px', color: 'var(--red)' }} onClick={async () => {
-                              if (!window.confirm('Are you sure you want to delete this shift configuration?')) return;
-                              try {
-                                await axios.delete(`/api/employees/shifts/list/${s.id}`)
-                                toast.success('Shift config deleted!')
-                                loadShifts()
-                              } catch {
-                                toast.error('Failed to delete shift')
-                              }
+                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px 6px', color: 'var(--red)' }} onClick={() => {
+                              confirmAction('Are you sure you want to delete this shift configuration?', async () => {
+                                try {
+                                  await axios.delete(`/api/employees/shifts/list/${s.id}`)
+                                  toast.success('Shift config deleted!')
+                                  loadShifts()
+                                } catch {
+                                  toast.error('Failed to delete shift')
+                                }
+                              });
                             }}><Trash2 size={12} /></button>
                           </div>
                         </td>

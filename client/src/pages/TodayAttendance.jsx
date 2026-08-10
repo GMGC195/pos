@@ -223,10 +223,7 @@ export default function TodayAttendance() {
         const checkInTimes = sessions.map(s => `In: ${new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`).join('\n')
         const checkOutTimes = sessions.map(s => s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active').join('\n')
         
-        let statusText = 'Absent'
-        if (sessions.length > 0) {
-          statusText = emp.on_break ? 'On Break' : emp.attendance_status === 'Late' ? 'Late' : 'Present'
-        }
+        let statusText = emp.calculated_status || 'Absent'
 
         const otHours = Math.max(0, parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0))
 
@@ -270,9 +267,11 @@ export default function TodayAttendance() {
     } else if (selectedStatus === 'CheckedOut') {
       matchesStatus = hasSessions && !isCurrentlyCheckedIn;
     } else if (selectedStatus === 'Late') {
-      matchesStatus = hasSessions && emp.attendance_status === 'Late';
+      matchesStatus = emp.calculated_status === 'Late';
     } else if (selectedStatus === 'Absent') {
-      matchesStatus = !hasSessions;
+      matchesStatus = emp.calculated_status === 'Absent';
+    } else if (selectedStatus === 'Pending') {
+      matchesStatus = emp.calculated_status === 'Pending';
     }
 
     return matchesSearch && matchesShift && matchesDept && matchesStatus;
@@ -461,7 +460,34 @@ export default function TodayAttendance() {
             <option value="CheckedOut">Checked Out</option>
             <option value="Late">Late Arrivals</option>
             <option value="Absent">Absent Today</option>
+            <option value="Pending">Pending</option>
           </select>
+
+          {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All') && (
+            <button 
+              className="btn btn-secondary"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedShift('All');
+                setSelectedDepartment('All');
+                setSelectedStatus('All');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0 14px',
+                borderRadius: 10,
+                height: 40,
+                fontSize: 13,
+                borderColor: 'var(--surface-2)',
+                background: 'var(--surface)',
+                color: 'var(--text)'
+              }}
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -596,9 +622,15 @@ export default function TodayAttendance() {
 
                       <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                         {sessions.length === 0 ? (
-                          <span style={{ color: 'var(--red)', background: 'rgba(255, 69, 58, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-                            Absent
-                          </span>
+                          emp.calculated_status === 'Absent' ? (
+                            <span style={{ color: 'var(--red)', background: 'rgba(255, 69, 58, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+                              Absent
+                            </span>
+                          ) : (
+                            <span style={{ color: '#F59E0B', background: 'rgba(245, 158, 11, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+                              Pending
+                            </span>
+                          )
                         ) : !emp.attendance_id || emp.check_out ? (
                           <span style={{ color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
                             Checked Out
