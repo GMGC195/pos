@@ -11,8 +11,8 @@ router.get('/', authenticateToken, async (req, res) => {
     const params = [];
     
     if (userRole === 'operator' && req.user.shift) {
-      query += ` WHERE COALESCE(shift, 'R1') = $1`;
-      params.push(req.user.shift);
+      query += ` WHERE COALESCE(shift, 'R1') = ANY($1)`;
+      params.push(req.user.shift.split(',').map(s => s.trim()));
     }
     
     query += ' ORDER BY id DESC';

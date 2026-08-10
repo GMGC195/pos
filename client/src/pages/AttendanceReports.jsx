@@ -1334,6 +1334,29 @@ export default function AttendanceReports() {
                           <td style={{ padding: 10 }}>
                             {isPast && <span style={{ background: 'rgba(255, 69, 58, 0.1)', color: 'var(--red)', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600 }}>Absent</span>}
                           </td>
+                          {isAdmin && (
+                            <td style={{ padding: 10, textAlign: 'center' }}>
+                              {isPast && (
+                                <button 
+                                  onClick={() => handleEditFromPopup(selectedEmployeeLogs.employee_id, dateStr)}
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: 'var(--primary)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: 4,
+                                    borderRadius: 4
+                                  }}
+                                  title="Add Session"
+                                >
+                                  <Plus size={16} />
+                                </button>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       )
                     }

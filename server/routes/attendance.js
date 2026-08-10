@@ -64,8 +64,8 @@ router.get('/today', authenticateToken, async (req, res) => {
     const queryParams = [];
     const userRole = req.user.role?.toLowerCase();
     if (userRole === 'operator' && req.user.shift) {
-      queryStr += ` AND COALESCE(shift, 'R1') = $1`;
-      queryParams.push(req.user.shift);
+      queryStr += ` AND COALESCE(shift, 'R1') = ANY($1)`;
+      queryParams.push(req.user.shift.split(',').map(s => s.trim()));
     }
     queryStr += ` ORDER BY id ASC`;
     const activeEmps = await pool.query(queryStr, queryParams);
@@ -224,9 +224,9 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Verify operator shift matches employee shift
-    const userRole = req.user.role?.toLowerCase();
-    if (userRole === 'operator' && req.user.shift && req.user.shift !== shift) {
-      return res.status(403).json({ error: `You are only allowed to mark attendance for employees in Shift ${req.user.shift}` });
+    const userShifts = req.user.shift ? req.user.shift.split(',').map(s => s.trim()) : [];
+    if (userRole === 'operator' && userShifts.length > 0 && !userShifts.includes(shift)) {
+      return res.status(403).json({ error: `You are only allowed to mark attendance for employees in Shift(s): ${req.user.shift}` });
     }
 
     const result = await pool.query(
@@ -522,8 +522,8 @@ router.get('/analytics', authenticateToken, async (req, res) => {
     `;
     const weeklyParams = [];
     if (userRole === 'operator' && req.user.shift) {
-      weeklyQueryStr += " AND COALESCE(e.shift, 'R1') = $1";
-      weeklyParams.push(req.user.shift);
+      weeklyQueryStr += " AND COALESCE(e.shift, 'R1') = ANY($1)";
+      weeklyParams.push(req.user.shift.split(',').map(s => s.trim()));
     }
     weeklyQueryStr += " GROUP BY ea.date ORDER BY ea.date ASC";
     const weeklyQuery = await pool.query(weeklyQueryStr, weeklyParams);
@@ -531,8 +531,8 @@ router.get('/analytics', authenticateToken, async (req, res) => {
     let empsQueryStr = "SELECT COUNT(*) FROM employees WHERE status = 'Active'";
     const empsParams = [];
     if (userRole === 'operator' && req.user.shift) {
-      empsQueryStr += " AND COALESCE(shift, 'R1') = $1";
-      empsParams.push(req.user.shift);
+      empsQueryStr += " AND COALESCE(shift, 'R1') = ANY($1)";
+      empsParams.push(req.user.shift.split(',').map(s => s.trim()));
     }
     const totalEmployeesRes = await pool.query(empsQueryStr, empsParams);
     const totalEmployees = parseInt(totalEmployeesRes.rows[0].count) || 1;
@@ -578,8 +578,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
     let empsQueryStr = "SELECT id, shift FROM employees WHERE status = 'Active'";
     const empsParams = [];
     if (userRole === 'operator' && req.user.shift) {
-      empsQueryStr += " AND COALESCE(shift, 'R1') = $1";
-      empsParams.push(req.user.shift);
+      empsQueryStr += " AND COALESCE(shift, 'R1') = ANY($1)";
+      empsParams.push(req.user.shift.split(',').map(s => s.trim()));
     }
     const activeEmpsRes = await pool.query(empsQueryStr, empsParams);
     const activeEmps = activeEmpsRes.rows;
@@ -599,8 +599,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
     `;
     const logsParams = [];
     if (userRole === 'operator' && req.user.shift) {
-      logsQueryStr += " AND COALESCE(e.shift, 'R1') = $1";
-      logsParams.push(req.user.shift);
+      logsQueryStr += " AND COALESCE(e.shift, 'R1') = ANY($1)";
+      logsParams.push(req.user.shift.split(',').map(s => s.trim()));
     }
     logsQueryStr += " ORDER BY ea.employee_id, ea.check_in DESC";
     

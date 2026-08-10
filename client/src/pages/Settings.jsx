@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { 
   User, 
@@ -24,6 +24,7 @@ export default function Settings() {
   const { user, updateUser } = useAuth()
   const [activeTab, setActiveTab] = useState('account')
   const [loading, setLoading] = useState(false)
+  const shiftDropdownRef = useRef(null)
   
   // My Account State
   const [profileForm, setProfileForm] = useState({
@@ -40,6 +41,7 @@ export default function Settings() {
   const [isAddingUser, setIsAddingUser] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [showUserPass, setShowUserPass] = useState(false)
+  const [showShiftDropdown, setShowShiftDropdown] = useState(false)
   const [userForm, setUserForm] = useState({
     username: '',
     email: '',
@@ -47,6 +49,16 @@ export default function Settings() {
     role: 'Operator',
     shift: ''
   })
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (shiftDropdownRef.current && !shiftDropdownRef.current.contains(e.target)) {
+        setShowShiftDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [])
 
   const fetchShifts = async () => {
     try {
@@ -123,6 +135,7 @@ export default function Settings() {
       setIsAddingUser(false)
       setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
       setShowUserPass(false)
+      setShowShiftDropdown(false)
       fetchUsers()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Creation failed')
@@ -140,6 +153,7 @@ export default function Settings() {
       setEditingUser(null)
       setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
       setShowUserPass(false)
+      setShowShiftDropdown(false)
       fetchUsers()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Update failed')
@@ -169,6 +183,7 @@ export default function Settings() {
       shift: u.shift || ''
     })
     setIsAddingUser(true)
+    setShowShiftDropdown(false)
   }
 
   const togglePass = (e) => {
@@ -340,18 +355,100 @@ export default function Settings() {
                         </select>
                       </div>
                       {userForm.role === 'Operator' && (
-                        <div className="form-group">
-                          <label>Assigned Shift</label>
-                          <select 
-                            value={userForm.shift || ''}
-                            onChange={e => setUserForm({...userForm, shift: e.target.value})}
-                            required
+                        <div className="form-group" style={{ position: 'relative' }} ref={shiftDropdownRef}>
+                          <label>Assigned Shift(s)</label>
+                          <div 
+                            className="form-group-input" 
+                            style={{ 
+                              padding: '12px 14px', 
+                              border: '1.5px solid var(--surface-2)', 
+                              borderRadius: '12px', 
+                              background: 'var(--surface)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              minHeight: '45px'
+                            }}
+                            onClick={() => setShowShiftDropdown(!showShiftDropdown)}
                           >
-                            <option value="">Select Shift</option>
-                            {shifts.map(s => (
-                              <option key={s.id} value={s.name}>{s.name} ({s.start_time} - {s.end_time})</option>
-                            ))}
-                          </select>
+                            <div style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '14px', color: userForm.shift ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                              {userForm.shift ? userForm.shift.split(',').join(', ') : 'Select Shifts...'}
+                            </div>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--text-muted)' }}>
+                              <path d="m6 9 6 6 6-6"/>
+                            </svg>
+                          </div>
+                          
+                          {showShiftDropdown && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '100%',
+                              left: 0,
+                              right: 0,
+                              marginTop: '8px',
+                              background: 'white',
+                              border: '1px solid var(--surface-2)',
+                              borderRadius: '12px',
+                              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                              zIndex: 100,
+                              maxHeight: '220px',
+                              overflowY: 'auto',
+                              padding: '8px'
+                            }}>
+                              {shifts.map(s => {
+                                const selectedShifts = userForm.shift ? userForm.shift.split(',') : [];
+                                const isChecked = selectedShifts.includes(s.name);
+                                return (
+                                  <label 
+                                    key={s.id} 
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      padding: '10px 12px',
+                                      gap: '12px',
+                                      cursor: 'pointer',
+                                      borderRadius: '8px',
+                                      transition: 'background 0.2s',
+                                      background: isChecked ? 'rgba(var(--primary-rgb), 0.05)' : 'transparent'
+                                    }}
+                                    onMouseOver={e => !isChecked && (e.currentTarget.style.background = 'var(--surface-1)')}
+                                    onMouseOut={e => !isChecked && (e.currentTarget.style.background = 'transparent')}
+                                  >
+                                    <input 
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        let newShifts;
+                                        if (e.target.checked) {
+                                          newShifts = [...selectedShifts, s.name];
+                                        } else {
+                                          newShifts = selectedShifts.filter(shiftName => shiftName !== s.name);
+                                        }
+                                        setUserForm({...userForm, shift: newShifts.join(',')});
+                                      }}
+                                      style={{
+                                        width: '18px',
+                                        height: '18px',
+                                        cursor: 'pointer',
+                                        accentColor: 'var(--primary)',
+                                        margin: 0
+                                      }}
+                                    />
+                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                      <span style={{ fontSize: '14px', fontWeight: isChecked ? 600 : 500, color: 'var(--text-primary)' }}>{s.name}</span>
+                                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{s.start_time} - {s.end_time}</span>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                              {shifts.length === 0 && (
+                                <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                                  No shifts available
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                       <div className="form-group">
