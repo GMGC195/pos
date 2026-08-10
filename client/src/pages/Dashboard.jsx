@@ -752,7 +752,8 @@ export default function Dashboard() {
           }
         }
         @media (max-width: 767px) {
-          .attendance-analytics-row {
+          .attendance-analytics-row,
+          .attendance-bottom-cards-container {
             justify-content: center !important;
           }
         }
