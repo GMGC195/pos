@@ -1577,13 +1577,13 @@ export default function AttendanceReports() {
                       <div style={{ display: 'flex', gap: 12 }}>
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check In <span style={{ color: 'var(--red)' }}>*</span></span>
-                          <input type="time" value={addCheckIn} onChange={e => setAddCheckIn(e.target.value)}
+                          <input type="time" lang="en-GB" value={addCheckIn} onChange={e => setAddCheckIn(e.target.value)}
                             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
                           />
                         </div>
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check Out <span style={{ color: 'var(--red)' }}>*</span></span>
-                          <input type="time" value={addCheckOut} onChange={e => setAddCheckOut(e.target.value)}
+                          <input type="time" lang="en-GB" value={addCheckOut} onChange={e => setAddCheckOut(e.target.value)}
                             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
                           />
                         </div>
@@ -1701,6 +1701,7 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check In Time</span>
             <input 
               type="time" 
+              lang="en-GB"
               value={inVal}
               onChange={e => setInVal(e.target.value)}
               style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface-1)', color: 'var(--text)' }}
@@ -1710,6 +1711,7 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check Out Time</span>
             <input 
               type="time" 
+              lang="en-GB"
               value={outVal}
               onChange={e => setOutVal(e.target.value)}
               style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface-1)', color: 'var(--text)' }}

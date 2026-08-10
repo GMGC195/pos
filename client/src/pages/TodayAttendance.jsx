@@ -836,13 +836,13 @@ export default function TodayAttendance() {
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
                       <div>
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-In Time *</label>
-                        <input type="time" value={newCheckIn} onChange={e => setNewCheckIn(e.target.value)}
+                        <input type="time" lang="en-GB" value={newCheckIn} onChange={e => setNewCheckIn(e.target.value)}
                           style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
                         />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Check-Out Time *</label>
-                        <input type="time" value={newCheckOut} onChange={e => setNewCheckOut(e.target.value)}
+                        <input type="time" lang="en-GB" value={newCheckOut} onChange={e => setNewCheckOut(e.target.value)}
                           style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
                         />
                       </div>
@@ -954,13 +954,13 @@ function EditSessionRow({ session, index, saving, onSave, onDelete }) {
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check-In</span>
-          <input type="time" value={inVal} onChange={e => setInVal(e.target.value)}
+          <input type="time" lang="en-GB" value={inVal} onChange={e => setInVal(e.target.value)}
             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
           />
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check-Out</span>
-          <input type="time" value={outVal} onChange={e => setOutVal(e.target.value)}
+          <input type="time" lang="en-GB" value={outVal} onChange={e => setOutVal(e.target.value)}
             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
           />
         </div>

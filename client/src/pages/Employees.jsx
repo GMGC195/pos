@@ -122,6 +122,7 @@ export default function Employees() {
     employee_id: ''
   })
   const [isCustomShift, setIsCustomShift] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Shifts configuration state
   const [shifts, setShifts] = useState([])
@@ -219,7 +220,9 @@ export default function Employees() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!formData.name) return toast.error('Name is required')
+    if (isSubmitting) return
 
+    setIsSubmitting(true)
     try {
       const targetShiftName = formData.shift.trim().toUpperCase()
       const exists = shifts.some(s => s.name.toUpperCase() === targetShiftName)
@@ -252,6 +255,8 @@ export default function Employees() {
       loadShifts()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to save employee')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -695,6 +700,7 @@ export default function Employees() {
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Start Time</label>
                         <input 
                           type="time"
+                          lang="en-GB"
                           value={formData.shift_start_time}
                           onChange={e => handleTimeChange('shift_start_time', e.target.value)}
                           style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
@@ -706,6 +712,7 @@ export default function Employees() {
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>End Time</label>
                         <input 
                           type="time"
+                          lang="en-GB"
                           value={formData.shift_end_time}
                           onChange={e => handleTimeChange('shift_end_time', e.target.value)}
                           style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
@@ -717,8 +724,10 @@ export default function Employees() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24, borderTop: '1px solid var(--surface-2)', paddingTop: 16 }}>
-                <button type="button" className="btn btn-secondary" onClick={handleCloseModal}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Details</button>
+                <button type="button" className="btn btn-secondary" onClick={handleCloseModal} disabled={isSubmitting}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+                  {isSubmitting ? 'Saving...' : 'Save Details'}
+                </button>
               </div>
             </form>
           </div>
@@ -787,8 +796,8 @@ export default function Employees() {
                   <div>
                     <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Start Time</label>
                     <input 
-                      type="text" 
-                      placeholder="10:00 AM"
+                      type="time" 
+                      lang="en-GB"
                       required
                       value={newShiftForm.start_time}
                       onChange={e => setNewShiftForm({ ...newShiftForm, start_time: e.target.value })}
@@ -798,8 +807,8 @@ export default function Employees() {
                   <div>
                     <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>End Time</label>
                     <input 
-                      type="text" 
-                      placeholder="11:00 PM"
+                      type="time" 
+                      lang="en-GB"
                       required
                       value={newShiftForm.end_time}
                       onChange={e => setNewShiftForm({ ...newShiftForm, end_time: e.target.value })}

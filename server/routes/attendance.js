@@ -168,6 +168,32 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     );
 
     let status = 'Present';
+    let shiftStartTime = '10:00';
+    let shiftEndTime = '23:00';
+    let startHour = 10;
+    let startMin = 0;
+
+    const shiftDetails = await pool.query('SELECT * FROM employee_shifts WHERE name = $1', [shift]);
+    if (shiftDetails.rows.length > 0) {
+      shiftStartTime = shiftDetails.rows[0].start_time;
+      shiftEndTime = shiftDetails.rows[0].end_time;
+      const timeMatch = shiftStartTime.match(/^(\d+):(\d+)/);
+      if (timeMatch) {
+        startHour = parseInt(timeMatch[1], 10);
+        startMin = parseInt(timeMatch[2], 10);
+      }
+    } else {
+      if (shift === 'R2') {
+        startHour = 9;
+        shiftStartTime = '09:00';
+        shiftEndTime = '21:00';
+      } else if (shift === 'R3') {
+        startHour = 15;
+        shiftStartTime = '15:00';
+        shiftEndTime = '04:00';
+      }
+    }
+
     if (priorChecks.rows.length > 0) {
       // If they already checked in today, keep the status of the first session of the day
       status = priorChecks.rows[0].status;
@@ -177,33 +203,6 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       const currentHours = now.getHours();
       const currentMins = now.getMinutes();
 
-      let isLate = false;
-      let startHour = 10;
-      let startMin = 0;
-      let shiftStartTime = '10:00';
-      let shiftEndTime = '23:00';
-      
-      const shiftDetails = await pool.query('SELECT * FROM employee_shifts WHERE name = $1', [shift]);
-      if (shiftDetails.rows.length > 0) {
-        shiftStartTime = shiftDetails.rows[0].start_time;
-        shiftEndTime = shiftDetails.rows[0].end_time;
-        const timeMatch = shiftStartTime.match(/^(\d+):(\d+)/);
-        if (timeMatch) {
-          startHour = parseInt(timeMatch[1], 10);
-          startMin = parseInt(timeMatch[2], 10);
-        }
-      } else {
-        if (shift === 'R2') {
-          startHour = 9;
-          shiftStartTime = '09:00';
-          shiftEndTime = '21:00';
-        } else if (shift === 'R3') {
-          startHour = 15;
-          shiftStartTime = '15:00';
-          shiftEndTime = '04:00';
-        }
-      }
-      
       let thresholdMins = startMin + 15;
       let thresholdHour = startHour;
       if (thresholdMins >= 60) {
@@ -212,10 +211,6 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       }
       
       if (currentHours > thresholdHour || (currentHours === thresholdHour && currentMins > thresholdMins)) {
-        isLate = true;
-      }
-
-      if (isLate) {
         status = 'Late';
       }
     }

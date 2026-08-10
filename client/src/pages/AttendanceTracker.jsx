@@ -871,6 +871,7 @@ export default function AttendanceTracker() {
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Start Time</span>
                     <input 
                       type="time" 
+                      lang="en-GB"
                       value={editStartTimeVal}
                       onChange={e => handleTimeChange('start', e.target.value)}
                       style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
@@ -880,6 +881,7 @@ export default function AttendanceTracker() {
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>End Time</span>
                     <input 
                       type="time" 
+                      lang="en-GB"
                       value={editEndTimeVal}
                       onChange={e => handleTimeChange('end', e.target.value)}
                       style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
