@@ -547,6 +547,10 @@ export default function AttendanceTracker() {
             const isOnBreak = emp.on_break;
  
             const staffRole = emp.role && emp.role.toLowerCase() !== 'operator' ? emp.role : 'Staff';
+            
+            const shiftName = emp.shift || 'R1';
+            const matchedShift = shiftsList.find(s => s.name.toUpperCase() === shiftName.toUpperCase());
+
             return (
               <div key={emp.employee_id} className="card" style={{ 
                 padding: 20, 
@@ -561,9 +565,10 @@ export default function AttendanceTracker() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                     <div>
                       <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{emp.name}</h4>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        <strong style={{ color: 'var(--primary)' }}>{emp.employee_code}</strong> • {staffRole} • <strong>Shift {emp.shift || 'R1'}</strong>
-                      </span>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: '1.4' }}>
+                        <div><strong style={{ color: 'var(--primary)' }}>{emp.employee_code}</strong> • {staffRole}</div>
+                        <div><strong>{matchedShift ? `Shift ${matchedShift.name} (${matchedShift.start_time} - ${matchedShift.end_time})` : `Shift ${shiftName}`}</strong></div>
+                      </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ 
@@ -654,14 +659,9 @@ export default function AttendanceTracker() {
                   {!isCheckedIn && (
                     <div style={{ background: 'var(--surface-1)', padding: '8px 12px', border: '1px dashed var(--surface-3)', borderRadius: 8, fontSize: 12, marginBottom: 14, color: 'var(--text-secondary)' }}>
                       <strong>Shift Details:</strong> {
-                        (() => {
-                          const shiftName = emp.shift || 'R1';
-                          const s = shiftsList.find(s => s.name.toUpperCase() === shiftName.toUpperCase());
-                          if (s) {
-                            return `${s.name} (${s.start_time} - ${s.hours} hrs)`;
-                          }
-                          return `${shiftName} (Time not set - ${emp.shift_hours || 12} hrs)`;
-                        })()
+                        matchedShift 
+                          ? `${matchedShift.name} (${matchedShift.start_time} - ${matchedShift.end_time} | ${matchedShift.hours} hrs)` 
+                          : `${shiftName} (Time not set - ${emp.shift_hours || 12} hrs)`
                       }
                     </div>
                   )}
