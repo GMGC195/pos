@@ -6,7 +6,18 @@ const { authenticateToken } = require('../middleware/auth');
 // GET all employees
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM employees ORDER BY id DESC');
+    const userRole = req.user.role?.toLowerCase();
+    let query = 'SELECT * FROM employees';
+    const params = [];
+    
+    if (userRole === 'operator' && req.user.shift) {
+      query += ` WHERE COALESCE(shift, 'R1') = $1`;
+      params.push(req.user.shift);
+    }
+    
+    query += ' ORDER BY id DESC';
+    
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

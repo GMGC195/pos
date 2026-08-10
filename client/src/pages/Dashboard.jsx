@@ -68,9 +68,7 @@ export default function Dashboard() {
   const isDeveloper = user?.role?.toLowerCase() === 'developer'
 
   useEffect(() => {
-    if (user?.role?.toLowerCase() === 'operator') {
-      navigate('/attendance', { replace: true })
-    }
+    // Operator is now allowed to view dashboard
   }, [user, navigate])
 
   // Developer sales states

@@ -761,7 +761,7 @@ export default function TodayAttendance() {
                   <div>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>Select Date Range</label>
                     <div style={{ display: 'flex', gap: 10 }}>
-                      {['today', 'previous'].map(mode => (
+                      {['today', 'previous'].filter(m => !(user?.role?.toLowerCase() === 'operator' && m === 'previous')).map(mode => (
                         <button
                           key={mode}
                           onClick={() => {

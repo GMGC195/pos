@@ -512,15 +512,29 @@ router.get('/reports', authenticateToken, async (req, res) => {
 // Get attendance analytics (weekly rates)
 router.get('/analytics', authenticateToken, async (req, res) => {
   try {
-    const weeklyQuery = await pool.query(`
-      SELECT date, COUNT(DISTINCT employee_id) as present_count 
-      FROM employee_attendance 
-      WHERE date >= CURRENT_DATE - INTERVAL '6 days' AND status != 'Holiday'
-      GROUP BY date 
-      ORDER BY date ASC
-    `);
+    const userRole = req.user.role?.toLowerCase();
     
-    const totalEmployeesRes = await pool.query("SELECT COUNT(*) FROM employees WHERE status = 'Active'");
+    let weeklyQueryStr = `
+      SELECT ea.date, COUNT(DISTINCT ea.employee_id) as present_count 
+      FROM employee_attendance ea
+      JOIN employees e ON ea.employee_id = e.id
+      WHERE ea.date >= CURRENT_DATE - INTERVAL '6 days' AND ea.status != 'Holiday'
+    `;
+    const weeklyParams = [];
+    if (userRole === 'operator' && req.user.shift) {
+      weeklyQueryStr += " AND COALESCE(e.shift, 'R1') = $1";
+      weeklyParams.push(req.user.shift);
+    }
+    weeklyQueryStr += " GROUP BY ea.date ORDER BY ea.date ASC";
+    const weeklyQuery = await pool.query(weeklyQueryStr, weeklyParams);
+    
+    let empsQueryStr = "SELECT COUNT(*) FROM employees WHERE status = 'Active'";
+    const empsParams = [];
+    if (userRole === 'operator' && req.user.shift) {
+      empsQueryStr += " AND COALESCE(shift, 'R1') = $1";
+      empsParams.push(req.user.shift);
+    }
+    const totalEmployeesRes = await pool.query(empsQueryStr, empsParams);
     const totalEmployees = parseInt(totalEmployeesRes.rows[0].count) || 1;
 
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -558,8 +572,16 @@ router.get('/analytics', authenticateToken, async (req, res) => {
 // Get dashboard statistics
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
+    const userRole = req.user.role?.toLowerCase();
+    
     // Total employees count
-    const activeEmpsRes = await pool.query("SELECT id, shift FROM employees WHERE status = 'Active'");
+    let empsQueryStr = "SELECT id, shift FROM employees WHERE status = 'Active'";
+    const empsParams = [];
+    if (userRole === 'operator' && req.user.shift) {
+      empsQueryStr += " AND COALESCE(shift, 'R1') = $1";
+      empsParams.push(req.user.shift);
+    }
+    const activeEmpsRes = await pool.query(empsQueryStr, empsParams);
     const activeEmps = activeEmpsRes.rows;
     const totalEmployees = activeEmps.length;
 
@@ -568,13 +590,21 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const shiftsList = shiftsData.rows;
 
     // Get today's attendance logs
-    const todayLogs = await pool.query(`
-      SELECT DISTINCT ON (employee_id) 
-             employee_id, check_out, on_break, status
-      FROM employee_attendance
-      WHERE date = CURRENT_DATE
-      ORDER BY employee_id, check_in DESC
-    `);
+    let logsQueryStr = `
+      SELECT DISTINCT ON (ea.employee_id) 
+             ea.employee_id, ea.check_out, ea.on_break, ea.status
+      FROM employee_attendance ea
+      JOIN employees e ON ea.employee_id = e.id
+      WHERE ea.date = CURRENT_DATE
+    `;
+    const logsParams = [];
+    if (userRole === 'operator' && req.user.shift) {
+      logsQueryStr += " AND COALESCE(e.shift, 'R1') = $1";
+      logsParams.push(req.user.shift);
+    }
+    logsQueryStr += " ORDER BY ea.employee_id, ea.check_in DESC";
+    
+    const todayLogs = await pool.query(logsQueryStr, logsParams);
 
     let present = 0;
     let late = 0;
@@ -640,6 +670,14 @@ router.get('/employee-date', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Employee ID and date are required' });
   }
 
+  const userRole = req.user.role?.toLowerCase();
+  if (userRole === 'operator') {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    if (date !== todayStr) {
+      return res.status(403).json({ error: "Access denied: Operators can only view today's attendance." });
+    }
+  }
+
   try {
     const result = await pool.query(
       'SELECT id, check_in, check_out, status, total_break_duration_seconds FROM employee_attendance WHERE employee_id = $1 AND date = $2 ORDER BY check_in ASC',
@@ -660,14 +698,26 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
   }
 
   try {
+    const sessionRes = await pool.query('SELECT date FROM employee_attendance WHERE id = $1', [id]);
+    if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Attendance log not found.' });
+    
+    const recordDate = sessionRes.rows[0].date;
+    const userRole = req.user.role?.toLowerCase();
+    
+    if (userRole === 'operator') {
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const recordDateStr = recordDate instanceof Date ? recordDate.toLocaleDateString('en-CA') : String(recordDate).split('T')[0];
+      if (recordDateStr !== todayStr) {
+        return res.status(403).json({ error: "Access denied: Operators can only modify today's attendance." });
+      }
+    } else if (userRole !== 'admin' && userRole !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
+    }
+
     const result = await pool.query(
       'UPDATE employee_attendance SET check_in = $1, check_out = $2 WHERE id = $3 RETURNING *',
       [check_in, check_out || null, id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Attendance log not found.' });
-    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -680,6 +730,16 @@ router.post('/session', authenticateToken, async (req, res) => {
   const { employee_id, date, check_in, check_out, status } = req.body;
   if (!employee_id || !date || !check_in) {
     return res.status(400).json({ error: 'Employee ID, date, and check-in time are required' });
+  }
+
+  const userRole = req.user.role?.toLowerCase();
+  if (userRole === 'operator') {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    if (date !== todayStr) {
+      return res.status(403).json({ error: "Access denied: Operators can only add today's attendance." });
+    }
+  } else if (userRole !== 'admin' && userRole !== 'developer') {
+    return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
   }
 
   try {
@@ -698,14 +758,26 @@ router.delete('/session/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
 
   try {
+    const sessionRes = await pool.query('SELECT date FROM employee_attendance WHERE id = $1', [id]);
+    if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Attendance log not found.' });
+    
+    const recordDate = sessionRes.rows[0].date;
+    const userRole = req.user.role?.toLowerCase();
+    
+    if (userRole === 'operator') {
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const recordDateStr = recordDate instanceof Date ? recordDate.toLocaleDateString('en-CA') : String(recordDate).split('T')[0];
+      if (recordDateStr !== todayStr) {
+        return res.status(403).json({ error: "Access denied: Operators can only delete today's attendance." });
+      }
+    } else if (userRole !== 'admin' && userRole !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
+    }
+
     const result = await pool.query(
       'DELETE FROM employee_attendance WHERE id = $1 RETURNING *',
       [id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Attendance log not found.' });
-    }
 
     res.json({ message: 'Attendance log deleted successfully' });
   } catch (err) {
@@ -738,10 +810,13 @@ router.post('/edit', authenticateToken, async (req, res) => {
     // Restrictions for Operator role
     const userRole = req.user.role?.toLowerCase();
     if (userRole === 'operator') {
-      // Must be created by this operator (can edit any past date)
-      if (created_by !== req.user.username) {
-        return res.status(403).json({ error: 'Access denied: You can only edit attendance logs that you created.' });
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const recordDateStr = recordDate instanceof Date ? recordDate.toLocaleDateString('en-CA') : String(recordDate).split('T')[0];
+      if (recordDateStr !== todayStr) {
+        return res.status(403).json({ error: "Access denied: Operators can only modify today's attendance." });
       }
+    } else if (userRole !== 'admin' && userRole !== 'developer') {
+      return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
     }
 
     // Log the edit
