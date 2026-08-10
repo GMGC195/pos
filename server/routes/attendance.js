@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 
-// Middleware to auto checkout old sessions (> 24 hours)
+// Middleware to auto checkout old sessions (> 23 hours)
 const autoCheckoutOldSessions = async (req, res, next) => {
   try {
     await pool.query(`
@@ -11,11 +11,11 @@ const autoCheckoutOldSessions = async (req, res, next) => {
       SET check_out = check_in + (COALESCE(e.shift_hours, 12.0) * INTERVAL '1 hour'),
           on_break = false,
           break_start = null,
-          remarks = 'System Checkout'
+          remarks = 'automatically system check out'
       FROM employees e
       WHERE employee_attendance.employee_id = e.id
         AND employee_attendance.check_out IS NULL 
-        AND employee_attendance.check_in < NOW() - INTERVAL '24 hours'
+        AND employee_attendance.check_in < NOW() - INTERVAL '23 hours'
     `);
   } catch (err) {
     console.error('Error auto checking out old sessions:', err.message);
@@ -470,12 +470,6 @@ router.get('/reports', authenticateToken, async (req, res) => {
       const rowDateStr = row.date instanceof Date
         ? row.date.toLocaleDateString('en-CA')
         : String(row.date).split('T')[0];
-
-      let forgotCheckout = false;
-      if (!checkOutTime && rowDateStr < todayStr) {
-        checkOutTime = checkInTime; // Treat as checked out at check-in time (0 hours)
-        forgotCheckout = true;
-      }
       
       if (row.status === 'Holiday') {
         return {
@@ -504,8 +498,8 @@ router.get('/reports', authenticateToken, async (req, res) => {
         hours_worked: durationHours,
         shift_hours: shiftHours,
         ot_hours: otHours,
-        check_out: forgotCheckout ? row.check_in : row.check_out,
-        forgot_checkout: forgotCheckout
+        check_out: row.check_out,
+        forgot_checkout: false
       };
     });
 

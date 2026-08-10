@@ -158,7 +158,16 @@ export default function TodayAttendance() {
     if (!newCheckIn) { toast.error('Check-In time is required'); return }
     if (!newCheckOut) { toast.error('Check-Out time is required'); return }
     const fullCheckIn = `${editDate}T${newCheckIn}`
-    const fullCheckOut = `${editDate}T${newCheckOut}`
+    let fullCheckOut = `${editDate}T${newCheckOut}`
+    
+    // Auto-adjust next day if check-out time is earlier than check-in time (crossing midnight)
+    if (new Date(fullCheckOut) < new Date(fullCheckIn)) {
+      const nextDay = new Date(editDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      const nY = nextDay.getFullYear(), nMo = String(nextDay.getMonth()+1).padStart(2,'0'), nDy = String(nextDay.getDate()).padStart(2,'0');
+      fullCheckOut = `${nY}-${nMo}-${nDy}T${newCheckOut}`;
+    }
+    
     if (new Date(fullCheckOut) <= new Date(fullCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
     const toISO = (v) => v ? new Date(v).toISOString() : null
     try {
@@ -916,14 +925,25 @@ function EditSessionRow({ session, index, saving, onSave, onDelete }) {
   const [reason, setReason] = useState('')
 
   const handleSave = () => {
-    // Reconstruct full date string using the original session date
-    const baseDateIn = session.check_in ? new Date(session.check_in) : new Date()
+    const baseDateIn = session.check_in ? new Date(session.check_in) : (session.date ? new Date(session.date) : new Date())
     const yIn = baseDateIn.getFullYear(), moIn = String(baseDateIn.getMonth()+1).padStart(2,'0'), dyIn = String(baseDateIn.getDate()).padStart(2,'0')
     const fullInStr = `${yIn}-${moIn}-${dyIn}T${inVal}`
 
-    const baseDateOut = session.check_out ? new Date(session.check_out) : new Date()
-    const yOut = baseDateOut.getFullYear(), moOut = String(baseDateOut.getMonth()+1).padStart(2,'0'), dyOut = String(baseDateOut.getDate()).padStart(2,'0')
-    const fullOutStr = outVal ? `${yOut}-${moOut}-${dyOut}T${outVal}` : ''
+    let fullOutStr = '';
+    if (outVal) {
+      let baseDateOut = new Date(baseDateIn); // ALWAYS baseline from Check-In Date
+      let yOut = baseDateOut.getFullYear(), moOut = String(baseDateOut.getMonth()+1).padStart(2,'0'), dyOut = String(baseDateOut.getDate()).padStart(2,'0');
+      fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
+      
+      // Auto-adjust next day if check-out time is earlier than check-in time (e.g., crossing midnight)
+      if (new Date(fullOutStr) < new Date(fullInStr)) {
+        baseDateOut.setDate(baseDateOut.getDate() + 1);
+        yOut = baseDateOut.getFullYear();
+        moOut = String(baseDateOut.getMonth()+1).padStart(2,'0');
+        dyOut = String(baseDateOut.getDate()).padStart(2,'0');
+        fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
+      }
+    }
 
     onSave(session.id, fullInStr, fullOutStr, reason)
   }

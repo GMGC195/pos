@@ -175,7 +175,16 @@ export default function AttendanceReports() {
     if (!addCheckIn) { toast.error('Check-In time is required'); return }
     if (!addCheckOut) { toast.error('Check-Out time is required'); return }
     const fullCheckIn = `${editDate}T${addCheckIn}`
-    const fullCheckOut = `${editDate}T${addCheckOut}`
+    let fullCheckOut = `${editDate}T${addCheckOut}`
+    
+    // Auto-adjust next day if check-out time is earlier than check-in time (crossing midnight)
+    if (new Date(fullCheckOut) < new Date(fullCheckIn)) {
+      const nextDay = new Date(editDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      const nY = nextDay.getFullYear(), nMo = String(nextDay.getMonth()+1).padStart(2,'0'), nDy = String(nextDay.getDate()).padStart(2,'0');
+      fullCheckOut = `${nY}-${nMo}-${nDy}T${addCheckOut}`;
+    }
+    
     if (new Date(fullCheckOut) <= new Date(fullCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
     const toISO = (v) => v ? new Date(v).toISOString() : null
     try {
@@ -626,12 +635,10 @@ export default function AttendanceReports() {
               
               const sessionLines = sessions.map(s => {
                 const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                const isSystem = s.remarks === 'System Checkout'
-                const outStr = s.forgot_checkout 
-                  ? 'Forgot' 
-                  : s.check_out 
-                    ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystem ? ' (Sys)' : ''}` 
-                    : 'Active'
+                const isSystem = s.remarks === 'automatically system check out' || s.remarks === 'System Checkout'
+                const outStr = s.check_out 
+                  ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystem ? ' (SYS)' : ''}` 
+                  : 'Active'
                 return `In: ${inStr} Out: ${outStr}`
               })
               
@@ -1065,17 +1072,15 @@ export default function AttendanceReports() {
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', fontSize: 9 }}>
                                   {sessions.map((s, idx) => {
                                     const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                    const isSystem = s.remarks === 'System Checkout'
+                                    const isSystem = s.remarks === 'automatically system check out' || s.remarks === 'System Checkout'
                                     const isEdited = s.remarks === 'Edited'
                                     const isManual = s.remarks === 'Manual'
-                                    const valColor = isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--text)'
+                                    const valColor = isSystem ? 'var(--primary)' : isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--text)'
                                     const tag = isEdited ? <span style={{color: '#3B82F6', fontSize: 9, fontWeight: 700}}>(E)</span> : isManual ? <span style={{color: '#8B5CF6', fontSize: 9, fontWeight: 700}}>(M)</span> : null
                                     
-                                    const outStr = s.forgot_checkout 
-                                      ? 'Forgot' 
-                                      : s.check_out 
-                                        ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystem ? ' (Sys)' : ''}` 
-                                        : 'Active'
+                                    const outStr = s.check_out 
+                                      ? isSystem ? 'SYS' : `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
+                                      : 'Active'
                                     return (
                                       <div key={idx} style={{ whiteSpace: 'nowrap', display: 'flex', gap: 3, alignItems: 'center' }}>
                                         <span style={{ color: 'var(--green)', fontWeight: 700 }}>In:</span>
@@ -1334,12 +1339,10 @@ export default function AttendanceReports() {
                     }
 
                     return sessions.map((session, sIdx) => {
-                      const isSystemCheckout = session.remarks === 'System Checkout'
-                      const checkOut = session.forgot_checkout 
-                        ? 'Forgot' 
-                        : session.check_out 
-                          ? `${new Date(session.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystemCheckout ? ' (System)' : ''}` 
-                          : 'Active'
+                      const isSystemCheckout = session.remarks === 'automatically system check out' || session.remarks === 'System Checkout'
+                      const checkOut = session.check_out 
+                        ? `${new Date(session.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystemCheckout ? ' (automatically system check out)' : ''}` 
+                        : 'Active'
                       
                       const breakMins = Math.floor((session.total_break_duration_seconds || 0) / 60)
                       
@@ -1627,14 +1630,25 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
   const [reason, setReason] = useState('')
 
   const handleSave = () => {
-    // Reconstruct full date string using the original session date
-    const baseDateIn = session.check_in ? new Date(session.check_in) : new Date()
+    const baseDateIn = session.check_in ? new Date(session.check_in) : (session.date ? new Date(session.date) : new Date())
     const yIn = baseDateIn.getFullYear(), moIn = String(baseDateIn.getMonth()+1).padStart(2,'0'), dyIn = String(baseDateIn.getDate()).padStart(2,'0')
     const fullInStr = `${yIn}-${moIn}-${dyIn}T${inVal}`
 
-    const baseDateOut = session.check_out ? new Date(session.check_out) : new Date()
-    const yOut = baseDateOut.getFullYear(), moOut = String(baseDateOut.getMonth()+1).padStart(2,'0'), dyOut = String(baseDateOut.getDate()).padStart(2,'0')
-    const fullOutStr = outVal ? `${yOut}-${moOut}-${dyOut}T${outVal}` : ''
+    let fullOutStr = '';
+    if (outVal) {
+      let baseDateOut = new Date(baseDateIn); // ALWAYS baseline from Check-In Date
+      let yOut = baseDateOut.getFullYear(), moOut = String(baseDateOut.getMonth()+1).padStart(2,'0'), dyOut = String(baseDateOut.getDate()).padStart(2,'0');
+      fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
+      
+      // Auto-adjust next day if check-out time is earlier than check-in time (e.g., crossing midnight)
+      if (new Date(fullOutStr) < new Date(fullInStr)) {
+        baseDateOut.setDate(baseDateOut.getDate() + 1);
+        yOut = baseDateOut.getFullYear();
+        moOut = String(baseDateOut.getMonth()+1).padStart(2,'0');
+        dyOut = String(baseDateOut.getDate()).padStart(2,'0');
+        fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
+      }
+    }
 
     onSave(session.id, fullInStr, fullOutStr, reason)
   }
