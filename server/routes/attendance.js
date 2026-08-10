@@ -8,14 +8,12 @@ const autoCheckoutOldSessions = async (req, res, next) => {
   try {
     await pool.query(`
       UPDATE employee_attendance 
-      SET check_out = check_in + (COALESCE(e.shift_hours, 12.0) * INTERVAL '1 hour'),
+      SET check_out = check_in + (COALESCE(shift_hours, 12.0) * INTERVAL '1 hour'),
           on_break = false,
           break_start = null,
           remarks = 'automatically system check out'
-      FROM employees e
-      WHERE employee_attendance.employee_id = e.id
-        AND employee_attendance.check_out IS NULL 
-        AND employee_attendance.check_in < NOW() - INTERVAL '23 hours'
+      WHERE check_out IS NULL 
+        AND check_in < NOW() - INTERVAL '23 hours'
     `);
   } catch (err) {
     console.error('Error auto checking out old sessions:', err.message);
@@ -155,11 +153,12 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Fetch employee shift details
-    const empRes = await pool.query('SELECT shift FROM employees WHERE id = $1', [employee_id]);
+    const empRes = await pool.query('SELECT shift, shift_hours FROM employees WHERE id = $1', [employee_id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
     const shift = empRes.rows[0].shift || 'R1';
+    const shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
 
     // Determine status (Present or Late)
     // Check if it's the first check-in of the day
@@ -181,11 +180,14 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       let isLate = false;
       let startHour = 10;
       let startMin = 0;
+      let shiftStartTime = '10:00';
+      let shiftEndTime = '23:00';
       
       const shiftDetails = await pool.query('SELECT * FROM employee_shifts WHERE name = $1', [shift]);
       if (shiftDetails.rows.length > 0) {
-        const startTimeStr = shiftDetails.rows[0].start_time;
-        const timeMatch = startTimeStr.match(/^(\d+):(\d+)/);
+        shiftStartTime = shiftDetails.rows[0].start_time;
+        shiftEndTime = shiftDetails.rows[0].end_time;
+        const timeMatch = shiftStartTime.match(/^(\d+):(\d+)/);
         if (timeMatch) {
           startHour = parseInt(timeMatch[1], 10);
           startMin = parseInt(timeMatch[2], 10);
@@ -193,8 +195,12 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       } else {
         if (shift === 'R2') {
           startHour = 9;
+          shiftStartTime = '09:00';
+          shiftEndTime = '21:00';
         } else if (shift === 'R3') {
           startHour = 15;
+          shiftStartTime = '15:00';
+          shiftEndTime = '04:00';
         }
       }
       
@@ -221,8 +227,8 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by) VALUES ($1, NOW(), $2, CURRENT_DATE, $3) RETURNING *',
-      [employee_id, status, req.user.username]
+      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time) VALUES ($1, NOW(), $2, CURRENT_DATE, $3, $4, $5, $6, $7) RETURNING *',
+      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime]
     );
 
     res.status(201).json(result.rows[0]);
@@ -426,7 +432,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, e.name, e.role, e.shift, e.shift_hours, e.employee_id as employee_code, e.department
+      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE 1=1
@@ -454,7 +460,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
       let checkOutTime = row.check_out ? new Date(row.check_out).getTime() : null;
       let durationHours = 0;
       let otHours = 0;
-      const shiftHours = parseFloat(row.shift_hours || 12.0);
+      const shiftHours = parseFloat(row.shift_hours || row.current_shift_hours || 12.0);
       
       // row.date from PostgreSQL is a JS Date object (not a string).
       // We must convert it to a local date string (YYYY-MM-DD) before comparing.
@@ -937,7 +943,16 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
     const daysLate = new Set(logsRes.rows.filter(log => log.status === 'Late').map(log => log.date.toISOString().split('T')[0])).size;
     
     let totalHours = 0;
+    let expectedHours = 0;
+    let processedDates = new Set();
+    
     logsRes.rows.forEach(log => {
+      const dateStr = log.date.toISOString().split('T')[0];
+      if ((log.status === 'Present' || log.status === 'Late') && !processedDates.has(dateStr)) {
+        processedDates.add(dateStr);
+        expectedHours += parseFloat(log.shift_hours || employee.shift_hours || 12.0);
+      }
+
       const checkInTime = new Date(log.check_in).getTime();
       const checkOutTime = log.check_out ? new Date(log.check_out).getTime() : new Date().getTime();
       const breakSecs = log.total_break_duration_seconds || 0;
@@ -945,9 +960,6 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
       totalHours += Math.max(0, sessionMs / (1000 * 60 * 60));
     });
     
-    // Standard shifts hours
-    const standardHoursPerShift = parseFloat(employee.shift_hours) || 12.0;
-    const expectedHours = daysPresent * standardHoursPerShift;
     const overtime = Math.max(0, totalHours - expectedHours);
     
     res.json({

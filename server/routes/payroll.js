@@ -162,7 +162,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
     // Get attendance/leave logs for the selected month
     const logsRes = await pool.query(
-      `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
+      `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, ea.shift_hours, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
        FROM employee_attendance ea
        WHERE TO_CHAR(ea.date, 'YYYY-MM') = $1
        ORDER BY ea.date ASC, ea.check_in ASC`,
@@ -233,7 +233,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
                 dailyHours += Math.max(0, (outTime - inTime) / (1000 * 60 * 60));
               }
             });
-            const shiftHours = parseFloat(emp.shift_hours || 12.0);
+            const shiftHours = parseFloat(daySessions[0].shift_hours || emp.shift_hours || 12.0);
             totalOvertimeHours += Math.max(0, dailyHours - shiftHours);
           }
         } else {

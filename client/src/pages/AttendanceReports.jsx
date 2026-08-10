@@ -416,8 +416,9 @@ export default function AttendanceReports() {
               dayBreakSecs += parseInt(s.total_break_duration_seconds || 0)
             })
             dayHours = Math.min(24, dayHours) // Cap to 24 hours max per day
-            totalHours += Math.min(emp.shift_hours || 12.0, dayHours)
-            totalOvertime += Math.max(0, dayHours - (emp.shift_hours || 12.0))
+            const currentDayShiftHours = mainSession.shift_hours || emp.shift_hours || 12.0
+            totalHours += Math.min(currentDayShiftHours, dayHours)
+            totalOvertime += Math.max(0, dayHours - currentDayShiftHours)
             totalBreakSeconds += dayBreakSecs
           }
         } else {
@@ -640,7 +641,8 @@ export default function AttendanceReports() {
               cellClass += ' leave-cell'
             } else {
               const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
-              const dayOvertime = Math.max(0, dayHours - emp.shift_hours)
+              const currentDayShiftHours = main.shift_hours || emp.shift_hours || 12.0
+              const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
               
               const sessionLines = sessions.map(s => {
                 const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -659,7 +661,7 @@ export default function AttendanceReports() {
               }
               
               cellText = [...sessionLines, ...paddingLines].join('<br/>')
-              cellText += `<br/><span style="font-size: 8pt; color: #475569; font-weight: bold;">Total Duty: ${formatHoursToText(Math.min(emp.shift_hours || 12.0, dayHours))}${dayOvertime > 0 ? `<br/>Overtime: +${formatHoursToText(dayOvertime)}` : ''}</span>`
+              cellText += `<br/><span style="font-size: 8pt; color: #475569; font-weight: bold;">Total Duty: ${formatHoursToText(Math.min(currentDayShiftHours, dayHours))}${dayOvertime > 0 ? `<br/>Overtime: +${formatHoursToText(dayOvertime)}` : ''}</span>`
               cellClass += ' present-cell'
             }
           } else {
@@ -1074,7 +1076,8 @@ export default function AttendanceReports() {
                               cellBg = 'rgba(249, 115, 22, 0.08)'
                             } else {
                               const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
-                              const dayOvertime = Math.max(0, dayHours - emp.shift_hours)
+                              const currentDayShiftHours = sessions[0].shift_hours || emp.shift_hours || 12.0
+                              const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
                               const dayBreakSecs = sessions.reduce((acc, s) => acc + parseInt(s.total_break_duration_seconds || 0), 0)
                               
                               cellContent = (
@@ -1329,7 +1332,8 @@ export default function AttendanceReports() {
                     const dateStr = formatLocalDate(day)
                     const sessions = selectedEmployeeLogs.days[dateStr] || []
                     const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
-                    const dayOvertime = Math.max(0, dayHours - selectedEmployeeLogs.shift_hours)
+                    const currentDayShiftHours = sessions[0].shift_hours || selectedEmployeeLogs.shift_hours || 12.0
+                    const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
 
                     if (sessions.length === 0) {
                       const todayStr = formatLocalDate(new Date())

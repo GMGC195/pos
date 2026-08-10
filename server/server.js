@@ -111,6 +111,10 @@ const pool = require('./db');
         break_start TIMESTAMPTZ,
         total_break_duration_seconds INTEGER DEFAULT 0,
         date DATE DEFAULT CURRENT_DATE,
+        shift_name VARCHAR(50),
+        shift_hours NUMERIC(4, 2),
+        shift_start_time VARCHAR(20),
+        shift_end_time VARCHAR(20),
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
@@ -133,6 +137,24 @@ const pool = require('./db');
 
     // Ensure employee_attendance has remarks column
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS remarks VARCHAR(100)');
+    // Add shift tracking columns
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_name VARCHAR(50)');
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_hours NUMERIC(4, 2)');
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_start_time VARCHAR(20)');
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_end_time VARCHAR(20)');
+
+    // Migrate existing records: fetch employee's current shift details and populate historical attendance
+    await pool.query(`
+      UPDATE employee_attendance ea
+      SET 
+        shift_name = e.shift,
+        shift_hours = COALESCE(e.shift_hours, 12.0),
+        shift_start_time = es.start_time,
+        shift_end_time = es.end_time
+      FROM employees e
+      LEFT JOIN employee_shifts es ON e.shift = es.name
+      WHERE ea.employee_id = e.id AND ea.shift_name IS NULL
+    `);
     // Ensure employee_attendance has created_by column
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS created_by VARCHAR(150)');
     // Ensure users has shift column
