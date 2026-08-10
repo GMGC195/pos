@@ -6,27 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 
 
-const format12to24 = (time12h) => {
-  if (!time12h) return '10:00';
-  const match = time12h.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
-  if (!match) return '10:00';
-  let hrs = parseInt(match[1]);
-  const mins = match[2];
-  const ampm = match[3].toUpperCase();
-  if (ampm === 'PM' && hrs < 12) hrs += 12;
-  if (ampm === 'AM' && hrs === 12) hrs = 0;
-  return `${String(hrs).padStart(2, '0')}:${mins}`;
-};
 
-const format24to12 = (time24h) => {
-  if (!time24h) return '10:00 AM';
-  const [hrsStr, minsStr] = time24h.split(':');
-  let hrs = parseInt(hrsStr);
-  const ampm = hrs >= 12 ? 'PM' : 'AM';
-  if (hrs > 12) hrs -= 12;
-  if (hrs === 0) hrs = 12;
-  return `${String(hrs).padStart(2, '0')}:${minsStr} ${ampm}`;
-};
 
 const calculateHoursDiff = (startTime24, endTime24) => {
   if (!startTime24 || !endTime24) return 12.0;
@@ -76,8 +56,8 @@ export default function AttendanceTracker() {
   const [selectedEmpForShiftEdit, setSelectedEmpForShiftEdit] = useState(null)
   const [editShiftVal, setEditShiftVal] = useState('R1')
   const [editShiftHoursVal, setEditShiftHoursVal] = useState(13.0)
-  const [editStartTimeVal, setEditStartTimeVal] = useState('10:00 AM')
-  const [editEndTimeVal, setEditEndTimeVal] = useState('11:00 PM')
+  const [editStartTimeVal, setEditStartTimeVal] = useState('10:00')
+  const [editEndTimeVal, setEditEndTimeVal] = useState('23:00')
   const [isCustomShiftEdit, setIsCustomShiftEdit] = useState(false)
   const [shiftsList, setShiftsList] = useState([])
 
@@ -116,14 +96,13 @@ export default function AttendanceTracker() {
     return () => window.removeEventListener('click', handleOutsideClick)
   }, [])
 
-  const handleTimeChangeTracker = (field, val24h) => {
-    const val12h = format24to12(val24h)
-    if (field === 'editStartTimeVal') {
-      setEditStartTimeVal(val12h)
-      setEditShiftHoursVal(calculateHoursDiff(val24h, format12to24(editEndTimeVal)))
+  const handleTimeChange = (field, val24h) => {
+    if (field === 'start') {
+      setEditStartTimeVal(val24h)
+      setEditShiftHoursVal(calculateHoursDiff(val24h, editEndTimeVal))
     } else {
-      setEditEndTimeVal(val12h)
-      setEditShiftHoursVal(calculateHoursDiff(format12to24(editStartTimeVal), val24h))
+      setEditEndTimeVal(val24h)
+      setEditShiftHoursVal(calculateHoursDiff(editStartTimeVal, val24h))
     }
   }
 
@@ -643,8 +622,8 @@ export default function AttendanceTracker() {
                                   const isPredefined = !!matchedShift
                                   setEditShiftVal(currentShift)
                                   setEditShiftHoursVal(parseFloat(emp.shift_hours || 12.0))
-                                  setEditStartTimeVal(matchedShift ? matchedShift.start_time : '10:00 AM')
-                                  setEditEndTimeVal(matchedShift ? matchedShift.end_time : '11:00 PM')
+                                  setEditStartTimeVal(matchedShift ? matchedShift.start_time : '10:00')
+                                  setEditEndTimeVal(matchedShift ? matchedShift.end_time : '23:00')
                                   setIsCustomShiftEdit(!isPredefined)
                                   setShowShiftModal(true)
                                 }}
@@ -691,7 +670,7 @@ export default function AttendanceTracker() {
                     <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                         <span style={{ color: 'var(--text-muted)' }}>Checked In:</span>
-                        <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: 'var(--text-muted)' }}>Duty Hours:</span>
@@ -856,15 +835,15 @@ export default function AttendanceTracker() {
                       setIsCustomShiftEdit(true)
                       setEditShiftVal('CUSTOM_R1')
                       setEditShiftHoursVal(12.0)
-                      setEditStartTimeVal('10:00 AM')
-                      setEditEndTimeVal('10:00 PM')
+                      setEditStartTimeVal('10:00')
+                      setEditEndTimeVal('23:00')
                     } else {
                       setIsCustomShiftEdit(false)
                       setEditShiftVal(val)
                       const matched = shiftsList.find(s => s.name === val)
                       setEditShiftHoursVal(matched ? parseFloat(matched.hours) : 12.0)
-                      setEditStartTimeVal(matched ? matched.start_time : '10:00 AM')
-                      setEditEndTimeVal(matched ? matched.end_time : '11:00 PM')
+                      setEditStartTimeVal(matched ? matched.start_time : '10:00')
+                      setEditEndTimeVal(matched ? matched.end_time : '23:00')
                     }
                   }}
                   style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
@@ -892,8 +871,8 @@ export default function AttendanceTracker() {
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Start Time</span>
                     <input 
                       type="time" 
-                      value={format12to24(editStartTimeVal)}
-                      onChange={e => handleTimeChangeTracker('editStartTimeVal', e.target.value)}
+                      value={editStartTimeVal}
+                      onChange={e => handleTimeChange('start', e.target.value)}
                       style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
                     />
                   </div>
@@ -901,8 +880,8 @@ export default function AttendanceTracker() {
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>End Time</span>
                     <input 
                       type="time" 
-                      value={format12to24(editEndTimeVal)}
-                      onChange={e => handleTimeChangeTracker('editEndTimeVal', e.target.value)}
+                      value={editEndTimeVal}
+                      onChange={e => handleTimeChange('end', e.target.value)}
                       style={{ border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', borderRadius: 8, padding: 10, outline: 'none' }}
                     />
                   </div>

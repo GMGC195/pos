@@ -654,7 +654,7 @@ export default function Reports({ isTodaySales = false }) {
                             {t.payment_method === t.order_status ? t.order_status : `${t.payment_method} - ${t.order_status}`}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#666' }}>{new Date(t.created_at).toLocaleTimeString()}</td>
+                        <td style={{ padding: '10px 12px', color: '#666' }}>{new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</td>
                       </tr>
                     ))}
                     {filteredTransactions.length === 0 && (

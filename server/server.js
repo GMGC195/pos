@@ -39,8 +39,8 @@ const pool = require('./db');
       CREATE TABLE IF NOT EXISTS employee_shifts (
         id SERIAL PRIMARY KEY,
         name VARCHAR(50) UNIQUE NOT NULL,
-        start_time VARCHAR(20) NOT NULL DEFAULT '10:00 AM',
-        end_time VARCHAR(20) NOT NULL DEFAULT '11:00 PM',
+        start_time VARCHAR(20) NOT NULL DEFAULT '10:00',
+        end_time VARCHAR(20) NOT NULL DEFAULT '23:00',
         hours NUMERIC(4, 2) NOT NULL DEFAULT 13.0
       )
     `);
@@ -49,11 +49,35 @@ const pool = require('./db');
     await pool.query(`
       INSERT INTO employee_shifts (name, start_time, end_time, hours)
       VALUES 
-        ('R1', '10:00 AM', '11:00 PM', 13.0),
-        ('R2', '09:00 AM', '09:00 PM', 12.0),
-        ('R3', '03:00 PM', '04:00 AM', 13.0)
+        ('R1', '10:00', '23:00', 13.0),
+        ('R2', '09:00', '21:00', 12.0),
+        ('R3', '15:00', '04:00', 13.0)
       ON CONFLICT (name) DO NOTHING
     `);
+
+    // Convert existing shifts to 24-hour format
+    const shiftsRes = await pool.query('SELECT id, start_time, end_time FROM employee_shifts');
+    for (const row of shiftsRes.rows) {
+      const convertTo24 = (timeStr) => {
+        if (!timeStr) return timeStr;
+        const match = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+        if (match) {
+          let hrs = parseInt(match[1], 10);
+          const mins = parseInt(match[2], 10);
+          const ampm = match[3].toUpperCase();
+          if (ampm === 'PM' && hrs < 12) hrs += 12;
+          if (ampm === 'AM' && hrs === 12) hrs = 0;
+          return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+        }
+        return timeStr;
+      };
+      const newStart = convertTo24(row.start_time);
+      const newEnd = convertTo24(row.end_time);
+      if (newStart !== row.start_time || newEnd !== row.end_time) {
+        await pool.query('UPDATE employee_shifts SET start_time = $1, end_time = $2 WHERE id = $3', [newStart, newEnd, row.id]);
+        console.log(`Migrated shift ${row.id} time to 24h format.`);
+      }
+    }
 
     // Add employee_id column if not exists
     await pool.query(`

@@ -362,7 +362,7 @@ export default function POS() {
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
       Order #${orderId} | ${slipNumber || '-'}
     </div>
-    <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString()}</p>
+    <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
   </div>
   ${customerInfo.name || customerInfo.phone || customerInfo.address ? `
   <div class="divider"></div>
@@ -684,7 +684,7 @@ export default function POS() {
           <div style={{ margin: '10px 0', fontSize: 18, fontWeight: 900 }}>
             Order #... | ...
           </div>
-          <p>{now.toLocaleDateString()} {now.toLocaleTimeString()}</p>
+          <p>{now.toLocaleDateString()} {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
         </div>
         <div className="receipt-items">
           {cart.map((item, idx) => (

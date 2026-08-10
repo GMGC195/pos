@@ -643,10 +643,10 @@ export default function AttendanceReports() {
               const dayOvertime = Math.max(0, dayHours - emp.shift_hours)
               
               const sessionLines = sessions.map(s => {
-                const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
                 const isSystem = s.remarks === 'automatically system check out' || s.remarks === 'System Checkout'
                 const outStr = s.check_out 
-                  ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystem ? ' (SYS)' : ''}` 
+                  ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}${isSystem ? ' (SYS)' : ''}` 
                   : 'Active'
                 return `In: ${inStr} Out: ${outStr}`
               })
@@ -1080,7 +1080,7 @@ export default function AttendanceReports() {
                               cellContent = (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', fontSize: 9 }}>
                                   {sessions.map((s, idx) => {
-                                    const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                    const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
                                     const isSystem = s.remarks === 'automatically system check out' || s.remarks === 'System Checkout'
                                     const isEdited = s.remarks === 'Edited'
                                     const isManual = s.remarks === 'Manual'
@@ -1088,7 +1088,7 @@ export default function AttendanceReports() {
                                     const tag = isEdited ? <span style={{color: '#3B82F6', fontSize: 9, fontWeight: 700}}>(E)</span> : isManual ? <span style={{color: '#8B5CF6', fontSize: 9, fontWeight: 700}}>(M)</span> : null
                                     
                                     const outStr = s.check_out 
-                                      ? isSystem ? 'SYS' : `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
+                                      ? isSystem ? 'SYS' : `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}` 
                                       : 'Active'
                                     return (
                                       <div key={idx} style={{ whiteSpace: 'nowrap', display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -1373,7 +1373,7 @@ export default function AttendanceReports() {
                     return sessions.map((session, sIdx) => {
                       const isSystemCheckout = session.remarks === 'automatically system check out' || session.remarks === 'System Checkout'
                       const checkOut = session.check_out 
-                        ? `${new Date(session.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${isSystemCheckout ? ' (automatically system check out)' : ''}` 
+                        ? `${new Date(session.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}${isSystemCheckout ? ' (automatically system check out)' : ''}` 
                         : 'Active'
                       
                       const breakMins = Math.floor((session.total_break_duration_seconds || 0) / 60)
@@ -1393,7 +1393,7 @@ export default function AttendanceReports() {
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>
                             {sIdx === 0 ? day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}
                           </td>
-                          <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : new Date(session.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                          <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : new Date(session.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</td>
                           <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : checkOut}</td>
                           <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : `${breakMins} mins`}</td>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>

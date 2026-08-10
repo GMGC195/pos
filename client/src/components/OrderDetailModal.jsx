@@ -59,7 +59,7 @@ export default function OrderDetailModal({ order, onClose }) {
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
       Order #${order.id} | ${order.slip_number || '-'}
     </div>
-    <p class="sub">${now.toLocaleDateString()} ${now.toLocaleTimeString()}</p>
+    <p class="sub">${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
   </div>
   ${order.customer_name || order.customer_phone || order.customer_address ? `
   <div class="divider"></div>

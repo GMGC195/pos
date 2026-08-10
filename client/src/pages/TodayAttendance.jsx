@@ -229,8 +229,8 @@ export default function TodayAttendance() {
       const XLSX = await import('xlsx')
       const data = filteredEmployees.map(emp => {
         const sessions = emp.sessions || []
-        const checkInTimes = sessions.map(s => `In: ${new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`).join('\n')
-        const checkOutTimes = sessions.map(s => s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active').join('\n')
+        const checkInTimes = sessions.map(s => `In: ${new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`).join('\n')
+        const checkOutTimes = sessions.map(s => s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Active').join('\n')
         
         let statusText = emp.calculated_status || 'Absent'
 
@@ -598,7 +598,7 @@ export default function TodayAttendance() {
                               const valColor = isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--green)';
                               return (
                                 <div key={idx} style={{ color: valColor, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                                  In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {tag}
+                                  In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} {tag}
                                 </div>
                               );
                             })}
@@ -619,7 +619,7 @@ export default function TodayAttendance() {
                               const valColor = isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--text-muted)';
                               return (
                                 <div key={idx} style={{ color: valColor, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                                  {s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active'} {s.check_out && tag}
+                                  {s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Active'} {s.check_out && tag}
                                 </div>
                               );
                             })}

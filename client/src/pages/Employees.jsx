@@ -5,27 +5,7 @@ import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
 import { useAuth } from '../contexts/AuthContext'
 
-const format12to24 = (time12h) => {
-  if (!time12h) return '10:00';
-  const match = time12h.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
-  if (!match) return '10:00';
-  let hrs = parseInt(match[1]);
-  const mins = match[2];
-  const ampm = match[3].toUpperCase();
-  if (ampm === 'PM' && hrs < 12) hrs += 12;
-  if (ampm === 'AM' && hrs === 12) hrs = 0;
-  return `${String(hrs).padStart(2, '0')}:${mins}`;
-};
 
-const format24to12 = (time24h) => {
-  if (!time24h) return '10:00 AM';
-  const [hrsStr, minsStr] = time24h.split(':');
-  let hrs = parseInt(hrsStr);
-  const ampm = hrs >= 12 ? 'PM' : 'AM';
-  if (hrs > 12) hrs -= 12;
-  if (hrs === 0) hrs = 12;
-  return `${String(hrs).padStart(2, '0')}:${minsStr} ${ampm}`;
-};
 
 const calculateHoursDiff = (startTime24, endTime24) => {
   if (!startTime24 || !endTime24) return 12.0;
@@ -135,8 +115,8 @@ export default function Employees() {
     status: 'Active',
     shift: 'R1',
     shift_hours: 13.0,
-    shift_start_time: '10:00 AM',
-    shift_end_time: '11:00 PM',
+    shift_start_time: '10:00',
+    shift_end_time: '23:00',
     department: '',
     position: '',
     employee_id: ''
@@ -146,7 +126,7 @@ export default function Employees() {
   // Shifts configuration state
   const [shifts, setShifts] = useState([])
   const [showShiftConfig, setShowShiftConfig] = useState(false)
-  const [newShiftForm, setNewShiftForm] = useState({ name: '', start_time: '10:00 AM', end_time: '11:00 PM', hours: 13.0 })
+  const [newShiftForm, setNewShiftForm] = useState({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0 })
   const [editingShiftId, setEditingShiftId] = useState(null)
 
   const loadShifts = () => {
@@ -189,8 +169,8 @@ export default function Employees() {
       status: 'Active',
       shift: shifts[0]?.name || 'R1',
       shift_hours: parseFloat(shifts[0]?.hours || 13.0),
-      shift_start_time: shifts[0]?.start_time || '10:00 AM',
-      shift_end_time: shifts[0]?.end_time || '11:00 PM',
+      shift_start_time: shifts[0]?.start_time || '10:00',
+      shift_end_time: shifts[0]?.end_time || '23:00',
       department: '',
       position: '',
       employee_id: ''
@@ -212,8 +192,8 @@ export default function Employees() {
       status: emp.status || 'Active',
       shift: currentShift,
       shift_hours: parseFloat(emp.shift_hours || 12.0),
-      shift_start_time: matchedShift ? matchedShift.start_time : '10:00 AM',
-      shift_end_time: matchedShift ? matchedShift.end_time : '11:00 PM',
+      shift_start_time: matchedShift ? matchedShift.start_time : '10:00',
+      shift_end_time: matchedShift ? matchedShift.end_time : '23:00',
       department: emp.department || '',
       position: emp.position || '',
       employee_id: emp.employee_id || ''
@@ -227,11 +207,10 @@ export default function Employees() {
   }
 
   const handleTimeChange = (field, val24h) => {
-    const val12h = format24to12(val24h)
     setFormData(prev => {
-      const updated = { ...prev, [field]: val12h }
-      const start24 = field === 'shift_start_time' ? val24h : format12to24(prev.shift_start_time)
-      const end24 = field === 'shift_end_time' ? val24h : format12to24(prev.shift_end_time)
+      const updated = { ...prev, [field]: val24h }
+      const start24 = field === 'shift_start_time' ? val24h : prev.shift_start_time
+      const end24 = field === 'shift_end_time' ? val24h : prev.shift_end_time
       updated.shift_hours = calculateHoursDiff(start24, end24)
       return updated
     })
@@ -662,8 +641,8 @@ export default function Employees() {
                               ...prev, 
                               shift: 'CUSTOM_R1', 
                               shift_hours: 12.0,
-                              shift_start_time: '10:00 AM',
-                              shift_end_time: '10:00 PM'
+                              shift_start_time: '10:00',
+                              shift_end_time: '22:00'
                             }))
                           } else {
                             setIsCustomShift(false)
@@ -672,8 +651,8 @@ export default function Employees() {
                               ...prev, 
                               shift: val, 
                               shift_hours: matchedShift ? parseFloat(matchedShift.hours) : 12.0,
-                              shift_start_time: matchedShift ? matchedShift.start_time : '10:00 AM',
-                              shift_end_time: matchedShift ? matchedShift.end_time : '11:00 PM'
+                              shift_start_time: matchedShift ? matchedShift.start_time : '10:00',
+                              shift_end_time: matchedShift ? matchedShift.end_time : '23:00'
                             }))
                           }
                         }}
@@ -716,7 +695,7 @@ export default function Employees() {
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Start Time</label>
                         <input 
                           type="time"
-                          value={format12to24(formData.shift_start_time)}
+                          value={formData.shift_start_time}
                           onChange={e => handleTimeChange('shift_start_time', e.target.value)}
                           style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
                         />
@@ -727,7 +706,7 @@ export default function Employees() {
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>End Time</label>
                         <input 
                           type="time"
-                          value={format12to24(formData.shift_end_time)}
+                          value={formData.shift_end_time}
                           onChange={e => handleTimeChange('shift_end_time', e.target.value)}
                           style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
                         />
@@ -772,7 +751,7 @@ export default function Employees() {
                     await axios.post('/api/employees/shifts/list', newShiftForm)
                     toast.success('New shift configured!')
                   }
-                  setNewShiftForm({ name: '', start_time: '10:00 AM', end_time: '11:00 PM', hours: 13.0 })
+                  setNewShiftForm({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0 })
                   setEditingShiftId(null)
                   loadShifts()
                 } catch (err) {
@@ -831,7 +810,7 @@ export default function Employees() {
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
                   {editingShiftId && (
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
-                      setNewShiftForm({ name: '', start_time: '10:00 AM', end_time: '11:00 PM', hours: 13.0 });
+                      setNewShiftForm({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0 });
                       setEditingShiftId(null);
                     }}>Cancel Edit</button>
                   )}

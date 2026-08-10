@@ -30,15 +30,10 @@ const evaluateShiftStart = (shiftName, shiftsList) => {
   const shift = shiftsList.find(s => s.name.toUpperCase() === (shiftName || 'R1').toUpperCase());
   let startHour = 10, startMin = 0;
   if (shift && shift.start_time) {
-    const timeMatch = shift.start_time.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+    const timeMatch = shift.start_time.match(/^(\d+):(\d+)/);
     if (timeMatch) {
-      let hrs = parseInt(timeMatch[1], 10);
-      const mins = parseInt(timeMatch[2], 10);
-      const ampm = timeMatch[3].toUpperCase();
-      if (ampm === 'PM' && hrs < 12) hrs += 12;
-      if (ampm === 'AM' && hrs === 12) hrs = 0;
-      startHour = hrs;
-      startMin = mins;
+      startHour = parseInt(timeMatch[1], 10);
+      startMin = parseInt(timeMatch[2], 10);
     }
   } else {
     if (shiftName === 'R2') startHour = 9;
@@ -146,6 +141,7 @@ router.get('/today', authenticateToken, async (req, res) => {
 router.post('/check-in', authenticateToken, async (req, res) => {
   const { employee_id, late_threshold } = req.body;
   const threshold = late_threshold || '09:00'; // Default is 9:00 AM
+  const userRole = req.user?.role?.toLowerCase();
   
   try {
     // Check if there is an active session (check_out is NULL)
@@ -189,15 +185,10 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       const shiftDetails = await pool.query('SELECT * FROM employee_shifts WHERE name = $1', [shift]);
       if (shiftDetails.rows.length > 0) {
         const startTimeStr = shiftDetails.rows[0].start_time;
-        const timeMatch = startTimeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+        const timeMatch = startTimeStr.match(/^(\d+):(\d+)/);
         if (timeMatch) {
-          let hrs = parseInt(timeMatch[1]);
-          const mins = parseInt(timeMatch[2]);
-          const ampm = timeMatch[3].toUpperCase();
-          if (ampm === 'PM' && hrs < 12) hrs += 12;
-          if (ampm === 'AM' && hrs === 12) hrs = 0;
-          startHour = hrs;
-          startMin = mins;
+          startHour = parseInt(timeMatch[1], 10);
+          startMin = parseInt(timeMatch[2], 10);
         }
       } else {
         if (shift === 'R2') {

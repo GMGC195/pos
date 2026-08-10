@@ -618,10 +618,10 @@ export default function Dashboard() {
                             {new Date(log.date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
                           </td>
                           <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>
-                            {new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
                           </td>
                           <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>
-                            {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                            {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'}
                           </td>
                           <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                             <span style={{
@@ -696,8 +696,8 @@ export default function Dashboard() {
 
       const data = tableFilteredEmployees.map(emp => {
         const sessions = emp.sessions || []
-        const checkInTimes = sessions.map(s => `In: ${new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`).join('\n')
-        const checkOutTimes = sessions.map(s => s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active').join('\n')
+        const checkInTimes = sessions.map(s => `In: ${new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`).join('\n')
+        const checkOutTimes = sessions.map(s => s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Active').join('\n')
 
         let statusText = 'Absent'
         if (sessions.length > 0) {
@@ -935,7 +935,7 @@ export default function Dashboard() {
                       )}
                       <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={{ fontSize: 11, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
-                          In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                          In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
                         </span>
                         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
                           {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs
@@ -972,7 +972,7 @@ export default function Dashboard() {
                   <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{log.name}</span>
                     <span style={{ fontSize: 11, color: '#F97316', background: 'rgba(249, 115, 22, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                      {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Late'}
+                      {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Late'}
                     </span>
                   </div>
                 ))
@@ -1043,10 +1043,10 @@ export default function Dashboard() {
                       <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 2 }}>
                           <span style={{ fontSize: 10, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
-                            In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                            In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
                           </span>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
-                            Out: {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                            Out: {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
                           </span>
                         </div>
                         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
@@ -1285,7 +1285,7 @@ export default function Dashboard() {
                             {sessions.length > 0 ? (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                 {sessions.map((s, idx) => (
-                                  <div key={idx}>In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                  <div key={idx}>In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</div>
                                 ))}
                               </div>
                             ) : (
@@ -1298,7 +1298,7 @@ export default function Dashboard() {
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                 {sessions.map((s, idx) => (
                                   <div key={idx}>
-                                    {s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Active'}
+                                    {s.check_out ? `Out: ${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Active'}
                                   </div>
                                 ))}
                               </div>

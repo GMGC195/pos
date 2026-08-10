@@ -428,7 +428,7 @@ export default function StockManagement() {
                     <td>Rs {Number(h.price_per_unit).toFixed(2)}</td>
                     <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>Rs {Number(h.total_price).toFixed(2)}</td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-                      {new Date(h.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(h.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
