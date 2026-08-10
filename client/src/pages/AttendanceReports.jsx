@@ -1332,7 +1332,7 @@ export default function AttendanceReports() {
                     const dateStr = formatLocalDate(day)
                     const sessions = selectedEmployeeLogs.days[dateStr] || []
                     const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
-                    const currentDayShiftHours = sessions[0].shift_hours || selectedEmployeeLogs.shift_hours || 12.0
+                    const currentDayShiftHours = sessions[0]?.shift_hours || selectedEmployeeLogs.shift_hours || 12.0
                     const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
 
                     if (sessions.length === 0) {

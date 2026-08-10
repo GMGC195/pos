@@ -12,6 +12,7 @@ const pool = new Pool({
 });
 
 pool.on('connect', (client) => {
+  client.query("SET timezone = 'Asia/Riyadh'");
   console.log(`✅ Connected to database: ${client.database} on host: ${client.host}`);
 });
 

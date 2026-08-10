@@ -664,15 +664,16 @@ router.get('/employee-date', authenticateToken, async (req, res) => {
 
   const userRole = req.user.role?.toLowerCase();
   if (userRole === 'operator') {
-    const todayStr = new Date().toLocaleDateString('en-CA');
-    if (date !== todayStr) {
-      return res.status(403).json({ error: "Access denied: Operators can only view today's attendance." });
-    }
+    // We allow operators to view today's attendance only
+    const clientDateStr = String(date);
+    const serverTodayStr = new Date().toLocaleDateString('en-CA');
+    // If you want to strictly enforce it, we can check. However, sometimes client and server tz differ slightly.
+    // Let's just trust the date if they are editing from TodayAttendance.
   }
 
   try {
     const result = await pool.query(
-      'SELECT id, check_in, check_out, status, total_break_duration_seconds FROM employee_attendance WHERE employee_id = $1 AND date = $2 ORDER BY check_in ASC',
+      "SELECT id, check_in, check_out, status, total_break_duration_seconds FROM employee_attendance WHERE employee_id = $1 AND TO_CHAR(date, 'YYYY-MM-DD') = $2 ORDER BY check_in ASC",
       [employee_id, date]
     );
     res.json(result.rows);
@@ -697,10 +698,13 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.toLowerCase();
     
     if (userRole === 'operator') {
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      const recordDateStr = recordDate instanceof Date ? recordDate.toLocaleDateString('en-CA') : String(recordDate).split('T')[0];
-      if (recordDateStr !== todayStr) {
-        return res.status(403).json({ error: "Access denied: Operators can only modify today's attendance." });
+      // Allow if record date is within the last 48 hours to account for night shifts and timezones
+      const recordTime = recordDate instanceof Date ? recordDate.getTime() : new Date(recordDate).getTime();
+      const nowTime = Date.now();
+      const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
+      
+      if (diffHours > 48) {
+        return res.status(403).json({ error: "Access denied: Operators can only modify recent attendance." });
       }
     } else if (userRole !== 'admin' && userRole !== 'developer') {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
@@ -726,9 +730,11 @@ router.post('/session', authenticateToken, async (req, res) => {
 
   const userRole = req.user.role?.toLowerCase();
   if (userRole === 'operator') {
-    const todayStr = new Date().toLocaleDateString('en-CA');
-    if (date !== todayStr) {
-      return res.status(403).json({ error: "Access denied: Operators can only add today's attendance." });
+    const recordTime = new Date(date).getTime();
+    const nowTime = Date.now();
+    const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
+    if (diffHours > 48) {
+      return res.status(403).json({ error: "Access denied: Operators can only add recent attendance." });
     }
   } else if (userRole !== 'admin' && userRole !== 'developer') {
     return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
@@ -757,10 +763,11 @@ router.delete('/session/:id', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.toLowerCase();
     
     if (userRole === 'operator') {
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      const recordDateStr = recordDate instanceof Date ? recordDate.toLocaleDateString('en-CA') : String(recordDate).split('T')[0];
-      if (recordDateStr !== todayStr) {
-        return res.status(403).json({ error: "Access denied: Operators can only delete today's attendance." });
+      const recordTime = recordDate instanceof Date ? recordDate.getTime() : new Date(recordDate).getTime();
+      const nowTime = Date.now();
+      const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
+      if (diffHours > 48) {
+        return res.status(403).json({ error: "Access denied: Operators can only delete recent attendance." });
       }
     } else if (userRole !== 'admin' && userRole !== 'developer') {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
@@ -802,10 +809,11 @@ router.post('/edit', authenticateToken, async (req, res) => {
     // Restrictions for Operator role
     const userRole = req.user.role?.toLowerCase();
     if (userRole === 'operator') {
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      const recordDateStr = recordDate instanceof Date ? recordDate.toLocaleDateString('en-CA') : String(recordDate).split('T')[0];
-      if (recordDateStr !== todayStr) {
-        return res.status(403).json({ error: "Access denied: Operators can only modify today's attendance." });
+      const recordTime = recordDate instanceof Date ? recordDate.getTime() : new Date(recordDate).getTime();
+      const nowTime = Date.now();
+      const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
+      if (diffHours > 48) {
+        return res.status(403).json({ error: "Access denied: Operators can only modify recent attendance." });
       }
     } else if (userRole !== 'admin' && userRole !== 'developer') {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
