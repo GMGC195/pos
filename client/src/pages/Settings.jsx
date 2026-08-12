@@ -68,7 +68,7 @@ export default function Settings() {
 
   const fetchShifts = async () => {
     try {
-      const res = await api.get('/api/employees/shifts/list')
+      const res = await api.get('/api/employees/working-hours/list')
       setShifts(res.data)
     } catch {
       toast.error('Failed to fetch shifts')

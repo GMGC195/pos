@@ -85,7 +85,7 @@ export default function TodayAttendance() {
   }
 
   const loadShifts = () => {
-    axios.get('/api/employees/shifts/list')
+    axios.get('/api/employees/working-hours/list')
       .then(res => setShiftsList(res.data))
       .catch(() => {})
   }

@@ -433,16 +433,29 @@ export default function Dashboard() {
   }
 
   // Shift Attendance Bar Chart data
-  const shiftOrder = ['R1-D', 'R2-D', 'R3-D', 'R1-N', 'R2-N', 'R3-N'];
-  const employeeShifts = new Set((allEmployees.length > 0 ? allEmployees : todayActivity).map(e => e.shift).filter(Boolean));
-  // Always show all defined shifts; append any extra shifts found in data at the end
-  const extraShifts = [...employeeShifts].filter(s => !shiftOrder.includes(s)).sort((a, b) => a.localeCompare(b));
-  const uniqueShifts = [...shiftOrder, ...extraShifts];
-  const presentData = uniqueShifts.map(shiftName =>
-    todayActivity.filter(e => e.shift === shiftName && e.attendance_id).length
+  const uniqueShifts = ['R1 Day', 'R2 Day', 'R3 Day', 'R1 Night', 'R2 Night', 'R3 Night'];
+  
+  const getEmployeeBucket = (emp) => {
+    let rPref = 'R1';
+    const b = (emp.branch || '').toLowerCase();
+    if (b.includes('1') || b.includes('r1')) rPref = 'R1';
+    else if (b.includes('2') || b.includes('r2')) rPref = 'R2';
+    else if (b.includes('3') || b.includes('r3')) rPref = 'R3';
+
+    const sVal = (emp.new_shift || emp.shift || 'Day');
+    let sSuff = 'Day';
+    if (String(sVal).toLowerCase().includes('night') || String(sVal).toLowerCase().includes('n')) {
+      sSuff = 'Night';
+    }
+
+    return `${rPref} ${sSuff}`;
+  };
+
+  const presentData = uniqueShifts.map(bucket =>
+    todayActivity.filter(e => getEmployeeBucket(e) === bucket && e.attendance_id).length
   );
-  const enrolledData = uniqueShifts.map(shiftName =>
-    (allEmployees.length > 0 ? allEmployees : todayActivity).filter(e => e.shift === shiftName).length
+  const enrolledData = uniqueShifts.map(bucket =>
+    (allEmployees.length > 0 ? allEmployees : todayActivity).filter(e => getEmployeeBucket(e) === bucket).length
   );
 
   const attendanceBarData = {

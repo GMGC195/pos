@@ -81,7 +81,7 @@ export default function AttendanceTracker() {
   }
 
   const loadShifts = () => {
-    axios.get('/api/employees/shifts/list')
+    axios.get('/api/employees/working-hours/list')
       .then(res => setShiftsList(res.data))
       .catch(() => toast.error('Error loading shifts'))
   }
@@ -113,7 +113,7 @@ export default function AttendanceTracker() {
       const exists = shiftsList.some(s => s.name.toUpperCase() === targetName)
 
       if (isCustomShiftEdit && !exists) {
-        await axios.post('/api/employees/shifts/list', {
+        await axios.post('/api/employees/working-hours/list', {
           name: targetName,
           start_time: editStartTimeVal,
           end_time: editEndTimeVal,
@@ -121,8 +121,8 @@ export default function AttendanceTracker() {
         })
       }
 
-      await axios.patch(`/api/employees/${selectedEmpForShiftEdit.employee_id}/shift`, {
-        shift: targetName,
+      await axios.patch(`/api/employees/${selectedEmpForShiftEdit.employee_id}/working-hours`, {
+        working_hours: targetName,
         shift_hours: editShiftHoursVal
       })
       toast.success(`Shift updated to ${targetName} for ${selectedEmpForShiftEdit.name}!`)
