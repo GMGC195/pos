@@ -25,6 +25,7 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState('account')
   const [loading, setLoading] = useState(false)
   const shiftDropdownRef = useRef(null)
+  const branchDropdownRef = useRef(null)
   
   // My Account State
   const [profileForm, setProfileForm] = useState({
@@ -59,6 +60,8 @@ export default function Settings() {
     const handleOutsideClick = (e) => {
       if (shiftDropdownRef.current && !shiftDropdownRef.current.contains(e.target)) {
         setShowShiftDropdown(false)
+      }
+      if (branchDropdownRef.current && !branchDropdownRef.current.contains(e.target)) {
         setShowBranchDropdown(false)
       }
     }
@@ -454,7 +457,7 @@ export default function Settings() {
                           )}
                         </div>
 
-                        <div className="form-group" style={{ position: 'relative' }}>
+                        <div className="form-group" style={{ position: 'relative' }} ref={branchDropdownRef}>
                           <label>Assigned Branch(es)</label>
                           <div 
                             className="form-group-input" 
@@ -485,10 +488,10 @@ export default function Settings() {
                           {showBranchDropdown && (
                             <div style={{
                               position: 'absolute',
-                              top: '100%',
+                              bottom: '100%',
                               left: 0,
                               right: 0,
-                              marginTop: '8px',
+                              marginBottom: '8px',
                               background: 'white',
                               border: '1px solid var(--surface-2)',
                               borderRadius: '12px',
