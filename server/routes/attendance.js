@@ -119,8 +119,12 @@ router.get('/today', authenticateToken, async (req, res) => {
       
       let calculatedStatus = 'Absent';
       if (empSessions.length > 0) {
-        if (lastSession.on_break) calculatedStatus = 'On Break';
-        else if (lastSession.attendance_status === 'Late') calculatedStatus = 'Late';
+        const st = lastSession.attendance_status;
+        if (st === 'Holiday') calculatedStatus = 'Holiday';
+        else if (st === 'Leave') calculatedStatus = 'Leave';
+        else if (lastSession.check_out) calculatedStatus = 'Checked Out';
+        else if (lastSession.on_break) calculatedStatus = 'On Break';
+        else if (st === 'Late') calculatedStatus = 'Late';
         else calculatedStatus = 'Present';
       } else if (!evaluateShiftStart(emp.shift, shiftsList)) {
         calculatedStatus = 'Pending';
@@ -624,7 +628,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const totalEmployees = activeEmps.length;
 
     // Fetch all shifts
-    const shiftsData = await pool.query(`SELECT name, start_time FROM employee_shifts`);
+    const shiftsData = await pool.query(`SELECT name, start_time FROM employee_working_hours`);
     const shiftsList = shiftsData.rows;
 
     // Get today's attendance logs
