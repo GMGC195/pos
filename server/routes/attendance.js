@@ -169,12 +169,13 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Fetch employee shift details
-    const empRes = await pool.query('SELECT working_hours, shift_hours FROM employees WHERE id = $1', [employee_id]);
+    const empRes = await pool.query('SELECT working_hours, shift_hours, shift FROM employees WHERE id = $1', [employee_id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
     const shift = empRes.rows[0].working_hours || 'R1';
     const shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
+    const empShift = empRes.rows[0].shift || 'Day';
 
     // Determine status (Present or Late)
     // Check if it's the first check-in of the day
@@ -267,7 +268,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
 
     // Verify operator shift matches employee shift
     const userShifts = req.user.shift ? req.user.shift.split(',').map(s => s.trim()) : [];
-    if (userRole === 'operator' && userShifts.length > 0 && !userShifts.includes(shift)) {
+    if (userRole === 'operator' && userShifts.length > 0 && !userShifts.includes(empShift)) {
       return res.status(403).json({ error: `You are only allowed to mark attendance for employees in Shift(s): ${req.user.shift}` });
     }
 
