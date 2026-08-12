@@ -45,7 +45,7 @@ router.post('/login', async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift },
+      { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch },
       process.env.JWT_SECRET || 'fallback_secret',
       { expiresIn: '23h' }
     );
@@ -53,7 +53,7 @@ router.post('/login', async (req, res) => {
     res.json({
       message: 'Login successful',
       token,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift }
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch }
     });
   } catch (err) {
     console.error(err);
@@ -66,7 +66,7 @@ router.post('/login', async (req, res) => {
 // -------------------------------------------------------------
 router.get('/users', authenticateToken, isAdmin, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username, email, role, shift, created_at FROM users ORDER BY created_at DESC');
+    const result = await pool.query('SELECT id, username, email, role, shift, branch, created_at FROM users ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -78,7 +78,7 @@ router.get('/users', authenticateToken, isAdmin, async (req, res) => {
 // POST /api/auth/users (Admin only)
 // -------------------------------------------------------------
 router.post('/users', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role, shift } = req.body;
+  const { username, email, password, role, shift, branch } = req.body;
 
   try {
     // Check if user exists
@@ -89,8 +89,8 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
 
     const password_hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      'INSERT INTO users (username, email, password_hash, role, shift) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, role, shift',
-      [username, email, password_hash, role || 'Operator', shift || null]
+      'INSERT INTO users (username, email, password_hash, role, shift, branch) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, username, email, role, shift, branch',
+      [username, email, password_hash, role || 'Operator', shift || null, branch || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -104,7 +104,7 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
 // PUT /api/auth/users/:id (Admin only)
 // -------------------------------------------------------------
 router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role, shift } = req.body;
+  const { username, email, password, role, shift, branch } = req.body;
   const { id } = req.params;
 
   try {
@@ -114,18 +114,18 @@ router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
       return res.status(403).json({ error: 'Only Developers can modify Developer accounts' });
     }
 
-    let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4';
-    const params = [username, email, role, shift || null, id];
+    let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4, branch = $5';
+    const params = [username, email, role, shift || null, branch || null, id];
 
     if (password) {
       const password_hash = await bcrypt.hash(password, 10);
-      query += ', password_hash = $6 WHERE id = $5';
+      query += ', password_hash = $7 WHERE id = $6';
       params.push(password_hash);
     } else {
-      query += ' WHERE id = $5';
+      query += ' WHERE id = $6';
     }
 
-    const result = await pool.query(query + ' RETURNING id, username, email, role, shift', params);
+    const result = await pool.query(query + ' RETURNING id, username, email, role, shift, branch', params);
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);

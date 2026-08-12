@@ -19,6 +19,14 @@ const calculateHoursDiff = (startTime24, endTime24) => {
   return parseFloat((diffMins / 60).toFixed(2));
 };
 
+// Display 00:00 as 24:00 (midnight shown as end of day)
+const formatTime = (t) => {
+  if (!t) return '';
+  if (t === '00:00' || t === '0:00') return '24:00';
+  return t;
+};
+
+
 const decimalHoursToText = (hoursDec) => {
   if (isNaN(hoursDec) || hoursDec === null || hoursDec === undefined) return '';
   const totalMins = Math.round(hoursDec * 60);
@@ -97,7 +105,9 @@ export default function Employees() {
   const [searchTerm, setSearchTerm] = useState('')
   const [roleFilter, setRoleFilter] = useState('All')
   const [selectedDept, setSelectedDept] = useState('All')
+  const [selectedWorkingHours, setSelectedWorkingHours] = useState('All')
   const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedBranch, setSelectedBranch] = useState('All')
   const [selectedPosition, setSelectedPosition] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
@@ -113,7 +123,9 @@ export default function Employees() {
     role: 'Operator',
     salary: 0,
     status: 'Active',
-    shift: 'R1',
+    working_hours: 'R1',
+    shift: 'Day',
+    branch: 'Restaurant 1',
     shift_hours: 13.0,
     shift_start_time: '10:00',
     shift_end_time: '23:00',
@@ -124,16 +136,17 @@ export default function Employees() {
   const [isCustomShift, setIsCustomShift] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Shifts configuration state
-  const [shifts, setShifts] = useState([])
+  // Working Hours configuration state
+  const [workingHours, setWorkingHours] = useState([])
   const [showShiftConfig, setShowShiftConfig] = useState(false)
-  const [newShiftForm, setNewShiftForm] = useState({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0 })
+  const [newShiftForm, setNewShiftForm] = useState({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0, is_split_shift: false, start_time_2: '18:00', end_time_2: '22:00' })
   const [editingShiftId, setEditingShiftId] = useState(null)
+  const [isTimesEditable, setIsTimesEditable] = useState(false)
 
-  const loadShifts = () => {
-    axios.get('/api/employees/shifts/list')
-      .then(res => setShifts(res.data))
-      .catch(() => toast.error('Error loading shifts'))
+  const loadWorkingHours = () => {
+    axios.get('/api/employees/working-hours/list')
+      .then(res => setWorkingHours(res.data))
+      .catch(() => toast.error('Error loading working hours'))
   }
 
   const loadEmployees = (showSpinner = false) => {
@@ -157,7 +170,7 @@ export default function Employees() {
   useEffect(() => {
     const hasCache = !!localStorage.getItem('pizza_shop_employees')
     loadEmployees(!hasCache)
-    loadShifts()
+    loadWorkingHours()
   }, [])
 
   const handleOpenAdd = () => {
@@ -168,10 +181,12 @@ export default function Employees() {
       role: 'Operator',
       salary: 0,
       status: 'Active',
-      shift: shifts[0]?.name || 'R1',
-      shift_hours: parseFloat(shifts[0]?.hours || 13.0),
-      shift_start_time: shifts[0]?.start_time || '10:00',
-      shift_end_time: shifts[0]?.end_time || '23:00',
+      working_hours: workingHours[0]?.name || 'R1',
+      shift: 'Day',
+      branch: 'Restaurant 1',
+      shift_hours: parseFloat(workingHours[0]?.hours || 13.0),
+      shift_start_time: workingHours[0]?.start_time || '10:00',
+      shift_end_time: workingHours[0]?.end_time || '23:00',
       department: '',
       position: '',
       employee_id: ''
@@ -181,8 +196,8 @@ export default function Employees() {
 
   const handleOpenEdit = (emp) => {
     setEditingEmployee(emp)
-    const currentShift = emp.shift || 'R1'
-    const matchedShift = shifts.find(s => s.name === currentShift)
+    const currentWorkingHours = emp.working_hours || 'R1'
+    const matchedShift = workingHours.find(s => s.name === currentWorkingHours)
     const isPredefined = !!matchedShift
     
     setIsCustomShift(!isPredefined)
@@ -191,7 +206,9 @@ export default function Employees() {
       role: emp.role || 'Operator',
       salary: emp.salary || 0,
       status: emp.status || 'Active',
-      shift: currentShift,
+      working_hours: currentWorkingHours,
+      shift: emp.shift || 'Day',
+      branch: emp.branch || 'Restaurant 1',
       shift_hours: parseFloat(emp.shift_hours || 12.0),
       shift_start_time: matchedShift ? matchedShift.start_time : '10:00',
       shift_end_time: matchedShift ? matchedShift.end_time : '23:00',
@@ -224,21 +241,8 @@ export default function Employees() {
 
     setIsSubmitting(true)
     try {
-      const targetShiftName = formData.shift.trim().toUpperCase()
-      const exists = shifts.some(s => s.name.toUpperCase() === targetShiftName)
-      
-      if (isCustomShift && !exists) {
-        await axios.post('/api/employees/shifts/list', {
-          name: targetShiftName,
-          start_time: formData.shift_start_time,
-          end_time: formData.shift_end_time,
-          hours: formData.shift_hours
-        })
-      }
-
       const payload = {
         ...formData,
-        shift: targetShiftName
       }
 
       if (editingEmployee) {
@@ -252,7 +256,7 @@ export default function Employees() {
       }
       handleCloseModal()
       loadEmployees()
-      loadShifts()
+      loadWorkingHours()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to save employee')
     } finally {
@@ -274,6 +278,8 @@ export default function Employees() {
 
   const departments = [...new Set(employees.map(e => e.department).filter(Boolean))].sort()
   const positions = [...new Set(employees.map(e => e.position).filter(Boolean))].sort()
+  const workingHoursList = [...new Set(employees.map(e => e.working_hours).filter(Boolean))].sort()
+  const branchesList = [...new Set(employees.map(e => e.branch).filter(Boolean))].sort()
   const shiftsList = [...new Set(employees.map(e => e.shift).filter(Boolean))].sort()
 
   const filteredEmployees = employees.filter(emp => {
@@ -282,9 +288,11 @@ export default function Employees() {
                           (emp.position && emp.position.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesDept = selectedDept === 'All' || emp.department === selectedDept
     const matchesPosition = selectedPosition === 'All' || emp.position === selectedPosition
+    const matchesWorkingHours = selectedWorkingHours === 'All' || emp.working_hours === selectedWorkingHours
     const matchesShift = selectedShift === 'All' || emp.shift === selectedShift
+    const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch
     const matchesStatus = selectedStatus === 'All' || emp.status === selectedStatus
-    return matchesSearch && matchesDept && matchesPosition && matchesShift && matchesStatus
+    return matchesSearch && matchesDept && matchesPosition && matchesWorkingHours && matchesShift && matchesBranch && matchesStatus
   })
 
   return (
@@ -309,7 +317,7 @@ export default function Employees() {
           {/* Buttons group */}
           <div className="emp-buttons-row" style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-secondary" onClick={() => setShowShiftConfig(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, justifyContent: 'center' }}>
-              <Settings size={18} /> Manage Shifts
+              <Settings size={18} /> Manage Employees Working Hours
             </button>
             <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, justifyContent: 'center' }}>
               <FileSpreadsheet size={18} /> Import Employees
@@ -415,6 +423,17 @@ export default function Employees() {
             </select>
 
             <select
+              value={selectedWorkingHours}
+              onChange={e => setSelectedWorkingHours(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+            >
+              <option value="All">All Working Hours</option>
+              {workingHoursList.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            
+            <select
               value={selectedShift}
               onChange={e => setSelectedShift(e.target.value)}
               style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
@@ -422,6 +441,17 @@ export default function Employees() {
               <option value="All">All Shifts</option>
               {shiftsList.map(s => (
                 <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            
+            <select
+              value={selectedBranch}
+              onChange={e => setSelectedBranch(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+            >
+              <option value="All">All Branches</option>
+              {branchesList.map(b => (
+                <option key={b} value={b}>{b}</option>
               ))}
             </select>
 
@@ -435,14 +465,16 @@ export default function Employees() {
               <option value="Inactive">Inactive</option>
             </select>
 
-            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedShift !== 'All' || selectedStatus !== 'All') && (
+            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedWorkingHours !== 'All' || selectedShift !== 'All' || selectedBranch !== 'All' || selectedStatus !== 'All') && (
               <button 
                 className="btn btn-secondary"
                 onClick={() => {
                   setSearchTerm('');
                   setSelectedDept('All');
                   setSelectedPosition('All');
+                  setSelectedWorkingHours('All');
                   setSelectedShift('All');
+                  setSelectedBranch('All');
                   setSelectedStatus('All');
                 }}
                 style={{
@@ -473,9 +505,10 @@ export default function Employees() {
               <tr>
                 <th>Emp ID</th>
                 <th style={{ width: '150px' }}>Name</th>
+                <th>Branch / Shift</th>
                 <th>Department</th>
                 <th>Position</th>
-                <th>Shift</th>
+                <th>Working Hours</th>
                 <th>Duty Time</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -484,13 +517,13 @@ export default function Employees() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                  <td colSpan="9" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
                     Loading employees...
                   </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                  <td colSpan="9" style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
                     No employees found matching filter criteria.
                   </td>
                 </tr>
@@ -505,14 +538,26 @@ export default function Employees() {
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Joined {new Date(emp.created_at).toLocaleDateString()}</span>
                     </td>
                     <td>
+                      <div style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>
+                        {emp.branch || '--'} - {emp.shift === 'Day' ? 'D' : emp.shift === 'Night' ? 'N' : emp.shift}
+                      </div>
+                    </td>
+                    <td>
                       {emp.department || <span style={{ color: 'var(--text-muted)' }}>--</span>}
                     </td>
                     <td>
                       <div style={{ fontWeight: 550 }}>{emp.position || 'Staff'}</div>
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>
-                        {emp.shift || 'R1'}
+                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13 }}>
+                        {(() => {
+                          const wName = emp.working_hours || 'R1';
+                          const wObj = workingHours.find(w => w.name === wName);
+                          if (wObj) {
+                            return `${wObj.start_time} - ${wObj.end_time}`;
+                          }
+                          return 'Not Set';
+                        })()}
                       </div>
                     </td>
                     <td>
@@ -633,94 +678,65 @@ export default function Employees() {
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Assigned Shift</label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <select 
-                        disabled={user?.role?.toLowerCase() === 'management'}
-                        value={isCustomShift ? 'Custom' : formData.shift}
-                        onChange={(e) => {
-                          const val = e.target.value
-                          if (val === 'Custom') {
-                            setIsCustomShift(true)
-                            setFormData(prev => ({ 
-                              ...prev, 
-                              shift: 'CUSTOM_R1', 
-                              shift_hours: 12.0,
-                              shift_start_time: '10:00',
-                              shift_end_time: '22:00'
-                            }))
-                          } else {
-                            setIsCustomShift(false)
-                            const matchedShift = shifts.find(s => s.name === val)
-                            setFormData(prev => ({ 
-                              ...prev, 
-                              shift: val, 
-                              shift_hours: matchedShift ? parseFloat(matchedShift.hours) : 12.0,
-                              shift_start_time: matchedShift ? matchedShift.start_time : '10:00',
-                              shift_end_time: matchedShift ? matchedShift.end_time : '23:00'
-                            }))
-                          }
-                        }}
-                        style={{ flex: 1, border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                      >
-                        {shifts.map(s => (
-                          <option key={s.id} value={s.name}>{s.name} ({s.start_time} - {s.end_time})</option>
-                        ))}
-                        <option value="Custom">Custom Shift...</option>
-                      </select>
-                    </div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Branch</label>
+                    <select 
+                      value={formData.branch}
+                      onChange={e => setFormData({ ...formData, branch: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    >
+                      <option value="Restaurant 1">Restaurant 1</option>
+                      <option value="Restaurant 2">Restaurant 2</option>
+                      <option value="Restaurant 3">Restaurant 3</option>
+                    </select>
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
-                      Shift Standard Hours {formData.shift_hours ? `(${decimalHoursToText(formData.shift_hours)})` : ''}
-                    </label>
-                    <input 
-                      type="text" 
-                      readOnly
-                      value={decimalHoursToText(formData.shift_hours)}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-2)', color: 'var(--text-muted)', outline: 'none' }}
-                    />
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Shift (Day/Night)</label>
+                    <select 
+                      value={formData.shift}
+                      onChange={e => setFormData({ ...formData, shift: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    >
+                      <option value="Day">Day</option>
+                      <option value="Night">Night</option>
+                    </select>
                   </div>
                 </div>
 
-                {isCustomShift && (
-                  <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 14 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Custom Shift Name</label>
-                        <input 
-                          type="text"
-                          placeholder="e.g. R4"
-                          value={formData.shift}
-                          onChange={e => setFormData(prev => ({ ...prev, shift: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Start Time</label>
-                        <input 
-                          type="time"
-                          lang="en-GB"
-                          value={formData.shift_start_time}
-                          onChange={e => handleTimeChange('shift_start_time', e.target.value)}
-                          style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                        />
-                      </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Start Time</label>
+                      <input 
+                        type="time"
+                        lang="en-GB"
+                        value={formData.shift_start_time}
+                        onChange={e => handleTimeChange('shift_start_time', e.target.value)}
+                        style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                      />
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 14 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>End Time</label>
-                        <input 
-                          type="time"
-                          lang="en-GB"
-                          value={formData.shift_end_time}
-                          onChange={e => handleTimeChange('shift_end_time', e.target.value)}
-                          style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
-                        />
-                      </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>End Time</label>
+                      <input 
+                        type="time"
+                        lang="en-GB"
+                        value={formData.shift_end_time}
+                        onChange={e => handleTimeChange('shift_end_time', e.target.value)}
+                        style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                      />
                     </div>
-                  </>
-                )}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
+                        Shift Standard Hours {formData.shift_hours ? `(${decimalHoursToText(formData.shift_hours)})` : ''}
+                      </label>
+                      <input 
+                        type="text" 
+                        readOnly
+                        value={decimalHoursToText(formData.shift_hours)}
+                        style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-2)', color: 'var(--text-muted)', outline: 'none' }}
+                      />
+                    </div>
+                  </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24, borderTop: '1px solid var(--surface-2)', paddingTop: 16 }}>
@@ -742,7 +758,7 @@ export default function Employees() {
         }}>
           <div className="card" style={{ width: '100%', maxWidth: 520, padding: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--surface-2)' }}>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Manage Shift Timings</h3>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Manage Employees Working Hours</h3>
               <button onClick={() => { setShowShiftConfig(false); setEditingShiftId(null); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <X size={20} />
               </button>
@@ -754,31 +770,58 @@ export default function Employees() {
                 e.preventDefault();
                 try {
                   if (editingShiftId) {
-                    await axios.put(`/api/employees/shifts/list/${editingShiftId}`, newShiftForm)
-                    toast.success('Shift config updated!')
+                    await axios.put(`/api/employees/working-hours/list/${editingShiftId}`, newShiftForm)
+                    toast.success('Working hours updated!')
                   } else {
-                    await axios.post('/api/employees/shifts/list', newShiftForm)
-                    toast.success('New shift configured!')
+                    await axios.post('/api/employees/working-hours/list', newShiftForm)
+                    toast.success('Working hours assigned!')
                   }
-                  setNewShiftForm({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0 })
+                  setNewShiftForm({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0, is_split_shift: false, start_time_2: '18:00', end_time_2: '22:00' })
                   setEditingShiftId(null)
-                  loadShifts()
+                  setIsTimesEditable(false)
+                  loadWorkingHours()
                 } catch (err) {
-                  toast.error(err?.response?.data?.error || 'Failed to save shift')
+                  toast.error(err?.response?.data?.error || 'Failed to save working hours')
                 }
               }} style={{ marginBottom: 20, background: 'var(--surface-1)', padding: 16, borderRadius: 10, border: '1px solid var(--surface-2)' }}>
-                <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 700 }}>{editingShiftId ? 'Edit Shift Config' : 'Configure New Shift'}</h4>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 700 }}>{editingShiftId ? 'Edit Employee Working Hours' : 'Assign Employee Working Hours'}</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Shift Name (e.g. R4)</label>
-                    <input 
-                      type="text" 
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Employee Name</label>
+                    <select 
                       required
-                      placeholder="R4"
                       value={newShiftForm.name}
-                      onChange={e => setNewShiftForm({ ...newShiftForm, name: e.target.value })}
+                      onChange={e => {
+                        const empName = e.target.value;
+                        setNewShiftForm({ ...newShiftForm, name: empName });
+                        const existingConfig = workingHours.find(w => w.name === empName);
+                        if (existingConfig) {
+                          setNewShiftForm({
+                            name: empName,
+                            start_time: existingConfig.start_time,
+                            end_time: existingConfig.end_time,
+                            hours: parseFloat(existingConfig.hours)
+                          });
+                          setEditingShiftId(existingConfig.id);
+                          setIsTimesEditable(false);
+                        } else {
+                          setNewShiftForm({
+                            name: empName,
+                            start_time: '10:00',
+                            end_time: '23:00',
+                            hours: 13.0
+                          });
+                          setEditingShiftId(null);
+                          setIsTimesEditable(true);
+                        }
+                      }}
                       style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
-                    />
+                    >
+                      <option value="">Select Employee...</option>
+                      {employees.map(emp => (
+                        <option key={emp.id} value={emp.name}>{emp.name}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Standard Hours</label>
@@ -786,9 +829,10 @@ export default function Employees() {
                       type="number" 
                       step="0.5"
                       required
+                      disabled={!isTimesEditable}
                       value={newShiftForm.hours}
                       onChange={e => setNewShiftForm({ ...newShiftForm, hours: parseFloat(e.target.value) || 0 })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: isTimesEditable ? 'var(--surface)' : 'var(--surface-2)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
                     />
                   </div>
                 </div>
@@ -799,9 +843,10 @@ export default function Employees() {
                       type="time" 
                       lang="en-GB"
                       required
+                      disabled={!isTimesEditable}
                       value={newShiftForm.start_time}
                       onChange={e => setNewShiftForm({ ...newShiftForm, start_time: e.target.value })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: isTimesEditable ? 'var(--surface)' : 'var(--surface-2)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
                     />
                   </div>
                   <div>
@@ -810,22 +855,72 @@ export default function Employees() {
                       type="time" 
                       lang="en-GB"
                       required
+                      disabled={!isTimesEditable}
                       value={newShiftForm.end_time}
                       onChange={e => setNewShiftForm({ ...newShiftForm, end_time: e.target.value })}
-                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: isTimesEditable ? 'var(--surface)' : 'var(--surface-2)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
                     />
                   </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  {editingShiftId && !isTimesEditable && (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsTimesEditable(true)}>Edit Time</button>
+                  )}
                   {editingShiftId && (
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
-                      setNewShiftForm({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0 });
+                      setNewShiftForm({ name: '', start_time: '10:00', end_time: '23:00', hours: 13.0, is_split_shift: false, start_time_2: '18:00', end_time_2: '22:00' });
                       setEditingShiftId(null);
-                    }}>Cancel Edit</button>
+                      setIsTimesEditable(false);
+                    }}>Cancel</button>
                   )}
-                  <button type="submit" className="btn btn-primary btn-sm">{editingShiftId ? 'Save Changes' : 'Add Shift'}</button>
+                  {(isTimesEditable || !editingShiftId) && (
+                    <button type="submit" className="btn btn-primary btn-sm">{editingShiftId ? 'Update' : 'Add Working Hours'}</button>
+                  )}
                 </div>
-              </form>
+                  {/* Split shift toggle - only when editing time */}
+                  {isTimesEditable && (
+                    <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input 
+                        type="checkbox" 
+                        id="isSplitShift"
+                        checked={newShiftForm.is_split_shift}
+                        onChange={e => setNewShiftForm({ ...newShiftForm, is_split_shift: e.target.checked })}
+                        style={{ width: 14, height: 14, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="isSplitShift" style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Split Shift (Two separate time segments)</label>
+                    </div>
+                  )}
+                  {/* Split shift fields */}
+                  {newShiftForm.is_split_shift && isTimesEditable && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Second Shift Segment</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Start Time 2</label>
+                          <input 
+                            type="time" 
+                            lang="en-GB"
+                            required
+                            value={newShiftForm.start_time_2}
+                            onChange={e => setNewShiftForm({ ...newShiftForm, start_time_2: e.target.value })}
+                            style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>End Time 2</label>
+                          <input 
+                            type="time" 
+                            lang="en-GB"
+                            required
+                            value={newShiftForm.end_time_2}
+                            onChange={e => setNewShiftForm({ ...newShiftForm, end_time_2: e.target.value })}
+                            style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </form>
 
               {/* Configured Shifts List */}
               <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
@@ -839,25 +934,42 @@ export default function Employees() {
                     </tr>
                   </thead>
                   <tbody>
-                    {shifts.map(s => (
+                    {workingHours.map(s => (
                       <tr key={s.id} style={{ borderBottom: '1px solid var(--surface-2)' }}>
                         <td style={{ padding: 8, fontSize: 12, fontWeight: 700 }}>{s.name}</td>
-                        <td style={{ padding: 8, fontSize: 12 }}>{s.start_time} - {s.end_time}</td>
+                        <td style={{ padding: 8, fontSize: 12 }}>
+                          {formatTime(s.start_time)} - {formatTime(s.end_time)}
+                          {s.is_split_shift && s.start_time_2 && (
+                            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>
+                              &amp; {formatTime(s.start_time_2)} - {formatTime(s.end_time_2)}
+                            </span>
+                          )}
+                        </td>
                         <td style={{ padding: 8, fontSize: 12 }}>{s.hours} hrs</td>
                         <td style={{ padding: 8, textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                             <button className="btn btn-secondary btn-sm" style={{ padding: '4px 6px' }} onClick={() => {
                               setEditingShiftId(s.id);
-                              setNewShiftForm({ name: s.name, start_time: s.start_time, end_time: s.end_time, hours: parseFloat(s.hours) });
+                              setNewShiftForm({
+                                name: s.name,
+                                start_time: s.start_time,
+                                end_time: s.end_time,
+                                hours: parseFloat(s.hours),
+                                is_split_shift: s.is_split_shift || false,
+                                start_time_2: s.start_time_2 || '18:00',
+                                end_time_2: s.end_time_2 || '22:00'
+                              });
+                              setIsTimesEditable(true);
                             }}><Edit2 size={12} /></button>
                             <button className="btn btn-secondary btn-sm" style={{ padding: '4px 6px', color: 'var(--red)' }} onClick={() => {
-                              confirmAction('Are you sure you want to delete this shift configuration?', async () => {
+                              confirmAction('Are you sure you want to delete this configuration?', async () => {
                                 try {
-                                  await axios.delete(`/api/employees/shifts/list/${s.id}`)
-                                  toast.success('Shift config deleted!')
-                                  loadShifts()
-                                } catch {
-                                  toast.error('Failed to delete shift')
+                                  await axios.delete(`/api/employees/working-hours/list/${s.id}`)
+                                  toast.success('Working hours config deleted!')
+                                  loadWorkingHours()
+                                } catch (err) {
+                                  console.error(err)
+                                  toast.error('Failed to delete configuration')
                                 }
                               });
                             }}><Trash2 size={12} /></button>

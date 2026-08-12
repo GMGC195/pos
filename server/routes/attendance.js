@@ -6,9 +6,11 @@ const { authenticateToken } = require('../middleware/auth');
 // Middleware to auto checkout old sessions (> 23 hours)
 const autoCheckoutOldSessions = async (req, res, next) => {
   try {
+    // Auto checkout: set check_out to exactly check_in + 23 hours
+    // This reflects the max window before auto-trigger
     await pool.query(`
       UPDATE employee_attendance 
-      SET check_out = check_in + (COALESCE(shift_hours, 12.0) * INTERVAL '1 hour'),
+      SET check_out = check_in + INTERVAL '23 hours',
           on_break = false,
           break_start = null,
           remarks = 'automatically system check out'
@@ -50,15 +52,25 @@ router.get('/today', authenticateToken, async (req, res) => {
   try {
     // Fetch all active employees
     let queryStr = `
-      SELECT id as employee_id, name, role, shift, shift_hours, status as employee_status, employee_id as employee_code, department
+      SELECT id as employee_id, name, role, working_hours as shift, shift_hours, status as employee_status, employee_id as employee_code, department, branch, shift as new_shift
       FROM employees
       WHERE status = 'Active'
     `;
     const queryParams = [];
     const userRole = req.user.role?.toLowerCase();
-    if (userRole === 'operator' && req.user.shift) {
-      queryStr += ` AND COALESCE(shift, 'R1') = ANY($1)`;
-      queryParams.push(req.user.shift.split(',').map(s => s.trim()));
+    if (userRole === 'operator') {
+      if (req.user.shift) {
+        queryStr += ` AND COALESCE(shift, 'Day') = ANY($1)`;
+        queryParams.push(req.user.shift.split(',').map(s => s.trim()));
+      }
+      if (req.user.branch) {
+        if (queryParams.length === 1) {
+          queryStr += ` AND COALESCE(branch, '') = ANY($2)`;
+        } else {
+          queryStr += ` AND COALESCE(branch, '') = ANY($1)`;
+        }
+        queryParams.push(req.user.branch.split(',').map(s => s.trim()));
+      }
     }
     queryStr += ` ORDER BY id ASC`;
     const activeEmps = await pool.query(queryStr, queryParams);
@@ -72,7 +84,7 @@ router.get('/today', authenticateToken, async (req, res) => {
     `);
 
     // Fetch all shifts for shift timing checks
-    const shiftsData = await pool.query(`SELECT name, start_time FROM employee_shifts`);
+    const shiftsData = await pool.query(`SELECT name, start_time FROM employee_working_hours`);
     const shiftsList = shiftsData.rows;
 
     // Group sessions by employee ID
@@ -153,11 +165,11 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Fetch employee shift details
-    const empRes = await pool.query('SELECT shift, shift_hours FROM employees WHERE id = $1', [employee_id]);
+    const empRes = await pool.query('SELECT working_hours, shift_hours FROM employees WHERE id = $1', [employee_id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
-    const shift = empRes.rows[0].shift || 'R1';
+    const shift = empRes.rows[0].working_hours || 'R1';
     const shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
 
     // Determine status (Present or Late)
@@ -170,17 +182,51 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     let status = 'Present';
     let shiftStartTime = '10:00';
     let shiftEndTime = '23:00';
+    let isSplitShift = false;
+    let shiftStartTime2 = null;
+    let shiftEndTime2 = null;
     let startHour = 10;
     let startMin = 0;
 
-    const shiftDetails = await pool.query('SELECT * FROM employee_shifts WHERE name = $1', [shift]);
+    const shiftDetails = await pool.query('SELECT * FROM employee_working_hours WHERE name = $1', [shift]);
     if (shiftDetails.rows.length > 0) {
-      shiftStartTime = shiftDetails.rows[0].start_time;
-      shiftEndTime = shiftDetails.rows[0].end_time;
-      const timeMatch = shiftStartTime.match(/^(\d+):(\d+)/);
-      if (timeMatch) {
-        startHour = parseInt(timeMatch[1], 10);
-        startMin = parseInt(timeMatch[2], 10);
+      const sd = shiftDetails.rows[0];
+      shiftStartTime = sd.start_time;
+      shiftEndTime = sd.end_time;
+      isSplitShift = sd.is_split_shift || false;
+      shiftStartTime2 = sd.start_time_2 || null;
+      shiftEndTime2 = sd.end_time_2 || null;
+
+      // For split shift: determine which segment the current time belongs to
+      const now = new Date();
+      const currentTotalMins = now.getHours() * 60 + now.getMinutes();
+
+      if (isSplitShift && shiftStartTime2) {
+        const parseTime = (t) => {
+          const m = t.match(/^(\d+):(\d+)/);
+          return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 0;
+        };
+        const shift1StartMins = parseTime(shiftStartTime);
+        const shift2StartMins = parseTime(shiftStartTime2);
+        // Midpoint between end of shift1 and start of shift2
+        const shift1EndMins = parseTime(shiftEndTime);
+        const midpoint = Math.floor((shift1EndMins + shift2StartMins) / 2);
+
+        // Pick closer shift
+        if (currentTotalMins >= midpoint) {
+          // Current time is in shift 2 range → use shift 2 start for lateness
+          startHour = Math.floor(shift2StartMins / 60);
+          startMin = shift2StartMins % 60;
+        } else {
+          startHour = Math.floor(shift1StartMins / 60);
+          startMin = shift1StartMins % 60;
+        }
+      } else {
+        const timeMatch = shiftStartTime.match(/^(\d+):(\d+)/);
+        if (timeMatch) {
+          startHour = parseInt(timeMatch[1], 10);
+          startMin = parseInt(timeMatch[2], 10);
+        }
       }
     } else {
       if (shift === 'R2') {
@@ -222,8 +268,8 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time) VALUES ($1, NOW(), $2, CURRENT_DATE, $3, $4, $5, $6, $7) RETURNING *',
-      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime]
+      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2) VALUES ($1, NOW(), $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime, isSplitShift, shiftStartTime2, shiftEndTime2]
     );
 
     res.status(201).json(result.rows[0]);

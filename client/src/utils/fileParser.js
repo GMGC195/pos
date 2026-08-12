@@ -5,7 +5,9 @@ const HEADER_MAPPINGS = {
   name: [/^(employee\s*)?name$/i, /^full\s*name$/i, /^emp\s*name$/i, /^employee$/i],
   department: [/^department$/i, /^dept$/i],
   position: [/^position$/i, /^designation$/i, /^role$/i, /^title$/i],
-  shift: [/^shift$/i]
+  working_hours: [/^working\s*hours$/i, /^hours$/i, /^shift$/i, /^r[1-9]$/i],
+  shift: [/^shift\s*(time|type)?$/i, /^day\/night$/i, /^morning\/evening$/i],
+  branch: [/^branch$/i, /^restaurant$/i, /^location$/i]
 };
 
 /**
@@ -38,7 +40,9 @@ export const parseFile = (file) => {
           name: '',
           department: '',
           position: '',
-          shift: ''
+          working_hours: '',
+          shift: '',
+          branch: ''
         };
 
         headers.forEach((header) => {
@@ -90,7 +94,9 @@ export const applyMapping = (rawRows, mapping) => {
       name: mapping.name ? row[mapping.name] || '' : '',
       department: mapping.department ? row[mapping.department] || '' : '',
       position: mapping.position ? row[mapping.position] || '' : '',
-      shift: mapping.shift ? row[mapping.shift] || '' : ''
+      working_hours: mapping.working_hours ? row[mapping.working_hours] || '' : '',
+      shift: mapping.shift ? row[mapping.shift] || '' : '',
+      branch: mapping.branch ? row[mapping.branch] || '' : ''
     };
   });
 };

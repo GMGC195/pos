@@ -10,9 +10,19 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = 'SELECT * FROM employees';
     const params = [];
     
-    if (userRole === 'operator' && req.user.shift) {
-      query += ` WHERE COALESCE(shift, 'R1') = ANY($1)`;
-      params.push(req.user.shift.split(',').map(s => s.trim()));
+    if (userRole === 'operator') {
+      if (req.user.shift) {
+        query += ` WHERE COALESCE(shift, 'Day') = ANY($1)`;
+        params.push(req.user.shift.split(',').map(s => s.trim()));
+      }
+      if (req.user.branch) {
+        if (params.length === 1) {
+          query += ` AND COALESCE(branch, '') = ANY($2)`;
+        } else {
+          query += ` WHERE COALESCE(branch, '') = ANY($1)`;
+        }
+        params.push(req.user.branch.split(',').map(s => s.trim()));
+      }
     }
     
     query += ' ORDER BY id DESC';
@@ -26,20 +36,30 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // POST new employee
 router.post('/', authenticateToken, async (req, res) => {
-  const { name, role, salary, status, shift, shift_hours, department, position, employee_id } = req.body;
+  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift } = req.body;
   try {
+    // Upsert employee working hours config
+    if (shift_start_time && shift_end_time) {
+      await pool.query(
+        'INSERT INTO employee_working_hours (name, start_time, end_time, hours) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO UPDATE SET start_time = $2, end_time = $3, hours = $4',
+        [name, shift_start_time, shift_end_time, shift_hours || 12.0]
+      );
+    }
+
     const result = await pool.query(
-      'INSERT INTO employees (name, role, salary, status, shift, shift_hours, department, position, employee_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+      'INSERT INTO employees (name, role, salary, status, working_hours, shift_hours, department, position, employee_id, branch, shift) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
       [
         name, 
         role || 'Operator', 
         salary || 0, 
         status || 'Active', 
-        shift || 'R1', 
+        name, 
         shift_hours || 12.0,
         department || null,
         position || null,
-        employee_id || null
+        employee_id || null,
+        branch || null,
+        shift || 'Day'
       ]
     );
     const newEmp = result.rows[0];
@@ -59,20 +79,30 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // PUT update employee
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { name, role, salary, status, shift, shift_hours, department, position, employee_id } = req.body;
+  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift } = req.body;
   try {
+    // Upsert employee working hours config
+    if (shift_start_time && shift_end_time) {
+      await pool.query(
+        'INSERT INTO employee_working_hours (name, start_time, end_time, hours) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO UPDATE SET start_time = $2, end_time = $3, hours = $4',
+        [name, shift_start_time, shift_end_time, shift_hours || 12.0]
+      );
+    }
+
     const result = await pool.query(
-      'UPDATE employees SET name=$1, role=$2, salary=$3, status=$4, shift=$5, shift_hours=$6, department=$7, position=$8, employee_id=$9 WHERE id=$10 RETURNING *',
+      'UPDATE employees SET name=$1, role=$2, salary=$3, status=$4, working_hours=$5, shift_hours=$6, department=$7, position=$8, employee_id=$9, branch=$10, shift=$11 WHERE id=$12 RETURNING *',
       [
         name, 
         role || 'Operator', 
         salary || 0, 
         status || 'Active', 
-        shift || 'R1', 
+        name, 
         shift_hours || 12.0, 
         department || null,
         position || null,
         employee_id || null,
+        branch || null,
+        shift || 'Day',
         req.params.id
       ]
     );
@@ -83,16 +113,16 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// PATCH update employee shift only
-router.patch('/:id/shift', authenticateToken, async (req, res) => {
-  const { shift, shift_hours } = req.body;
-  if (!shift) {
-    return res.status(400).json({ error: 'Shift is required' });
+// PATCH update employee working_hours only
+router.patch('/:id/working-hours', authenticateToken, async (req, res) => {
+  const { working_hours, shift_hours } = req.body;
+  if (!working_hours) {
+    return res.status(400).json({ error: 'Working Hours are required' });
   }
   try {
     const result = await pool.query(
-      'UPDATE employees SET shift=$1, shift_hours=$2 WHERE id=$3 RETURNING *',
-      [shift, shift_hours || (shift === 'R2' ? 12.0 : 13.0), req.params.id]
+      'UPDATE employees SET working_hours=$1, shift_hours=$2 WHERE id=$3 RETURNING *',
+      [working_hours, shift_hours || (working_hours === 'R2' ? 12.0 : 13.0), req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Employee not found' });
     res.json(result.rows[0]);
@@ -147,13 +177,15 @@ router.post('/import', authenticateToken, async (req, res) => {
       const role = emp.role ? String(emp.role).trim() : 'Operator';
       const salary = parseFloat(emp.salary) || 0;
       const status = 'Active';
-      const shift = emp.shift ? String(emp.shift).trim() : 'R1';
+      const working_hours = emp.working_hours ? String(emp.working_hours).trim() : 'R1';
+      const shift = emp.shift ? String(emp.shift).trim() : 'Day';
+      const branch = emp.branch ? String(emp.branch).trim() : null;
       
       let shift_hours = parseFloat(emp.shift_hours);
       if (isNaN(shift_hours)) {
         shift_hours = 12.0;
-        if (shift === 'R1') shift_hours = 13.0;
-        if (shift === 'R3') shift_hours = 13.0;
+        if (working_hours === 'R1') shift_hours = 13.0;
+        if (working_hours === 'R3') shift_hours = 13.0;
       }
       const department = emp.department ? String(emp.department).trim() : null;
       const position = emp.position ? String(emp.position).trim() : null;
@@ -191,9 +223,9 @@ router.post('/import', authenticateToken, async (req, res) => {
           // Update existing employee
           await client.query(
             `UPDATE employees 
-             SET name=$1, role=$2, salary=$3, status=$4, shift=$5, shift_hours=$6, department=$7, position=$8
-             WHERE id=$9`,
-            [name, role, salary, status, shift, shift_hours, department, position, existing.id]
+             SET name=$1, role=$2, salary=$3, status=$4, working_hours=$5, shift_hours=$6, department=$7, position=$8, branch=$9, shift=$10
+             WHERE id=$11`,
+            [name, role, salary, status, working_hours, shift_hours, department, position, branch, shift, existing.id]
           );
           updatedCount++;
         } else {
@@ -209,9 +241,9 @@ router.post('/import', authenticateToken, async (req, res) => {
       } else {
         // Insert new employee
         const insertRes = await client.query(
-          `INSERT INTO employees (name, role, salary, status, shift, shift_hours, department, position)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-          [name, role, salary, status, shift, shift_hours, department, position]
+          `INSERT INTO employees (name, role, salary, status, working_hours, shift_hours, department, position, branch, shift)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+          [name, role, salary, status, working_hours, shift_hours, department, position, branch, shift]
         );
         const newId = insertRes.rows[0].id;
         const generatedId = `EMP-${String(newId).padStart(4, '0')}`;
@@ -237,56 +269,76 @@ router.post('/import', authenticateToken, async (req, res) => {
   }
 });
 
-// GET all configured shifts
-router.get('/shifts/list', authenticateToken, async (req, res) => {
+// GET all configured working hours (only for actual employees)
+router.get('/working-hours/list', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM employee_shifts ORDER BY id ASC');
+    const result = await pool.query(`
+      SELECT wh.* 
+      FROM employee_working_hours wh
+      WHERE EXISTS (
+        SELECT 1 FROM employees e WHERE LOWER(e.name) = LOWER(wh.name)
+      )
+      ORDER BY wh.id ASC
+    `);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST new custom shift
-router.post('/shifts/list', authenticateToken, async (req, res) => {
-  const { name, start_time, end_time, hours } = req.body;
+// POST new custom working hours
+router.post('/working-hours/list', authenticateToken, async (req, res) => {
+  const { name, start_time, end_time, hours, is_split_shift, start_time_2, end_time_2 } = req.body;
   if (!name || !start_time || !end_time) {
     return res.status(400).json({ error: 'Name, Start Time, and End Time are required' });
   }
+  if (is_split_shift && (!start_time_2 || !end_time_2)) {
+    return res.status(400).json({ error: 'Second Start Time and End Time are required for split shifts' });
+  }
   try {
     const hoursNum = parseFloat(hours) || 12.0;
-    const result = await pool.query(
-      'INSERT INTO employee_shifts (name, start_time, end_time, hours) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name.toUpperCase(), start_time, end_time, hoursNum]
-    );
+    // Case-insensitive upsert: if a config already exists for this name (any case), update it instead of inserting
+    const existing = await pool.query('SELECT id FROM employee_working_hours WHERE LOWER(name) = LOWER($1)', [name]);
+    let result;
+    if (existing.rows.length > 0) {
+      result = await pool.query(
+        'UPDATE employee_working_hours SET start_time=$1, end_time=$2, hours=$3, is_split_shift=$4, start_time_2=$5, end_time_2=$6 WHERE id=$7 RETURNING *',
+        [start_time, end_time, hoursNum, is_split_shift || false, start_time_2 || null, end_time_2 || null, existing.rows[0].id]
+      );
+    } else {
+      result = await pool.query(
+        'INSERT INTO employee_working_hours (name, start_time, end_time, hours, is_split_shift, start_time_2, end_time_2) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+        [name, start_time, end_time, hoursNum, is_split_shift || false, start_time_2 || null, end_time_2 || null]
+      );
+    }
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT update configured shift
-router.put('/shifts/list/:id', authenticateToken, async (req, res) => {
-  const { name, start_time, end_time, hours } = req.body;
+// PUT update configured working hours
+router.put('/working-hours/list/:id', authenticateToken, async (req, res) => {
+  const { start_time, end_time, hours, is_split_shift, start_time_2, end_time_2 } = req.body;
   try {
     const hoursNum = parseFloat(hours) || 12.0;
     const result = await pool.query(
-      'UPDATE employee_shifts SET name=$1, start_time=$2, end_time=$3, hours=$4 WHERE id=$5 RETURNING *',
-      [name.toUpperCase(), start_time, end_time, hoursNum, req.params.id]
+      'UPDATE employee_working_hours SET start_time=$1, end_time=$2, hours=$3, is_split_shift=$4, start_time_2=$5, end_time_2=$6 WHERE id=$7 RETURNING *',
+      [start_time, end_time, hoursNum, is_split_shift || false, start_time_2 || null, end_time_2 || null, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Shift config not found' });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Working hours config not found' });
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE shift config
-router.delete('/shifts/list/:id', authenticateToken, async (req, res) => {
+// DELETE working hours config
+router.delete('/working-hours/list/:id', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM employee_shifts WHERE id = $1 RETURNING *', [req.params.id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Shift config not found' });
-    res.json({ message: 'Shift configuration deleted successfully' });
+    const result = await pool.query('DELETE FROM employee_working_hours WHERE id = $1 RETURNING *', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Working hours config not found' });
+    res.json({ message: 'Working hours configuration deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

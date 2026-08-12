@@ -47,13 +47,19 @@ export default function Settings() {
     email: '',
     password: '',
     role: 'Operator',
-    shift: ''
+    shift: '',
+    branch: ''
   })
+  
+  const SHIFT_OPTIONS = ['Day', 'Night'];
+  const BRANCH_OPTIONS = ['Restaurant 1', 'Restaurant 2', 'Restaurant 3'];
+  const [showBranchDropdown, setShowBranchDropdown] = useState(false);
 
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (shiftDropdownRef.current && !shiftDropdownRef.current.contains(e.target)) {
         setShowShiftDropdown(false)
+        setShowBranchDropdown(false)
       }
     }
     document.addEventListener('mousedown', handleOutsideClick)
@@ -133,9 +139,10 @@ export default function Settings() {
       await api.post('/api/auth/users', userForm)
       toast.success('User created successfully')
       setIsAddingUser(false)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '' })
       setShowUserPass(false)
       setShowShiftDropdown(false)
+      setShowBranchDropdown(false)
       fetchUsers()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Creation failed')
@@ -151,9 +158,10 @@ export default function Settings() {
       await api.put(`/api/auth/users/${editingUser.id}`, userForm)
       toast.success('User updated successfully')
       setEditingUser(null)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '' })
       setShowUserPass(false)
       setShowShiftDropdown(false)
+      setShowBranchDropdown(false)
       fetchUsers()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Update failed')
@@ -180,10 +188,12 @@ export default function Settings() {
       email: u.email,
       password: '',
       role: u.role,
-      shift: u.shift || ''
+      shift: u.shift || '',
+      branch: u.branch || ''
     })
     setIsAddingUser(true)
     setShowShiftDropdown(false)
+    setShowBranchDropdown(false)
   }
 
   const togglePass = (e) => {
@@ -355,6 +365,7 @@ export default function Settings() {
                         </select>
                       </div>
                       {userForm.role === 'Operator' && (
+                        <>
                         <div className="form-group" style={{ position: 'relative' }} ref={shiftDropdownRef}>
                           <label>Assigned Shift(s)</label>
                           <div 
@@ -396,12 +407,12 @@ export default function Settings() {
                               overflowY: 'auto',
                               padding: '8px'
                             }}>
-                              {shifts.map(s => {
+                              {SHIFT_OPTIONS.map(s => {
                                 const selectedShifts = userForm.shift ? userForm.shift.split(',') : [];
-                                const isChecked = selectedShifts.includes(s.name);
+                                const isChecked = selectedShifts.includes(s);
                                 return (
                                   <label 
-                                    key={s.id} 
+                                    key={s} 
                                     style={{
                                       display: 'flex',
                                       alignItems: 'center',
@@ -421,9 +432,9 @@ export default function Settings() {
                                       onChange={(e) => {
                                         let newShifts;
                                         if (e.target.checked) {
-                                          newShifts = [...selectedShifts, s.name];
+                                          newShifts = [...selectedShifts, s];
                                         } else {
-                                          newShifts = selectedShifts.filter(shiftName => shiftName !== s.name);
+                                          newShifts = selectedShifts.filter(shiftName => shiftName !== s);
                                         }
                                         setUserForm({...userForm, shift: newShifts.join(',')});
                                       }}
@@ -435,21 +446,105 @@ export default function Settings() {
                                         margin: 0
                                       }}
                                     />
-                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                      <span style={{ fontSize: '14px', fontWeight: isChecked ? 600 : 500, color: 'var(--text-primary)' }}>{s.name}</span>
-                                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{s.start_time} - {s.end_time}</span>
-                                    </div>
+                                    <span style={{ fontSize: '14px', fontWeight: isChecked ? 600 : 500, color: 'var(--text-primary)' }}>{s}</span>
                                   </label>
                                 );
                               })}
-                              {shifts.length === 0 && (
-                                <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                                  No shifts available
-                                </div>
-                              )}
                             </div>
                           )}
                         </div>
+
+                        <div className="form-group" style={{ position: 'relative' }}>
+                          <label>Assigned Branch(es)</label>
+                          <div 
+                            className="form-group-input" 
+                            style={{ 
+                              padding: '12px 14px', 
+                              border: '1.5px solid var(--surface-2)', 
+                              borderRadius: '12px', 
+                              background: 'var(--surface)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              minHeight: '45px'
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowBranchDropdown(!showBranchDropdown);
+                            }}
+                          >
+                            <div style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '14px', color: userForm.branch ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                              {userForm.branch ? userForm.branch.split(',').join(', ') : 'Select Branches...'}
+                            </div>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--text-muted)' }}>
+                              <path d="m6 9 6 6 6-6"/>
+                            </svg>
+                          </div>
+                          
+                          {showBranchDropdown && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '100%',
+                              left: 0,
+                              right: 0,
+                              marginTop: '8px',
+                              background: 'white',
+                              border: '1px solid var(--surface-2)',
+                              borderRadius: '12px',
+                              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                              zIndex: 100,
+                              maxHeight: '220px',
+                              overflowY: 'auto',
+                              padding: '8px'
+                            }}>
+                              {BRANCH_OPTIONS.map(b => {
+                                const selectedBranches = userForm.branch ? userForm.branch.split(',') : [];
+                                const isChecked = selectedBranches.includes(b);
+                                return (
+                                  <label 
+                                    key={b} 
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      padding: '10px 12px',
+                                      gap: '12px',
+                                      cursor: 'pointer',
+                                      borderRadius: '8px',
+                                      transition: 'background 0.2s',
+                                      background: isChecked ? 'rgba(var(--primary-rgb), 0.05)' : 'transparent'
+                                    }}
+                                    onMouseOver={e => !isChecked && (e.currentTarget.style.background = 'var(--surface-1)')}
+                                    onMouseOut={e => !isChecked && (e.currentTarget.style.background = 'transparent')}
+                                  >
+                                    <input 
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        let newBranches;
+                                        if (e.target.checked) {
+                                          newBranches = [...selectedBranches, b];
+                                        } else {
+                                          newBranches = selectedBranches.filter(bName => bName !== b);
+                                        }
+                                        setUserForm({...userForm, branch: newBranches.join(',')});
+                                      }}
+                                      style={{
+                                        width: '18px',
+                                        height: '18px',
+                                        cursor: 'pointer',
+                                        accentColor: 'var(--primary)',
+                                        margin: 0
+                                      }}
+                                    />
+                                    <span style={{ fontSize: '14px', fontWeight: isChecked ? 600 : 500, color: 'var(--text-primary)' }}>{b}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                        </>
                       )}
                       <div className="form-group">
                         <label>{editingUser ? 'New Password (Optional)' : 'Password'}</label>

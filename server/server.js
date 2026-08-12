@@ -24,9 +24,14 @@ const pool = require('./db');
     await pool.query('ALTER TABLE employees DROP COLUMN IF EXISTS email CASCADE');
     await pool.query('ALTER TABLE employees DROP COLUMN IF EXISTS phone CASCADE');
     
-    // Add shift column if not exists
+    // Rename shift column to working_hours if it exists
+    try {
+      await pool.query('ALTER TABLE employees RENAME COLUMN shift TO working_hours');
+    } catch (e) {}
+
+    // Add working_hours column if not exists (in case it didn't exist before)
     await pool.query(`
-      ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift VARCHAR(20) DEFAULT 'R1'
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS working_hours VARCHAR(20) DEFAULT 'R1'
     `);
     
     // Add shift_hours column if not exists
@@ -34,29 +39,59 @@ const pool = require('./db');
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_hours NUMERIC(4, 2) DEFAULT 12.0
     `);
 
-    // Create employee_shifts config table if not exists
+    // Add branch column
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS employee_shifts (
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS branch VARCHAR(100)
+    `);
+
+    // Add new shift column
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift VARCHAR(50) DEFAULT 'Day'
+    `);
+
+    // Rename employee_shifts to employee_working_hours if it exists
+    try {
+      await pool.query('ALTER TABLE employee_shifts RENAME TO employee_working_hours');
+    } catch (e) {}
+
+    // Create employee_working_hours config table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_working_hours (
         id SERIAL PRIMARY KEY,
         name VARCHAR(50) UNIQUE NOT NULL,
         start_time VARCHAR(20) NOT NULL DEFAULT '10:00',
         end_time VARCHAR(20) NOT NULL DEFAULT '23:00',
-        hours NUMERIC(4, 2) NOT NULL DEFAULT 13.0
+        hours NUMERIC(4, 2) NOT NULL DEFAULT 13.0,
+        is_split_shift BOOLEAN DEFAULT false,
+        start_time_2 VARCHAR(20),
+        end_time_2 VARCHAR(20)
       )
     `);
 
-    // Seed default shifts if not already seeded
-    await pool.query(`
-      INSERT INTO employee_shifts (name, start_time, end_time, hours)
-      VALUES 
-        ('R1', '10:00', '23:00', 13.0),
-        ('R2', '09:00', '21:00', 12.0),
-        ('R3', '15:00', '04:00', 13.0)
-      ON CONFLICT (name) DO NOTHING
-    `);
+    // Ensure new split shift columns exist on employee_working_hours
+    try {
+      await pool.query('ALTER TABLE employee_working_hours ADD COLUMN is_split_shift BOOLEAN DEFAULT false');
+      await pool.query('ALTER TABLE employee_working_hours ADD COLUMN start_time_2 VARCHAR(20)');
+      await pool.query('ALTER TABLE employee_working_hours ADD COLUMN end_time_2 VARCHAR(20)');
+    } catch (e) {
+      // Columns likely already exist
+    }
+
+    // NOTE: No default seed for working hours - entries are created per employee only
+    // Cleanup: remove working hour records that don't match any real employee (e.g. R1, R2, R3 legacy seeds)
+    try {
+      await pool.query(`
+        DELETE FROM employee_working_hours wh
+        WHERE NOT EXISTS (
+          SELECT 1 FROM employees e WHERE LOWER(e.name) = LOWER(wh.name)
+        )
+      `);
+    } catch (e) {
+      console.log('Cleanup skipped:', e.message);
+    }
 
     // Convert existing shifts to 24-hour format
-    const shiftsRes = await pool.query('SELECT id, start_time, end_time FROM employee_shifts');
+    const shiftsRes = await pool.query('SELECT id, start_time, end_time FROM employee_working_hours');
     for (const row of shiftsRes.rows) {
       const convertTo24 = (timeStr) => {
         if (!timeStr) return timeStr;
@@ -74,7 +109,7 @@ const pool = require('./db');
       const newStart = convertTo24(row.start_time);
       const newEnd = convertTo24(row.end_time);
       if (newStart !== row.start_time || newEnd !== row.end_time) {
-        await pool.query('UPDATE employee_shifts SET start_time = $1, end_time = $2 WHERE id = $3', [newStart, newEnd, row.id]);
+        await pool.query('UPDATE employee_working_hours SET start_time = $1, end_time = $2 WHERE id = $3', [newStart, newEnd, row.id]);
         console.log(`Migrated shift ${row.id} time to 24h format.`);
       }
     }
@@ -99,25 +134,40 @@ const pool = require('./db');
       UPDATE employees SET employee_id = 'EMP-' || LPAD(id::text, 4, '0') WHERE employee_id IS NULL
     `);
     
-    // Create employee_attendance table
+    // Create employee_attendance table if not exists
     await pool.query(`
       CREATE TABLE IF NOT EXISTS employee_attendance (
         id SERIAL PRIMARY KEY,
         employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
-        check_in TIMESTAMPTZ NOT NULL,
+        check_in TIMESTAMPTZ,
         check_out TIMESTAMPTZ,
-        status VARCHAR(20) NOT NULL DEFAULT 'Present',
-        on_break BOOLEAN DEFAULT FALSE,
+        status VARCHAR(50) DEFAULT 'Present',
+        notes TEXT,
+        is_paid BOOLEAN DEFAULT true,
+        date DATE DEFAULT CURRENT_DATE,
+        on_break BOOLEAN DEFAULT false,
         break_start TIMESTAMPTZ,
         total_break_duration_seconds INTEGER DEFAULT 0,
-        date DATE DEFAULT CURRENT_DATE,
         shift_name VARCHAR(50),
         shift_hours NUMERIC(4, 2),
         shift_start_time VARCHAR(20),
         shift_end_time VARCHAR(20),
+        is_split_shift BOOLEAN DEFAULT false,
+        shift_start_time_2 VARCHAR(20),
+        shift_end_time_2 VARCHAR(20),
+        created_by VARCHAR(100),
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // Ensure new split shift columns exist on employee_attendance
+    try {
+      await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS is_split_shift BOOLEAN DEFAULT false');
+      await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_start_time_2 VARCHAR(20)');
+      await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_end_time_2 VARCHAR(20)');
+    } catch (e) {
+      // Columns likely already exist
+    }
 
     // Create edited_attendance table for audit logging
     await pool.query(`
@@ -147,18 +197,19 @@ const pool = require('./db');
     await pool.query(`
       UPDATE employee_attendance ea
       SET 
-        shift_name = e.shift,
+        shift_name = e.working_hours,
         shift_hours = COALESCE(e.shift_hours, 12.0),
         shift_start_time = es.start_time,
         shift_end_time = es.end_time
       FROM employees e
-      LEFT JOIN employee_shifts es ON e.shift = es.name
+      LEFT JOIN employee_working_hours es ON e.working_hours = es.name
       WHERE ea.employee_id = e.id AND ea.shift_name IS NULL
     `);
     // Ensure employee_attendance has created_by column
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS created_by VARCHAR(150)');
-    // Ensure users has shift column
+    // Ensure users has shift and branch column
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS shift VARCHAR(50)');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS branch VARCHAR(100)');
 
     // Create indexes
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_employee ON employee_attendance(employee_id)`);
