@@ -6,16 +6,16 @@ const { authenticateToken } = require('../middleware/auth');
 // Middleware to auto checkout old sessions (> 23 hours)
 const autoCheckoutOldSessions = async (req, res, next) => {
   try {
-    // Auto checkout: set check_out to exactly check_in + 23 hours
+    // Auto checkout: set check_out to exactly check_in + 15 hours
     // This reflects the max window before auto-trigger
     await pool.query(`
       UPDATE employee_attendance 
-      SET check_out = check_in + INTERVAL '23 hours',
+      SET check_out = check_in + INTERVAL '15 hours',
           on_break = false,
           break_start = null,
           remarks = 'automatically system check out'
       WHERE check_out IS NULL 
-        AND check_in < NOW() - INTERVAL '23 hours'
+        AND check_in < NOW() - INTERVAL '15 hours'
     `);
   } catch (err) {
     console.error('Error auto checking out old sessions:', err.message);
@@ -77,7 +77,7 @@ router.get('/today', authenticateToken, async (req, res) => {
 
     // Fetch all today's attendance sessions
     const sessions = await pool.query(`
-      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, remarks
+      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, remarks, shift_start_time, shift_end_time
       FROM employee_attendance
       WHERE date = CURRENT_DATE
       ORDER BY check_in ASC

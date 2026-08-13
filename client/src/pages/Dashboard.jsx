@@ -1243,7 +1243,8 @@ export default function Dashboard() {
                   <tr style={{ background: 'var(--surface-1)' }}>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Code</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '220px' }}>Employee Name</th>
-                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Shift</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Shift Hrs</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '150px' }}>Branch</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-In Time</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-Out Time</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Status</th>
@@ -1293,7 +1294,19 @@ export default function Dashboard() {
                         >
                           <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{emp.employee_code || emp.employee_id}</td>
                           <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '220px' }}>{emp.name}</td>
-                          <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>{emp.shift || 'R1'}</td>
+                           <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>
+                             {sessions.length > 0 && sessions[0].shift_start_time && sessions[0].shift_end_time 
+                               ? `${sessions[0].shift_start_time} - ${sessions[0].shift_end_time}` 
+                               : '--'}
+                           </td>
+                           <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>
+                             {(() => {
+                               const b = emp.branch || 'R1';
+                               const sVal = String(emp.new_shift || emp.shift || 'Day').toLowerCase();
+                               const suffix = sVal.includes('night') || sVal.includes('n') ? 'N' : 'D';
+                               return `${b}-${suffix}`;
+                             })()}
+                           </td>
 
                           <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600, textAlign: 'center', color: 'var(--green)' }}>
                             {sessions.length > 0 ? (
