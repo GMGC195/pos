@@ -37,6 +37,7 @@ export default function Payroll() {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
+  const [selectedBranch, setSelectedBranch] = useState('All')
 
   // Global Settings Modal State
   const [showSettingsModal, setShowSettingsModal] = useState(false)
@@ -241,11 +242,13 @@ export default function Payroll() {
     setShowOverridesModal(true)
   }
 
-  // Filter payroll records based on search query
-  const filteredPayroll = payrollData.filter(record => 
-    record.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    record.employee_id.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  // Filter payroll records based on search query and selected branch
+  const filteredPayroll = payrollData.filter(record => {
+    const matchesSearch = record.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          record.employee_id.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesBranch = selectedBranch === 'All' || record.branch === selectedBranch;
+    return matchesSearch && matchesBranch;
+  })
 
   // Calculations for KPI Cards
   const totalPayroll = filteredPayroll.reduce((sum, item) => sum + item.net_salary, 0)
@@ -382,15 +385,62 @@ export default function Payroll() {
         {/* Divider line between month/buttons and search input */}
         <div style={{ height: '1.5px', background: 'var(--surface-2)', width: '100%' }} />
 
-        <div style={{ position: 'relative', width: '100%', maxWidth: '300px' }}>
-          <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={16} />
-          <input 
-            type="text"
-            placeholder="Search active staff..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            style={{ width: '100%', padding: '10px 12px 10px 36px', border: '1px solid var(--surface-2)', borderRadius: '8px', fontSize: '13px', outline: 'none' }}
-          />
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '300px' }}>
+            <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={16} />
+            <input 
+              type="text"
+              placeholder="Search active staff..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{ width: '100%', padding: '10px 12px 10px 36px', border: '1px solid var(--surface-2)', borderRadius: '8px', fontSize: '13px', outline: 'none' }}
+            />
+          </div>
+
+          <select 
+            value={selectedBranch}
+            onChange={e => setSelectedBranch(e.target.value)}
+            style={{
+              padding: '10px 12px',
+              background: 'var(--white)',
+              border: '1px solid var(--surface-2)',
+              borderRadius: '8px',
+              outline: 'none',
+              fontSize: '13px',
+              minWidth: '150px',
+              cursor: 'pointer',
+              height: '40px'
+            }}
+          >
+            {['All', ...new Set(payrollData.map(record => record.branch).filter(Boolean))].map(br => (
+              <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
+            ))}
+          </select>
+
+          {(searchQuery !== '' || selectedBranch !== 'All') && (
+            <button 
+              className="btn btn-secondary"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedBranch('All');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0 14px',
+                borderRadius: '8px',
+                height: '40px',
+                fontSize: '13px',
+                borderColor: 'var(--surface-2)',
+                background: 'var(--white)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer'
+              }}
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
       </section>
 

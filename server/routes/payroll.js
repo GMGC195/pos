@@ -280,7 +280,9 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         net_salary: parseFloat(netSalary.toFixed(2)),
         paid_amount: parseFloat(paidAmount.toFixed(2)),
         status: paymentStatus,
-        notes: notes
+        notes: notes,
+        branch: emp.branch || '',
+        department: emp.department || ''
       };
     });
 

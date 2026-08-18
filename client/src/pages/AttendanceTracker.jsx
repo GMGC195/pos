@@ -112,6 +112,7 @@ export default function AttendanceTracker() {
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedShift, setSelectedShift] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
+  const [selectedBranch, setSelectedBranch] = useState('All')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
@@ -414,6 +415,7 @@ export default function AttendanceTracker() {
                           String(emp.employee_id || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
     const matchesShift = selectedShift === 'All' || (emp.shift || 'R1') === selectedShift;
+    const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch;
 
     // Status Filter
     let matchesStatus = true;
@@ -432,7 +434,7 @@ export default function AttendanceTracker() {
       matchesStatus = isCheckedOut;
     }
 
-    return matchesSearch && matchesDept && matchesShift && matchesStatus;
+    return matchesSearch && matchesDept && matchesShift && matchesStatus && matchesBranch;
   });
 
   return (
@@ -706,6 +708,25 @@ export default function AttendanceTracker() {
 
         <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <select 
+            value={selectedBranch}
+            onChange={e => setSelectedBranch(e.target.value)}
+            style={{
+              padding: '10px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 10,
+              outline: 'none',
+              fontSize: 13,
+              minWidth: 140,
+              cursor: 'pointer'
+            }}
+          >
+            {['All', ...new Set(employees.map(emp => emp.branch).filter(Boolean))].map(br => (
+              <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
+            ))}
+          </select>
+
+          <select 
             value={selectedShift}
             onChange={e => setSelectedShift(e.target.value)}
             style={{
@@ -763,6 +784,33 @@ export default function AttendanceTracker() {
             <option value="Late">Late Arrivals</option>
             <option value="CheckedOut">Checked Out</option>
           </select>
+
+          {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
+            <button 
+              className="btn btn-secondary"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedShift('All');
+                setSelectedDepartment('All');
+                setSelectedStatus('All');
+                setSelectedBranch('All');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0 14px',
+                borderRadius: 10,
+                height: 40,
+                fontSize: 13,
+                borderColor: 'var(--surface-2)',
+                background: 'var(--surface)',
+                color: 'var(--text)'
+              }}
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
       </div>
 

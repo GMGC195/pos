@@ -132,7 +132,10 @@ export default function Employees() {
     shift_end_time: '23:00',
     department: '',
     position: '',
-    employee_id: ''
+    employee_id: '',
+    is_split_shift: false,
+    start_time_2: '18:00',
+    end_time_2: '22:00'
   })
   const [isCustomShift, setIsCustomShift] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -190,7 +193,10 @@ export default function Employees() {
       shift_end_time: workingHours[0]?.end_time || '23:00',
       department: '',
       position: '',
-      employee_id: ''
+      employee_id: '',
+      is_split_shift: workingHours[0]?.is_split_shift || false,
+      start_time_2: workingHours[0]?.start_time_2 || '18:00',
+      end_time_2: workingHours[0]?.end_time_2 || '22:00'
     })
     setShowModal(true)
   }
@@ -215,7 +221,10 @@ export default function Employees() {
       shift_end_time: matchedShift ? matchedShift.end_time : '23:00',
       department: emp.department || '',
       position: emp.position || '',
-      employee_id: emp.employee_id || ''
+      employee_id: emp.employee_id || '',
+      is_split_shift: matchedShift ? (matchedShift.is_split_shift || false) : false,
+      start_time_2: matchedShift ? (matchedShift.start_time_2 || '18:00') : '18:00',
+      end_time_2: matchedShift ? (matchedShift.end_time_2 || '22:00') : '22:00'
     })
     setShowModal(true)
   }
@@ -230,10 +239,25 @@ export default function Employees() {
       const updated = { ...prev, [field]: val24h }
       const start24 = field === 'shift_start_time' ? val24h : prev.shift_start_time
       const end24 = field === 'shift_end_time' ? val24h : prev.shift_end_time
-      updated.shift_hours = calculateHoursDiff(start24, end24)
+      const start24_2 = field === 'start_time_2' ? val24h : prev.start_time_2
+      const end24_2 = field === 'end_time_2' ? val24h : prev.end_time_2
+      
+      const hours1 = calculateHoursDiff(start24, end24)
+      const hours2 = updated.is_split_shift ? calculateHoursDiff(start24_2, end24_2) : 0
+      updated.shift_hours = parseFloat((hours1 + hours2).toFixed(2))
       return updated
     })
   }
+
+  const handleModalSplitShiftToggle = (checked) => {
+    setFormData(prev => {
+      const updated = { ...prev, is_split_shift: checked };
+      const hours1 = calculateHoursDiff(updated.shift_start_time, updated.shift_end_time);
+      const hours2 = checked ? calculateHoursDiff(updated.start_time_2, updated.end_time_2) : 0;
+      updated.shift_hours = parseFloat((hours1 + hours2).toFixed(2));
+      return updated;
+    });
+  };
 
   const handleShiftConfigTimeChange = (field, val24h) => {
     setNewShiftForm(prev => {
@@ -439,11 +463,11 @@ export default function Employees() {
             </button>
           </div>
           
-          <div className={`employee-filters ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className={`employee-filters ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select
               value={selectedDept}
               onChange={e => setSelectedDept(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 140 }}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120, fontSize: 12 }}
             >
               <option value="All">All Departments</option>
               {departments.map(d => (
@@ -454,7 +478,7 @@ export default function Employees() {
             <select
               value={selectedPosition}
               onChange={e => setSelectedPosition(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 140 }}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120, fontSize: 12 }}
             >
               <option value="All">All Positions</option>
               {positions.map(p => (
@@ -465,7 +489,7 @@ export default function Employees() {
             <select
               value={selectedWorkingHours}
               onChange={e => setSelectedWorkingHours(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 110, fontSize: 12 }}
             >
               <option value="All">All Working Hours</option>
               {workingHoursList.map(s => (
@@ -476,7 +500,7 @@ export default function Employees() {
             <select
               value={selectedShift}
               onChange={e => setSelectedShift(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 100, fontSize: 12 }}
             >
               <option value="All">All Shifts</option>
               {shiftsList.map(s => (
@@ -487,7 +511,7 @@ export default function Employees() {
             <select
               value={selectedBranch}
               onChange={e => setSelectedBranch(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 100, fontSize: 12 }}
             >
               <option value="All">All Branches</option>
               {branchesList.map(b => (
@@ -498,7 +522,7 @@ export default function Employees() {
             <select
               value={selectedStatus}
               onChange={e => setSelectedStatus(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120 }}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 100, fontSize: 12 }}
             >
               <option value="All">All Statuses</option>
               <option value="Active">Active</option>
@@ -508,7 +532,7 @@ export default function Employees() {
             <select
               value={sortBy}
               onChange={e => setSortBy(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 130 }}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 110, fontSize: 12 }}
             >
               <option value="Default">Sort By: Default</option>
               <option value="EmpIdAsc">Employee ID (Ascending)</option>
@@ -671,8 +695,8 @@ export default function Employees() {
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
         }}>
-          <div className="card" style={{ width: '100%', maxWidth: 500, padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--surface-2)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: 500, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--surface-2)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
                 {editingEmployee ? 'Edit Employee Info' : 'Register New Employee'}
               </h3>
@@ -681,8 +705,8 @@ export default function Employees() {
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} style={{ padding: 24 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div style={{ padding: 24, overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Full Name *</label>
                   <input 
@@ -791,7 +815,7 @@ export default function Employees() {
                       />
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'end' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
                         Shift Standard Hours {formData.shift_hours ? `(${decimalHoursToText(formData.shift_hours)})` : ''}
@@ -803,10 +827,52 @@ export default function Employees() {
                         style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-2)', color: 'var(--text-muted)', outline: 'none' }}
                       />
                     </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 12 }}>
+                      <input 
+                        type="checkbox" 
+                        id="modalIsSplitShift"
+                        checked={formData.is_split_shift}
+                        onChange={e => handleModalSplitShiftToggle(e.target.checked)}
+                        style={{ width: 14, height: 14, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="modalIsSplitShift" style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', fontWeight: 600 }}>
+                        Split Shift (Two separate time segments)
+                      </label>
+                    </div>
                   </div>
+
+                  {formData.is_split_shift && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 4 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', borderTop: '1px solid var(--surface-2)', paddingTop: 12 }}>Second Shift Segment</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Start Time 2</label>
+                          <input 
+                            type="time"
+                            lang="en-GB"
+                            required
+                            value={formData.start_time_2}
+                            onChange={e => handleTimeChange('start_time_2', e.target.value)}
+                            style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>End Time 2</label>
+                          <input 
+                            type="time"
+                            lang="en-GB"
+                            required
+                            value={formData.end_time_2}
+                            onChange={e => handleTimeChange('end_time_2', e.target.value)}
+                            style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24, borderTop: '1px solid var(--surface-2)', paddingTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '16px 24px', borderTop: '1px solid var(--surface-2)', flexShrink: 0 }}>
                 <button type="button" className="btn btn-secondary" onClick={handleCloseModal} disabled={isSubmitting}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
                   {isSubmitting ? 'Saving...' : 'Save Details'}

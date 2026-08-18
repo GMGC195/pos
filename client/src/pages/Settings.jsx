@@ -696,6 +696,7 @@ export default function Settings() {
                       <table className="users-table" style={{ width: '100%' }}>
                         <thead>
                           <tr>
+                            <th style={{ width: '50px' }}>#</th>
                             <th>User</th>
                             <th>Role</th>
                             <th>Shift</th>
@@ -704,8 +705,9 @@ export default function Settings() {
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredUsers.map(u => (
+                          {filteredUsers.map((u, index) => (
                             <tr key={u.id}>
+                              <td style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>{index + 1}</td>
                               <td>
                                 <div className="user-info-cell">
                                   <div className="user-avatar-sm">

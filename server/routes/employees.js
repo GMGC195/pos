@@ -83,13 +83,13 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // POST new employee
 router.post('/', authenticateToken, async (req, res) => {
-  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift } = req.body;
+  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2 } = req.body;
   try {
     // Upsert employee working hours config
     if (shift_start_time && shift_end_time) {
       await pool.query(
-        'INSERT INTO employee_working_hours (name, start_time, end_time, hours) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO UPDATE SET start_time = $2, end_time = $3, hours = $4',
-        [name, shift_start_time, shift_end_time, shift_hours || 12.0]
+        'INSERT INTO employee_working_hours (name, start_time, end_time, hours, is_split_shift, start_time_2, end_time_2) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (name) DO UPDATE SET start_time = $2, end_time = $3, hours = $4, is_split_shift = $5, start_time_2 = $6, end_time_2 = $7',
+        [name, shift_start_time, shift_end_time, shift_hours || 12.0, is_split_shift || false, start_time_2 || null, end_time_2 || null]
       );
     }
 
@@ -129,13 +129,13 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // PUT update employee
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift } = req.body;
+  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2 } = req.body;
   try {
     // Upsert employee working hours config
     if (shift_start_time && shift_end_time) {
       await pool.query(
-        'INSERT INTO employee_working_hours (name, start_time, end_time, hours) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO UPDATE SET start_time = $2, end_time = $3, hours = $4',
-        [name, shift_start_time, shift_end_time, shift_hours || 12.0]
+        'INSERT INTO employee_working_hours (name, start_time, end_time, hours, is_split_shift, start_time_2, end_time_2) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (name) DO UPDATE SET start_time = $2, end_time = $3, hours = $4, is_split_shift = $5, start_time_2 = $6, end_time_2 = $7',
+        [name, shift_start_time, shift_end_time, shift_hours || 12.0, is_split_shift || false, start_time_2 || null, end_time_2 || null]
       );
     }
 

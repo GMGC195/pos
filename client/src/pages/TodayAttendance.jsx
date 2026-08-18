@@ -47,6 +47,7 @@ export default function TodayAttendance() {
   const [selectedShift, setSelectedShift] = useState('All')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
+  const [selectedBranch, setSelectedBranch] = useState('All')
   const [shiftsList, setShiftsList] = useState([])
   const [showMobileFilters, setShowMobileFilters] = useState(false)
 
@@ -265,6 +266,7 @@ export default function TodayAttendance() {
                           String(emp.employee_id).toLowerCase().includes(searchQuery.toLowerCase());
     const matchesShift = selectedShift === 'All' || emp.shift === selectedShift;
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
+    const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch;
     
     // Status Filter
     let matchesStatus = true;
@@ -283,7 +285,7 @@ export default function TodayAttendance() {
       matchesStatus = emp.calculated_status === 'Pending';
     }
 
-    return matchesSearch && matchesShift && matchesDept && matchesStatus;
+    return matchesSearch && matchesShift && matchesDept && matchesStatus && matchesBranch;
   }).sort((a, b) => {
     // Sort present (checked-in) employees to the top
     const aCheckedIn = a.attendance_id && !a.check_out ? 1 : 0;
@@ -413,6 +415,25 @@ export default function TodayAttendance() {
 
         <div className={`attendance-filters-row ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <select 
+            value={selectedBranch}
+            onChange={e => setSelectedBranch(e.target.value)}
+            style={{
+              padding: '10px 14px',
+              background: 'var(--surface)',
+              border: '1.5px solid var(--surface-2)',
+              borderRadius: 10,
+              outline: 'none',
+              fontSize: 13,
+              minWidth: 140,
+              cursor: 'pointer'
+            }}
+          >
+            {['All', ...new Set(employees.map(emp => emp.branch).filter(Boolean))].map(br => (
+              <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
+            ))}
+          </select>
+
+          <select 
             value={selectedShift}
             onChange={e => setSelectedShift(e.target.value)}
             style={{
@@ -472,7 +493,7 @@ export default function TodayAttendance() {
             <option value="Pending">Pending</option>
           </select>
 
-          {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All') && (
+          {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
             <button 
               className="btn btn-secondary"
               onClick={() => {
@@ -480,6 +501,7 @@ export default function TodayAttendance() {
                 setSelectedShift('All');
                 setSelectedDepartment('All');
                 setSelectedStatus('All');
+                setSelectedBranch('All');
               }}
               style={{
                 display: 'flex',
@@ -551,6 +573,7 @@ export default function TodayAttendance() {
             <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '800px' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-1)' }}>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '50px' }}>#</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Code</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '220px' }}>Employee Name</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Shift Hrs</th>
@@ -584,6 +607,7 @@ export default function TodayAttendance() {
                       onMouseOver={e => e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.06)'}
                       onMouseOut={e => e.currentTarget.style.background = rowBg}
                     >
+                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>{index + 1}</td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{emp.employee_code || emp.employee_id}</td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '220px' }}>{emp.name}</td>
                        <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>

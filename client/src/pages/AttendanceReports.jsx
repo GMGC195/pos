@@ -98,6 +98,7 @@ export default function AttendanceReports() {
   const [selectedShift, setSelectedShift] = useState('All')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
+  const [selectedBranch, setSelectedBranch] = useState('All')
   
   // Holiday state
   const [showHolidayModal, setShowHolidayModal] = useState(false)
@@ -355,6 +356,7 @@ export default function AttendanceReports() {
         shift: emp.shift || 'R1',
         shift_hours: parseFloat(emp.shift_hours || 12.0),
         department: emp.department || '',
+        branch: emp.branch || '',
         days: {}
       }
     })
@@ -371,6 +373,7 @@ export default function AttendanceReports() {
           shift: log.shift || 'R1',
           shift_hours: parseFloat(log.shift_hours || 12.0),
           department: log.department || '',
+          branch: log.branch || '',
           days: {}
         }
       }
@@ -454,6 +457,7 @@ export default function AttendanceReports() {
                           String(emp.employee_code || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
     const matchesShift = selectedShift === 'All' || emp.shift === selectedShift;
+    const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch;
 
     let matchesStatus = true;
     if (selectedStatus === 'Present') {
@@ -468,7 +472,7 @@ export default function AttendanceReports() {
       matchesStatus = emp.leaves > 0;
     }
 
-    return matchesSearch && matchesDept && matchesShift && matchesStatus;
+    return matchesSearch && matchesDept && matchesShift && matchesStatus && matchesBranch;
   });
 
   // Set Holiday API Call
@@ -839,6 +843,25 @@ export default function AttendanceReports() {
         <div style={{ padding: '0 28px', marginTop: 12 }}>
           <div className="attendance-controls-card" style={{ display: 'flex', gap: 16, padding: '16px 20px', flexWrap: 'wrap', alignItems: 'center' }}>
             <select 
+              value={selectedBranch}
+              onChange={e => setSelectedBranch(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                background: 'var(--surface-1)',
+                border: '1.5px solid var(--surface-2)',
+                borderRadius: 8,
+                outline: 'none',
+                fontSize: 13,
+                minWidth: 150,
+                flex: 1
+              }}
+            >
+              {['All', ...new Set(employeesList.map(emp => emp.branch).filter(Boolean))].map(br => (
+                <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
+              ))}
+            </select>
+
+            <select 
               value={selectedShift}
               onChange={e => setSelectedShift(e.target.value)}
               style={{
@@ -899,7 +922,7 @@ export default function AttendanceReports() {
               <option value="Leave">Leave (At least 1 day)</option>
             </select>
 
-            {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All') && (
+            {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
               <button 
                 className="btn btn-secondary"
                 onClick={() => {
@@ -907,6 +930,7 @@ export default function AttendanceReports() {
                   setSelectedShift('All');
                   setSelectedDepartment('All');
                   setSelectedStatus('All');
+                  setSelectedBranch('All');
                 }}
                 style={{
                   display: 'flex',
@@ -954,6 +978,20 @@ export default function AttendanceReports() {
             <table className="attendance-table">
               <thead>
                 <tr>
+                  {/* Serial Number */}
+                  <th style={{
+                    background: 'var(--surface-1)',
+                    minWidth: 50,
+                    borderBottom: '2px solid var(--surface-2)',
+                    borderRight: '1px solid var(--surface-2)',
+                    padding: '12px 14px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap'
+                  }}>
+                    #
+                  </th>
+
                   {/* Employee Code — NOT sticky, scrolls with day columns */}
                   <th style={{
                     background: 'var(--surface-1)',
@@ -1013,7 +1051,7 @@ export default function AttendanceReports() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={daysInMonth.length + 10} style={{ textAlign: 'center', padding: '100px 0', color: 'var(--text-muted)' }}>
+                    <td colSpan={daysInMonth.length + 11} style={{ textAlign: 'center', padding: '100px 0', color: 'var(--text-muted)' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                         <Loader2 className="spin" size={32} style={{ color: 'var(--primary)' }} />
                         <span style={{ fontSize: 14, fontWeight: 500 }}>Loading Attendance Sheet...</span>
@@ -1022,7 +1060,7 @@ export default function AttendanceReports() {
                   </tr>
                 ) : filteredGroupedData.length === 0 ? (
                   <tr>
-                    <td colSpan={daysInMonth.length + 9} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+                    <td colSpan={daysInMonth.length + 10} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
                       No employees registered or matching filter criteria.
                     </td>
                   </tr>
@@ -1042,6 +1080,11 @@ export default function AttendanceReports() {
                         onMouseOver={e => e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.06)'}
                         onMouseOut={e => e.currentTarget.style.background = rowBg}
                       >
+                        {/* Serial Number */}
+                        <td style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600, borderRight: '1px solid var(--surface-2)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                          {index + 1}
+                        </td>
+
                         {/* Employee Code — NOT sticky */}
                         <td style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600, borderRight: '1px solid var(--surface-2)', whiteSpace: 'nowrap' }}>
                           {emp.employee_code}
