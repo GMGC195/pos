@@ -6,16 +6,16 @@ const { authenticateToken } = require('../middleware/auth');
 // Middleware to auto checkout old sessions (> 23 hours)
 const autoCheckoutOldSessions = async (req, res, next) => {
   try {
-    // Auto checkout: set check_out to exactly check_in + 15 hours
-    // This reflects the max window before auto-trigger
+    // Auto checkout: set check_out to NOW() (the actual checkout time)
+    // Runs for sessions that have been open for more than 23 hours
     await pool.query(`
       UPDATE employee_attendance 
-      SET check_out = check_in + INTERVAL '15 hours',
+      SET check_out = NOW(),
           on_break = false,
           break_start = null,
           remarks = 'automatically system check out'
       WHERE check_out IS NULL 
-        AND check_in < NOW() - INTERVAL '15 hours'
+        AND check_in < NOW() - INTERVAL '23 hours'
     `);
   } catch (err) {
     console.error('Error auto checking out old sessions:', err.message);
@@ -24,6 +24,63 @@ const autoCheckoutOldSessions = async (req, res, next) => {
 };
 
 router.use(autoCheckoutOldSessions);
+
+// GET notifications for attendance (> 15 hours checked in)
+router.get('/notifications', authenticateToken, async (req, res) => {
+  try {
+    const userRole = req.user.role?.toLowerCase();
+    const username = req.user.username;
+
+    // Find if the logged-in user is an employee
+    let employeeId = null;
+    if (userRole === 'employee') {
+      const empRes = await pool.query(
+        `SELECT id FROM employees WHERE LOWER(name) = LOWER($1) OR LOWER(employee_id) = LOWER($1)`,
+        [username]
+      );
+      if (empRes.rows.length > 0) {
+        employeeId = empRes.rows[0].id;
+      }
+    }
+
+    // Query active sessions running for more than 15 hours
+    let query = `
+      SELECT ea.id, ea.employee_id, e.name AS employee_name, ea.check_in, e.employee_id AS employee_code
+      FROM employee_attendance ea
+      JOIN employees e ON ea.employee_id = e.id
+      WHERE ea.check_out IS NULL
+        AND ea.check_in < NOW() - INTERVAL '15 hours'
+    `;
+    
+    const params = [];
+    if (userRole === 'employee') {
+      if (employeeId) {
+        query += ` AND ea.employee_id = $1`;
+        params.push(employeeId);
+      } else {
+        return res.json([]);
+      }
+    }
+
+    const result = await pool.query(query, params);
+
+    const notifications = result.rows.map(row => ({
+      id: `attendance-warning-${row.id}`,
+      type: 'attendance_warning',
+      employee_id: row.employee_id,
+      employee_name: row.employee_name,
+      employee_code: row.employee_code,
+      check_in: row.check_in,
+      message: `${row.employee_name} (${row.employee_code || 'EMP-' + row.employee_id}) has been checked in for more than 15 hours.`
+    }));
+
+    res.json(notifications);
+  } catch (err) {
+    console.error('Error fetching attendance warnings:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // Helper to evaluate if a shift has started based on current time
 const evaluateShiftStart = (shiftName, shiftsList) => {

@@ -87,21 +87,56 @@ export default function Layout() {
 
   const fetchAlerts = async () => {
     try {
-      const res = await axios.get('/api/stock/alerts')
-      setAlerts(res.data)
-      if (res.data.length > 0 && !isNotifOpen) {
-        setHasNewAlerts(true)
+      let combinedAlerts = [];
+      const role = user?.role?.toLowerCase();
+
+      // 1. Fetch stock alerts only for admin or developer
+      if (role === 'admin' || role === 'developer') {
+        try {
+          const stockRes = await axios.get('/api/stock/alerts');
+          const stockAlerts = stockRes.data.map(item => ({
+            id: `stock-${item.id}`,
+            type: 'stock',
+            name: item.name,
+            quantity: item.quantity,
+            unit: item.unit,
+            low_stock_at: item.low_stock_at
+          }));
+          combinedAlerts = [...combinedAlerts, ...stockAlerts];
+        } catch (err) {
+          console.error('Error fetching stock alerts:', err);
+        }
+      }
+
+      // 2. Fetch attendance warnings for everyone
+      try {
+        const attRes = await axios.get('/api/attendance/notifications');
+        const attAlerts = attRes.data.map(item => ({
+          id: item.id,
+          type: 'attendance_warning',
+          message: item.message,
+          check_in: item.check_in,
+          employee_name: item.employee_name
+        }));
+        combinedAlerts = [...combinedAlerts, ...attAlerts];
+      } catch (err) {
+        console.error('Error fetching attendance warnings:', err);
+      }
+
+      setAlerts(combinedAlerts);
+      if (combinedAlerts.length > 0 && !isNotifOpen) {
+        setHasNewAlerts(true);
       }
     } catch (err) {
-      console.error('Error fetching alerts:', err)
+      console.error('Error fetching alerts:', err);
     }
-  }
+  };
 
   const handleClearAll = async (e) => {
     e.stopPropagation();
     try {
       await axios.post('/api/stock/alerts/clear');
-      setAlerts([]);
+      setAlerts(prev => prev.filter(item => item.type === 'attendance_warning'));
       setHasNewAlerts(false);
     } catch (err) {
       console.error('Error clearing alerts:', err);
@@ -111,7 +146,10 @@ export default function Layout() {
   const handleClearItem = async (e, id) => {
     e.stopPropagation();
     try {
-      await axios.post(`/api/stock/alerts/${id}/clear`);
+      if (typeof id === 'string' && id.startsWith('stock-')) {
+        const stockId = id.replace('stock-', '');
+        await axios.post(`/api/stock/alerts/${stockId}/clear`);
+      }
       setAlerts(prev => prev.filter(item => item.id !== id));
     } catch (err) {
       console.error('Error clearing alert:', err);
@@ -130,13 +168,12 @@ export default function Layout() {
   };
 
   useEffect(() => {
-    const role = user?.role?.toLowerCase()
-    if (role === 'admin' || role === 'developer') {
-      fetchAlerts()
-      const interval = setInterval(fetchAlerts, 5 * 60 * 1000) // Refresh every 5 mins
-      return () => clearInterval(interval)
+    if (user) {
+      fetchAlerts();
+      const interval = setInterval(fetchAlerts, 5 * 60 * 1000); // Refresh every 5 mins
+      return () => clearInterval(interval);
     }
-  }, [user])
+  }, [user]);
 
   useEffect(() => {
     if (isNotifOpen) {
@@ -313,7 +350,7 @@ export default function Layout() {
             <input type="text" placeholder="Search anything..." />
           </div> */}
           <div className="topbar-right">
-            {(user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'developer') && (
+            {user && (
               <div className="notif-wrapper" style={{ position: 'relative' }}>
                 <button
                   className={`icon-btn ${isNotifOpen ? 'active' : ''}`}
@@ -327,7 +364,7 @@ export default function Layout() {
                   <Bell size={20} strokeWidth={2} />
                   {hasNewAlerts && alerts.length > 0 && <span className="notif-badge">{alerts.length}</span>}
                 </button>
-
+ 
                 {isNotifOpen && (
                   <div className="notif-dropdown" onClick={(e) => e.stopPropagation()}>
                     <div className="notif-header">
@@ -337,7 +374,7 @@ export default function Layout() {
                           {alerts.length}
                         </span>
                       </div>
-                      {alerts.length > 0 && (
+                      {alerts.some(item => item.type !== 'attendance_warning') && (
                         <button className="notif-clear-all" onClick={handleClearAll}>
                           Clear All
                         </button>
@@ -355,27 +392,46 @@ export default function Layout() {
                             key={item.id} 
                             className="notif-item"
                             onClick={() => {
-                              navigate('/stock-management');
+                              if (item.type === 'attendance_warning') {
+                                navigate('/today-attendance');
+                              } else {
+                                navigate('/stock-management');
+                              }
                               setIsNotifOpen(false);
                             }}
                           >
-                            <button 
-                              className="notif-item-clear"
-                              onClick={(e) => handleClearItem(e, item.id)}
-                              title="Clear this notification"
+                            {item.type !== 'attendance_warning' && (
+                              <button 
+                                className="notif-item-clear"
+                                onClick={(e) => handleClearItem(e, item.id)}
+                                title="Clear this notification"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                            <div 
+                              className="notif-item-icon" 
+                              style={{ 
+                                backgroundColor: item.type === 'attendance_warning' ? 'rgba(255, 152, 0, 0.1)' : undefined, 
+                                color: item.type === 'attendance_warning' ? '#ff9800' : undefined 
+                              }}
                             >
-                              <X size={14} />
-                            </button>
-                            <div className="notif-item-icon">
-                              <AlertTriangle size={18} />
+                              {item.type === 'attendance_warning' ? <Clock size={18} /> : <AlertTriangle size={18} />}
                             </div>
                             <div className="notif-item-content">
-                              <span className="notif-item-title">Low Stock: {item.name}</span>
+                              <span 
+                                className="notif-item-title" 
+                                style={{ 
+                                  color: item.type === 'attendance_warning' ? '#ff9800' : undefined 
+                                }}
+                              >
+                                {item.type === 'attendance_warning' ? 'Long Session Warning' : `Low Stock: ${item.name}`}
+                              </span>
                               <span className="notif-item-desc">
-                                Currently {Number(item.quantity).toFixed(2)} {item.unit}
+                                {item.type === 'attendance_warning' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}
                               </span>
                               <span className="notif-item-time">
-                                {formatNotifTime(item.low_stock_at)}
+                                {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.low_stock_at)}
                               </span>
                             </div>
                           </div>
