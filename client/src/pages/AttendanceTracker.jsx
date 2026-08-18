@@ -30,6 +30,12 @@ const decimalHoursToText = (hoursDec) => {
   return `${mins} min`;
 };
 
+const formatTime = (t) => {
+  if (!t) return '';
+  if (t === '00:00' || t === '0:00') return '24:00';
+  return t;
+};
+
 export default function AttendanceTracker() {
   const { user } = useAuth()
 
@@ -824,7 +830,20 @@ export default function AttendanceTracker() {
                       <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{emp.name}</h4>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: '1.4' }}>
                         <div><strong style={{ color: 'var(--primary)' }}>{emp.employee_code}</strong> • {staffRole}</div>
-                        <div><strong>{matchedShift ? `Shift ${matchedShift.name} (${matchedShift.start_time} - ${matchedShift.end_time})` : `Shift ${shiftName}`}</strong></div>
+                        <div>
+                          <strong>
+                            {matchedShift ? (
+                              <>
+                                Shift {matchedShift.name} ({formatTime(matchedShift.start_time)} - {formatTime(matchedShift.end_time)}
+                                {matchedShift.is_split_shift && matchedShift.start_time_2 && (
+                                  <> &amp; {formatTime(matchedShift.start_time_2)} - {formatTime(matchedShift.end_time_2)}</>
+                                )})
+                              </>
+                            ) : (
+                              `Shift ${shiftName}`
+                            )}
+                          </strong>
+                        </div>
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -917,7 +936,7 @@ export default function AttendanceTracker() {
                     <div style={{ background: 'var(--surface-1)', padding: '8px 12px', border: '1px dashed var(--surface-3)', borderRadius: 8, fontSize: 12, marginBottom: 14, color: 'var(--text-secondary)' }}>
                       <strong>Shift Details:</strong> {
                         matchedShift 
-                          ? `${matchedShift.name} (${matchedShift.start_time} - ${matchedShift.end_time} | ${matchedShift.hours} hrs)` 
+                          ? `${matchedShift.name} (${formatTime(matchedShift.start_time)} - ${formatTime(matchedShift.end_time)}${matchedShift.is_split_shift && matchedShift.start_time_2 ? ` & ${formatTime(matchedShift.start_time_2)} - ${formatTime(matchedShift.end_time_2)}` : ''} | ${matchedShift.hours} hrs)` 
                           : `${shiftName} (Time not set - ${emp.shift_hours || 12} hrs)`
                       }
                     </div>

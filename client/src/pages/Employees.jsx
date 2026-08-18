@@ -111,6 +111,7 @@ export default function Employees() {
   const [selectedPosition, setSelectedPosition] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [sortBy, setSortBy] = useState('Default')
   
   // Modal state
   const [showModal, setShowModal] = useState(false)
@@ -314,6 +315,24 @@ export default function Employees() {
     const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch
     const matchesStatus = selectedStatus === 'All' || emp.status === selectedStatus
     return matchesSearch && matchesDept && matchesPosition && matchesWorkingHours && matchesShift && matchesBranch && matchesStatus
+  }).sort((a, b) => {
+    if (sortBy === 'EmpIdAsc') {
+      const idA = a.employee_id || '';
+      const idB = b.employee_id || '';
+      return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    if (sortBy === 'EmpIdDesc') {
+      const idA = a.employee_id || '';
+      const idB = b.employee_id || '';
+      return idB.localeCompare(idA, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    if (sortBy === 'AlphabeticalAZ') {
+      return a.name.localeCompare(b.name);
+    }
+    if (sortBy === 'AlphabeticalZA') {
+      return b.name.localeCompare(a.name);
+    }
+    return 0;
   })
 
   return (
@@ -486,7 +505,19 @@ export default function Employees() {
               <option value="Inactive">Inactive</option>
             </select>
 
-            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedWorkingHours !== 'All' || selectedShift !== 'All' || selectedBranch !== 'All' || selectedStatus !== 'All') && (
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 130 }}
+            >
+              <option value="Default">Sort By: Default</option>
+              <option value="EmpIdAsc">Employee ID (Ascending)</option>
+              <option value="EmpIdDesc">Employee ID (Descending)</option>
+              <option value="AlphabeticalAZ">Name (A to Z)</option>
+              <option value="AlphabeticalZA">Name (Z to A)</option>
+            </select>
+
+            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedWorkingHours !== 'All' || selectedShift !== 'All' || selectedBranch !== 'All' || selectedStatus !== 'All' || sortBy !== 'Default') && (
               <button 
                 className="btn btn-secondary"
                 onClick={() => {
@@ -497,6 +528,7 @@ export default function Employees() {
                   setSelectedShift('All');
                   setSelectedBranch('All');
                   setSelectedStatus('All');
+                  setSortBy('Default');
                 }}
                 style={{
                   display: 'flex',

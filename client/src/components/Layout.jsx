@@ -66,7 +66,7 @@ const navGroups = [
   {
     title: 'Employees & Attendance',
     items: [
-      { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin', 'Operator', 'Management'] },
+      { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin', 'Management'] },
       { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Operator', 'Management', 'Employee'] },
       { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Operator', 'Management'] },
       { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Management'] },

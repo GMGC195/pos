@@ -82,7 +82,7 @@ export default function App() {
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer']}><ProductCostManagement /></ProtectedRoute>} />
 
                 {/* Employee & Attendance routes */}
-                <Route path="/employees"          element={<ProtectedRoute allowedRoles={['Admin', 'Operator', 'Management']}><Employees /></ProtectedRoute>} />
+                <Route path="/employees"          element={<ProtectedRoute allowedRoles={['Admin', 'Management']}><Employees /></ProtectedRoute>} />
                 <Route path="/attendance"         element={<ProtectedRoute allowedRoles={['Admin', 'Operator', 'Management', 'Employee']}><AttendanceTracker /></ProtectedRoute>} />
                 <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Operator', 'Management']}><TodayAttendance /></ProtectedRoute>} />
                 <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Management']}><AttendanceReports /></ProtectedRoute>} />
