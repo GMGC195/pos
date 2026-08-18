@@ -45,7 +45,7 @@ router.post('/login', async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch },
+      { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch, must_change_password: user.must_change_password },
       process.env.JWT_SECRET || 'fallback_secret',
       { expiresIn: '23h' }
     );
@@ -53,8 +53,30 @@ router.post('/login', async (req, res) => {
     res.json({
       message: 'Login successful',
       token,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch }
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch, must_change_password: user.must_change_password }
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// -------------------------------------------------------------
+// POST /api/auth/change-password
+// -------------------------------------------------------------
+router.post('/change-password', authenticateToken, async (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  }
+
+  try {
+    const password_hash = await bcrypt.hash(newPassword, 10);
+    await pool.query(
+      'UPDATE users SET password_hash = $1, must_change_password = false WHERE id = $2',
+      [password_hash, req.user.id]
+    );
+    res.json({ success: true, message: 'Password changed successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

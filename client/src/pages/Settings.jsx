@@ -55,6 +55,8 @@ export default function Settings() {
   const SHIFT_OPTIONS = ['Day', 'Night'];
   const BRANCH_OPTIONS = ['Restaurant 1', 'Restaurant 2', 'Restaurant 3'];
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+  const [userSearchTerm, setUserSearchTerm] = useState('')
+  const [userRoleFilter, setUserRoleFilter] = useState('All')
 
   useEffect(() => {
     const handleOutsideClick = (e) => {
@@ -115,6 +117,14 @@ export default function Settings() {
       toast.error('Failed to fetch users')
     }
   }
+
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = 
+      (u.username && u.username.toLowerCase().includes(userSearchTerm.toLowerCase())) || 
+      (u.email && u.email.toLowerCase().includes(userSearchTerm.toLowerCase()));
+    const matchesRole = userRoleFilter === 'All' || u.role === userRoleFilter;
+    return matchesSearch && matchesRole;
+  })
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault()
@@ -621,6 +631,65 @@ export default function Settings() {
                     </div>
                   </div>
                   
+                  {/* Filters Bar */}
+                  <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    padding: '16px 24px',
+                    borderBottom: '1.5px solid var(--surface-2)',
+                    background: 'var(--surface-1)',
+                    alignItems: 'center'
+                  }}>
+                    <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                        </svg>
+                      </span>
+                      <input 
+                        type="text" 
+                        placeholder="Search by name or email..." 
+                        value={userSearchTerm}
+                        onChange={e => setUserSearchTerm(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px 10px 36px',
+                          border: '1.5px solid var(--surface-2)',
+                          borderRadius: '8px',
+                          background: 'var(--surface)',
+                          color: 'var(--text)',
+                          outline: 'none',
+                          fontSize: '13px'
+                        }}
+                      />
+                    </div>
+                    <div style={{ minWidth: '150px' }}>
+                      <select
+                        value={userRoleFilter}
+                        onChange={e => setUserRoleFilter(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: '1.5px solid var(--surface-2)',
+                          borderRadius: '8px',
+                          background: 'var(--surface)',
+                          color: 'var(--text)',
+                          outline: 'none',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="All">All Roles</option>
+                        <option value="Admin">Admin</option>
+                        <option value="Operator">Operator</option>
+                        <option value="Management">Management</option>
+                        <option value="Employee">Employee</option>
+                        <option value="Developer">Developer</option>
+                      </select>
+                    </div>
+                  </div>
+
                   {/* Desktop Table View */}
                   <div className="users-table-wrap desktop-table-view">
                     <div style={{ minWidth: '600px' }}>
@@ -635,7 +704,7 @@ export default function Settings() {
                           </tr>
                         </thead>
                         <tbody>
-                          {users.map(u => (
+                          {filteredUsers.map(u => (
                             <tr key={u.id}>
                               <td>
                                 <div className="user-info-cell">
@@ -685,7 +754,7 @@ export default function Settings() {
 
                   {/* Mobile Card Grid View */}
                   <div className="users-mobile-grid" style={{ display: 'none', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
-                    {users.map(u => (
+                    {filteredUsers.map(u => (
                       <UserMobileCard 
                         key={u.id} 
                         u={u} 

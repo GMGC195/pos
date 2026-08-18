@@ -32,6 +32,67 @@ const decimalHoursToText = (hoursDec) => {
 
 export default function AttendanceTracker() {
   const { user } = useAuth()
+
+  // ── Employee View states ──
+  const [personalStats, setPersonalStats] = useState(null)
+  const [personalLoading, setPersonalLoading] = useState(false)
+  const [personalMonth, setPersonalMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [showRequestModal, setShowRequestModal] = useState(false)
+  const [requestTargetLog, setRequestTargetLog] = useState(null)
+  const [requestedCheckIn, setRequestedCheckIn] = useState('')
+  const [requestedCheckOut, setRequestedCheckOut] = useState('')
+  const [requestReason, setRequestReason] = useState('')
+  const [requestTargetRole, setRequestTargetRole] = useState('Admin')
+  const [requestSubmitting, setRequestSubmitting] = useState(false)
+
+  const loadPersonalStats = () => {
+    if (user?.role?.toLowerCase() !== 'employee') return;
+    setPersonalLoading(true);
+    axios.get(`/api/attendance/personal-stats`, { params: { month: personalMonth } })
+      .then(res => setPersonalStats(res.data))
+      .catch(() => toast.error('Error loading your attendance report'))
+      .finally(() => setPersonalLoading(false));
+  };
+
+  useEffect(() => {
+    loadPersonalStats();
+  }, [user, personalMonth]);
+
+  const handleCreateRequestSubmit = async (e) => {
+    e.preventDefault();
+    if (!requestTargetLog || !requestReason) {
+      toast.error('Reason is required');
+      return;
+    }
+    
+    const logDateStr = new Date(requestTargetLog.date).toISOString().split('T')[0];
+    const fullIn = requestedCheckIn ? `${logDateStr}T${requestedCheckIn}:00` : null;
+    const fullOut = requestedCheckOut ? `${logDateStr}T${requestedCheckOut}:00` : null;
+
+    setRequestSubmitting(true);
+    try {
+      await axios.post('/api/attendance/edit-requests', {
+        attendance_id: requestTargetLog.id,
+        requested_check_in: fullIn,
+        requested_check_out: fullOut,
+        reason: requestReason,
+        target_role: requestTargetRole
+      });
+      toast.success('Edit request submitted successfully!');
+      setShowRequestModal(false);
+      setRequestReason('');
+      setRequestedCheckIn('');
+      setRequestedCheckOut('');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to submit edit request');
+    } finally {
+      setRequestSubmitting(false);
+    }
+  };
+
   const [employees, setEmployees] = useState(() => {
     const cached = localStorage.getItem('pizza_shop_attendance_today')
     return cached ? JSON.parse(cached) : []
@@ -370,8 +431,204 @@ export default function AttendanceTracker() {
 
   return (
     <div className="page-content" style={{ paddingTop: 0 }}>
-      {/* Header with setting */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, marginTop: -60, flexWrap: 'wrap', gap: 16 }}>
+      {user?.role?.toLowerCase() === 'employee' ? (
+        <>
+          {/* Header with Month Selector */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, marginTop: -60, flexWrap: 'wrap', gap: 16 }}>
+            <h3 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Fingerprint size={24} style={{ color: 'var(--primary)' }} /> My Attendance History
+            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Month Filter:</label>
+              <input 
+                type="month" 
+                value={personalMonth} 
+                onChange={e => setPersonalMonth(e.target.value)} 
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1.5px solid var(--surface-2)',
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Loading Indicator */}
+          {personalLoading ? (
+            <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+              Loading your attendance records...
+            </div>
+          ) : (
+            <>
+              {/* Stats Dashboard */}
+              {personalStats && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Days Present</span>
+                    <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--green)' }}>{personalStats.days_present}</span>
+                  </div>
+                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Days Late</span>
+                    <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--red)' }}>{personalStats.days_late}</span>
+                  </div>
+                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Total Hours Worked</span>
+                    <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{personalStats.total_hours} hrs</span>
+                  </div>
+                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Overtime Hours</span>
+                    <span style={{ fontSize: 28, fontWeight: 900, color: '#ff9800' }}>{personalStats.overtime} hrs</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Attendance Logs Table */}
+              {(personalStats?.monthly_logs || []).length === 0 ? (
+                <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+                  <Clock size={48} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
+                  <h3>No Attendance Records</h3>
+                  <p style={{ color: 'var(--text-muted)' }}>No logs found for the selected month.</p>
+                </div>
+              ) : (
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div className="table-wrap">
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--surface-1)' }}>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Date</th>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Check-In</th>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Check-Out</th>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Break Duration</th>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Hours Worked</th>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Status</th>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Remarks</th>
+                          <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(personalStats?.monthly_logs || []).map((log, index) => {
+                          const rowBg = index % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)';
+                          const formattedDate = new Date(log.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+                          const checkInTime = log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--';
+                          const checkOutTime = log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Still Working';
+                          const breakText = log.total_break_duration_seconds ? `${Math.round(log.total_break_duration_seconds / 60)} min` : '--';
+                          
+                          let durationHours = '--';
+                          if (log.check_in && log.check_out) {
+                            const ms = new Date(log.check_out).getTime() - new Date(log.check_in).getTime();
+                            const breaks = (log.total_break_duration_seconds || 0) * 1000;
+                            durationHours = `${Math.max(0, (ms - breaks) / (1000 * 60 * 60)).toFixed(2)} hrs`;
+                          }
+
+                          let statusColor = 'var(--text)';
+                          let statusBg = 'var(--surface-2)';
+                          if (log.status === 'Present') {
+                            statusColor = 'var(--green)';
+                            statusBg = 'rgba(16, 185, 129, 0.1)';
+                          } else if (log.status === 'Late') {
+                            statusColor = 'var(--red)';
+                            statusBg = 'rgba(239, 68, 68, 0.1)';
+                          } else if (log.status === 'Leave' || log.status === 'Holiday') {
+                            statusColor = 'var(--primary)';
+                            statusBg = 'rgba(227, 24, 55, 0.1)';
+                          }
+
+                          return (
+                            <tr key={log.id} style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
+                              <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{formattedDate}</td>
+                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkInTime}</td>
+                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkOutTime}</td>
+                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{breakText}</td>
+                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>{durationHours}</td>
+                              <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                                <span style={{ color: statusColor, background: statusBg, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{log.status}</span>
+                              </td>
+                              <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--text-muted)' }}>{log.remarks || '--'}</td>
+                              <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                                <button 
+                                  className="btn btn-secondary" 
+                                  onClick={() => {
+                                    setRequestTargetLog(log);
+                                    if (log.check_in) setRequestedCheckIn(new Date(log.check_in).toTimeString().slice(0, 5));
+                                    if (log.check_out) setRequestedCheckOut(new Date(log.check_out).toTimeString().slice(0, 5));
+                                    setShowRequestModal(true);
+                                  }}
+                                  style={{ padding: '6px 12px', fontSize: 12 }}
+                                >
+                                  Request Edit
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Request Edit Modal */}
+          {showRequestModal && requestTargetLog && (
+            <div style={{
+              position: 'fixed', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(0, 0, 0, 0.6)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 9999,
+              padding: 20
+            }}>
+              <div className="card" style={{ width: '100%', maxWidth: 450, padding: 25, borderRadius: 12, background: 'var(--surface)', animation: 'scaleUp 0.2s ease-out' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <h4 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Request Attendance Correction</h4>
+                  <button onClick={() => setShowRequestModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={20} /></button>
+                </div>
+                <form onSubmit={handleCreateRequestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Date</span>
+                    <input type="text" readOnly value={new Date(requestTargetLog.date).toLocaleDateString()} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-2)', color: 'var(--text-muted)' }} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Requested Check-In</label>
+                      <input type="time" value={requestedCheckIn} onChange={e => setRequestedCheckIn(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Requested Check-Out</label>
+                      <input type="time" value={requestedCheckOut} onChange={e => setRequestedCheckOut(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Send Request To</label>
+                    <select value={requestTargetRole} onChange={e => setRequestTargetRole(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer' }}>
+                      <option value="Admin">Admin</option>
+                      <option value="Operator">Operator</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Reason for Correction</label>
+                    <textarea required placeholder="Explain why you need this correction (e.g. forgot to check out)..." value={requestReason} onChange={e => setRequestReason(e.target.value)} rows={3} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', resize: 'vertical' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowRequestModal(false)} style={{ flex: 1 }}>Cancel</button>
+                    <button type="submit" className="btn btn-primary" disabled={requestSubmitting} style={{ flex: 1 }}>{requestSubmitting ? 'Sending...' : 'Submit Request'}</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Header with setting */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, marginTop: -60, flexWrap: 'wrap', gap: 16 }}>
         <h3 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Fingerprint size={24} style={{ color: 'var(--primary)' }} /> Today's Attendance Panel
         </h3>
@@ -935,6 +1192,8 @@ export default function AttendanceTracker() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
       <style>{`
         @keyframes fadeIn {

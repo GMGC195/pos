@@ -74,7 +74,36 @@ router.get('/notifications', authenticateToken, async (req, res) => {
       message: `${row.employee_name} (${row.employee_code || 'EMP-' + row.employee_id}) has been checked in for more than 15 hours.`
     }));
 
-    res.json(notifications);
+    let requestNotifs = [];
+    if (userRole === 'admin' || userRole === 'developer') {
+      const requestsRes = await pool.query(
+        `SELECT r.id, e.name AS employee_name, r.created_at
+         FROM attendance_edit_requests r
+         JOIN employees e ON r.employee_id = e.id
+         WHERE r.status = 'Pending' AND r.target_role = 'Admin'`
+      );
+      requestNotifs = requestsRes.rows.map(row => ({
+        id: `attendance-request-${row.id}`,
+        type: 'attendance_request',
+        created_at: row.created_at,
+        message: `Attendance request from ${row.employee_name} pending Admin approval.`
+      }));
+    } else if (userRole === 'operator') {
+      const requestsRes = await pool.query(
+        `SELECT r.id, e.name AS employee_name, r.created_at
+         FROM attendance_edit_requests r
+         JOIN employees e ON r.employee_id = e.id
+         WHERE r.status = 'Pending' AND r.target_role = 'Operator'`
+      );
+      requestNotifs = requestsRes.rows.map(row => ({
+        id: `attendance-request-${row.id}`,
+        type: 'attendance_request',
+        created_at: row.created_at,
+        message: `Attendance request from ${row.employee_name} pending Operator approval.`
+      }));
+    }
+
+    res.json([...notifications, ...requestNotifs]);
   } catch (err) {
     console.error('Error fetching attendance warnings:', err.message);
     res.status(500).json({ error: err.message });
@@ -231,7 +260,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Employee not found.' });
     }
     const shift = empRes.rows[0].working_hours || 'R1';
-    const shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
+    let shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
     const empShift = empRes.rows[0].shift || 'Day';
 
     // Determine status (Present or Late)
@@ -258,6 +287,9 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       isSplitShift = sd.is_split_shift || false;
       shiftStartTime2 = sd.start_time_2 || null;
       shiftEndTime2 = sd.end_time_2 || null;
+      if (sd.hours) {
+        shiftHours = parseFloat(sd.hours);
+      }
 
       // For split shift: determine which segment the current time belongs to
       const now = new Date();
@@ -1022,10 +1054,13 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
   const usernameLower = req.user.username.toLowerCase();
   
   try {
-    // Find employee by employee_code (employee_id) or by name
+    // Find employee by employee_id linkage or employee_code or by name
     const empRes = await pool.query(
-      `SELECT * FROM employees WHERE LOWER(employee_id) = $1 OR LOWER(name) = $1`,
-      [usernameLower]
+      `SELECT * FROM employees 
+       WHERE id = (SELECT employee_id FROM users WHERE id = $1)
+          OR LOWER(employee_id) = $2 
+          OR LOWER(name) = $2`,
+      [req.user.id, usernameLower]
     );
     
     if (empRes.rows.length === 0) {
@@ -1035,9 +1070,15 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
     const employee = empRes.rows[0];
     const employeeId = employee.id;
     
-    // Fetch all logs of this employee for the current month
-    const currentYear = new Date().getFullYear();
-    const currentMonth = new Date().getMonth() + 1; // 1-indexed
+    // Fetch all logs of this employee for the filtered month or current month
+    let currentYear = new Date().getFullYear();
+    let currentMonth = new Date().getMonth() + 1; // 1-indexed
+    
+    if (req.query.month) {
+      const parts = req.query.month.split('-');
+      currentYear = parseInt(parts[0], 10);
+      currentMonth = parseInt(parts[1], 10);
+    }
     
     const logsRes = await pool.query(
       `SELECT * FROM employee_attendance 
@@ -1086,6 +1127,207 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
       monthly_logs: logsRes.rows
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST create edit request (Employee only or general)
+router.post('/edit-requests', authenticateToken, async (req, res) => {
+  const { attendance_id, requested_check_in, requested_check_out, reason, target_role } = req.body;
+  if (!attendance_id || !reason || !target_role) {
+    return res.status(400).json({ error: 'Missing required fields: attendance_id, reason, target_role' });
+  }
+
+  try {
+    // Find employee_id from current user
+    const username = req.user.username;
+    const empRes = await pool.query(
+      `SELECT id FROM employees WHERE LOWER(name) = LOWER($1) OR LOWER(employee_id) = LOWER($1) OR id = (SELECT employee_id FROM users WHERE id = $2)`,
+      [username, req.user.id]
+    );
+
+    if (empRes.rows.length === 0) {
+      return res.status(403).json({ error: 'You are not linked to an employee account to make requests.' });
+    }
+    const employee_id = empRes.rows[0].id;
+
+    const result = await pool.query(
+      `INSERT INTO attendance_edit_requests (attendance_id, employee_id, requested_by_user_id, target_role, requested_check_in, requested_check_out, reason, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'Pending') RETURNING *`,
+      [attendance_id, employee_id, req.user.id, target_role, requested_check_in || null, requested_check_out || null, reason]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating edit request:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET all edit requests (filtered by user role)
+router.get('/edit-requests', authenticateToken, async (req, res) => {
+  try {
+    const userRole = req.user.role?.toLowerCase();
+    const username = req.user.username;
+
+    let query = `
+      SELECT r.*, e.name AS employee_name, e.employee_id AS employee_code, 
+             ea.check_in AS original_check_in, ea.check_out AS original_check_out, ea.date AS attendance_date
+      FROM attendance_edit_requests r
+      JOIN employees e ON r.employee_id = e.id
+      JOIN employee_attendance ea ON r.attendance_id = ea.id
+    `;
+    const params = [];
+
+    if (userRole === 'admin' || userRole === 'developer') {
+      query += ` WHERE r.target_role = 'Admin'`;
+    } else if (userRole === 'operator') {
+      query += ` WHERE r.target_role = 'Operator'`;
+    } else {
+      // Employee role: show their own requests
+      // Find employee ID
+      const empRes = await pool.query(
+        `SELECT id FROM employees WHERE LOWER(name) = LOWER($1) OR LOWER(employee_id) = LOWER($1) OR id = (SELECT employee_id FROM users WHERE id = $2)`,
+        [username, req.user.id]
+      );
+      if (empRes.rows.length === 0) {
+        return res.json([]);
+      }
+      query += ` WHERE r.employee_id = $1`;
+      params.push(empRes.rows[0].id);
+    }
+
+    query += ` ORDER BY r.created_at DESC`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching edit requests:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST action (Approve/Reject) on edit request
+router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { action } = req.body; // 'Approve' or 'Reject'
+  
+  if (!['Approve', 'Reject'].includes(action)) {
+    return res.status(400).json({ error: "Invalid action. Must be 'Approve' or 'Reject'" });
+  }
+
+  try {
+    const requestRes = await pool.query(
+      `SELECT r.*, ea.check_in AS original_check_in, ea.check_out AS original_check_out
+       FROM attendance_edit_requests r
+       JOIN employee_attendance ea ON r.attendance_id = ea.id
+       WHERE r.id = $1`,
+      [id]
+    );
+
+    if (requestRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    const request = requestRes.rows[0];
+    if (request.status !== 'Pending') {
+      return res.status(400).json({ error: 'This request has already been processed.' });
+    }
+
+    const editorName = req.user.username;
+
+    if (action === 'Approve') {
+      // Operator date constraint: only today and yesterday
+      const attendanceDate = new Date(request.attendance_date);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      if (req.user.role?.toLowerCase() === 'operator' && attendanceDate < yesterday) {
+        return res.status(403).json({ error: 'Operators can only approve requests for today and yesterday. Please reject this request or forward it to the Admin.' });
+      }
+
+      // 1. Update status to Approved
+      await pool.query(
+        `UPDATE attendance_edit_requests SET status = 'Approved' WHERE id = $1`,
+        [id]
+      );
+
+      // 2. Perform attendance check_in / check_out update
+      await pool.query(
+        `UPDATE employee_attendance 
+         SET check_in = COALESCE($1, check_in),
+             check_out = COALESCE($2, check_out),
+             remarks = 'Updated via request approval'
+         WHERE id = $3`,
+        [request.requested_check_in, request.requested_check_out, request.attendance_id]
+      );
+
+      // 3. Insert audit log in edited_attendance
+      await pool.query(
+        `INSERT INTO edited_attendance (attendance_id, employee_id, original_check_in, original_check_out, new_check_in, new_check_out, edited_by, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          request.attendance_id,
+          request.employee_id,
+          request.original_check_in,
+          request.original_check_out,
+          request.requested_check_in || request.original_check_in,
+          request.requested_check_out || request.original_check_out,
+          editorName,
+          request.reason
+        ]
+      );
+      
+      res.json({ success: true, message: 'Request approved and attendance updated successfully.' });
+    } else {
+      // Reject
+      await pool.query(
+        `UPDATE attendance_edit_requests SET status = 'Rejected' WHERE id = $1`,
+        [id]
+      );
+      res.json({ success: true, message: 'Request rejected successfully.' });
+    }
+  } catch (err) {
+    console.error('Error handling edit request action:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST forward request to admin (Operator only)
+router.post('/edit-requests/:id/forward', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+
+  try {
+    const requestRes = await pool.query(
+      `SELECT * FROM attendance_edit_requests WHERE id = $1`,
+      [id]
+    );
+
+    if (requestRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    const request = requestRes.rows[0];
+    if (request.status !== 'Pending') {
+      return res.status(400).json({ error: 'This request has already been processed.' });
+    }
+
+    const updatedReason = `${request.reason || ''} [Forwarded by Operator. Reason: ${reason || 'N/A'}]`;
+
+    await pool.query(
+      `UPDATE attendance_edit_requests 
+       SET target_role = 'Admin', 
+           reason = $1 
+       WHERE id = $2`,
+      [updatedReason, id]
+    );
+
+    res.json({ success: true, message: 'Request forwarded to Admin successfully.' });
+  } catch (err) {
+    console.error('Error forwarding request:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

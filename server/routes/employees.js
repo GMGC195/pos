@@ -2,6 +2,53 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const bcrypt = require('bcrypt');
+
+const autoCreateUserForEmployee = async (employee) => {
+  try {
+    const name = employee.name;
+    const empId = employee.id;
+    const employeeCode = employee.employee_id || `EMP-${String(empId).padStart(4, '0')}`;
+    
+    // Check if a user for this employee already exists
+    const userCheck = await pool.query(
+      'SELECT * FROM users WHERE employee_id = $1 OR email = $2 OR username = $3',
+      [empId, `${employeeCode.toLowerCase()}@alrawaq.com`, employeeCode.toLowerCase()]
+    );
+    if (userCheck.rows.length > 0) {
+      return; // Already exists
+    }
+
+    // Generate unique username from name
+    let baseUsername = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!baseUsername) {
+      baseUsername = `emp${empId}`;
+    }
+    
+    let username = baseUsername;
+    let counter = 1;
+    while (true) {
+      const checkU = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+      if (checkU.rows.length === 0) {
+        break;
+      }
+      username = `${baseUsername}${counter}`;
+      counter++;
+    }
+
+    const email = `${username}@alrawaq.com`;
+    const passwordHash = await bcrypt.hash('user123', 10);
+
+    await pool.query(
+      `INSERT INTO users (username, email, password_hash, role, employee_id, must_change_password)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [username, email, passwordHash, 'Employee', empId, true]
+    );
+    console.log(`Auto-created login user account for employee: ${name} (Username: ${username}, Email: ${email})`);
+  } catch (err) {
+    console.error('Error auto-creating user for employee:', err.message);
+  }
+};
 
 // GET all employees
 router.get('/', authenticateToken, async (req, res) => {
@@ -70,6 +117,9 @@ router.post('/', authenticateToken, async (req, res) => {
       await pool.query('UPDATE employees SET employee_id = $1 WHERE id = $2', [generatedId, newEmp.id]);
       newEmp.employee_id = generatedId;
     }
+
+    // Auto-create login user account
+    await autoCreateUserForEmployee(newEmp);
     
     res.status(201).json(newEmp);
   } catch (err) {
@@ -107,6 +157,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Employee not found' });
+    
+    // Auto-create user account if not exists
+    await autoCreateUserForEmployee(result.rows[0]);
+
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -311,6 +365,9 @@ router.post('/working-hours/list', authenticateToken, async (req, res) => {
         [name, start_time, end_time, hoursNum, is_split_shift || false, start_time_2 || null, end_time_2 || null]
       );
     }
+    // Sync to employees table
+    await pool.query('UPDATE employees SET shift_hours = $1 WHERE LOWER(name) = LOWER($2)', [hoursNum, name]);
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -322,11 +379,18 @@ router.put('/working-hours/list/:id', authenticateToken, async (req, res) => {
   const { start_time, end_time, hours, is_split_shift, start_time_2, end_time_2 } = req.body;
   try {
     const hoursNum = parseFloat(hours) || 12.0;
+    const existing = await pool.query('SELECT name FROM employee_working_hours WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Working hours config not found' });
+    const name = existing.rows[0].name;
+
     const result = await pool.query(
       'UPDATE employee_working_hours SET start_time=$1, end_time=$2, hours=$3, is_split_shift=$4, start_time_2=$5, end_time_2=$6 WHERE id=$7 RETURNING *',
       [start_time, end_time, hoursNum, is_split_shift || false, start_time_2 || null, end_time_2 || null, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Working hours config not found' });
+
+    // Sync to employees table
+    await pool.query('UPDATE employees SET shift_hours = $1 WHERE LOWER(name) = LOWER($2)', [hoursNum, name]);
+
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });

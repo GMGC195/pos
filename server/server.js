@@ -185,6 +185,22 @@ const pool = require('./db');
       )
     `);
 
+    // Create attendance_edit_requests table for employee requested changes
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS attendance_edit_requests (
+        id SERIAL PRIMARY KEY,
+        attendance_id INTEGER REFERENCES employee_attendance(id) ON DELETE CASCADE,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        requested_by_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        target_role VARCHAR(20) NOT NULL,
+        requested_check_in TIMESTAMPTZ,
+        requested_check_out TIMESTAMPTZ,
+        reason TEXT,
+        status VARCHAR(20) DEFAULT 'Pending',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     // Ensure employee_attendance has remarks column
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS remarks VARCHAR(100)');
     // Add shift tracking columns
@@ -210,6 +226,44 @@ const pool = require('./db');
     // Ensure users has shift and branch column
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS shift VARCHAR(50)');
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS branch VARCHAR(100)');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT TRUE');
+
+    // Migration: Auto-create user accounts for existing employees
+    const employeesRes = await pool.query('SELECT * FROM employees');
+    const bcrypt = require('bcrypt');
+    for (const emp of employeesRes.rows) {
+      const empId = emp.id;
+      const employeeCode = emp.employee_id || `EMP-${String(empId).padStart(4, '0')}`;
+      const userCheck = await pool.query(
+        'SELECT * FROM users WHERE employee_id = $1',
+        [empId]
+      );
+      if (userCheck.rows.length === 0) {
+        let baseUsername = emp.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!baseUsername) {
+          baseUsername = `emp${empId}`;
+        }
+        let username = baseUsername;
+        let counter = 1;
+        while (true) {
+          const checkU = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+          if (checkU.rows.length === 0) {
+            break;
+          }
+          username = `${baseUsername}${counter}`;
+          counter++;
+        }
+        const email = `${username}@alrawaq.com`;
+        const passwordHash = await bcrypt.hash('user123', 10);
+        await pool.query(
+          `INSERT INTO users (username, email, password_hash, role, employee_id, must_change_password)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [username, email, passwordHash, 'Employee', empId, true]
+        );
+        console.log(`Migrated: Auto-created user account for existing employee: ${emp.name} (${username})`);
+      }
+    }
 
     // Create indexes
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_employee ON employee_attendance(employee_id)`);

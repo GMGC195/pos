@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import axios from '../api'
+import toast from 'react-hot-toast'
 import {
   BRAND_NAME,
   BRAND_TAGLINE,
@@ -76,7 +77,7 @@ const navGroups = [
 ]
 
 export default function Layout() {
-  const { user, logout } = useAuth()
+  const { user, logout, updateUser } = useAuth()
   const navigate = useNavigate()
   const [alerts, setAlerts] = useState([])
   const [isNotifOpen, setIsNotifOpen] = useState(false)
@@ -84,6 +85,42 @@ export default function Layout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const location = useLocation()
+
+  // Password change states
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passError, setPassError] = useState('');
+  const [passSubmitting, setPassSubmitting] = useState(false);
+
+  const handlePasswordChangeSubmit = async (e) => {
+    e.preventDefault();
+    setPassError('');
+    if (newPassword.length < 6) {
+      setPassError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPassError('Passwords do not match.');
+      return;
+    }
+
+    setPassSubmitting(true);
+    try {
+      await axios.post('/api/auth/change-password', { newPassword });
+      toast.success('Password updated successfully!');
+      updateUser({ must_change_password: false });
+    } catch (err) {
+      setPassError(err.response?.data?.error || 'Failed to update password.');
+    } finally {
+      setPassSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role?.toLowerCase() === 'employee' && location.pathname === '/') {
+      navigate('/attendance', { replace: true });
+    }
+  }, [user, location.pathname, navigate]);
 
   const fetchAlerts = async () => {
     try {
@@ -108,14 +145,15 @@ export default function Layout() {
         }
       }
 
-      // 2. Fetch attendance warnings for everyone
+      // 2. Fetch attendance warnings/requests for everyone
       try {
         const attRes = await axios.get('/api/attendance/notifications');
         const attAlerts = attRes.data.map(item => ({
           id: item.id,
-          type: 'attendance_warning',
+          type: item.type, // 'attendance_warning' or 'attendance_request'
           message: item.message,
           check_in: item.check_in,
+          created_at: item.created_at,
           employee_name: item.employee_name
         }));
         combinedAlerts = [...combinedAlerts, ...attAlerts];
@@ -136,7 +174,7 @@ export default function Layout() {
     e.stopPropagation();
     try {
       await axios.post('/api/stock/alerts/clear');
-      setAlerts(prev => prev.filter(item => item.type === 'attendance_warning'));
+      setAlerts(prev => prev.filter(item => item.type === 'attendance_warning' || item.type === 'attendance_request'));
       setHasNewAlerts(false);
     } catch (err) {
       console.error('Error clearing alerts:', err);
@@ -207,15 +245,111 @@ export default function Layout() {
     navigate('/login', { replace: true })
   }
 
-  const filteredNavGroups = navGroups.map(group => ({
-    ...group,
-    items: group.items.filter(item => {
+  const filteredNavGroups = navGroups.map(group => {
+    let items = group.items.filter(item => {
       if (user?.role?.toLowerCase() === 'developer') return true
       if (!item.roles) return true
       const userRole = user?.role?.charAt(0).toUpperCase() + user?.role?.slice(1).toLowerCase()
       return item.roles.includes(userRole)
-    })
-  })).filter(group => group.items.length > 0)
+    });
+
+    if (user?.role?.toLowerCase() === 'employee') {
+      items = items.map(item => {
+        if (item.to === '/attendance') {
+          return { ...item, label: 'My Attendance' };
+        }
+        return item;
+      });
+      if (['Main Menu', 'Reports', 'Item Management'].includes(group.title)) {
+        items = [];
+      }
+    }
+
+    return { ...group, items };
+  }).filter(group => group.items.length > 0)
+
+  if (user?.must_change_password) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(18, 18, 18, 0.96)',
+        backdropFilter: 'blur(10px)',
+        zIndex: 999999,
+        padding: 20
+      }}>
+        <div className="card" style={{ width: '100%', maxWidth: 400, padding: 30, borderRadius: 12, border: '1px solid var(--surface-2)', background: 'var(--surface)' }}>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--red)', marginBottom: 10, textAlign: 'center' }}>
+            Change Password Required
+          </h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 20, textAlign: 'center' }}>
+            This is your first login. For security reasons, you must update your password to continue.
+          </p>
+          <form onSubmit={handlePasswordChangeSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, display: 'block', color: 'var(--text-muted)' }}>New Password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  border: '1.5px solid var(--surface-2)',
+                  background: 'var(--surface-1)',
+                  color: 'var(--text)',
+                  outline: 'none',
+                  fontSize: 14
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, display: 'block', color: 'var(--text-muted)' }}>Confirm New Password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  border: '1.5px solid var(--surface-2)',
+                  background: 'var(--surface-1)',
+                  color: 'var(--text)',
+                  outline: 'none',
+                  fontSize: 14
+                }}
+              />
+            </div>
+            {passError && (
+              <div style={{ color: 'var(--red)', fontSize: 13, fontWeight: 600, textAlign: 'center' }}>
+                {passError}
+              </div>
+            )}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={passSubmitting}
+              style={{ padding: '12px', fontSize: 14, fontWeight: 700, marginTop: 8 }}
+            >
+              {passSubmitting ? 'Updating...' : 'Update Password'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleLogout}
+              style={{ padding: '10px', fontSize: 13, marginTop: 4 }}
+            >
+              Logout
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-layout">
@@ -394,13 +528,15 @@ export default function Layout() {
                             onClick={() => {
                               if (item.type === 'attendance_warning') {
                                 navigate('/today-attendance');
+                              } else if (item.type === 'attendance_request') {
+                                navigate('/edited-logs');
                               } else {
                                 navigate('/stock-management');
                               }
                               setIsNotifOpen(false);
                             }}
                           >
-                            {item.type !== 'attendance_warning' && (
+                            {item.type !== 'attendance_warning' && item.type !== 'attendance_request' && (
                               <button 
                                 className="notif-item-clear"
                                 onClick={(e) => handleClearItem(e, item.id)}
@@ -412,8 +548,8 @@ export default function Layout() {
                             <div 
                               className="notif-item-icon" 
                               style={{ 
-                                backgroundColor: item.type === 'attendance_warning' ? 'rgba(255, 152, 0, 0.1)' : undefined, 
-                                color: item.type === 'attendance_warning' ? '#ff9800' : undefined 
+                                backgroundColor: item.type === 'attendance_warning' ? 'rgba(255, 152, 0, 0.1)' : item.type === 'attendance_request' ? 'rgba(255, 193, 7, 0.1)' : undefined, 
+                                color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : undefined 
                               }}
                             >
                               {item.type === 'attendance_warning' ? <Clock size={18} /> : <AlertTriangle size={18} />}
@@ -422,16 +558,16 @@ export default function Layout() {
                               <span 
                                 className="notif-item-title" 
                                 style={{ 
-                                  color: item.type === 'attendance_warning' ? '#ff9800' : undefined 
+                                  color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : undefined 
                                 }}
                               >
-                                {item.type === 'attendance_warning' ? 'Long Session Warning' : `Low Stock: ${item.name}`}
+                                {item.type === 'attendance_warning' ? 'Long Session Warning' : item.type === 'attendance_request' ? 'Correction Request' : `Low Stock: ${item.name}`}
                               </span>
                               <span className="notif-item-desc">
-                                {item.type === 'attendance_warning' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}
+                                {item.type === 'attendance_warning' || item.type === 'attendance_request' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}
                               </span>
                               <span className="notif-item-time">
-                                {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.low_stock_at)}
+                                {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.type === 'attendance_request' ? item.created_at : item.low_stock_at)}
                               </span>
                             </div>
                           </div>
