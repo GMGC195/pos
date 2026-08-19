@@ -165,7 +165,7 @@ router.get('/today', authenticateToken, async (req, res) => {
     const sessions = await pool.query(`
       SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, remarks, shift_start_time, shift_end_time
       FROM employee_attendance
-      WHERE date = CURRENT_DATE
+      WHERE date = CURRENT_DATE OR check_out IS NULL
       ORDER BY check_in ASC
     `);
 
@@ -246,7 +246,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
   try {
     // Check if there is an active session (check_out is NULL)
     const activeSession = await pool.query(
-      'SELECT id FROM employee_attendance WHERE employee_id = $1 AND check_out IS NULL AND date = CURRENT_DATE',
+      'SELECT id FROM employee_attendance WHERE employee_id = $1 AND check_out IS NULL',
       [employee_id]
     );
 
