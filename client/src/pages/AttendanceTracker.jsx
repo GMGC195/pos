@@ -75,8 +75,8 @@ export default function AttendanceTracker() {
     }
     
     const logDateStr = new Date(requestTargetLog.date).toISOString().split('T')[0];
-    const fullIn = requestedCheckIn ? `${logDateStr}T${requestedCheckIn}:00` : null;
-    const fullOut = requestedCheckOut ? `${logDateStr}T${requestedCheckOut}:00` : null;
+    const fullIn = requestedCheckIn ? new Date(`${logDateStr}T${requestedCheckIn}:00`).toISOString() : null;
+    const fullOut = requestedCheckOut ? new Date(`${logDateStr}T${requestedCheckOut}:00`).toISOString() : null;
 
     setRequestSubmitting(true);
     try {

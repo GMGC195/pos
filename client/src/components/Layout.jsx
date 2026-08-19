@@ -123,34 +123,28 @@ export default function Layout() {
   }, [user, location.pathname, navigate]);
 
   const fetchAlerts = async () => {
+    if (user?.role?.toLowerCase() === 'staff') return;
     try {
-      let combinedAlerts = [];
-      const role = user?.role?.toLowerCase();
+      const clearedIds = JSON.parse(localStorage.getItem('pizza_shop_cleared_alerts') || '[]');
+      const readIds = JSON.parse(localStorage.getItem('pizza_shop_read_alerts') || '[]');
 
-      // 1. Fetch stock alerts only for admin or developer
-      if (role === 'admin' || role === 'developer') {
-        try {
-          const stockRes = await axios.get('/api/stock/alerts');
-          const stockAlerts = stockRes.data.map(item => ({
-            id: `stock-${item.id}`,
-            type: 'stock',
-            name: item.name,
-            quantity: item.quantity,
-            unit: item.unit,
-            low_stock_at: item.low_stock_at
-          }));
-          combinedAlerts = [...combinedAlerts, ...stockAlerts];
-        } catch (err) {
-          console.error('Error fetching stock alerts:', err);
-        }
-      }
+      const stockRes = await axios.get('/api/stock/alerts');
+      const stockAlerts = stockRes.data.map(item => ({
+        id: `stock-${item.id}`,
+        type: 'stock',
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+        low_stock_at: item.low_stock_at
+      }));
 
-      // 2. Fetch attendance warnings/requests for everyone
+      let combinedAlerts = [...stockAlerts];
+
       try {
         const attRes = await axios.get('/api/attendance/notifications');
         const attAlerts = attRes.data.map(item => ({
           id: item.id,
-          type: item.type, // 'attendance_warning' or 'attendance_request'
+          type: item.type,
           message: item.message,
           check_in: item.check_in,
           created_at: item.created_at,
@@ -161,8 +155,19 @@ export default function Layout() {
         console.error('Error fetching attendance warnings:', err);
       }
 
+      // Filter out cleared alerts
+      combinedAlerts = combinedAlerts.filter(item => !clearedIds.includes(item.id));
+      
+      // Mark read alerts
+      combinedAlerts = combinedAlerts.map(item => ({
+        ...item,
+        read: readIds.includes(item.id)
+      }));
+
       setAlerts(combinedAlerts);
-      if (combinedAlerts.length > 0 && !isNotifOpen) {
+      
+      const unreadCount = combinedAlerts.filter(item => !item.read).length;
+      if (unreadCount > 0 && !isNotifOpen) {
         setHasNewAlerts(true);
       }
     } catch (err) {
@@ -173,12 +178,27 @@ export default function Layout() {
   const handleClearAll = async (e) => {
     e.stopPropagation();
     try {
-      await axios.post('/api/stock/alerts/clear');
-      setAlerts(prev => prev.filter(item => item.type === 'attendance_warning' || item.type === 'attendance_request'));
+      await axios.post('/api/stock/alerts/clear').catch(() => {});
+      
+      const currentIds = alerts.map(a => a.id);
+      const existingCleared = JSON.parse(localStorage.getItem('pizza_shop_cleared_alerts') || '[]');
+      localStorage.setItem('pizza_shop_cleared_alerts', JSON.stringify([...new Set([...existingCleared, ...currentIds])]));
+      
+      setAlerts([]);
       setHasNewAlerts(false);
     } catch (err) {
       console.error('Error clearing alerts:', err);
     }
+  };
+
+  const handleReadAll = (e) => {
+    e.stopPropagation();
+    const currentIds = alerts.map(a => a.id);
+    const existingRead = JSON.parse(localStorage.getItem('pizza_shop_read_alerts') || '[]');
+    localStorage.setItem('pizza_shop_read_alerts', JSON.stringify([...new Set([...existingRead, ...currentIds])]));
+    
+    setAlerts(prev => prev.map(a => ({ ...a, read: true })));
+    setHasNewAlerts(false);
   };
 
   const handleClearItem = async (e, id) => {
@@ -186,8 +206,12 @@ export default function Layout() {
     try {
       if (typeof id === 'string' && id.startsWith('stock-')) {
         const stockId = id.replace('stock-', '');
-        await axios.post(`/api/stock/alerts/${stockId}/clear`);
+        await axios.post(`/api/stock/alerts/${stockId}/clear`).catch(() => {});
       }
+      
+      const existingCleared = JSON.parse(localStorage.getItem('pizza_shop_cleared_alerts') || '[]');
+      localStorage.setItem('pizza_shop_cleared_alerts', JSON.stringify([...new Set([...existingCleared, id])]));
+      
       setAlerts(prev => prev.filter(item => item.id !== id));
     } catch (err) {
       console.error('Error clearing alert:', err);
@@ -496,7 +520,7 @@ export default function Layout() {
                   title="Notifications"
                 >
                   <Bell size={20} strokeWidth={2} />
-                  {hasNewAlerts && alerts.length > 0 && <span className="notif-badge">{alerts.length}</span>}
+                  {hasNewAlerts && alerts.filter(a => !a.read).length > 0 && <span className="notif-badge">{alerts.filter(a => !a.read).length}</span>}
                 </button>
  
                 {isNotifOpen && (
@@ -508,10 +532,15 @@ export default function Layout() {
                           {alerts.length}
                         </span>
                       </div>
-                      {alerts.some(item => item.type !== 'attendance_warning') && (
-                        <button className="notif-clear-all" onClick={handleClearAll}>
-                          Clear All
-                        </button>
+                      {alerts.length > 0 && (
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <button className="notif-clear-all" style={{ color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={handleReadAll}>
+                            Read All
+                          </button>
+                          <button className="notif-clear-all" onClick={handleClearAll}>
+                            Clear All
+                          </button>
+                        </div>
                       )}
                     </div>
                     <div className="notif-list">
@@ -536,15 +565,13 @@ export default function Layout() {
                               setIsNotifOpen(false);
                             }}
                           >
-                            {item.type !== 'attendance_warning' && item.type !== 'attendance_request' && (
-                              <button 
+                            <button 
                                 className="notif-item-clear"
                                 onClick={(e) => handleClearItem(e, item.id)}
                                 title="Clear this notification"
                               >
                                 <X size={14} />
-                              </button>
-                            )}
+                            </button>
                             <div 
                               className="notif-item-icon" 
                               style={{ 
@@ -569,6 +596,9 @@ export default function Layout() {
                               <span className="notif-item-time">
                                 {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.type === 'attendance_request' ? item.created_at : item.low_stock_at)}
                               </span>
+                              {!item.read && (
+                                <div style={{ width: 6, height: 6, background: 'var(--primary)', borderRadius: '50%', position: 'absolute', top: 14, left: -4 }}></div>
+                              )}
                             </div>
                           </div>
                         ))
