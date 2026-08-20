@@ -123,22 +123,26 @@ export default function Layout() {
   }, [user, location.pathname, navigate]);
 
   const fetchAlerts = async () => {
-    if (user?.role?.toLowerCase() === 'staff') return;
+    const role = user?.role?.toLowerCase();
+    if (role === 'staff') return;
     try {
       const clearedIds = JSON.parse(localStorage.getItem('pizza_shop_cleared_alerts') || '[]');
       const readIds = JSON.parse(localStorage.getItem('pizza_shop_read_alerts') || '[]');
 
-      const stockRes = await axios.get('/api/stock/alerts');
-      const stockAlerts = stockRes.data.map(item => ({
-        id: `stock-${item.id}`,
-        type: 'stock',
-        name: item.name,
-        quantity: item.quantity,
-        unit: item.unit,
-        low_stock_at: item.low_stock_at
-      }));
+      let combinedAlerts = [];
 
-      let combinedAlerts = [...stockAlerts];
+      if (role !== 'employee') {
+        const stockRes = await axios.get('/api/stock/alerts');
+        const stockAlerts = stockRes.data.map(item => ({
+          id: `stock-${item.id}`,
+          type: 'stock',
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          low_stock_at: item.low_stock_at
+        }));
+        combinedAlerts = [...stockAlerts];
+      }
 
       try {
         const attRes = await axios.get('/api/attendance/notifications');
@@ -163,6 +167,11 @@ export default function Layout() {
         ...item,
         read: readIds.includes(item.id)
       }));
+
+      // Forcefully strip out any stock alerts if the user is an employee
+      if (role === 'employee') {
+        combinedAlerts = combinedAlerts.filter(item => item.type !== 'stock');
+      }
 
       setAlerts(combinedAlerts);
       
@@ -389,7 +398,7 @@ export default function Layout() {
       <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <div className="logo-icon" style={{ padding: 0, overflow: 'hidden', background: 'transparent', boxShadow: 'none' }}>
-            <img src={BRAND_LOGO} alt={BRAND_NAME} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 10 }} />
+            <img src={BRAND_LOGO} alt={BRAND_NAME} style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: 10 }} />
           </div>
           <div className="logo-text">
             <h2>{BRAND_NAME}</h2>

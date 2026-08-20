@@ -210,12 +210,9 @@ export default function Login() {
         }
 
         .lp-logo {
-          width: 116px; height: 116px;
-          object-fit: cover;
-          border-radius: 22px;
+          width: auto; height: 116px;
+          object-fit: contain;
           margin-bottom: 22px;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-          border: 2px solid rgba(244,180,0,0.22);
         }
 
         .lp-welcome {
@@ -315,13 +312,9 @@ export default function Login() {
 
         .lp-card-logo {
           display: block;
-          width: 76px; height: 76px;
+          width: auto; height: 76px;
           object-fit: contain;
-          border-radius: 15px;
           margin: 0 auto 16px;
-          background: #103C43;
-          padding: 6px;
-          box-shadow: 0 4px 16px rgba(0,0,0,0.1);
         }
 
         .lp-card-title {
@@ -495,9 +488,6 @@ export default function Login() {
           animate={isFlipped ? "success" : "show"}
         >
           <img src={BRAND_LOGIN_LOGO} alt={BRAND_NAME} className="lp-logo" />
-          <p className="lp-welcome">Welcome to</p>
-          <h1 className="lp-brand-name">AL <span>RAWAQ</span></h1>
-          <p className="lp-tagline">{BRAND_TAGLINE}</p>
           <div className="lp-divider" />
           
           {/* features, slogans... */}

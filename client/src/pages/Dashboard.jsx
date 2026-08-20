@@ -289,11 +289,7 @@ export default function Dashboard() {
                           style={{
                             width: 105,
                             height: 105,
-                            objectFit: 'cover',
-                            borderRadius: '50%',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                            border: '3px solid white',
-                            background: 'white'
+                            objectFit: 'contain'
                           }}
                         />
                       </div>

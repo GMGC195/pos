@@ -46,6 +46,7 @@ export default function AttendanceTracker() {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
+  const [personalDateFilter, setPersonalDateFilter] = useState('')
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [requestTargetLog, setRequestTargetLog] = useState(null)
   const [requestedCheckIn, setRequestedCheckIn] = useState('')
@@ -53,45 +54,86 @@ export default function AttendanceTracker() {
   const [requestReason, setRequestReason] = useState('')
   const [requestTargetRole, setRequestTargetRole] = useState('Admin')
   const [requestSubmitting, setRequestSubmitting] = useState(false)
+  const [pendingRequests, setPendingRequests] = useState([])
+  const [loadingRequests, setLoadingRequests] = useState(false)
+  const [activeRequestModal, setActiveRequestModal] = useState(null)
+  const [isEditingRequestTime, setIsEditingRequestTime] = useState(false)
+  const [editingRequestTimeValue, setEditingRequestTimeValue] = useState('')
 
   const loadPersonalStats = () => {
     if (user?.role?.toLowerCase() !== 'employee') return;
     setPersonalLoading(true);
     axios.get(`/api/attendance/personal-stats`, { params: { month: personalMonth } })
       .then(res => setPersonalStats(res.data))
-      .catch(() => toast.error('Error loading your attendance report'))
-      .finally(() => setPersonalLoading(false));
+      .catch(() => {
+        if (showSpinner) toast.error('Error loading your attendance report');
+      })
+      .finally(() => {
+        if (showSpinner) setPersonalLoading(false);
+      });
+  };
+
+  const loadRequests = () => {
+    if (user?.role?.toLowerCase() === 'employee') return;
+    setLoadingRequests(true);
+    axios.get(`/api/attendance/edit-requests`)
+      .then(res => {
+        // Only show pending requests
+        setPendingRequests(res.data.filter(r => r.status === 'Pending'));
+      })
+      .catch(() => toast.error('Error loading attendance requests'))
+      .finally(() => setLoadingRequests(false));
   };
 
   useEffect(() => {
     loadPersonalStats();
+    loadRequests();
   }, [user, personalMonth]);
 
   const handleCreateRequestSubmit = async (e) => {
     e.preventDefault();
-    if (!requestTargetLog || !requestReason) {
+    const isCheckInOut = ['Check-In', 'Check-Out'].includes(requestTargetLog?.request_type);
+    
+    if (!isCheckInOut && (!requestTargetLog || !requestReason)) {
       toast.error('Reason is required');
       return;
     }
     
-    const logDateStr = new Date(requestTargetLog.date).toISOString().split('T')[0];
-    const fullIn = requestedCheckIn ? new Date(`${logDateStr}T${requestedCheckIn}:00`).toISOString() : null;
-    const fullOut = requestedCheckOut ? new Date(`${logDateStr}T${requestedCheckOut}:00`).toISOString() : null;
+    const reqDate = new Date(requestTargetLog.date);
+    const logDateStr = `${reqDate.getFullYear()}-${String(reqDate.getMonth() + 1).padStart(2, '0')}-${String(reqDate.getDate()).padStart(2, '0')}`;
+    
+    const fullIn = requestedCheckIn ? new Date(`${logDateStr}T${requestedCheckIn}:00`) : null;
+    const fullOut = requestedCheckOut ? new Date(`${logDateStr}T${requestedCheckOut}:00`) : null;
+    const now = new Date();
+
+    if (fullIn && fullIn > now) {
+      toast.error('Requested Check-In time cannot be in the future.');
+      return;
+    }
+    if (fullOut && fullOut > now) {
+      toast.error('Requested Check-Out time cannot be in the future.');
+      return;
+    }
 
     setRequestSubmitting(true);
     try {
       await axios.post('/api/attendance/edit-requests', {
-        attendance_id: requestTargetLog.id,
-        requested_check_in: fullIn,
-        requested_check_out: fullOut,
-        reason: requestReason,
-        target_role: requestTargetRole
+        attendance_id: requestTargetLog?.id || null, // Allow null for new check-ins
+        requested_check_in: fullIn ? fullIn.toISOString() : null,
+        requested_check_out: fullOut ? fullOut.toISOString() : null,
+        reason: isCheckInOut ? `Self ${requestTargetLog.request_type}` : requestReason,
+        target_role: isCheckInOut ? 'Both' : requestTargetRole,
+        request_type: requestTargetLog?.request_type || 'Edit' // Handle new types
       });
       toast.success('Edit request submitted successfully!');
       setShowRequestModal(false);
       setRequestReason('');
       setRequestedCheckIn('');
       setRequestedCheckOut('');
+      loadPersonalStats();
+      if (user?.role?.toLowerCase() === 'employee') {
+        loadAttendance();
+      }
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to submit edit request');
     } finally {
@@ -153,6 +195,24 @@ export default function AttendanceTracker() {
       .then(res => setShiftsList(res.data))
       .catch(() => toast.error('Error loading shifts'))
   }
+
+  const handleRequestAction = async (requestId, action, overrideCheckIn, overrideCheckOut) => {
+    try {
+      const payload = { action };
+      if (action === 'Approve') {
+        if (overrideCheckIn) payload.edited_check_in = overrideCheckIn;
+        if (overrideCheckOut) payload.edited_check_out = overrideCheckOut;
+      }
+      await axios.post(`/api/attendance/edit-requests/${requestId}/action`, payload);
+      toast.success(`Request ${action.toLowerCase()}d successfully`);
+      loadRequests();
+      if (['admin', 'operator'].includes(user?.role?.toLowerCase())) {
+        loadAttendance(false);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || `Failed to ${action.toLowerCase()} request`);
+    }
+  };
 
   // Close dropdown on click outside and load shifts
   useEffect(() => {
@@ -267,6 +327,9 @@ export default function AttendanceTracker() {
     const interval = setInterval(() => {
       if (navigator.onLine) {
         loadAttendance(false)
+        if (user?.role?.toLowerCase() === 'employee') {
+          loadPersonalStats(false)
+        }
         syncPendingAttendance()
       }
     }, 30000)
@@ -403,12 +466,27 @@ export default function AttendanceTracker() {
   // Filter employees by search query, department, shift, and status
   const filteredEmployees = employees.filter(emp => {
     if (user?.role?.toLowerCase() === 'employee') {
-      const usernameLower = (user?.username || '').toLowerCase();
-      const codeLower = (emp.employee_code || emp.employee_id || '').toLowerCase();
-      const nameLower = (emp.name || '').toLowerCase();
-      if (usernameLower !== codeLower && usernameLower !== nameLower) {
+      if (user?.employee_id && user.employee_id === emp.employee_id) {
+        return true;
+      }
+      
+      const emailName = (user?.email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+      const usernameLower = (user?.username || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const codeNoSpaces = (emp.employee_code || emp.employee_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const nameNoSpaces = (emp.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      
+      const isMatch = 
+        (emailName && nameNoSpaces.includes(emailName)) ||
+        (usernameLower && nameNoSpaces.includes(usernameLower)) ||
+        (emailName && codeNoSpaces.includes(emailName)) ||
+        (usernameLower && codeNoSpaces.includes(usernameLower)) ||
+        (nameNoSpaces && usernameLower.includes(nameNoSpaces)) ||
+        (nameNoSpaces && emailName.includes(nameNoSpaces));
+
+      if (!isMatch) {
         return false;
       }
+      return true;
     }
 
     const matchesSearch = (emp.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -435,69 +513,174 @@ export default function AttendanceTracker() {
     }
 
     return matchesSearch && matchesDept && matchesShift && matchesStatus && matchesBranch;
+  }).sort((a, b) => {
+    const aPending = a.pending_requests && a.pending_requests.length > 0 ? 1 : 0;
+    const bPending = b.pending_requests && b.pending_requests.length > 0 ? 1 : 0;
+    return bPending - aPending;
   });
 
   return (
     <div className="page-content" style={{ paddingTop: 0 }}>
       {user?.role?.toLowerCase() === 'employee' ? (
         <>
-          {/* Header with Month Selector */}
+          {/* Header with Month Selector and Request Actions */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, marginTop: -60, flexWrap: 'wrap', gap: 16 }}>
             <h3 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Fingerprint size={24} style={{ color: 'var(--primary)' }} /> My Attendance History
             </h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Month Filter:</label>
-              <input 
-                type="month" 
-                value={personalMonth} 
-                onChange={e => setPersonalMonth(e.target.value)} 
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: '1.5px solid var(--surface-2)',
-                  background: 'var(--surface)',
-                  color: 'var(--text)',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  outline: 'none',
-                  cursor: 'pointer'
-                }}
-              />
-            </div>
           </div>
 
-          {/* Loading Indicator */}
-          {personalLoading ? (
-            <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
-              Loading your attendance records...
-            </div>
-          ) : (
-            <>
-              {/* Stats Dashboard */}
-              {personalStats && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+          {/* Employee Card */}
+          {filteredEmployees.length > 0 && (() => {
+            const emp = filteredEmployees[0];
+            const badge = getStatusBadge(emp);
+            const isCheckedIn = emp.attendance_id && !emp.check_out;
+            const shiftName = emp.shift || 'R1';
+            const matchedShift = shiftsList.find(s => s.name.toUpperCase() === shiftName.toUpperCase());
+            
+            const hasPendingReq = !isCheckedIn 
+              ? (emp.pending_requests || []).some(r => r.request_type === 'Check-In' && new Date(r.requested_check_in || r.created_at).toDateString() === new Date().toDateString())
+              : (emp.pending_requests || []).some(r => r.request_type === 'Check-Out' && r.attendance_id === emp.attendance_id);
+
+            return (
+              <div className="card" style={{ padding: 20, borderLeft: `4px solid ${badge.color}`, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', marginBottom: 24, maxWidth: 400 }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{emp.name}</h4>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: '1.4' }}>
+                        <div><strong style={{ color: 'var(--primary)' }}>{emp.employee_code}</strong></div>
+                        <div><strong>Shift {matchedShift ? matchedShift.name : shiftName}</strong></div>
+                      </div>
+                    </div>
+                    <span style={{ color: badge.color, background: badge.bg, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{badge.text}</span>
+                  </div>
+                  {!isCheckedIn && (
+                    <div style={{ background: 'var(--surface-1)', padding: '8px 12px', border: '1px dashed var(--surface-3)', borderRadius: 8, fontSize: 12, marginBottom: 14, color: 'var(--text-secondary)' }}>
+                      <strong>Shift Details:</strong> {matchedShift ? `${matchedShift.hours} hrs` : `${emp.shift_hours || 12} hrs`}
+                    </div>
+                  )}
+                  {isCheckedIn && (
+                    <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Checked In:</span>
+                        <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                    {!isCheckedIn ? (
+                    hasPendingReq ? (
+                      <button className="btn btn-primary" disabled style={{ flex: 1, padding: '8px', fontSize: 13, background: '#ff9800', borderColor: '#ff9800' }}><AlertCircle size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Request Pending</button>
+                    ) : (
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setRequestTargetLog({ request_type: 'Check-In', date: new Date().toISOString() });
+                          setRequestedCheckIn(new Date().toTimeString().slice(0, 5));
+                          setRequestedCheckOut('');
+                          setShowRequestModal(true);
+                        }}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px' }}
+                      >
+                        <Play size={14} /> Request Check In
+                      </button>
+                    )
+                  ) : (
+                    hasPendingReq ? (
+                      <button className="btn btn-secondary" disabled style={{ flex: 1, padding: '8px', fontSize: 13, color: '#ff9800', borderColor: '#ff9800' }}><AlertCircle size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Request Pending</button>
+                    ) : (
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setRequestTargetLog({ id: emp.attendance_id, request_type: 'Check-Out', date: new Date().toISOString() });
+                          setRequestedCheckIn('');
+                          setRequestedCheckOut(new Date().toTimeString().slice(0, 5));
+                          setShowRequestModal(true);
+                        }}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)' }}
+                      >
+                        <Square size={14} /> Request Check Out
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Skeleton loading and stats dashboard */}
+          <div style={{ opacity: personalLoading ? 0.6 : 1, transition: 'opacity 0.2s' }}>
+            {/* Stats Dashboard */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
                   <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Days Present</span>
-                    <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--green)' }}>{personalStats.days_present}</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 40, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--green)' }}>{personalStats?.days_present || 0}</span>}
                   </div>
                   <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Days Late</span>
-                    <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--red)' }}>{personalStats.days_late}</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 40, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--red)' }}>{personalStats?.days_late || 0}</span>}
                   </div>
                   <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Total Hours Worked</span>
-                    <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{personalStats.total_hours} hrs</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{personalStats?.total_hours || 0} hrs</span>}
                   </div>
                   <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Overtime Hours</span>
-                    <span style={{ fontSize: 28, fontWeight: 900, color: '#ff9800' }}>{personalStats.overtime} hrs</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: '#ff9800' }}>{personalStats?.overtime || 0} hrs</span>}
                   </div>
                 </div>
-              )}
+
+              {/* Attendance Logs Table Filters */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 16 }}>
+                <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Attendance Records</h4>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Month Filter:</label>
+                    <input 
+                      type="month" 
+                      value={personalMonth} 
+                      onChange={e => setPersonalMonth(e.target.value)} 
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: '1.5px solid var(--surface-2)',
+                        background: 'var(--surface)',
+                        color: 'var(--text)',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Filter by Date:</label>
+                    <input 
+                      type="date"
+                      value={personalDateFilter}
+                      onChange={e => setPersonalDateFilter(e.target.value)}
+                      style={{
+                        background: 'var(--surface-1)',
+                        border: '1.5px solid var(--surface-3)',
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        color: 'var(--text)',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
 
               {/* Attendance Logs Table */}
-              {(personalStats?.monthly_logs || []).length === 0 ? (
+              {(!personalLoading && (personalStats?.monthly_logs || []).length === 0) ? (
                 <div className="card" style={{ padding: 40, textAlign: 'center' }}>
                   <Clock size={48} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
                   <h3>No Attendance Records</h3>
@@ -520,118 +703,160 @@ export default function AttendanceTracker() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(personalStats?.monthly_logs || []).map((log, index) => {
-                          const rowBg = index % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)';
-                          const formattedDate = new Date(log.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-                          const checkInTime = log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--';
-                          const checkOutTime = log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Still Working';
-                          const breakText = log.total_break_duration_seconds ? `${Math.round(log.total_break_duration_seconds / 60)} min` : '--';
-                          
-                          let durationHours = '--';
-                          if (log.check_in && log.check_out) {
-                            const ms = new Date(log.check_out).getTime() - new Date(log.check_in).getTime();
-                            const breaks = (log.total_break_duration_seconds || 0) * 1000;
-                            durationHours = `${Math.max(0, (ms - breaks) / (1000 * 60 * 60)).toFixed(2)} hrs`;
-                          }
-
-                          let statusColor = 'var(--text)';
-                          let statusBg = 'var(--surface-2)';
-                          if (log.status === 'Present') {
-                            statusColor = 'var(--green)';
-                            statusBg = 'rgba(16, 185, 129, 0.1)';
-                          } else if (log.status === 'Late') {
-                            statusColor = 'var(--red)';
-                            statusBg = 'rgba(239, 68, 68, 0.1)';
-                          } else if (log.status === 'Leave' || log.status === 'Holiday') {
-                            statusColor = 'var(--primary)';
-                            statusBg = 'rgba(227, 24, 55, 0.1)';
-                          }
-
-                          return (
-                            <tr key={log.id} style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
-                              <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{formattedDate}</td>
-                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkInTime}</td>
-                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkOutTime}</td>
-                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{breakText}</td>
-                              <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>{durationHours}</td>
-                              <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                                <span style={{ color: statusColor, background: statusBg, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{log.status}</span>
-                              </td>
-                              <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--text-muted)' }}>{log.remarks || '--'}</td>
-                              <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                                <button 
-                                  className="btn btn-secondary" 
-                                  onClick={() => {
-                                    setRequestTargetLog(log);
-                                    if (log.check_in) setRequestedCheckIn(new Date(log.check_in).toTimeString().slice(0, 5));
-                                    if (log.check_out) setRequestedCheckOut(new Date(log.check_out).toTimeString().slice(0, 5));
-                                    setShowRequestModal(true);
-                                  }}
-                                  style={{ padding: '6px 12px', fontSize: 12 }}
-                                >
-                                  Request Edit
-                                </button>
+                        {(personalLoading && !personalStats) ? (
+                          Array.from({ length: 5 }).map((_, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                              <td colSpan="8" style={{ padding: '16px 14px' }}>
+                                <div className="skeleton" style={{ height: 24, width: '100%', borderRadius: 4 }}></div>
                               </td>
                             </tr>
-                          );
-                        })}
+                          ))
+                        ) : (() => {
+                          let logsToRender = [...(personalStats?.monthly_logs || [])];
+                          if (personalDateFilter) {
+                            logsToRender = logsToRender.filter(log => {
+                              const d = new Date(log.date);
+                              return d.toLocaleDateString('en-CA') === personalDateFilter || d.toISOString().split('T')[0] === personalDateFilter;
+                            });
+                          }
+                          
+                          const todayStr = new Date().toDateString();
+                          const todayIsoDateStr = new Date().toLocaleDateString('en-CA');
+                          
+                          // Only inject "Today" dummy row if we have NO today records AND (no date filter OR date filter is today)
+                          const hasToday = logsToRender.some(log => new Date(log.date).toDateString() === todayStr);
+                          const shouldInjectToday = !hasToday && (!personalDateFilter || personalDateFilter === todayIsoDateStr);
+                          
+                          if (shouldInjectToday) {
+                            logsToRender.unshift({
+                              id: 'dummy-today',
+                              date: new Date().toISOString(),
+                              check_in: null,
+                              check_out: null,
+                              status: 'Absent',
+                              isDummyToday: true
+                            });
+                          }
+                          
+                          return logsToRender.map((log, index) => {
+                            const rowBg = index % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)';
+                            const formattedDate = new Date(log.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+                            const checkInTime = log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--';
+                            const checkOutTime = log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (log.check_in ? 'Still Working' : '--');
+                            const breakText = log.total_break_duration_seconds ? `${Math.round(log.total_break_duration_seconds / 60)} min` : '--';
+                            
+                            let durationHours = '--';
+                            if (log.check_in && log.check_out) {
+                              const ms = new Date(log.check_out).getTime() - new Date(log.check_in).getTime();
+                              const breaks = (log.total_break_duration_seconds || 0) * 1000;
+                              durationHours = `${Math.max(0, (ms - breaks) / (1000 * 60 * 60)).toFixed(2)} hrs`;
+                            }
+  
+                            let statusColor = 'var(--text)';
+                            let statusBg = 'var(--surface-2)';
+                            if (log.status === 'Present') {
+                              statusColor = 'var(--green)';
+                              statusBg = 'rgba(16, 185, 129, 0.1)';
+                            } else if (log.status === 'Late') {
+                              statusColor = 'var(--red)';
+                              statusBg = 'rgba(239, 68, 68, 0.1)';
+                            } else if (log.status === 'Leave' || log.status === 'Holiday') {
+                              statusColor = 'var(--primary)';
+                              statusBg = 'rgba(227, 24, 55, 0.1)';
+                            }
+                            
+                            const logDateStr = new Date(log.date).toDateString();
+                            const pendingCheckIn = (personalStats?.pending_requests || []).find(r => r.request_type === 'Check-In' && new Date(r.requested_check_in || r.created_at).toDateString() === logDateStr);
+                            const pendingCheckOut = (personalStats?.pending_requests || []).find(r => r.request_type === 'Check-Out' && r.attendance_id === log.id);
+                            const hasAnyPendingReq = (personalStats?.pending_requests || []).some(r => (r.request_type === 'Check-In' && new Date(r.requested_check_in || r.created_at).toDateString() === logDateStr) || r.attendance_id === log.id);
+
+                            return (
+                              <tr key={log.id} style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
+                                <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{formattedDate}</td>
+                                <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkInTime}</td>
+                                <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkOutTime}</td>
+                                <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{breakText}</td>
+                                <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>{durationHours}</td>
+                                <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                                  <span style={{ color: statusColor, background: statusBg, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{log.isDummyToday ? 'Not Checked In' : log.status}</span>
+                                </td>
+                                <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--text-muted)' }}>{log.remarks || '--'}</td>
+                                <td style={{ padding: '12px 14px', textAlign: 'center', display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                  {!log.isDummyToday && (
+                                    <button 
+                                      className="btn btn-secondary" 
+                                      disabled={hasAnyPendingReq && !pendingCheckOut}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        setRequestTargetLog(log);
+                                        if (log.check_in) setRequestedCheckIn(new Date(log.check_in).toTimeString().slice(0, 5));
+                                        if (log.check_out) setRequestedCheckOut(new Date(log.check_out).toTimeString().slice(0, 5));
+                                        setShowRequestModal(true);
+                                      }}
+                                      style={{ padding: '6px 12px', fontSize: 12, opacity: hasAnyPendingReq && !pendingCheckOut ? 0.5 : 1, cursor: hasAnyPendingReq && !pendingCheckOut ? 'not-allowed' : 'pointer' }}
+                                    >
+                                      {(hasAnyPendingReq && !pendingCheckOut) ? 'Edit Pending' : 'Request Edit'}
+                                    </button>
+                                  )}
+                                  
+                                  {logDateStr === todayStr && (
+                                      log.isDummyToday ? (
+                                        pendingCheckIn ? (
+                                          <button className="btn btn-secondary" disabled style={{ padding: '6px 12px', fontSize: 12, color: 'var(--text-muted)', borderColor: 'var(--surface-2)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <div style={{width: 14, height: 14, borderRadius: '50%', border: '2px solid currentColor', position: 'relative'}}><div style={{position: 'absolute', top: '50%', left: -2, right: -2, height: 2, background: 'currentColor', transform: 'translateY(-50%) rotate(45deg)'}}></div></div> Check In Request Sent
+                                          </button>
+                                        ) : (
+                                          <button 
+                                            className="btn btn-primary" 
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              setRequestTargetLog({ request_type: 'Check-In', date: new Date().toISOString() });
+                                              setRequestedCheckIn(new Date().toTimeString().slice(0, 5));
+                                              setRequestedCheckOut('');
+                                              setShowRequestModal(true);
+                                            }}
+                                            style={{ padding: '6px 12px', fontSize: 12, background: 'var(--green)', borderColor: 'var(--green)' }}
+                                          >
+                                            Check In Request
+                                          </button>
+                                        )
+                                      ) : (
+                                        !log.check_out ? (
+                                          pendingCheckOut ? (
+                                            <button className="btn btn-secondary" disabled style={{ padding: '6px 12px', fontSize: 12, color: 'var(--text-muted)', borderColor: 'var(--surface-2)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                              <div style={{width: 14, height: 14, borderRadius: '50%', border: '2px solid currentColor', position: 'relative'}}><div style={{position: 'absolute', top: '50%', left: -2, right: -2, height: 2, background: 'currentColor', transform: 'translateY(-50%) rotate(45deg)'}}></div></div> Check Out Request Sent
+                                            </button>
+                                          ) : (
+                                            <button 
+                                              className="btn btn-secondary" 
+                                              onClick={(e) => {
+                                                e.preventDefault();
+                                                setRequestTargetLog({ ...log, request_type: 'Check-Out' });
+                                                setRequestedCheckIn('');
+                                                setRequestedCheckOut(new Date().toTimeString().slice(0, 5));
+                                                setShowRequestModal(true);
+                                              }}
+                                              style={{ padding: '6px 12px', fontSize: 12, color: 'var(--red)', borderColor: 'var(--red)' }}
+                                            >
+                                              Check Out Request
+                                            </button>
+                                          )
+                                        ) : null
+                                      )
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
                       </tbody>
                     </table>
                   </div>
                 </div>
               )}
-            </>
-          )}
-
-          {/* Request Edit Modal */}
-          {showRequestModal && requestTargetLog && (
-            <div style={{
-              position: 'fixed', inset: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(0, 0, 0, 0.6)',
-              backdropFilter: 'blur(4px)',
-              zIndex: 9999,
-              padding: 20
-            }}>
-              <div className="card" style={{ width: '100%', maxWidth: 450, padding: 25, borderRadius: 12, background: 'var(--surface)', animation: 'scaleUp 0.2s ease-out' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <h4 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Request Attendance Correction</h4>
-                  <button onClick={() => setShowRequestModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={20} /></button>
-                </div>
-                <form onSubmit={handleCreateRequestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <div>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Date</span>
-                    <input type="text" readOnly value={new Date(requestTargetLog.date).toLocaleDateString()} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-2)', color: 'var(--text-muted)' }} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Requested Check-In</label>
-                      <input type="time" value={requestedCheckIn} onChange={e => setRequestedCheckIn(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Requested Check-Out</label>
-                      <input type="time" value={requestedCheckOut} onChange={e => setRequestedCheckOut(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }} />
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Send Request To</label>
-                    <select value={requestTargetRole} onChange={e => setRequestTargetRole(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer' }}>
-                      <option value="Admin">Admin</option>
-                      <option value="Operator">Operator</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Reason for Correction</label>
-                    <textarea required placeholder="Explain why you need this correction (e.g. forgot to check out)..." value={requestReason} onChange={e => setRequestReason(e.target.value)} rows={3} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', resize: 'vertical' }} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowRequestModal(false)} style={{ flex: 1 }}>Cancel</button>
-                    <button type="submit" className="btn btn-primary" disabled={requestSubmitting} style={{ flex: 1 }}>{requestSubmitting ? 'Sending...' : 'Submit Request'}</button>
-                  </div>
-                </form>
-              </div>
             </div>
-          )}
+
+
         </>
       ) : (
         <>
@@ -1011,41 +1236,126 @@ export default function AttendanceTracker() {
                 </div>
  
                 <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                  {!isCheckedIn ? (
-                    <button 
-                      className="btn btn-primary" 
-                      onClick={() => handleCheckIn(emp.employee_id, emp.name)}
-                      disabled={pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
-                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
-                    >
-                      {pendingActions[`check-in-${emp.employee_id}`] ? 'Checking In...' : <><Play size={14} /> Check In</>}
-                    </button>
-                  ) : (
-                    <>
-                      <button 
-                        className={`btn ${isOnBreak ? 'btn-primary' : 'btn-secondary'}`} 
-                        onClick={() => handleToggleBreak(emp.employee_id, emp.name)}
-                        disabled={pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
-                      >
-                        {pendingActions[`toggle-break-${emp.employee_id}`] ? 'Loading...' : <><Coffee size={14} /> {isOnBreak ? 'End Break' : 'Break'}</>}
-                      </button>
-                      <button 
-                        className="btn btn-secondary" 
-                        onClick={() => handleCheckOut(emp.employee_id, emp.name)}
-                        disabled={pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)', opacity: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
-                      >
-                        {pendingActions[`check-out-${emp.employee_id}`] ? 'Checking Out...' : <><Square size={14} /> Check Out</>}
-                      </button>
-                    </>
-                  )}
+                  {(() => {
+                    const pendingReq = (emp.pending_requests || []).find(r => ['Check-In', 'Check-Out'].includes(r.request_type));
+                    const hasPendingReq = !!pendingReq;
+
+                    if (!isCheckedIn) {
+                      return hasPendingReq ? (
+                        <button 
+                          className="btn btn-primary" 
+                          onClick={() => setActiveRequestModal({...pendingReq, employee_name: emp.name})}
+                          style={{ flex: 1, padding: '8px', fontSize: 13, background: '#ff9800', borderColor: '#ff9800' }}
+                        >
+                          <AlertCircle size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Request
+                        </button>
+                      ) : (
+                        <button 
+                          className="btn btn-primary" 
+                          onClick={() => handleCheckIn(emp.employee_id, emp.name)}
+                          disabled={pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
+                          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`check-in-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
+                        >
+                          {pendingActions[`check-in-${emp.employee_id}`] ? 'Checking In...' : <><Play size={14} /> Check In</>}
+                        </button>
+                      );
+                    } else {
+                      return (
+                        <>
+                          <button 
+                            className={`btn ${isOnBreak ? 'btn-primary' : 'btn-secondary'}`} 
+                            onClick={() => handleToggleBreak(emp.employee_id, emp.name)}
+                            disabled={pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
+                            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', opacity: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`toggle-break-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
+                          >
+                            {pendingActions[`toggle-break-${emp.employee_id}`] ? 'Loading...' : <><Coffee size={14} /> {isOnBreak ? 'End Break' : 'Break'}</>}
+                          </button>
+                          
+                          {hasPendingReq ? (
+                            <button 
+                              className="btn btn-secondary" 
+                              onClick={() => setActiveRequestModal({...pendingReq, employee_name: emp.name})}
+                              style={{ flex: 1, padding: '8px', fontSize: 13, color: '#ff9800', borderColor: '#ff9800' }}
+                            >
+                              <AlertCircle size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Request
+                            </button>
+                          ) : (
+                            <button 
+                              className="btn btn-secondary" 
+                              onClick={() => handleCheckOut(emp.employee_id, emp.name)}
+                              disabled={pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management'}
+                              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)', opacity: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 0.6 : 1, cursor: (pendingActions[`check-out-${emp.employee_id}`] || user?.role?.toLowerCase() === 'management') ? 'not-allowed' : 'pointer' }}
+                            >
+                              {pendingActions[`check-out-${emp.employee_id}`] ? 'Checking Out...' : <><Square size={14} /> Check Out</>}
+                            </button>
+                          )}
+                        </>
+                      );
+                    }
+                  })()}
                 </div>
               </div>
             )
           })}
         </div>
       )}
+      {/* Active Request Process Modal */}
+      {activeRequestModal && (
+        <div 
+          onClick={() => setActiveRequestModal(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}
+        >
+          <div onClick={e => e.stopPropagation()} className="card" style={{ width: '90%', maxWidth: 400, padding: 24, borderRadius: 16 }}>
+            <h4 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16, color: 'var(--primary)' }}>Process Request</h4>
+            <div style={{ marginBottom: 20, fontSize: 14 }}>
+               <p style={{ marginBottom: 8 }}><strong>Employee:</strong> {activeRequestModal.employee_name}</p>
+               <p style={{ marginBottom: 8 }}><strong>Date:</strong> {new Date(activeRequestModal.attendance_date || activeRequestModal.created_at).toLocaleDateString()}</p>
+               <p style={{ marginBottom: 8 }}><strong>Requested Time:</strong> {activeRequestModal.requested_check_in ? new Date(activeRequestModal.requested_check_in).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : activeRequestModal.requested_check_out ? new Date(activeRequestModal.requested_check_out).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '--'}</p>
+               <div style={{ fontStyle: 'italic', color: 'var(--text-muted)', marginTop: 12, background: 'var(--surface-1)', padding: 10, borderRadius: 8 }}>
+                 "{activeRequestModal.reason}"
+               </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
+               {!isEditingRequestTime ? (
+                 <>
+                   <button className="btn btn-primary" onClick={() => { handleRequestAction(activeRequestModal.request_id || activeRequestModal.id, 'Approve'); setActiveRequestModal(null); setIsEditingRequestTime(false); }}>Approve Request</button>
+                   <button className="btn btn-secondary" onClick={() => { 
+                       const initialTime = activeRequestModal.requested_check_in ? new Date(activeRequestModal.requested_check_in).toTimeString().slice(0,5) : activeRequestModal.requested_check_out ? new Date(activeRequestModal.requested_check_out).toTimeString().slice(0,5) : "";
+                       setEditingRequestTimeValue(initialTime);
+                       setIsEditingRequestTime(true);
+                   }}>Edit Time & Approve</button>
+                   <button className="btn btn-secondary" onClick={() => { handleRequestAction(activeRequestModal.request_id || activeRequestModal.id, 'Reject'); setActiveRequestModal(null); setIsEditingRequestTime(false); }} style={{ color: 'var(--red)', borderColor: 'var(--red)' }}>Reject</button>
+                   <button className="btn" onClick={() => { setActiveRequestModal(null); setIsEditingRequestTime(false); }} style={{ marginTop: 8 }}>Cancel</button>
+                 </>
+               ) : (
+                 <div style={{ background: 'var(--surface-1)', padding: 16, borderRadius: 12, marginTop: 12 }}>
+                   <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Edit Requested Time</label>
+                   <input 
+                     type="time" 
+                     value={editingRequestTimeValue}
+                     onChange={e => setEditingRequestTimeValue(e.target.value)}
+                     style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text)', outline: 'none', marginBottom: 12 }} 
+                   />
+                   <div style={{ display: 'flex', gap: 8 }}>
+                     <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                       let overrideTime = null;
+                       if (editingRequestTimeValue) {
+                         const d = new Date(activeRequestModal.attendance_date || activeRequestModal.created_at);
+                         overrideTime = new Date(`${d.toISOString().split('T')[0]}T${editingRequestTimeValue}:00`).toISOString();
+                       }
+                       handleRequestAction(activeRequestModal.request_id || activeRequestModal.id, 'Approve', activeRequestModal.request_type==='Check-In'?overrideTime:undefined, activeRequestModal.request_type==='Check-Out'?overrideTime:undefined);
+                       setActiveRequestModal(null);
+                       setIsEditingRequestTime(false);
+                     }}>Save & Approve</button>
+                     <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setIsEditingRequestTime(false)}>Back</button>
+                   </div>
+                 </div>
+               )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmModal && (
         <div 
           onClick={() => setConfirmModal(null)}
@@ -1272,6 +1582,64 @@ export default function AttendanceTracker() {
           to { transform: scale(1); opacity: 1; }
         }
       `}</style>
+
+      {/* Request Edit Modal - Moved to the bottom of root div to guarantee it renders over everything */}
+      {showRequestModal && requestTargetLog && (
+        <div style={{
+          position: 'fixed', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(4px)',
+          zIndex: 999999,
+          padding: 20
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 450, padding: 25, borderRadius: 12, background: 'var(--surface)', animation: 'scaleUp 0.2s ease-out' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h4 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Request Attendance Correction</h4>
+              <button onClick={() => setShowRequestModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            <form onSubmit={handleCreateRequestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Date</span>
+                <input type="text" readOnly value={new Date(requestTargetLog.date).toLocaleDateString()} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-2)', color: 'var(--text-muted)' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {requestTargetLog.request_type !== 'Check-Out' && (
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Requested Check-In</label>
+                    <input type="time" value={requestedCheckIn} onChange={e => setRequestedCheckIn(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }} />
+                  </div>
+                )}
+                {requestTargetLog.request_type !== 'Check-In' && (
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Requested Check-Out</label>
+                    <input type="time" value={requestedCheckOut} onChange={e => setRequestedCheckOut(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }} />
+                  </div>
+                )}
+              </div>
+              {!['Check-In', 'Check-Out'].includes(requestTargetLog.request_type) && (
+                <>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Send Request To</label>
+                    <select value={requestTargetRole} onChange={e => setRequestTargetRole(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer' }}>
+                      <option value="Admin">Admin</option>
+                      <option value="Operator">Operator</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Reason for Correction</label>
+                    <textarea required placeholder="Explain why you need this correction (e.g. forgot to check out)..." value={requestReason} onChange={e => setRequestReason(e.target.value)} rows={3} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', resize: 'vertical' }} />
+                  </div>
+                </>
+              )}
+              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowRequestModal(false)} style={{ flex: 1 }}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={requestSubmitting} style={{ flex: 1 }}>{requestSubmitting ? 'Sending...' : 'Submit Request'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -197,9 +197,13 @@ const pool = require('./db');
         requested_check_out TIMESTAMPTZ,
         reason TEXT,
         status VARCHAR(20) DEFAULT 'Pending',
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        request_type VARCHAR(20) DEFAULT 'Edit'
       )
     `);
+    
+    // Ensure request_type column exists if table was already created
+    await pool.query('ALTER TABLE attendance_edit_requests ADD COLUMN IF NOT EXISTS request_type VARCHAR(20) DEFAULT \'Edit\'');
 
     // Ensure employee_attendance has remarks column
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS remarks VARCHAR(100)');

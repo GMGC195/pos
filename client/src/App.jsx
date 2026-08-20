@@ -55,7 +55,7 @@ export default function App() {
         <Toaster
           position="top-right"
           toastOptions={{ style: { fontSize: '14px', borderRadius: '8px' } }}
-          containerStyle={{ zIndex: 999999 }}
+          containerStyle={{ zIndex: 2147483647 }}
         />
         <BrowserRouter>
           <Suspense fallback={<PageLoader />}>
