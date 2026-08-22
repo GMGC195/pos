@@ -106,11 +106,11 @@ export default function AttendanceTracker() {
     const fullOut = requestedCheckOut ? new Date(`${logDateStr}T${requestedCheckOut}:00`) : null;
     const now = new Date();
 
-    if (fullIn && fullIn > now) {
+    if (fullIn && fullIn > new Date(now.getTime() + 5 * 60000)) {
       toast.error('Requested Check-In time cannot be in the future.');
       return;
     }
-    if (fullOut && fullOut > now) {
+    if (fullOut && fullOut > new Date(now.getTime() + 5 * 60000)) {
       toast.error('Requested Check-Out time cannot be in the future.');
       return;
     }
@@ -653,11 +653,11 @@ export default function AttendanceTracker() {
                   </div>
                   <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Total Hours Worked</span>
-                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{personalStats?.total_hours || 0} hrs</span>}
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{personalStats?.total_hours ? decimalHoursToText(personalStats.total_hours) : '0 min'}</span>}
                   </div>
                   <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Overtime Hours</span>
-                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: '#ff9800' }}>{personalStats?.overtime || 0} hrs</span>}
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: '#ff9800' }}>{personalStats?.overtime ? decimalHoursToText(personalStats.overtime) : '0 min'}</span>}
                   </div>
                 </div>
 
@@ -768,8 +768,8 @@ export default function AttendanceTracker() {
                           return logsToRender.map((log, index) => {
                             const rowBg = index % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)';
                             const formattedDate = new Date(log.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-                            const checkInTime = log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--';
-                            const checkOutTime = log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (log.check_in ? 'Still Working' : '--');
+                            const checkInTime = log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--';
+                            const checkOutTime = log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : (log.check_in ? 'Still Working' : '--');
                             const breakText = log.total_break_duration_seconds ? `${Math.round(log.total_break_duration_seconds / 60)} min` : '--';
                             
                             let durationHours = '--';
@@ -1334,7 +1334,7 @@ export default function AttendanceTracker() {
             <div style={{ marginBottom: 20, fontSize: 14 }}>
                <p style={{ marginBottom: 8 }}><strong>Employee:</strong> {activeRequestModal.employee_name}</p>
                <p style={{ marginBottom: 8 }}><strong>Date:</strong> {new Date(activeRequestModal.attendance_date || activeRequestModal.created_at).toLocaleDateString()}</p>
-               <p style={{ marginBottom: 8 }}><strong>Requested Time:</strong> {activeRequestModal.requested_check_in ? new Date(activeRequestModal.requested_check_in).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : activeRequestModal.requested_check_out ? new Date(activeRequestModal.requested_check_out).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '--'}</p>
+               <p style={{ marginBottom: 8 }}><strong>Requested Time:</strong> {activeRequestModal.requested_check_in ? new Date(activeRequestModal.requested_check_in).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false}) : activeRequestModal.requested_check_out ? new Date(activeRequestModal.requested_check_out).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false}) : '--'}</p>
                <div style={{ fontStyle: 'italic', color: 'var(--text-muted)', marginTop: 12, background: 'var(--surface-1)', padding: 10, borderRadius: 8 }}>
                  "{activeRequestModal.reason}"
                </div>

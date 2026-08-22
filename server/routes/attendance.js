@@ -936,10 +936,10 @@ router.post('/session', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Employee ID, date, and check-in time are required' });
   }
   
-  if (check_in && new Date(check_in).getTime() > Date.now()) {
+  if (check_in && new Date(check_in).getTime() > Date.now() + 5 * 60000) {
     return res.status(400).json({ error: 'Check-in time cannot be in the future.' });
   }
-  if (check_out && new Date(check_out).getTime() > Date.now()) {
+  if (check_out && new Date(check_out).getTime() > Date.now() + 5 * 60000) {
     return res.status(400).json({ error: 'Check-out time cannot be in the future.' });
   }
   
@@ -1018,10 +1018,10 @@ router.post('/edit', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Attendance ID and reason are required' });
   }
 
-  if (new_check_in && new Date(new_check_in).getTime() > Date.now()) {
+  if (new_check_in && new Date(new_check_in).getTime() > Date.now() + 5 * 60000) {
     return res.status(400).json({ error: 'Check-in time cannot be in the future.' });
   }
-  if (new_check_out && new Date(new_check_out).getTime() > Date.now()) {
+  if (new_check_out && new Date(new_check_out).getTime() > Date.now() + 5 * 60000) {
     return res.status(400).json({ error: 'Check-out time cannot be in the future.' });
   }
 
@@ -1240,10 +1240,10 @@ router.post('/edit-requests', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Reason is required' });
   }
   
-  if (requested_check_in && new Date(requested_check_in).getTime() > Date.now()) {
+  if (requested_check_in && new Date(requested_check_in).getTime() > Date.now() + 5 * 60000) {
     return res.status(400).json({ error: 'Requested check-in time cannot be in the future.' });
   }
-  if (requested_check_out && new Date(requested_check_out).getTime() > Date.now()) {
+  if (requested_check_out && new Date(requested_check_out).getTime() > Date.now() + 5 * 60000) {
     return res.status(400).json({ error: 'Requested check-out time cannot be in the future.' });
   }
 
@@ -1367,10 +1367,10 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
       const effectiveCheckIn = edited_check_in || request.requested_check_in;
       const effectiveCheckOut = edited_check_out || request.requested_check_out;
 
-      if (effectiveCheckIn && new Date(effectiveCheckIn).getTime() > Date.now()) {
+      if (effectiveCheckIn && new Date(effectiveCheckIn).getTime() > Date.now() + 5 * 60000) {
         return res.status(400).json({ error: 'Approved check-in time cannot be in the future.' });
       }
-      if (effectiveCheckOut && new Date(effectiveCheckOut).getTime() > Date.now()) {
+      if (effectiveCheckOut && new Date(effectiveCheckOut).getTime() > Date.now() + 5 * 60000) {
         return res.status(400).json({ error: 'Approved check-out time cannot be in the future.' });
       }
 
