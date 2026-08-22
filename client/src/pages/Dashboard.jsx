@@ -84,9 +84,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [personalStats, setPersonalStats] = useState(null)
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('')
-  const [attendanceSelectedShift, setAttendanceSelectedShift] = useState('All')
-  const [attendanceSelectedDepartment, setAttendanceSelectedDepartment] = useState('All')
+  const [attendanceSelectedDayNight, setAttendanceSelectedDayNight] = useState('All')
   const [attendanceSelectedStatus, setAttendanceSelectedStatus] = useState('All')
+  const [attendanceSelectedBranch, setAttendanceSelectedBranch] = useState('All')
   const [showAttendanceTable, setShowAttendanceTable] = useState(false)
 
   const loadStats = () => {
@@ -660,30 +660,43 @@ export default function Dashboard() {
   const checkedOutEmployees = todayActivity.filter(log => log.attendance_id && log.check_out)
   const absentEmployees = todayActivity.filter(log => log.calculated_status === 'Absent' || log.calculated_status === 'Leave' || log.calculated_status === 'Holiday')
 
-  const departmentsList = ['All', ...new Set(todayActivity.map(emp => emp.department).filter(Boolean))].sort()
-  const shiftsDropdownList = ['All', ...new Set(todayActivity.map(emp => emp.shift).filter(Boolean))].sort()
+  const branchesList = ['All', ...new Set(todayActivity.map(emp => emp.branch).filter(Boolean))].sort()
 
   const tableFilteredEmployees = todayActivity.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(attendanceSearchQuery.toLowerCase()) ||
       String(emp.employee_id).toLowerCase().includes(attendanceSearchQuery.toLowerCase());
-    const matchesShift = attendanceSelectedShift === 'All' || emp.shift === attendanceSelectedShift;
-    const matchesDept = attendanceSelectedDepartment === 'All' || emp.department === attendanceSelectedDepartment;
+    
+    // Day/Night Shift mapping (matches the Day/Night property or defaults)
+    const empShiftVal = String(emp.new_shift || emp.shift || '').toLowerCase();
+    let isDay = empShiftVal.includes('day') || empShiftVal === 'd';
+    let isNight = empShiftVal.includes('night') || empShiftVal === 'n';
+    
+    // Default matching logic if neither is strictly matched, or if exact matches are found
+    const matchesDayNight = attendanceSelectedDayNight === 'All' || 
+                           (attendanceSelectedDayNight === 'Day' && isDay) || 
+                           (attendanceSelectedDayNight === 'Night' && isNight);
+
+    const matchesBranch = attendanceSelectedBranch === 'All' || emp.branch === attendanceSelectedBranch;
 
     let matchesStatus = true;
     const hasSessions = emp.sessions && emp.sessions.length > 0;
     const isCurrentlyCheckedIn = emp.attendance_id && !emp.check_out;
 
-    if (attendanceSelectedStatus === 'Present') {
+    if (attendanceSelectedStatus === 'Total Present') {
+      matchesStatus = hasSessions;
+    } else if (attendanceSelectedStatus === 'Currently Present') {
       matchesStatus = isCurrentlyCheckedIn;
-    } else if (attendanceSelectedStatus === 'CheckedOut') {
+    } else if (attendanceSelectedStatus === 'Checked Out Complete') {
       matchesStatus = hasSessions && !isCurrentlyCheckedIn;
+    } else if (attendanceSelectedStatus === 'Break') {
+      matchesStatus = isCurrentlyCheckedIn && emp.on_break;
     } else if (attendanceSelectedStatus === 'Late') {
       matchesStatus = hasSessions && emp.attendance_status === 'Late';
     } else if (attendanceSelectedStatus === 'Absent') {
       matchesStatus = emp.calculated_status === 'Absent' || emp.calculated_status === 'Leave' || emp.calculated_status === 'Holiday';
     }
 
-    return matchesSearch && matchesShift && matchesDept && matchesStatus;
+    return matchesSearch && matchesDayNight && matchesBranch && matchesStatus;
   }).sort((a, b) => {
     const aCheckedIn = a.attendance_id && !a.check_out ? 1 : 0;
     const bCheckedIn = b.attendance_id && !b.check_out ? 1 : 0;
@@ -1123,7 +1136,7 @@ export default function Dashboard() {
           onMouseOut={e => e.currentTarget.style.background = 'var(--surface-1)'}
         >
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Users size={20} style={{ color: 'var(--primary)' }} /> Today's Attendance Table
+            <Users size={20} style={{ color: 'var(--primary)' }} /> Today's Attendance Table <span style={{ fontSize: 13, background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)', padding: '2px 8px', borderRadius: 10, marginLeft: 8 }}>Total: {tableFilteredEmployees.length}</span>
           </h3>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
             {showAttendanceTable ? 'Click to Collapse ▲' : 'Click to Expand ▼'}
@@ -1155,8 +1168,8 @@ export default function Dashboard() {
               </div>
 
               <select
-                value={attendanceSelectedShift}
-                onChange={e => setAttendanceSelectedShift(e.target.value)}
+                value={attendanceSelectedBranch}
+                onChange={e => setAttendanceSelectedBranch(e.target.value)}
                 style={{
                   padding: '10px 14px',
                   background: 'var(--surface)',
@@ -1168,14 +1181,14 @@ export default function Dashboard() {
                   cursor: 'pointer'
                 }}
               >
-                {shiftsDropdownList.map(sh => (
-                  <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
+                {branchesList.map(br => (
+                  <option key={br} value={br}>{br === 'All' ? 'All Branches' : br}</option>
                 ))}
               </select>
 
               <select
-                value={attendanceSelectedDepartment}
-                onChange={e => setAttendanceSelectedDepartment(e.target.value)}
+                value={attendanceSelectedDayNight}
+                onChange={e => setAttendanceSelectedDayNight(e.target.value)}
                 style={{
                   padding: '10px 14px',
                   background: 'var(--surface)',
@@ -1187,9 +1200,9 @@ export default function Dashboard() {
                   cursor: 'pointer'
                 }}
               >
-                {departmentsList.map(dept => (
-                  <option key={dept} value={dept}>{dept === 'All' ? 'All Departments' : dept}</option>
-                ))}
+                <option value="All">All Shifts (Day/Night)</option>
+                <option value="Day">Day Shift</option>
+                <option value="Night">Night Shift</option>
               </select>
 
               <select
@@ -1207,10 +1220,12 @@ export default function Dashboard() {
                 }}
               >
                 <option value="All">All Statuses</option>
-                <option value="Present">Present (Active)</option>
-                <option value="CheckedOut">Checked Out</option>
-                <option value="Late">Late Arrivals</option>
-                <option value="Absent">Absent Today</option>
+                <option value="Total Present">Total Present</option>
+                <option value="Currently Present">Currently Present</option>
+                <option value="Checked Out Complete">Checked Out Complete</option>
+                <option value="Break">Break</option>
+                <option value="Late">Late</option>
+                <option value="Absent">Absent</option>
               </select>
 
               <button
@@ -1237,6 +1252,7 @@ export default function Dashboard() {
               <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '800px' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-1)' }}>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '50px' }}>#</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Code</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '220px' }}>Employee Name</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Shift Hrs</th>
@@ -1288,6 +1304,7 @@ export default function Dashboard() {
                           onMouseOver={e => e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.06)'}
                           onMouseOut={e => e.currentTarget.style.background = rowBg}
                         >
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>{index + 1}</td>
                           <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{emp.employee_code || emp.employee_id}</td>
                           <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '220px' }}>{emp.name}</td>
                            <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>

@@ -315,6 +315,9 @@ export default function Login() {
           width: auto; height: 76px;
           object-fit: contain;
           margin: 0 auto 16px;
+          background-color: #0d3038;
+          padding: 8px 16px;
+          border-radius: 12px;
         }
 
         .lp-card-title {

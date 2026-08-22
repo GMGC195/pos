@@ -106,7 +106,7 @@ export default function Employees() {
   const [roleFilter, setRoleFilter] = useState('All')
   const [selectedDept, setSelectedDept] = useState('All')
   const [selectedWorkingHours, setSelectedWorkingHours] = useState('All')
-  const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedDayNight, setSelectedDayNight] = useState('All')
   const [selectedBranch, setSelectedBranch] = useState('All')
   const [selectedPosition, setSelectedPosition] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
@@ -326,7 +326,6 @@ export default function Employees() {
   const positions = [...new Set(employees.map(e => e.position).filter(Boolean))].sort()
   const workingHoursList = [...new Set(employees.map(e => e.working_hours).filter(Boolean))].sort()
   const branchesList = [...new Set(employees.map(e => e.branch).filter(Boolean))].sort()
-  const shiftsList = [...new Set(employees.map(e => e.shift).filter(Boolean))].sort()
 
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -335,10 +334,19 @@ export default function Employees() {
     const matchesDept = selectedDept === 'All' || emp.department === selectedDept
     const matchesPosition = selectedPosition === 'All' || emp.position === selectedPosition
     const matchesWorkingHours = selectedWorkingHours === 'All' || emp.working_hours === selectedWorkingHours
-    const matchesShift = selectedShift === 'All' || emp.shift === selectedShift
+    
+    // Day/Night Shift mapping
+    const empShiftVal = String(emp.new_shift || emp.shift || '').toLowerCase();
+    let isDay = empShiftVal.includes('day') || empShiftVal === 'd';
+    let isNight = empShiftVal.includes('night') || empShiftVal === 'n';
+    
+    const matchesDayNight = selectedDayNight === 'All' || 
+                           (selectedDayNight === 'Day' && isDay) || 
+                           (selectedDayNight === 'Night' && isNight);
+
     const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch
     const matchesStatus = selectedStatus === 'All' || emp.status === selectedStatus
-    return matchesSearch && matchesDept && matchesPosition && matchesWorkingHours && matchesShift && matchesBranch && matchesStatus
+    return matchesSearch && matchesDept && matchesPosition && matchesWorkingHours && matchesDayNight && matchesBranch && matchesStatus
   }).sort((a, b) => {
     if (sortBy === 'EmpIdAsc') {
       const idA = a.employee_id || '';
@@ -498,14 +506,13 @@ export default function Employees() {
             </select>
             
             <select
-              value={selectedShift}
-              onChange={e => setSelectedShift(e.target.value)}
+              value={selectedDayNight}
+              onChange={e => setSelectedDayNight(e.target.value)}
               style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 100, fontSize: 12 }}
             >
-              <option value="All">All Shifts</option>
-              {shiftsList.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
+              <option value="All">All Shifts (Day/Night)</option>
+              <option value="Day">Day Shift</option>
+              <option value="Night">Night Shift</option>
             </select>
             
             <select
@@ -541,7 +548,7 @@ export default function Employees() {
               <option value="AlphabeticalZA">Name (Z to A)</option>
             </select>
 
-            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedWorkingHours !== 'All' || selectedShift !== 'All' || selectedBranch !== 'All' || selectedStatus !== 'All' || sortBy !== 'Default') && (
+            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedWorkingHours !== 'All' || selectedDayNight !== 'All' || selectedBranch !== 'All' || selectedStatus !== 'All' || sortBy !== 'Default') && (
               <button 
                 className="btn btn-secondary"
                 onClick={() => {
@@ -549,7 +556,7 @@ export default function Employees() {
                   setSelectedDept('All');
                   setSelectedPosition('All');
                   setSelectedWorkingHours('All');
-                  setSelectedShift('All');
+                  setSelectedDayNight('All');
                   setSelectedBranch('All');
                   setSelectedStatus('All');
                   setSortBy('Default');

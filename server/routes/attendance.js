@@ -715,7 +715,7 @@ router.get('/analytics', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.toLowerCase();
     
     let weeklyQueryStr = `
-      SELECT ea.date, COUNT(DISTINCT ea.employee_id) as present_count 
+      SELECT TO_CHAR(ea.date, 'YYYY-MM-DD') as date_str, COUNT(DISTINCT ea.employee_id) as present_count 
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE ea.date >= CURRENT_DATE - INTERVAL '6 days' AND ea.status != 'Holiday'
@@ -743,13 +743,13 @@ router.get('/analytics', authenticateToken, async (req, res) => {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
       const dayName = daysOfWeek[d.getDay()];
       
-      const dayData = weeklyQuery.rows.find(row => {
-        const rowDate = new Date(row.date).toISOString().split('T')[0];
-        return rowDate === dateStr;
-      });
+      const dayData = weeklyQuery.rows.find(row => row.date_str === dateStr);
       
       const present = dayData ? parseInt(dayData.present_count) : 0;
       const rate = Math.min(100, Math.round((present / totalEmployees) * 100));

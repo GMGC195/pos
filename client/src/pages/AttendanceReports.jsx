@@ -95,7 +95,7 @@ export default function AttendanceReports() {
   const [loading, setLoading] = useState(true)
   const [showFilters, setShowFilters] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedDayNight, setSelectedDayNight] = useState('All')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
   const [selectedBranch, setSelectedBranch] = useState('All')
@@ -450,13 +450,21 @@ export default function AttendanceReports() {
   const groupedData = getGroupedData()
 
   const departments = ['All', ...new Set(employeesList.map(emp => emp.department).filter(Boolean))]
-  const shifts = ['All', ...new Set(employeesList.map(emp => emp.shift).filter(Boolean))]
 
   const filteredGroupedData = groupedData.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           String(emp.employee_code || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
-    const matchesShift = selectedShift === 'All' || emp.shift === selectedShift;
+    
+    // Day/Night Shift mapping
+    const empShiftVal = String(emp.new_shift || emp.shift || '').toLowerCase();
+    let isDay = empShiftVal.includes('day') || empShiftVal === 'd';
+    let isNight = empShiftVal.includes('night') || empShiftVal === 'n';
+    
+    const matchesDayNight = selectedDayNight === 'All' || 
+                           (selectedDayNight === 'Day' && isDay) || 
+                           (selectedDayNight === 'Night' && isNight);
+
     const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch;
 
     let matchesStatus = true;
@@ -472,7 +480,7 @@ export default function AttendanceReports() {
       matchesStatus = emp.leaves > 0;
     }
 
-    return matchesSearch && matchesDept && matchesShift && matchesStatus && matchesBranch;
+    return matchesSearch && matchesDept && matchesDayNight && matchesStatus && matchesBranch;
   });
 
   // Set Holiday API Call
@@ -862,8 +870,8 @@ export default function AttendanceReports() {
             </select>
 
             <select 
-              value={selectedShift}
-              onChange={e => setSelectedShift(e.target.value)}
+              value={selectedDayNight}
+              onChange={e => setSelectedDayNight(e.target.value)}
               style={{
                 padding: '8px 12px',
                 background: 'var(--surface-1)',
@@ -875,10 +883,9 @@ export default function AttendanceReports() {
                 flex: 1
               }}
             >
-              <option value="All">All Shifts</option>
-              {shifts.map(sh => (
-                <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
-              ))}
+              <option value="All">All Shifts (Day/Night)</option>
+              <option value="Day">Day Shift</option>
+              <option value="Night">Night Shift</option>
             </select>
 
             <select 
@@ -922,12 +929,12 @@ export default function AttendanceReports() {
               <option value="Leave">Leave (At least 1 day)</option>
             </select>
 
-            {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
+            {(searchQuery !== '' || selectedDayNight !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
               <button 
                 className="btn btn-secondary"
                 onClick={() => {
                   setSearchQuery('');
-                  setSelectedShift('All');
+                  setSelectedDayNight('All');
                   setSelectedDepartment('All');
                   setSelectedStatus('All');
                   setSelectedBranch('All');

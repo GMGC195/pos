@@ -44,11 +44,10 @@ export default function TodayAttendance() {
   const [employeesList, setEmployeesList] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedDayNight, setSelectedDayNight] = useState('All')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
   const [selectedBranch, setSelectedBranch] = useState('All')
-  const [shiftsList, setShiftsList] = useState([])
   const [showMobileFilters, setShowMobileFilters] = useState(false)
 
   // ── Enhanced Edit Attendance Modal State ─────────────────────────────────
@@ -85,12 +84,6 @@ export default function TodayAttendance() {
       .finally(() => setLoading(false))
   }
 
-  const loadShifts = () => {
-    axios.get('/api/employees/working-hours/list')
-      .then(res => setShiftsList(res.data))
-      .catch(() => {})
-  }
-
   const loadEmployeesList = () => {
     axios.get('/api/employees')
       .then(res => setEmployeesList(res.data || []))
@@ -99,7 +92,6 @@ export default function TodayAttendance() {
 
   useEffect(() => {
     loadTodayAttendance()
-    loadShifts()
     loadEmployeesList()
     // Refresh at most every 5 minutes (300000 ms) instead of 30 seconds
     const interval = setInterval(loadTodayAttendance, 300000)
@@ -264,7 +256,16 @@ export default function TodayAttendance() {
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           String(emp.employee_id).toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesShift = selectedShift === 'All' || emp.shift === selectedShift;
+                          
+    // Day/Night Shift mapping
+    const empShiftVal = String(emp.new_shift || emp.shift || '').toLowerCase();
+    let isDay = empShiftVal.includes('day') || empShiftVal === 'd';
+    let isNight = empShiftVal.includes('night') || empShiftVal === 'n';
+    
+    const matchesDayNight = selectedDayNight === 'All' || 
+                           (selectedDayNight === 'Day' && isDay) || 
+                           (selectedDayNight === 'Night' && isNight);
+
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
     const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch;
     
@@ -285,7 +286,7 @@ export default function TodayAttendance() {
       matchesStatus = emp.calculated_status === 'Pending';
     }
 
-    return matchesSearch && matchesShift && matchesDept && matchesStatus && matchesBranch;
+    return matchesSearch && matchesDayNight && matchesDept && matchesStatus && matchesBranch;
   }).sort((a, b) => {
     // Sort present (checked-in) employees to the top
     const aCheckedIn = a.attendance_id && !a.check_out ? 1 : 0;
@@ -434,8 +435,8 @@ export default function TodayAttendance() {
           </select>
 
           <select 
-            value={selectedShift}
-            onChange={e => setSelectedShift(e.target.value)}
+            value={selectedDayNight}
+            onChange={e => setSelectedDayNight(e.target.value)}
             style={{
               padding: '10px 14px',
               background: 'var(--surface)',
@@ -447,9 +448,9 @@ export default function TodayAttendance() {
               cursor: 'pointer'
             }}
           >
-            {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
-              <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
-            ))}
+            <option value="All">All Shifts (Day/Night)</option>
+            <option value="Day">Day Shift</option>
+            <option value="Night">Night Shift</option>
           </select>
 
           <select 
@@ -493,12 +494,12 @@ export default function TodayAttendance() {
             <option value="Pending">Pending</option>
           </select>
 
-          {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
+          {(searchQuery !== '' || selectedDayNight !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
             <button 
               className="btn btn-secondary"
               onClick={() => {
                 setSearchQuery('');
-                setSelectedShift('All');
+                setSelectedDayNight('All');
                 setSelectedDepartment('All');
                 setSelectedStatus('All');
                 setSelectedBranch('All');

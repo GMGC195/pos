@@ -38,6 +38,7 @@ export default function Payroll() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
   const [selectedBranch, setSelectedBranch] = useState('All')
+  const [selectedDayNight, setSelectedDayNight] = useState('All')
 
   // Global Settings Modal State
   const [showSettingsModal, setShowSettingsModal] = useState(false)
@@ -247,7 +248,17 @@ export default function Payroll() {
     const matchesSearch = record.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           record.employee_id.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesBranch = selectedBranch === 'All' || record.branch === selectedBranch;
-    return matchesSearch && matchesBranch;
+    
+    const emp = employeesList.find(e => e.id === record.id) || record;
+    const empShiftVal = String(emp.new_shift || emp.shift || '').toLowerCase();
+    let isDay = empShiftVal.includes('day') || empShiftVal === 'd';
+    let isNight = empShiftVal.includes('night') || empShiftVal === 'n';
+    
+    const matchesDayNight = selectedDayNight === 'All' || 
+                           (selectedDayNight === 'Day' && isDay) || 
+                           (selectedDayNight === 'Night' && isNight);
+
+    return matchesSearch && matchesBranch && matchesDayNight;
   })
 
   // Calculations for KPI Cards
@@ -417,12 +428,33 @@ export default function Payroll() {
             ))}
           </select>
 
-          {(searchQuery !== '' || selectedBranch !== 'All') && (
+          <select 
+            value={selectedDayNight}
+            onChange={e => setSelectedDayNight(e.target.value)}
+            style={{
+              padding: '10px 12px',
+              background: 'var(--white)',
+              border: '1px solid var(--surface-2)',
+              borderRadius: '8px',
+              outline: 'none',
+              fontSize: '13px',
+              minWidth: '150px',
+              cursor: 'pointer',
+              height: '40px'
+            }}
+          >
+            <option value="All">All Shifts (Day/Night)</option>
+            <option value="Day">Day Shift</option>
+            <option value="Night">Night Shift</option>
+          </select>
+
+          {(searchQuery !== '' || selectedBranch !== 'All' || selectedDayNight !== 'All') && (
             <button 
               className="btn btn-secondary"
               onClick={() => {
                 setSearchQuery('');
                 setSelectedBranch('All');
+                setSelectedDayNight('All');
               }}
               style={{
                 display: 'flex',

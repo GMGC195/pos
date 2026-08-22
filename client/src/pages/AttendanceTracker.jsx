@@ -141,6 +141,30 @@ export default function AttendanceTracker() {
     }
   };
 
+  const handleDirectRequest = async (type, log = null) => {
+    setRequestSubmitting(true);
+    try {
+      const now = new Date();
+      await axios.post('/api/attendance/edit-requests', {
+        attendance_id: log?.id || null,
+        requested_check_in: type === 'Check-In' ? now.toISOString() : null,
+        requested_check_out: type === 'Check-Out' ? now.toISOString() : null,
+        reason: `Self ${type}`,
+        target_role: 'Both',
+        request_type: type
+      });
+      toast.success(`${type} request submitted successfully!`);
+      loadPersonalStats();
+      if (user?.role?.toLowerCase() === 'employee') {
+        loadAttendance();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || `Failed to submit ${type} request`);
+    } finally {
+      setRequestSubmitting(false);
+    }
+  };
+
   const [employees, setEmployees] = useState(() => {
     const cached = localStorage.getItem('pizza_shop_attendance_today')
     return cached ? JSON.parse(cached) : []
@@ -152,7 +176,7 @@ export default function AttendanceTracker() {
   const [lateThreshold, setLateThreshold] = useState('09:00')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('All')
-  const [selectedShift, setSelectedShift] = useState('All')
+  const [selectedDayNight, setSelectedDayNight] = useState('All')
   const [selectedStatus, setSelectedStatus] = useState('All')
   const [selectedBranch, setSelectedBranch] = useState('All')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
@@ -492,7 +516,16 @@ export default function AttendanceTracker() {
     const matchesSearch = (emp.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
                           String(emp.employee_id || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDept = selectedDepartment === 'All' || emp.department === selectedDepartment;
-    const matchesShift = selectedShift === 'All' || (emp.shift || 'R1') === selectedShift;
+    
+    // Day/Night Shift mapping
+    const empShiftVal = String(emp.new_shift || emp.shift || '').toLowerCase();
+    let isDay = empShiftVal.includes('day') || empShiftVal === 'd';
+    let isNight = empShiftVal.includes('night') || empShiftVal === 'n';
+    
+    const matchesDayNight = selectedDayNight === 'All' || 
+                           (selectedDayNight === 'Day' && isDay) || 
+                           (selectedDayNight === 'Night' && isNight);
+
     const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch;
 
     // Status Filter
@@ -512,7 +545,7 @@ export default function AttendanceTracker() {
       matchesStatus = isCheckedOut;
     }
 
-    return matchesSearch && matchesDept && matchesShift && matchesStatus && matchesBranch;
+    return matchesSearch && matchesDayNight && matchesDept && matchesStatus && matchesBranch;
   }).sort((a, b) => {
     const aPending = a.pending_requests && a.pending_requests.length > 0 ? 1 : 0;
     const bPending = b.pending_requests && b.pending_requests.length > 0 ? 1 : 0;
@@ -578,10 +611,7 @@ export default function AttendanceTracker() {
                         className="btn btn-primary" 
                         onClick={(e) => {
                           e.preventDefault();
-                          setRequestTargetLog({ request_type: 'Check-In', date: new Date().toISOString() });
-                          setRequestedCheckIn(new Date().toTimeString().slice(0, 5));
-                          setRequestedCheckOut('');
-                          setShowRequestModal(true);
+                          handleDirectRequest('Check-In');
                         }}
                         style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px' }}
                       >
@@ -596,10 +626,7 @@ export default function AttendanceTracker() {
                         className="btn btn-secondary" 
                         onClick={(e) => {
                           e.preventDefault();
-                          setRequestTargetLog({ id: emp.attendance_id, request_type: 'Check-Out', date: new Date().toISOString() });
-                          setRequestedCheckIn('');
-                          setRequestedCheckOut(new Date().toTimeString().slice(0, 5));
-                          setShowRequestModal(true);
+                          handleDirectRequest('Check-Out', { id: emp.attendance_id });
                         }}
                         style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)' }}
                       >
@@ -831,10 +858,7 @@ export default function AttendanceTracker() {
                                               className="btn btn-secondary" 
                                               onClick={(e) => {
                                                 e.preventDefault();
-                                                setRequestTargetLog({ ...log, request_type: 'Check-Out' });
-                                                setRequestedCheckIn('');
-                                                setRequestedCheckOut(new Date().toTimeString().slice(0, 5));
-                                                setShowRequestModal(true);
+                                                handleDirectRequest('Check-Out', log);
                                               }}
                                               style={{ padding: '6px 12px', fontSize: 12, color: 'var(--red)', borderColor: 'var(--red)' }}
                                             >
@@ -952,8 +976,8 @@ export default function AttendanceTracker() {
           </select>
 
           <select 
-            value={selectedShift}
-            onChange={e => setSelectedShift(e.target.value)}
+            value={selectedDayNight}
+            onChange={e => setSelectedDayNight(e.target.value)}
             style={{
               padding: '10px 14px',
               background: 'var(--surface)',
@@ -965,9 +989,9 @@ export default function AttendanceTracker() {
               cursor: 'pointer'
             }}
           >
-            {['All', ...new Set([...shiftsList.map(s => s.name), ...employees.map(emp => emp.shift).filter(Boolean)])].map(sh => (
-              <option key={sh} value={sh}>{sh === 'All' ? 'All Shifts' : `Shift ${sh}`}</option>
-            ))}
+            <option value="All">All Shifts (Day/Night)</option>
+            <option value="Day">Day Shift</option>
+            <option value="Night">Night Shift</option>
           </select>
 
           <select 
@@ -1010,12 +1034,12 @@ export default function AttendanceTracker() {
             <option value="CheckedOut">Checked Out</option>
           </select>
 
-          {(searchQuery !== '' || selectedShift !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
+          {(searchQuery !== '' || selectedDayNight !== 'All' || selectedDepartment !== 'All' || selectedStatus !== 'All' || selectedBranch !== 'All') && (
             <button 
               className="btn btn-secondary"
               onClick={() => {
                 setSearchQuery('');
-                setSelectedShift('All');
+                setSelectedDayNight('All');
                 setSelectedDepartment('All');
                 setSelectedStatus('All');
                 setSelectedBranch('All');
@@ -1595,7 +1619,11 @@ export default function AttendanceTracker() {
         }}>
           <div className="card" style={{ width: '100%', maxWidth: 450, padding: 25, borderRadius: 12, background: 'var(--surface)', animation: 'scaleUp 0.2s ease-out' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h4 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Request Attendance Correction</h4>
+              <h4 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>
+                {requestTargetLog?.request_type === 'Check-In' ? 'Send Check In Request' : 
+                 requestTargetLog?.request_type === 'Check-Out' ? 'Send Check Out Request' : 
+                 'Edit Request'}
+              </h4>
               <button onClick={() => setShowRequestModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={20} /></button>
             </div>
             <form onSubmit={handleCreateRequestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
