@@ -508,16 +508,12 @@ export default function POS() {
                     setSizeModalItem({ ...item, sizeOptionsParsed });
                     setSizeModalSelected(sizeOptionsParsed[0].name);
                   }}>
-                    {item.image_url ? (
+                    {item.image_url && (
                       <img
                         src={item.image_url}
                         alt={item.name}
                         onError={e => { e.target.style.display = 'none' }}
                       />
-                    ) : (
-                      <div style={{ width: '100%', height: '150px', background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13, borderBottom: '1px solid var(--surface-2)', fontWeight: 600 }}>
-                        No Image
-                      </div>
                     )}
                     <div className="product-card-info">
                       <h4>{item.name}</h4>
@@ -720,12 +716,8 @@ export default function POS() {
               </div>
 
               <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 24 }}>
-                {sizeModalItem.image_url ? (
+                {sizeModalItem.image_url && (
                   <img src={sizeModalItem.image_url} alt={sizeModalItem.name} style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} />
-                ) : (
-                  <div style={{ width: 64, height: 64, borderRadius: 10, background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 11, fontWeight: 600 }}>
-                    No Img
-                  </div>
                 )}
                 <div>
                   <h4 style={{ fontSize: 16, margin: 0, color: 'var(--text-primary)' }}>{sizeModalItem.name}</h4>
