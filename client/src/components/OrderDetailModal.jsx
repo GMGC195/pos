@@ -15,9 +15,9 @@ export default function OrderDetailModal({ order, onClose }) {
     const now = new Date(order.created_at)
     const itemRows = order.items.map((item, index) => `
       <div class="row">
-        <span class="item-name">${index + 1}. ${item.item_name}</span>
+        <span class="item-name">${index + 1}. ${item.item_name || item.name}</span>
         <span class="item-qty">${item.qty}</span>
-        <span class="item-price">${CURRENCY}${parseFloat(item.unit_price * item.qty).toFixed(2)}</span>
+        <span class="item-price">${CURRENCY}${parseFloat((item.unit_price || item.price) * item.qty).toFixed(2)}</span>
       </div>`).join('')
 
     const html = `<!DOCTYPE html>
@@ -149,9 +149,9 @@ export default function OrderDetailModal({ order, onClose }) {
 
             {order.items?.map((item, i) => (
               <div key={i} style={{ display: 'flex', marginBottom: 8 }}>
-                <span style={{ flex: 2, wordBreak: 'break-word' }}>${i + 1}. {item.item_name}</span>
+                <span style={{ flex: 2, wordBreak: 'break-word' }}>${i + 1}. {item.item_name || item.name}</span>
                 <span style={{ width: 30, textAlign: 'center' }}>{item.qty}</span>
-                <span style={{ flex: 1.2, textAlign: 'right' }}>{CURRENCY}{parseFloat(item.unit_price * item.qty).toFixed(2)}</span>
+                <span style={{ flex: 1.2, textAlign: 'right' }}>{CURRENCY}{parseFloat((item.unit_price || item.price) * item.qty).toFixed(2)}</span>
               </div>
             ))}
 

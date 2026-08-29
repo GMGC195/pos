@@ -27,7 +27,7 @@ export default function HoldPayments() {
   const loadHeldOrders = () => {
     setLoading(true)
     // Fetch with a high limit to ensure summary accuracy
-    axios.get('/api/orders', { params: { status: 'Hold', limit: 500 } })
+    axios.get('/api/orders', { params: { status: 'Hold,Payment Pending', limit: 500 } })
       .then(res => setOrders(res.data))
       .catch(err => console.error(err))
       .finally(() => setLoading(false))

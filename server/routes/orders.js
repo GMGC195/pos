@@ -95,7 +95,7 @@ async function returnStock(orderId, client) {
 
 // POST create order atomically
 router.post('/', authenticateToken, async (req, res) => {
-  const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id } = req.body;
+  const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments } = req.body;
   const client = await pool.connect();
   try {
     // Idempotency check: If client_order_id exists, return existing order
@@ -109,7 +109,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     await client.query('BEGIN');
 
-    const status = payment_method === 'Hold' ? 'Hold' : 'Completed';
+    const status = (payment_method === 'Hold' || payment_method === 'Payment Pending') ? payment_method : 'Completed';
 
     // Calculate daily resetting slip number
     const slipResult = await client.query(
@@ -121,9 +121,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Insert order
     const orderResult = await client.query(
-      `INSERT INTO orders (subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, NULL, $10, FALSE) RETURNING *`,
-      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber]
+      `INSERT INTO orders (subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, NULL, $10, FALSE, $11, $12, $13, $14) RETURNING *`,
+      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null]
     );
     const order = orderResult.rows[0];
 
@@ -163,15 +163,25 @@ router.post('/', authenticateToken, async (req, res) => {
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { status, limit = 50 } = req.query;
-    let query = 'SELECT * FROM orders WHERE 1=1';
+    let query = `
+      SELECT o.*, 
+        (SELECT json_agg(json_build_object('id', oi.item_id, 'cartId', oi.item_id, 'name', oi.item_name, 'qty', oi.qty, 'price', oi.unit_price)) 
+         FROM order_items oi WHERE oi.order_id = o.id) as items 
+      FROM orders o WHERE 1=1
+    `;
     const params = [];
 
     if (status) {
-      params.push(status);
-      query += ` AND status = $${params.length}`;
+      if (status.includes(',')) {
+        params.push(status.split(','));
+        query += ` AND o.status = ANY($${params.length})`;
+      } else {
+        params.push(status);
+        query += ` AND o.status = $${params.length}`;
+      }
     }
 
-    query += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+    query += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1}`;
     params.push(limit);
 
     const result = await pool.query(query, params);
@@ -217,7 +227,7 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
 // PATCH pay held order
 router.patch('/:id/pay', authenticateToken, async (req, res) => {
   const { payment_method } = req.body;
-  if (!['Cash', 'Card'].includes(payment_method)) {
+  if (!['Cash', 'Card', 'Online'].includes(payment_method)) {
     return res.status(400).json({ error: 'Invalid payment method' });
   }
   const client = await pool.connect();
@@ -405,7 +415,7 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
 
 // PUT update order
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id } = req.body;
+  const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -425,9 +435,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
        SET subtotal = $1, tax = $2, grand_total = $3, status = $4, 
            customer_name = $5, customer_phone = $6, customer_address = $7, discount = $8,
            client_order_id = COALESCE($9, client_order_id),
+           order_type = $10, table_number = $11, order_taker = $12, comments = $13,
            is_edited = TRUE
-       WHERE id = $10 RETURNING *`,
-      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, req.params.id]
+       WHERE id = $14 RETURNING *`,
+      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, order_type || null, table_number || null, order_taker || null, comments || null, req.params.id]
     );
 
     // Replace order items: Delete existing and insert new

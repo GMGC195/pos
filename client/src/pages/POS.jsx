@@ -3,6 +3,7 @@ import axios from '../api'
 import toast from 'react-hot-toast'
 import { CURRENCY } from '../config'
 import ManageCategoriesModal from '../components/ManageCategoriesModal'
+import OrderDetailModal from '../components/OrderDetailModal'
 import AddCategoryModal from '../components/AddCategoryModal'
 import {
   Search,
@@ -15,7 +16,14 @@ import {
   MoreVertical,
   Wifi,
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  ChevronRight,
+  X,
+  Edit,
+  Eye,
+  Check,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react'
 import {
   savePendingOrder,
@@ -74,6 +82,71 @@ export default function POS() {
   const [pendingCount, setPendingCount] = useState(0)
   const [syncing, setSyncing] = useState(false)
   const receiptRef = useRef(null)
+  const [showCart, setShowCart] = useState(false)
+  const [activeOrders, setActiveOrders] = useState([])
+  const [tableConflictData, setTableConflictData] = useState(null)
+  const [quickCompleteModal, setQuickCompleteModal] = useState(null)
+  const [detailOrder, setDetailOrder] = useState(null)
+  const [expandedSections, setExpandedSections] = useState({ 'Dine-In': true, 'Takeaway': false, 'Delivery': false })
+  
+  const toggleSection = (type) => {
+    setExpandedSections(prev => ({ ...prev, [type]: !prev[type] }));
+  };
+
+  useEffect(() => {
+    setExpandedSections(prev => {
+      let changed = false;
+      const next = { ...prev };
+      ['Takeaway', 'Delivery'].forEach(type => {
+        const hasOrders = activeOrders.some(o => o.order_type === type);
+        if (hasOrders && !prev[type]) {
+          next[type] = true;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [activeOrders]);
+
+  const loadOrderForEdit = async (editId) => {
+    try {
+      setShowCart(true)
+      
+      let order = activeOrders.find(o => o.id === parseInt(editId));
+      
+      // If we have the order in memory AND it has items with IDs (from our updated query), load instantly!
+      if (!order || !order.items || order.items.length === 0 || !order.items[0].id) {
+        // Fallback to API if not in memory or missing IDs
+        const res = await axios.get(`/api/orders/${editId}`)
+        order = res.data
+      }
+
+      const loadedCart = order.items.map(item => ({
+        id: item.item_id || item.id,
+        cartId: item.cartId || (item.item_id || item.id).toString(),
+        name: item.item_name || item.name,
+        price: parseFloat(item.unit_price || item.price),
+        qty: item.qty
+      }))
+      
+      setCart(loadedCart)
+      setCustomerInfo({
+        name: order.customer_name || '',
+        phone: order.customer_phone || '',
+        address: order.customer_address?.startsWith('Table ') ? '' : (order.customer_address || ''),
+        discount: order.discount || '',
+        orderType: order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : 'Delivery'),
+        tableNumber: order.table_number || (order.customer_address?.startsWith('Table ') ? order.customer_address.replace('Table ', '') : ''),
+        orderTaker: order.order_taker || '',
+        comments: order.comments || ''
+      })
+      setEditingOrderId(editId)
+      setPaymentMethod(order.status === 'Hold' ? 'Hold' : 'Cash')
+    } catch (err) {
+      console.error('Error loading order for edit:', err)
+      toast.error('Failed to load order details')
+    }
+  }
 
   // Check for edit parameter in URL
   useEffect(() => {
@@ -99,9 +172,12 @@ export default function POS() {
             phone: order.customer_phone || '',
             address: order.customer_address?.startsWith('Table ') ? '' : (order.customer_address || ''),
             discount: order.discount || '',
-            orderType: order.customer_address?.startsWith('Table ') ? 'Dine-In' : 'Delivery',
-            tableNumber: order.customer_address?.startsWith('Table ') ? order.customer_address.replace('Table ', '') : ''
+            orderType: order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : 'Delivery'),
+            tableNumber: order.table_number || (order.customer_address?.startsWith('Table ') ? order.customer_address.replace('Table ', '') : ''),
+            orderTaker: order.order_taker || '',
+            comments: order.comments || ''
           })
+          setShowCart(true)
           setPaymentMethod(order.status === 'Hold' ? 'Hold' : 'Cash')
         })
         .catch(err => {
@@ -131,6 +207,19 @@ export default function POS() {
     // Update pending count
     getAllPendingOrders().then(orders => setPendingCount(orders.length))
   }, [isOnline])
+
+  const fetchActiveOrders = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/orders?status=Hold&limit=100')
+      setActiveOrders(res.data)
+    } catch (err) {
+      console.error(err)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!showCart) fetchActiveOrders()
+  }, [showCart, fetchActiveOrders])
 
   const syncPendingOrders = async () => {
     const orders = await getAllPendingOrders()
@@ -170,6 +259,7 @@ export default function POS() {
   const total = subtotal + tax
 
   const addToCart = useCallback((item, sizeOpt = null) => {
+    setShowCart(true)
     setCart(prev => {
       let cartId = item.id.toString()
       let finalName = item.name
@@ -197,13 +287,29 @@ export default function POS() {
   // clearCart is now handled by POSContext
 
   const handlePayClick = (method = paymentMethod) => {
-    if (cart.length === 0) return toast.error('Cart is empty!')
+    if (cart.length === 0) return toast.error('Please Your cart is empty please select item')
     setPaymentMethod(method)
     setConfirmModal(true)
   }
 
-  const submitOrder = async (method = paymentMethod) => {
+  
+  const handlePlaceOrder = (method = paymentMethod, shouldPrint = true) => {
     if (cart.length === 0) return
+    if (customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber && method !== 'Hold') {
+      const isTableBooked = activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId));
+      if (isTableBooked) {
+        setTableConflictData({ method, shouldPrint })
+        return
+      }
+    }
+    executeOrder(method, shouldPrint)
+  }
+
+  const executeOrder = async (method = paymentMethod, shouldPrint = true) => {
+    if (cart.length === 0) return
+    
+
+    
     setProcessing(true)
     const finalDiscount = parseFloat(customerInfo.discount) || 0;
     const finalTotal = total - finalDiscount;
@@ -219,7 +325,11 @@ export default function POS() {
         customer_phone: customerInfo.phone,
         customer_address: customerInfo.orderType === 'Dine-In' ? (customerInfo.tableNumber ? `Table ${customerInfo.tableNumber}` : 'Dine-In') : customerInfo.address,
         discount: finalDiscount,
-        client_order_id: crypto.randomUUID()
+        client_order_id: crypto.randomUUID(),
+        order_type: customerInfo.orderType,
+        table_number: customerInfo.tableNumber,
+        order_taker: customerInfo.orderTaker,
+        comments: customerInfo.comments
       }
 
       let res;
@@ -232,7 +342,7 @@ export default function POS() {
           setPendingCount(prev => prev + 1)
           toast.success('Offline! Order saved locally and will sync when online.', { duration: 5000 })
           // We still "print" but it's offline
-          printThermalSlip(method, 'OFFLINE-' + orderData.client_order_id.slice(0, 8), '-')
+          if (shouldPrint) if (shouldPrint) printThermalSlip(method, 'OFFLINE-' + orderData.client_order_id.slice(0, 8), '-')
         } else {
           try {
             res = await axios.post('/api/orders', orderData)
@@ -258,16 +368,17 @@ export default function POS() {
       const slipNumber = res?.data?.order?.slip_number || '-'
       if (isOnline) {
         toast.success(method === 'Hold' ? 'Order updated to Hold status!' : 'Order Placed!', { duration: 3000 })
-        printThermalSlip(method, orderId, slipNumber)
+        if (shouldPrint) printThermalSlip(method, orderId, slipNumber)
       }
 
       // Cleanup
-      setCart([])
+      clearCart()
       setEditingOrderId(null)
       window.history.replaceState({}, '', '/pos')
       setPaymentMethod('Cash')
       setConfirmModal(false)
-      setCustomerInfo({ name: '', phone: '', address: '', discount: '' })
+      setShowCart(false)
+      fetchActiveOrders()
     } catch (err) {
       if (isOnline) {
         console.error('Order failed:', err)
@@ -556,8 +667,85 @@ export default function POS() {
         </div>
 
         {/* Right: Cart */}
-        <div className="pos-right">
-          <div className="cart-header">
+        
+        {/* Right Panel: Cart OR Active Orders */}
+        <div className={`pos-right ${showCart ? 'has-cart-open' : ''}`} style={{ position: 'relative' }}>
+          
+          <button 
+            className="btn btn-primary" 
+            style={{ position: 'absolute', top: 12, right: 12, zIndex: 100, borderRadius: '50%', width: 44, height: 44, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }} 
+            onClick={() => setShowCart(!showCart)}
+          >
+            <ShoppingCart size={20} />
+            {cart.reduce((s, c) => s + c.qty, 0) > 0 && <span className="cart-badge-dot" style={{ top: -4, right: -4 }}>{cart.reduce((s, c) => s + c.qty, 0)}</span>}
+          </button>
+
+          <div className="active-orders-panel">
+              <div className="active-orders-list" style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflow: 'hidden', padding: '8px 12px 12px' }}>
+                {['Dine-In', 'Takeaway', 'Delivery'].map(type => {
+                  const orders = activeOrders.filter(o => (o.order_type === type) || (!o.order_type && type === 'Delivery' && o.customer_address && !o.customer_address.startsWith('Table ')) || (!o.order_type && type === 'Dine-In' && o.customer_address?.startsWith('Table ')));
+                  const isExpanded = expandedSections[type];
+                  
+                  return (
+                    <div key={type} className="order-group" style={{ display: 'flex', flexDirection: 'column', flex: isExpanded ? (type === 'Dine-In' ? 2 : 1) : 'none', minHeight: isExpanded ? 0 : 'auto', transition: 'all 0.2s ease-in-out', flexShrink: 0, borderTop: type !== 'Dine-In' ? '1px dashed #ccc' : 'none', marginTop: type !== 'Dine-In' ? 4 : 0, paddingTop: type !== 'Dine-In' ? 4 : 0 }}>
+                      <div className="order-group-header" onClick={() => toggleSection(type)} style={{ cursor: 'pointer' }}>
+                        <h5 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                          {type === 'Dine-In' ? <CheckCircle2 size={14} /> : type === 'Takeaway' ? <ClipboardList size={14} /> : <ShoppingCart size={14}/>}
+                          {type} Orders
+                        </h5>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span className="order-badge">{orders.length} {orders.length === 1 ? 'Order' : 'Orders'}</span>
+                          <button className="btn btn-sm" style={{ background: 'transparent', padding: 4, color: 'var(--text-muted)' }} onClick={(e) => { e.stopPropagation(); toggleSection(type); }}>
+                            {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {isExpanded && (
+                      <div className="order-cards" style={{ overflowY: 'auto', flex: 1 }}>
+                        {orders.map(o => (
+                          <div key={o.id} className="active-order-card">
+                            <div className="order-head" style={{ marginBottom: 4 }}>
+                              <span style={{ fontWeight: 800, color: '#a22020', fontSize: 13 }}>Order #{o.id} | {o.slip_number}</span>
+                              <span style={{ fontWeight: 800, color: '#a22020', fontSize: 13 }}>{CURRENCY}{parseFloat(o.grand_total).toFixed(2)}</span>
+                            </div>
+                            <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                              {o.items ? o.items.map((i, idx) => (
+                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span>{i.qty}x {i.name}</span>
+                                  <span>Rs.{(i.price ? parseFloat(i.price) * i.qty : 0).toFixed(2)}</span>
+                                </div>
+                              )) : 'No items'}
+                            </div>
+                            <div style={{ borderTop: '1px dashed #ccc', paddingTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.2 }}>
+                                {type === 'Delivery' ? (
+                                  <>{o.customer_name || 'Guest'} {o.customer_phone ? ` - ${o.customer_phone}` : ''}</>
+                                ) : type === 'Takeaway' ? (
+                                  <>{o.customer_name || 'Guest'}</>
+                                ) : (
+                                  <>Table: {o.table_number || (o.customer_address ? o.customer_address.replace('Table ', '') : '-')} {o.customer_name && ` | ${o.customer_name}`}</>
+                                )}
+                              </div>
+                              <div className="order-actions" style={{ display: 'flex', gap: 4 }}>
+                                <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => loadOrderForEdit(o.id)} title="Edit"><Edit size={14} color="var(--text-muted)"/></button>
+                                <button className="btn btn-sm btn-secondary" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600, background: '#f5f5f5', color: '#333' }} onClick={() => setDetailOrder(o)}>Detail View</button>
+                                <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700 }} onClick={() => setQuickCompleteModal(o)}>Complete</button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {orders.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 0' }}>No active {type} orders.</div>}
+                      </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          
+          <div className={`pos-right-inner ${showCart ? 'cart-open' : 'cart-closed'}`}>
+          <div className="cart-header" style={{ paddingRight: 60 }}>
             <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ShoppingCart size={20} />
               {editingOrderId ? <span style={{ color: 'var(--red)' }}>Editing Order #{editingOrderId}</span> : 'Cart'}
@@ -566,7 +754,7 @@ export default function POS() {
               {editingOrderId && (
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={clearCart}
+                  onClick={() => { clearCart(); setEditingOrderId(null); setShowCart(false); window.history.replaceState({}, '', '/pos'); }}
                   style={{ fontSize: 11, padding: '4px 8px' }}
                 >
                   Cancel Edit
@@ -618,10 +806,17 @@ export default function POS() {
                 </div>
               ))
             }
+            {cart.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <button className="btn btn-sm btn-secondary" onClick={() => { clearCart(); setEditingOrderId(null); window.history.replaceState({}, '', '/pos'); }} style={{ gap: 4, padding: '4px 8px', fontSize: 12 }}>
+                  <Trash2 size={14} /> Clear Cart
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Totals */}
-          <div className="cart-totals">
+          <div className="cart-totals" style={{ padding: "16px 24px" }}>
             <div className="total-row">
               <span>Subtotal</span>
               <span>{CURRENCY}{subtotal.toFixed(2)}</span>
@@ -634,41 +829,30 @@ export default function POS() {
           </div>
 
           {/* Payment method */}
-          <div style={{ padding: '0 20px 12px', display: 'flex', gap: 8 }}>
-            {['Cash', 'Card'].map(m => (
-              <button
-                key={m}
-                className={`btn btn-sm ${paymentMethod === m ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, justifyContent: 'center', gap: 6 }}
-                onClick={() => setPaymentMethod(m)}
-              >
-                {m === 'Cash' ? <Banknote size={16} /> : <CreditCard size={16} />} {m}
-              </button>
-            ))}
-          </div>
+          
 
           {/* Actions */}
           <div className="cart-actions">
-            <div className="cart-actions-row">
-              <button className="btn btn-secondary" onClick={clearCart} style={{ gap: 6 }}><Trash2 size={16} /> Clear (Esc)</button>
+            <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', width: '100%' }}>
               <button
-                className={`btn ${paymentMethod === 'Hold' ? 'btn-primary' : 'btn-warning'}`}
+                className={`btn ${paymentMethod === 'Hold' ? 'btn-primary' : 'btn-warning'} btn-lg`}
                 onClick={() => handlePayClick('Hold')}
-                style={{ gap: 6 }}
+                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
+                disabled={processing}
               >
-                <ClipboardList size={16} /> {paymentMethod === 'Hold' ? 'Hold Selected' : 'Hold'}
+                <ClipboardList size={18} /> Hold (Enter)
+              </button>
+              <button
+                className="btn btn-success btn-lg"
+                style={{ justifyContent: 'center', gap: 6, padding: '12px 8px' }}
+                onClick={() => handlePayClick('Cash')}
+                disabled={processing}
+              >
+                <CheckCircle2 size={18} /> Complete Order
               </button>
             </div>
-            <button
-              className="btn btn-success btn-lg"
-              style={{ justifyContent: 'center', gap: 6, marginBottom: '3px' }}
-              onClick={() => handlePayClick()}
-              disabled={cart.length === 0 || processing}
-            >
-              <CheckCircle2 size={20} /> Confirm Order (Enter)
-            </button>
           </div>
-        </div>
+          </div>        </div>
       </div>
 
       {/* Thermal Receipt - hidden, printing is done via printThermalSlip() popup */}
@@ -779,17 +963,17 @@ export default function POS() {
       {
         confirmModal && (
           <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setConfirmModal(false) }}>
-            <div className="modal" style={{ maxWidth: 750, width: '90%' }}>
+            <div className="modal" style={{ maxWidth: 700, width: "90%", padding: 20 }}>
               <div className="modal-header">
                 <h3>Confirm Order</h3>
                 <button className="modal-close" onClick={() => setConfirmModal(false)}>✕</button>
               </div>
-              <div style={{ display: 'flex', gap: 16, padding: 16, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 12, padding: 12, flexWrap: 'wrap' }}>
                 {/* Left Column: Order Summary */}
                 <div style={{ flex: '1 1 300px', borderRight: '1px solid var(--surface-2)', paddingRight: 16 }}>
                   <h4 style={{ marginBottom: 16 }}>Receipt Preview</h4>
-                  <div style={{ background: '#f8f9fa', padding: 16, borderRadius: 8, fontFamily: 'Tahoma, Geneva, sans-serif', fontSize: 13 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: 8, borderBottom: '1px solid #ddd', paddingBottom: 4 }}>
+                  <div style={{ background: '#f8f9fa', padding: 12, borderRadius: 8, fontFamily: 'Tahoma, Geneva, sans-serif', fontSize: 13 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: 6, borderBottom: '1px solid #ddd', paddingBottom: 4 }}>
                       <span style={{ flex: 2 }}>Item</span>
                       <span style={{ flex: 1, textAlign: 'center' }}>QTY</span>
                       <span style={{ flex: 1, textAlign: 'right' }}>Amount</span>
@@ -825,84 +1009,148 @@ export default function POS() {
                 </div>
 
                 {/* Right Column: Optional Info & Actions */}
-                <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div className="form-group" style={{ marginBottom: 8 }}>
-                    <label style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Order Type</label>
+                <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div className="form-group" style={{ marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Order Type</label>
                     <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                        <input 
-                          type="radio" 
-                          name="orderType" 
-                          value="Delivery" 
-                          checked={customerInfo.orderType !== 'Dine-In'} 
-                          onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Delivery' }))} 
-                        />
-                        <span style={{ fontSize: 14 }}>Delivery / Takeaway</span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="radio" name="orderType" value="Dine-In" checked={customerInfo.orderType === 'Dine-In'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Dine-In' }))} />
+                        <span style={{ fontSize: 13 }}>Dine-In</span>
                       </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                        <input 
-                          type="radio" 
-                          name="orderType" 
-                          value="Dine-In" 
-                          checked={customerInfo.orderType === 'Dine-In'} 
-                          onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Dine-In' }))} 
-                        />
-                        <span style={{ fontSize: 14 }}>Dine-In</span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="radio" name="orderType" value="Takeaway" checked={customerInfo.orderType === 'Takeaway'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Takeaway' }))} />
+                        <span style={{ fontSize: 13 }}>Takeaway</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input type="radio" name="orderType" value="Delivery" checked={customerInfo.orderType === 'Delivery'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Delivery' }))} />
+                        <span style={{ fontSize: 13 }}>Delivery</span>
                       </label>
                     </div>
                   </div>
 
-                  <div className="form-group" style={{ marginBottom: 8 }}>
-                    <label style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name (Optional)</label>
+                  {/* DINE-IN FORM */}
+                  {customerInfo.orderType === 'Dine-In' && (
+                    <>
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+                        <div className="form-group" style={{ flex: 1 }}>
+                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'flex', justifyContent: 'space-between' }}>
+                            <span>Table Number *</span>
+                            {customerInfo.tableNumber && (
+                              <span style={{ color: activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'var(--red)' : 'var(--green)', fontWeight: 'bold' }}>
+                                {activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'Already Booked' : 'Available'}
+                              </span>
+                            )}
+                          </label>
+                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="e.g. 5" value={customerInfo.tableNumber || ''} onChange={e => setCustomerInfo(p => ({ ...p, tableNumber: e.target.value }))} />
+                        </div>
+                        <div className="form-group" style={{ flex: 1 }}>
+                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name *</label>
+                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+                        <div className="form-group" style={{ flex: 1 }}>
+                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Discount Amount</label>
+                          <input className="form-control" type="number" step="0.01" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                        </div>
+                        <div className="form-group" style={{ flex: 1 }}>
+                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Comments</label>
+                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Notes..." value={customerInfo.comments || ''} onChange={e => setCustomerInfo(p => ({ ...p, comments: e.target.value }))} />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* DELIVERY FORM */}
+                  {customerInfo.orderType === 'Delivery' && (
+                    <>
+                      <div className="form-group" style={{ marginBottom: 4 }}>
+                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name</label>
+                        <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Phone Number *</label>
+                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
+                        </div>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Discount Amount</label>
+                          <input className="form-control" type="number" step="0.01" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 4 }}>
+                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Address *</label>
+                        <textarea className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="123 Main St" rows={1} value={customerInfo.address} onChange={e => setCustomerInfo(p => ({ ...p, address: e.target.value }))} />
+                      </div>
+                    </>
+                  )}
+
+                  {/* TAKEAWAY FORM */}
+                  {customerInfo.orderType === 'Takeaway' && (
+                    <>
+                      <div className="form-group" style={{ marginBottom: 4 }}>
+                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name *</label>
+                        <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 4 }}>
+                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Phone Number *</label>
+                        <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 4 }}>
+                        <label style={{ display: 'block', fontSize: 12, marginBottom: 2, color: 'var(--text-secondary)' }}>Discount Amount</label>
+                        <input className="form-control" type="number" step="0.01" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="form-group" style={{ marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>
+                      {customerInfo.orderType === 'Delivery' ? 'Delivery Boy Name' : 'Order Taker Name'}
+                    </label>
                     <input
                       type="text"
                       className="form-control"
-                      placeholder="Enter Customer Name"
-                      value={customerInfo.name}
-                      onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))}
+                      style={{ padding: '6px 8px', fontSize: 13 }}
+                      placeholder={customerInfo.orderType === 'Delivery' ? 'Delivery Boy Name' : 'Order Taker Name'}
+                      value={customerInfo.orderTaker || ''}
+                      onChange={e => setCustomerInfo(p => ({ ...p, orderTaker: e.target.value }))}
                     />
                   </div>
-                  <div className="form-group" style={{ marginBottom: 8 }}>
-                    <label style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Phone Number (Optional)</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="0300-0000000"
-                      value={customerInfo.phone}
-                      onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))}
-                    />
-                  </div>
-                  {customerInfo.orderType === 'Dine-In' ? (
-                    <div className="form-group" style={{ marginBottom: 8 }}>
-                      <label style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Table Number *</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        placeholder="e.g. 5"
-                        value={customerInfo.tableNumber || ''}
-                        onChange={e => setCustomerInfo(p => ({ ...p, tableNumber: e.target.value }))}
-                      />
-                    </div>
-                  ) : (
-                    <div className="form-group" style={{ marginBottom: 8 }}>
-                      <label style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Address (Optional)</label>
-                      <textarea
-                        className="form-control"
-                        placeholder="123 Main St"
-                        rows={1}
-                        value={customerInfo.address}
-                        onChange={e => setCustomerInfo(p => ({ ...p, address: e.target.value }))}
-                      />
+
+                  {paymentMethod !== 'Hold' && (
+                    <div className="form-group" style={{ marginBottom: 4, marginTop: 'auto' }}>
+                      <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>Payment Method</label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {['Cash', 'Online', 'Payment Pending'].map(pm => (
+                          <button 
+                            key={pm}
+                            type="button"
+                            onClick={() => setPaymentMethod(pm)}
+                            style={{
+                              flex: 1, 
+                              padding: '8px 4px', 
+                              fontSize: 13,
+                              fontWeight: 600,
+                              borderRadius: 6,
+                              border: paymentMethod === pm || (pm==='Payment Pending' && paymentMethod==='Hold') ? '2px solid var(--primary)' : '1px solid var(--surface-2)',
+                              background: paymentMethod === pm || (pm==='Payment Pending' && paymentMethod==='Hold') ? 'rgba(255,184,0,0.1)' : 'white',
+                              color: paymentMethod === pm || (pm==='Payment Pending' && paymentMethod==='Hold') ? 'var(--primary)' : 'var(--text-secondary)',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {pm === 'Payment Pending' ? 'Pending' : pm}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
-                  <div className="form-group" style={{ marginBottom: 8 }}>
-                    <label style={{ display: 'block', fontSize: 13, marginBottom: 2, color: 'var(--text-secondary)' }}>Discount Amount ({CURRENCY})</label>
-                    <input className="form-control" type="number" step="0.01" placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
-                  </div>
 
-                  <div style={{ marginTop: 'auto', paddingTop: 8 }}>
-                    <button className="btn btn-primary" style={{ width: '100%', fontSize: 16, padding: '10px 16px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={() => submitOrder(paymentMethod)} disabled={processing}>
-                      {processing ? 'Processing...' : <><CheckCircle2 size={18} /> Place & Print (Enter)</>}
+                  <div style={{ paddingTop: 4, display: 'flex', gap: 10 }}>
+                    <button className="btn btn-secondary" style={{ flex: 1, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, false)} disabled={processing}>
+                      Punch Only
+                    </button>
+                    <button className="btn btn-primary" style={{ flex: 2, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, true)} disabled={processing}>
+                      {processing ? 'Processing...' : 'Print & Place Order'}
                     </button>
                   </div>
                 </div>
