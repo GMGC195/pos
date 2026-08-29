@@ -14,7 +14,7 @@ export function POSProvider({ children }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [cart, setCart] = useState([])
-  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', address: '', discount: '' })
+  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', address: '', discount: '', orderType: 'Delivery', tableNumber: '' })
   const [loading, setLoading] = useState(false)
   const [isDataLoaded, setIsDataLoaded] = useState(false)
   const [activeCategory, setActiveCategory] = useState('All')
@@ -61,7 +61,7 @@ export function POSProvider({ children }) {
   const updateCart = (newCart) => setCart(newCart)
   const clearCart = () => {
     setCart([])
-    setCustomerInfo({ name: '', phone: '', address: '', discount: '' })
+    setCustomerInfo({ name: '', phone: '', address: '', discount: '', orderType: 'Delivery', tableNumber: '' })
   }
 
   const value = {

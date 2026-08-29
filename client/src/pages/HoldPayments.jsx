@@ -35,7 +35,7 @@ export default function HoldPayments() {
 
   useEffect(() => {
     loadHeldOrders()
-    const interval = setInterval(loadHeldOrders, 30000) // Auto-refresh every 30s
+    const interval = setInterval(loadHeldOrders, 300000) // Auto-refresh every 5 mins
 
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {

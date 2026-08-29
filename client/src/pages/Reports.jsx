@@ -57,7 +57,7 @@ export default function Reports({ isTodaySales = false }) {
 
   useEffect(() => { 
     load()
-    const interval = setInterval(load, 180000) // Auto-refresh every 3 mins
+    const interval = setInterval(load, 300000) // Auto-refresh every 5 mins
     return () => clearInterval(interval)
   }, [from, to])
 

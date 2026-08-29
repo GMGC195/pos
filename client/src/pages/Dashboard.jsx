@@ -88,6 +88,7 @@ export default function Dashboard() {
   const [attendanceSelectedStatus, setAttendanceSelectedStatus] = useState('All')
   const [attendanceSelectedBranch, setAttendanceSelectedBranch] = useState('All')
   const [showAttendanceTable, setShowAttendanceTable] = useState(false)
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
 
   const loadStats = () => {
     setLoading(true)
@@ -138,7 +139,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadStats()
-    const interval = setInterval(loadStats, 180000) // Auto-refresh every 3 mins
+    const interval = setInterval(loadStats, 300000) // Auto-refresh every 5 mins
     return () => clearInterval(interval)
   }, [isDeveloper])
 
@@ -429,7 +430,7 @@ export default function Dashboard() {
   }
 
   // Shift Attendance Bar Chart data
-  const uniqueShifts = ['R1 Day', 'R2 Day', 'R3 Day', 'R1 Night', 'R2 Night', 'R3 Night'];
+  const uniqueShifts = ['R1 Day', 'R1 Night', 'R2 Day', 'R2 Night', 'R3 Day', 'R3 Night'];
   
   const getEmployeeBucket = (emp) => {
     let rPref = 'R1';
@@ -453,6 +454,44 @@ export default function Dashboard() {
   const enrolledData = uniqueShifts.map(bucket =>
     (allEmployees.length > 0 ? allEmployees : todayActivity).filter(e => getEmployeeBucket(e) === bucket).length
   );
+  const checkoutData = uniqueShifts.map(bucket =>
+    todayActivity.filter(e => getEmployeeBucket(e) === bucket && e.attendance_id && e.check_out).length
+  );
+
+  const barChartLabelsPlugin = {
+    id: 'barChartLabels',
+    afterDraw(chart) {
+      const { ctx } = chart;
+      chart.data.datasets.forEach((dataset, i) => {
+        const meta = chart.getDatasetMeta(i);
+        if (!meta.hidden) {
+          meta.data.forEach((element, index) => {
+            const data = dataset.data[index];
+            if (data > 0) {
+              ctx.save();
+              ctx.fillStyle = '#ffffff';
+              ctx.font = 'bold 12px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              
+              let labelText = '';
+              if (dataset.label === 'Present Today') labelText = 'P';
+              else if (dataset.label === 'Checked Out') labelText = 'C';
+              else if (dataset.label === 'Total Enrolled') labelText = 'T';
+
+              // Using tooltipPosition for safe coordinates
+              const pos = element.tooltipPosition();
+              const x = pos.x;
+              const y = pos.y + 12; // 12px below the top of the bar
+              
+              ctx.fillText(labelText, x, y);
+              ctx.restore();
+            }
+          });
+        }
+      });
+    }
+  };
 
   const attendanceBarData = {
     labels: uniqueShifts,
@@ -461,6 +500,12 @@ export default function Dashboard() {
         label: 'Present Today',
         data: presentData,
         backgroundColor: '#10b981', // green
+        borderRadius: 6,
+      },
+      {
+        label: 'Checked Out',
+        data: checkoutData,
+        backgroundColor: '#9ca3af', // gray
         borderRadius: 6,
       },
       {
@@ -773,14 +818,44 @@ export default function Dashboard() {
             grid-template-columns: repeat(6, 1fr) !important;
           }
         }
-        @media (max-width: 767px) {
+        @media (max-width: 768px) {
           .attendance-analytics-row,
           .attendance-bottom-cards-container {
             justify-content: center !important;
           }
+          .chart-card {
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+          }
+          .attendance-cards-grid {
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
+          }
+          .dashboard-refresh-btn {
+            display: none !important;
+          }
+          .mobile-only-filter-btn {
+            display: flex !important;
+          }
+          .filters-container {
+            display: none !important;
+            width: 100%;
+          }
+          .filters-container.show {
+            display: flex !important;
+          }
+        }
+        .mobile-only-filter-btn {
+          display: none;
+          align-items: center;
+          justify-content: center;
+          height: 38px;
+        }
+        .custom-scrollbar {
+          -webkit-overflow-scrolling: touch;
         }
         .custom-scrollbar::-webkit-scrollbar {
           width: 4px;
+          height: 4px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
           background: transparent;
@@ -801,14 +876,6 @@ export default function Dashboard() {
           <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
         </button>
       </div>
-
-      <style>{`
-        @media (max-width: 768px) {
-          .dashboard-refresh-btn {
-            display: none !important;
-          }
-        }
-      `}</style>
 
       {/* 6 Attendance KPI Cards */}
       <div className="attendance-cards-grid" style={{
@@ -880,7 +947,7 @@ export default function Dashboard() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16, width: '100%' }}>
         
         {/* Graph Card: Weekly Attendance Rate */}
-        <div className="card" style={{ padding: 20, flex: '1 1 calc(50% - 16px)', minWidth: 320 }}>
+        <div className="card chart-card" style={{ padding: 20, flex: '1 1 calc(50% - 16px)', minWidth: 320 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Weekly Attendance Rate</h3>
@@ -909,7 +976,7 @@ export default function Dashboard() {
           </div>
 
         {/* Graph Card: Today's Shift Attendance */}
-        <div className="card" style={{ padding: 20, flex: '1 1 calc(50% - 16px)', minWidth: 320 }}>
+        <div className="card chart-card" style={{ padding: 20, flex: '1 1 calc(50% - 16px)', minWidth: 320 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Today's Shift Attendance</h3>
@@ -917,204 +984,225 @@ export default function Dashboard() {
               </div>
             </div>
             <div style={{ height: 240 }}>
-              <Bar data={attendanceBarData} options={attendanceBarOpts} />
+              <Bar data={attendanceBarData} options={attendanceBarOpts} plugins={[barChartLabelsPlugin]} />
             </div>
           </div>
       </div>
 
       {/* Attendance Status Cards Row */}
-      <div className="attendance-bottom-cards-container" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24, width: '100%' }}>
-        {/* Column 1: Currently Present Column */}
-        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                Currently Present
-              </h3>
-              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)', padding: '2px 8px', borderRadius: 10 }}>
-                {currentlyPresentEmployees.length}
-              </span>
-            </div>
-            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-              {loading && currentlyPresentEmployees.length === 0 ? (
-                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  Loading...
-                </div>
-              ) : currentlyPresentEmployees.length === 0 ? (
-                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  No active present staff
-                </div>
-              ) : (
-                currentlyPresentEmployees.map((log, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Shift {log.shift || 'R1'}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                      {log.on_break && (
-                        <span style={{ fontSize: 10, color: 'var(--primary)', background: 'rgba(var(--primary-rgb), 0.1)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                          On Break
-                        </span>
-                      )}
-                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: 11, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
-                          In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
-                        </span>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
-                          {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+      {/* Attendance Status Cards Row per Restaurant */}
+      {['R1', 'R2', 'R3'].map((restCode) => {
+        const restName = restCode === 'R1' ? 'Restaurant 1' : restCode === 'R2' ? 'Restaurant 2' : 'Restaurant 3';
+        const restEmployees = todayActivity.filter(emp => getEmployeeBucket(emp).startsWith(restCode));
+        
+        const rPresent = restEmployees.filter(log => log.attendance_id && !log.check_out);
+        const rLate = restEmployees.filter(log => log.attendance_id && log.attendance_status === 'Late');
+        const rBreak = restEmployees.filter(log => log.attendance_id && log.on_break && !log.check_out);
+        const rCheckedOut = restEmployees.filter(log => log.attendance_id && log.check_out);
+        const rAbsent = restEmployees.filter(log => log.calculated_status === 'Absent' || log.calculated_status === 'Leave' || log.calculated_status === 'Holiday');
 
-        {/* Column 2: Late Arrivals Today */}
-        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                Late Arrivals
-              </h3>
-              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(249, 115, 22, 0.1)', color: '#F97316', padding: '2px 8px', borderRadius: 10 }}>
-                {lateEmployees.length}
-              </span>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-              {loading && lateEmployees.length === 0 ? (
-                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  Loading...
-                </div>
-              ) : lateEmployees.length === 0 ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: 12, padding: '20px 0' }}>
-                  No late arrivals today
-                </div>
-              ) : (
-                lateEmployees.map((log, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{log.name}</span>
-                    <span style={{ fontSize: 11, color: '#F97316', background: 'rgba(249, 115, 22, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                      {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Late'}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+        if (restEmployees.length === 0) return null;
 
-        {/* Column 3: Staff On Break Column */}
-        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                Staff On Break
-              </h3>
-              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)', padding: '2px 8px', borderRadius: 10 }}>
-                {onBreakEmployees.length}
+        return (
+          <div key={restCode} className="card" style={{ marginBottom: 32, width: '100%', padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+              <span style={{ background: '#f59e0b', color: 'white', padding: '6px 16px', borderRadius: 8, fontWeight: 800, fontSize: 18 }}>
+                {restName}
               </span>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', background: 'var(--surface-1)', padding: '4px 12px', borderRadius: 8, border: '1px solid var(--surface-2)' }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
+                  Total: {restEmployees.length}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--green)' }}>
+                  P = {rPresent.length}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--red)' }}>
+                  A = {rAbsent.length}
+                </span>
+              </div>
             </div>
-            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-              {loading && onBreakEmployees.length === 0 ? (
-                <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  Loading...
-                </div>
-              ) : onBreakEmployees.length === 0 ? (
-                <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  No staff on break
-                </div>
-              ) : (
-                onBreakEmployees.map((log, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600 }}>{log.name}</span>
-                    <span style={{ fontSize: 10, color: 'var(--primary)', background: 'rgba(var(--primary-rgb), 0.1)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                      On Break
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
 
-        {/* Column 4: Checked Out Today Column */}
-        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                Checked Out Today
-              </h3>
-              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(156, 163, 175, 0.1)', color: 'var(--text-muted)', padding: '2px 8px', borderRadius: 10 }}>
-                {checkedOutEmployees.length}
-              </span>
-            </div>
-            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-              {loading && checkedOutEmployees.length === 0 ? (
-                <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  Loading...
+            <div style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: 24, width: '100%', paddingBottom: 8 }} className="custom-scrollbar">
+              {/* Column 1: Currently Present Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 220 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    Currently Present
+                  </h3>
+                  <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)', padding: '2px 8px', borderRadius: 10 }}>
+                    {rPresent.length}
+                  </span>
                 </div>
-              ) : checkedOutEmployees.length === 0 ? (
-                <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  No checked out staff
-                </div>
-              ) : (
-                checkedOutEmployees.map((log, idx) => {
-                  const otHours = Math.max(0, parseFloat(log.total_hours_today || 0) - (parseFloat(log.shift_hours) || 12.0));
-                  return (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Shift {log.shift || 'R1'}</span>
-                      </div>
-                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 2 }}>
-                          <span style={{ fontSize: 10, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
-                            In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
-                          </span>
-                          <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
-                            Out: {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
-                          </span>
+                <div style={{ overflowY: 'auto', maxHeight: 250, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+                  {loading && rPresent.length === 0 ? (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading...</div>
+                  ) : rPresent.length === 0 ? (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No active present staff</div>
+                  ) : (
+                    rPresent.map((log, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-1)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.name}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Shift {log.shift || 'R1'}</span>
                         </div>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
-                          {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs {otHours > 0 && <span style={{ color: 'var(--primary)' }}>({otHours.toFixed(1)} OT)</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          {log.on_break && (
+                            <span style={{ fontSize: 10, color: 'var(--primary)', background: 'rgba(var(--primary-rgb), 0.1)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>On Break</span>
+                          )}
+                          <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 11, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
+                              In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
+                            </span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                              {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ width: 1, background: 'var(--surface-2)', flexShrink: 0 }}></div>
+
+              {/* Column 2: Late Arrivals Today */}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 220 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    Late Arrivals
+                  </h3>
+                  <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(249, 115, 22, 0.1)', color: '#F97316', padding: '2px 8px', borderRadius: 10 }}>
+                    {rLate.length}
+                  </span>
+                </div>
+                <div style={{ overflowY: 'auto', maxHeight: 250, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+                  {loading && rLate.length === 0 ? (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading...</div>
+                  ) : rLate.length === 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: 12, padding: '20px 0' }}>No late arrivals today</div>
+                  ) : (
+                    rLate.map((log, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-1)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{log.name}</span>
+                        <span style={{ fontSize: 11, color: '#F97316', background: 'rgba(249, 115, 22, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                          {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Late'}
                         </span>
                       </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
+                    ))
+                  )}
+                </div>
+              </div>
 
-        {/* Column 5: On Leave / Absent Column */}
-        <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', flex: '1 1 200px', minWidth: 240 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                On Leave / Absent
-              </h3>
-              <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', padding: '2px 8px', borderRadius: 10 }}>
-                {absentEmployees.length}
-              </span>
-            </div>
-            <div style={{ overflowY: 'auto', maxHeight: 200, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
-              {loading && absentEmployees.length === 0 ? (
-                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  Loading...
+              {/* Divider */}
+              <div style={{ width: 1, background: 'var(--surface-2)', flexShrink: 0 }}></div>
+
+              {/* Column 3: Staff On Break Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 220 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    Staff On Break
+                  </h3>
+                  <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)', padding: '2px 8px', borderRadius: 10 }}>
+                    {rBreak.length}
+                  </span>
                 </div>
-              ) : absentEmployees.length === 0 ? (
-                <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  All staff checked in
+                <div style={{ overflowY: 'auto', maxHeight: 250, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+                  {loading && rBreak.length === 0 ? (
+                    <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading...</div>
+                  ) : rBreak.length === 0 ? (
+                    <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No staff on break</div>
+                  ) : (
+                    rBreak.map((log, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', background: 'var(--surface-1)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>{log.name}</span>
+                        <span style={{ fontSize: 10, color: 'var(--primary)', background: 'rgba(var(--primary-rgb), 0.1)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>On Break</span>
+                      </div>
+                    ))
+                  )}
                 </div>
-              ) : (
-                absentEmployees.map((emp, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{emp.name}</span>
-                    <span style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                      Absent
-                    </span>
-                  </div>
-                ))
-              )}
+              </div>
+
+              {/* Divider */}
+              <div style={{ width: 1, background: 'var(--surface-2)', flexShrink: 0 }}></div>
+
+              {/* Column 4: Checked Out Today Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 220 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    Checked Out Today
+                  </h3>
+                  <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(156, 163, 175, 0.1)', color: 'var(--text-muted)', padding: '2px 8px', borderRadius: 10 }}>
+                    {rCheckedOut.length}
+                  </span>
+                </div>
+                <div style={{ overflowY: 'auto', maxHeight: 250, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+                  {loading && rCheckedOut.length === 0 ? (
+                    <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading...</div>
+                  ) : rCheckedOut.length === 0 ? (
+                    <div style={{ padding: '10px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No checked out staff</div>
+                  ) : (
+                    rCheckedOut.map((log, idx) => {
+                      const otHours = Math.max(0, parseFloat(log.total_hours_today || 0) - (parseFloat(log.shift_hours) || 12.0));
+                      return (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-1)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.name}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Shift {log.shift || 'R1'}</span>
+                          </div>
+                          <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 2 }}>
+                              <span style={{ fontSize: 10, color: 'var(--green)', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
+                                In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
+                              </span>
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, display: 'inline-block' }}>
+                                Out: {log.check_out ? new Date(log.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                              {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs {otHours > 0 && <span style={{ color: 'var(--primary)' }}>({otHours.toFixed(1)} OT)</span>}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ width: 1, background: 'var(--surface-2)', flexShrink: 0 }}></div>
+
+              {/* Column 5: On Leave / Absent Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 220 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    On Leave / Absent
+                  </h3>
+                  <span style={{ fontSize: 12, fontWeight: 700, background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', padding: '2px 8px', borderRadius: 10 }}>
+                    {rAbsent.length}
+                  </span>
+                </div>
+                <div style={{ overflowY: 'auto', maxHeight: 250, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
+                  {loading && rAbsent.length === 0 ? (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading...</div>
+                  ) : rAbsent.length === 0 ? (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>All staff checked in</div>
+                  ) : (
+                    rAbsent.map((emp, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-1)', border: '1px solid var(--surface-2)', borderRadius: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{emp.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>Absent</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-      </div>
+        );
+      })}
 
 
 
@@ -1130,15 +1218,23 @@ export default function Dashboard() {
             cursor: 'pointer',
             background: 'var(--surface-1)',
             borderBottom: showAttendanceTable ? '1.5px solid var(--surface-2)' : 'none',
-            transition: 'background 0.2s'
+            transition: 'background 0.2s',
+            flexWrap: 'wrap',
+            gap: 12
           }}
           onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
           onMouseOut={e => e.currentTarget.style.background = 'var(--surface-1)'}
         >
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Users size={20} style={{ color: 'var(--primary)' }} /> Today's Attendance Table <span style={{ fontSize: 13, background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)', padding: '2px 8px', borderRadius: 10, marginLeft: 8 }}>Total: {tableFilteredEmployees.length}</span>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <Users size={20} style={{ color: 'var(--primary)', flexShrink: 0 }} /> 
+            <span style={{ whiteSpace: 'nowrap' }}>Today's Attendance Table</span>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)', padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>Total: {tableFilteredEmployees.length}</span>
+              <span style={{ fontSize: 13, background: 'rgba(34, 197, 94, 0.1)', color: 'var(--green)', padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>P: {tableFilteredEmployees.filter(log => log.attendance_id && !log.check_out).length}</span>
+              <span style={{ fontSize: 13, background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>A: {tableFilteredEmployees.filter(log => log.calculated_status === 'Absent' || log.calculated_status === 'Leave' || log.calculated_status === 'Holiday').length}</span>
+            </div>
           </h3>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
             {showAttendanceTable ? 'Click to Collapse ▲' : 'Click to Expand ▼'}
           </span>
         </div>
@@ -1147,106 +1243,107 @@ export default function Dashboard() {
           <div style={{ padding: 20 }}>
             {/* Filters */}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20, alignItems: 'center' }}>
-              <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
-                <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                <input
-                  type="text"
-                  placeholder="Search active staff..."
-                  value={attendanceSearchQuery}
-                  onChange={e => setAttendanceSearchQuery(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 10px 10px 32px',
-                    background: 'var(--surface)',
-                    border: '1.5px solid var(--surface-2)',
-                    borderRadius: 10,
-                    outline: 'none',
-                    fontSize: 13,
-                    boxSizing: 'border-box'
-                  }}
-                />
+              <div style={{ display: 'flex', flex: '1 1 100%', gap: 8, alignItems: 'center' }}>
+                <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+                  <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search active staff..."
+                    value={attendanceSearchQuery}
+                    onChange={e => setAttendanceSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px 8px 32px',
+                      background: 'var(--surface)',
+                      border: '1.5px solid var(--surface-2)',
+                      borderRadius: 8,
+                      outline: 'none',
+                      fontSize: 13,
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+                {/* Mobile Filter Toggle */}
+                <button 
+                  className="btn btn-secondary mobile-only-filter-btn" 
+                  onClick={() => setShowMobileFilters(!showMobileFilters)}
+                  style={{ padding: '0 12px', borderRadius: 8 }}
+                >
+                  <Filter size={16} style={{ color: showMobileFilters ? 'var(--primary)' : 'inherit' }} />
+                </button>
               </div>
 
-              <select
-                value={attendanceSelectedBranch}
-                onChange={e => setAttendanceSelectedBranch(e.target.value)}
-                style={{
-                  padding: '10px 14px',
-                  background: 'var(--surface)',
-                  border: '1.5px solid var(--surface-2)',
-                  borderRadius: 10,
-                  outline: 'none',
-                  fontSize: 13,
-                  minWidth: 140,
-                  cursor: 'pointer'
-                }}
-              >
-                {branchesList.map(br => (
-                  <option key={br} value={br}>{br === 'All' ? 'All Branches' : br}</option>
-                ))}
-              </select>
+              {/* Collapsible filters on mobile */}
+              <div className={`filters-container ${showMobileFilters ? 'show' : ''}`} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', flex: '1 1 auto', alignItems: 'center' }}>
+                <select
+                  value={attendanceSelectedBranch}
+                  onChange={e => setAttendanceSelectedBranch(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    background: 'var(--surface)',
+                    border: '1.5px solid var(--surface-2)',
+                    borderRadius: 8,
+                    outline: 'none',
+                    fontSize: 12,
+                    flex: '1 1 110px',
+                    minWidth: 110,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {branchesList.map(br => (
+                    <option key={br} value={br}>{br === 'All' ? 'All Branches' : br}</option>
+                  ))}
+                </select>
 
-              <select
-                value={attendanceSelectedDayNight}
-                onChange={e => setAttendanceSelectedDayNight(e.target.value)}
-                style={{
-                  padding: '10px 14px',
-                  background: 'var(--surface)',
-                  border: '1.5px solid var(--surface-2)',
-                  borderRadius: 10,
-                  outline: 'none',
-                  fontSize: 13,
-                  minWidth: 140,
-                  cursor: 'pointer'
-                }}
-              >
-                <option value="All">All Shifts (Day/Night)</option>
-                <option value="Day">Day Shift</option>
-                <option value="Night">Night Shift</option>
-              </select>
+                <select
+                  value={attendanceSelectedDayNight}
+                  onChange={e => setAttendanceSelectedDayNight(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    background: 'var(--surface)',
+                    border: '1.5px solid var(--surface-2)',
+                    borderRadius: 8,
+                    outline: 'none',
+                    fontSize: 12,
+                    flex: '1 1 110px',
+                    minWidth: 110,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="All">All Shifts (Day/Night)</option>
+                  <option value="Day">Day Shift</option>
+                  <option value="Night">Night Shift</option>
+                </select>
 
-              <select
-                value={attendanceSelectedStatus}
-                onChange={e => setAttendanceSelectedStatus(e.target.value)}
-                style={{
-                  padding: '10px 14px',
-                  background: 'var(--surface)',
-                  border: '1.5px solid var(--surface-2)',
-                  borderRadius: 10,
-                  outline: 'none',
-                  fontSize: 13,
-                  minWidth: 140,
-                  cursor: 'pointer'
-                }}
-              >
-                <option value="All">All Statuses</option>
-                <option value="Total Present">Total Present</option>
-                <option value="Currently Present">Currently Present</option>
-                <option value="Checked Out Complete">Checked Out Complete</option>
-                <option value="Break">Break</option>
-                <option value="Late">Late</option>
-                <option value="Absent">Absent</option>
-              </select>
+                <select
+                  value={attendanceSelectedStatus}
+                  onChange={e => setAttendanceSelectedStatus(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    background: 'var(--surface)',
+                    border: '1.5px solid var(--surface-2)',
+                    borderRadius: 8,
+                    outline: 'none',
+                    fontSize: 12,
+                    flex: '1 1 110px',
+                    minWidth: 110,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="Total Present">Total Present</option>
+                  <option value="Currently Present">Currently Present</option>
+                  <option value="Checked Out Complete">Checked Out Complete</option>
+                  <option value="Break">Break</option>
+                  <option value="Late">Late</option>
+                  <option value="Absent">Absent</option>
+                </select>
 
-              <button
-                className="btn btn-secondary"
-                onClick={exportAttendanceToExcel}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '10px',
-                  borderRadius: 10,
-                  height: 40,
-                  width: 40,
-                  flexShrink: 0
-                }}
-                title="Export Excel"
-              >
-                <Download size={16} />
-              </button>
+                <button className="btn btn-secondary" onClick={exportAttendanceToExcel} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', fontSize: 12, borderRadius: 8, flex: '1 1 110px', justifyContent: 'center' }}>
+                  <Download size={14} /> Export Logs
+                </button>
+              </div>
             </div>
-
             {/* Table */}
             <div className="table-wrap">
               <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '800px' }}>
