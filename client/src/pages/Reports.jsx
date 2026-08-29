@@ -481,7 +481,7 @@ export default function Reports({ isTodaySales = false }) {
                       <td style={{ fontWeight: 800, color: 'var(--red)' }}>{t.slip_number || '-'}</td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span className="badge badge-info" style={{ fontWeight: 800 }}>Order #{t.order_id}</span>
+                          <span className="badge badge-info" style={{ fontWeight: 800 }}>Order #{t.order_id} / {t.slip_number}</span>
                           {t.is_edited && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Edited</span>}
                         </div>
                       </td>
@@ -642,7 +642,7 @@ export default function Reports({ isTodaySales = false }) {
                       <tr key={t.id} style={{ borderBottom: '1px solid #eee' }}>
                         <td style={{ padding: '10px 12px', fontWeight: 800, color: 'var(--red)' }}>{t.slip_number}</td>
                         <td style={{ padding: '10px 12px', fontWeight: 700 }}>
-                          Order #{t.order_id}
+                          Order #{t.order_id} / {t.slip_number}
                           {t.is_edited && <span style={{ fontSize: 10, color: '#999', marginLeft: 6 }}>(Edit)</span>}
                         </td>
                         <td style={{ padding: '10px 12px', maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.items}>

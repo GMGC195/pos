@@ -310,7 +310,7 @@ export default function POS() {
     
 
     
-    setProcessing(true)
+    setProcessing(shouldPrint ? 'print' : 'punch')
     const finalDiscount = parseFloat(customerInfo.discount) || 0;
     const finalTotal = total - finalDiscount;
 
@@ -508,7 +508,7 @@ export default function POS() {
   </div>
   <div class="dotted"></div>
   <div class="center footer" style="margin-top:4px;font-size:11px;font-weight:bold;color:#000000;">
-    <p>Software developed by Uzair</p>
+    <p>Software by Uzair</p>
     <p>03062951312</p>
   </div>
 </body>
@@ -1033,15 +1033,15 @@ export default function POS() {
                     <>
                       <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                         <div className="form-group" style={{ flex: 1 }}>
-                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'flex', justifyContent: 'space-between' }}>
+                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>
                             <span>Table Number *</span>
-                            {customerInfo.tableNumber && (
-                              <span style={{ color: activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'var(--red)' : 'var(--green)', fontWeight: 'bold' }}>
-                                {activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'Already Booked' : 'Available'}
-                              </span>
-                            )}
                           </label>
                           <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="e.g. 5" value={customerInfo.tableNumber || ''} onChange={e => setCustomerInfo(p => ({ ...p, tableNumber: e.target.value }))} />
+                          {customerInfo.tableNumber && (
+                            <div style={{ color: activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'var(--red)' : 'var(--green)', fontWeight: 'bold', fontSize: 10, marginTop: 4 }}>
+                              {activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'Already Booked' : 'Available'}
+                            </div>
+                          )}
                         </div>
                         <div className="form-group" style={{ flex: 1 }}>
                           <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name *</label>
@@ -1146,11 +1146,11 @@ export default function POS() {
                   )}
 
                   <div style={{ paddingTop: 4, display: 'flex', gap: 10 }}>
-                    <button className="btn btn-secondary" style={{ flex: 1, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, false)} disabled={processing}>
-                      Punch Only
+                    <button className="btn btn-secondary" style={{ flex: 1, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, false)} disabled={processing !== false}>
+                      {processing === 'punch' ? 'Punching...' : 'Punch Only'}
                     </button>
-                    <button className="btn btn-primary" style={{ flex: 2, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, true)} disabled={processing}>
-                      {processing ? 'Processing...' : 'Print & Place Order'}
+                    <button className="btn btn-primary" style={{ flex: 2, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, true)} disabled={processing !== false}>
+                      {processing === 'print' ? 'Processing...' : 'Print & Place Order'}
                     </button>
                   </div>
                 </div>
@@ -1159,6 +1159,52 @@ export default function POS() {
           </div>
         )
       }
+      {/* Quick Complete Modal */}
+      {quickCompleteModal && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal" style={{ maxWidth: 360, padding: 24, textAlign: 'center' }}>
+            <h3 style={{ marginBottom: 16 }}>Complete Order #{quickCompleteModal.id}</h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left', marginBottom: 24 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
+                <input type="radio" name="quickPayment" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
+                <span style={{ fontSize: 15, fontWeight: 500 }}>Cash</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
+                <input type="radio" name="quickPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
+                <span style={{ fontSize: 15, fontWeight: 500 }}>Online</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
+                <input type="radio" name="quickPayment" value="Payment Pending" checked={paymentMethod === 'Payment Pending' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Payment Pending')} />
+                <span style={{ fontSize: 15, fontWeight: 500 }}>Pending</span>
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setQuickCompleteModal(null)}>Cancel</button>
+              <button className="btn btn-success" style={{ flex: 1 }} onClick={async () => {
+                const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
+                try {
+                  if (method === 'Payment Pending') {
+                    await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
+                  } else {
+                    await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
+                  }
+                  toast.success('Order completed!')
+                  setQuickCompleteModal(null)
+                  fetchActiveOrders()
+                } catch(err) {
+                  toast.error('Failed to complete order')
+                }
+              }}>Complete</button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Detail View Modal */}
+      {detailOrder && <OrderDetailModal order={detailOrder} onClose={() => setDetailOrder(null)} onEdit={(id) => { setDetailOrder(null); loadOrderForEdit(id); }} />}
+      
       {
         showManageCategories && (
           <ManageCategoriesModal

@@ -215,7 +215,7 @@ export default function HoldPayments() {
                       <td style={{ fontWeight: 800, color: 'var(--red)', width: '60px' }}>{o.slip_number}</td>
                       <td style={{ fontWeight: 600 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span className="badge badge-warning">Order #{o.id}</span>
+                          <span className="badge badge-warning">Order #{o.id} / {o.slip_number}</span>
                           {o.is_edited && <span className="badge badge-secondary" style={{ fontSize: 10, padding: '2px 6px', background: '#e5e7eb', color: '#4b5563' }}>Edited</span>}
                           {o.cancel_requested && <span className="badge badge-error" style={{ fontSize: 10, padding: '2px 6px' }}>Req. Pending</span>}
                         </div>
@@ -319,7 +319,8 @@ export default function HoldPayments() {
       {showOrderDetails && (
         <OrderDetailModal 
           order={selectedOrder} 
-          onClose={() => { setShowOrderDetails(false); setSelectedOrder(null); }} 
+          onClose={() => { setShowOrderDetails(false); setSelectedOrder(null); }}
+          onEdit={(id) => { setShowOrderDetails(false); setSelectedOrder(null); handleEdit(id); }}
         />
       )}
 

@@ -1,4 +1,4 @@
-import { Printer, X } from 'lucide-react'
+import { Printer, X, Edit } from 'lucide-react'
 import { CURRENCY } from '../config'
 import {
   BRAND_LOGO as logo,
@@ -8,7 +8,7 @@ import {
   BRAND_PHONE_DISPLAY1
 } from '../branding'
 
-export default function OrderDetailModal({ order, onClose }) {
+export default function OrderDetailModal({ order, onClose, onEdit }) {
   if (!order) return null
 
   const handlePrint = () => {
@@ -60,13 +60,16 @@ export default function OrderDetailModal({ order, onClose }) {
       Order #${order.id} | ${order.slip_number || '-'}
     </div>
     <p class="sub">${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
+    <p style="margin: 4px 0; font-size: 13px; font-weight: bold; color: #000;">
+      ${order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
+    </p>
   </div>
-  ${order.customer_name || order.customer_phone || order.customer_address ? `
+  ${order.customer_name || order.customer_phone || (order.customer_address && order.customer_address !== 'Dine-In' && order.customer_address !== 'Takeaway') ? `
   <div class="divider"></div>
   <div style="text-align: left; font-size: 11px;">
     ${order.customer_name ? `<p style="margin: 2px 0;"><strong>Customer:</strong> ${order.customer_name}</p>` : ''}
     ${order.customer_phone ? `<p style="margin: 2px 0;"><strong>Phone:</strong> ${order.customer_phone}</p>` : ''}
-    ${order.customer_address ? `<p style="margin: 2px 0;"><strong>${order.customer_address.startsWith('Table ') ? 'Table Number:' : order.customer_address === 'Dine-In' ? 'Order Type:' : 'Address:'}</strong> ${order.customer_address.startsWith('Table ') ? order.customer_address.replace('Table ', '') : order.customer_address}</p>` : ''}
+    ${order.customer_address && order.customer_address !== 'Dine-In' && order.customer_address !== 'Takeaway' ? `<p style="margin: 2px 0;"><strong>${order.customer_address.startsWith('Table ') ? 'Table Number:' : 'Address:'}</strong> ${order.customer_address.startsWith('Table ') ? order.customer_address.replace('Table ', '') : order.customer_address}</p>` : ''}
   </div>
   ` : ''}
   <div class="divider"></div>
@@ -93,7 +96,7 @@ export default function OrderDetailModal({ order, onClose }) {
   </div>
   <div class="dotted"></div>
   <div class="center footer" style="margin-top:4px;font-size:11px;font-weight:bold;color:#000000;">
-    <p>Software developed by Uzair</p>
+    <p>Software by Uzair</p>
     <p>03062951312</p>
   </div>
 </body>
@@ -130,14 +133,19 @@ export default function OrderDetailModal({ order, onClose }) {
                 Order #{order.id} | {order.slip_number || '-'}
               </div>
               <p style={{ margin: '4px 0', fontSize: 11, color: '#666' }}>{new Date(order.created_at).toLocaleString()}</p>
+              <p style={{ margin: '4px 0', fontSize: 13, fontWeight: 'bold', color: '#000' }}>
+                {order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
+              </p>
             </div>
 
             {/* Customer Info */}
-            {(order.customer_name || order.customer_phone || order.customer_address) && (
+            {(order.customer_name || order.customer_phone || (order.customer_address && order.customer_address !== 'Dine-In' && order.customer_address !== 'Takeaway')) && (
               <div style={{ marginBottom: 15, borderTop: '1px dashed #ddd', paddingTop: 12 }}>
                 {order.customer_name && <p style={{ margin: '2px 0' }}><b>Customer:</b> {order.customer_name}</p>}
                 {order.customer_phone && <p style={{ margin: '2px 0' }}><b>Phone:</b> {order.customer_phone}</p>}
-                {order.customer_address && <p style={{ margin: '2px 0' }}><b>{order.customer_address.startsWith('Table ') ? 'Table Number:' : order.customer_address === 'Dine-In' ? 'Order Type:' : 'Address:'}</b> {order.customer_address.startsWith('Table ') ? order.customer_address.replace('Table ', '') : order.customer_address}</p>}
+                {order.customer_address && order.customer_address !== 'Dine-In' && order.customer_address !== 'Takeaway' && (
+                  <p style={{ margin: '2px 0' }}><b>{order.customer_address.startsWith('Table ') ? 'Table Number:' : 'Address:'}</b> {order.customer_address.startsWith('Table ') ? order.customer_address.replace('Table ', '') : order.customer_address}</p>
+                )}
               </div>
             )}
 
@@ -178,10 +186,17 @@ export default function OrderDetailModal({ order, onClose }) {
           </div>
         </div>
 
-        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--surface-2)', display: 'flex', gap: 10, background: 'white', flexShrink: 0 }}>
-          <button className="btn btn-secondary" onClick={onClose} style={{ flex: 1 }}>Close</button>
-          <button className="btn btn-primary" onClick={handlePrint} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <Printer size={18} /> Print Receipt
+        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--surface-2)', display: 'flex', gap: 10, background: 'white', flexShrink: 0, alignItems: 'center' }}>
+          <button className="btn btn-secondary" onClick={onClose} style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Close">
+            <X size={20} />
+          </button>
+          {onEdit && (
+            <button className="btn btn-secondary" onClick={() => onEdit(order.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Edit size={18} /> Edit
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={handlePrint} style={{ flex: onEdit ? 1 : 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Printer size={18} /> {onEdit ? 'Print' : 'Print Receipt'}
           </button>
         </div>
       </div>
