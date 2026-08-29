@@ -705,7 +705,16 @@ export default function Dashboard() {
   const checkedOutEmployees = todayActivity.filter(log => log.attendance_id && log.check_out)
   const absentEmployees = todayActivity.filter(log => log.calculated_status === 'Absent' || log.calculated_status === 'Leave' || log.calculated_status === 'Holiday')
 
-  const branchesList = ['All', ...new Set(todayActivity.map(emp => emp.branch).filter(Boolean))].sort()
+  const rawBranches = [...new Set(todayActivity.map(emp => emp.branch).filter(Boolean))];
+  const sortedBranches = rawBranches.sort((a, b) => {
+    const numA = parseInt(a.replace(/\D/g, ''));
+    const numB = parseInt(b.replace(/\D/g, ''));
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+      return numA - numB;
+    }
+    return a.localeCompare(b);
+  });
+  const branchesList = ['All', ...sortedBranches];
 
   const tableFilteredEmployees = todayActivity.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(attendanceSearchQuery.toLowerCase()) ||
@@ -1291,7 +1300,7 @@ export default function Dashboard() {
                   }}
                 >
                   {branchesList.map(br => (
-                    <option key={br} value={br}>{br === 'All' ? 'All Branches' : br}</option>
+                    <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
                   ))}
                 </select>
 

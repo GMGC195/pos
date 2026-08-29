@@ -329,11 +329,8 @@ export default function Employees() {
 
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (emp.department && emp.department.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                          (emp.position && emp.position.toLowerCase().includes(searchTerm.toLowerCase()))
+                          (emp.department && emp.department.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesDept = selectedDept === 'All' || emp.department === selectedDept
-    const matchesPosition = selectedPosition === 'All' || emp.position === selectedPosition
-    const matchesWorkingHours = selectedWorkingHours === 'All' || emp.working_hours === selectedWorkingHours
     
     // Day/Night Shift mapping
     const empShiftVal = String(emp.new_shift || emp.shift || '').toLowerCase();
@@ -346,7 +343,7 @@ export default function Employees() {
 
     const matchesBranch = selectedBranch === 'All' || emp.branch === selectedBranch
     const matchesStatus = selectedStatus === 'All' || emp.status === selectedStatus
-    return matchesSearch && matchesDept && matchesPosition && matchesWorkingHours && matchesDayNight && matchesBranch && matchesStatus
+    return matchesSearch && matchesDept && matchesDayNight && matchesBranch && matchesStatus
   }).sort((a, b) => {
     if (sortBy === 'EmpIdAsc') {
       const idA = a.employee_id || '';
@@ -455,7 +452,7 @@ export default function Employees() {
               <Search size={18} style={{ color: 'var(--text-muted)' }} />
               <input 
                 type="text" 
-                placeholder="Search by name, department, or position..." 
+                placeholder="Search by name or department..." 
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 style={{ width: '100%', border: 'none', outline: 'none', padding: '10px 8px', background: 'transparent', color: 'var(--text)' }}
@@ -473,38 +470,16 @@ export default function Employees() {
           
           <div className={`employee-filters ${showMobileFilters ? 'show-mobile' : ''}`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select
-              value={selectedDept}
-              onChange={e => setSelectedDept(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120, fontSize: 12 }}
+              value={selectedBranch}
+              onChange={e => setSelectedBranch(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 100, fontSize: 12 }}
             >
-              <option value="All">All Departments</option>
-              {departments.map(d => (
-                <option key={d} value={d}>{d}</option>
+              <option value="All">All Restaurants</option>
+              {branchesList.map(b => (
+                <option key={b} value={b}>{b}</option>
               ))}
             </select>
 
-            <select
-              value={selectedPosition}
-              onChange={e => setSelectedPosition(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120, fontSize: 12 }}
-            >
-              <option value="All">All Positions</option>
-              {positions.map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-
-            <select
-              value={selectedWorkingHours}
-              onChange={e => setSelectedWorkingHours(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 110, fontSize: 12 }}
-            >
-              <option value="All">All Working Hours</option>
-              {workingHoursList.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            
             <select
               value={selectedDayNight}
               onChange={e => setSelectedDayNight(e.target.value)}
@@ -513,17 +488,6 @@ export default function Employees() {
               <option value="All">All Shifts (Day/Night)</option>
               <option value="Day">Day Shift</option>
               <option value="Night">Night Shift</option>
-            </select>
-            
-            <select
-              value={selectedBranch}
-              onChange={e => setSelectedBranch(e.target.value)}
-              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 100, fontSize: 12 }}
-            >
-              <option value="All">All Branches</option>
-              {branchesList.map(b => (
-                <option key={b} value={b}>{b}</option>
-              ))}
             </select>
 
             <select
@@ -534,6 +498,17 @@ export default function Employees() {
               <option value="All">All Statuses</option>
               <option value="Active">Active</option>
               <option value="Inactive">Inactive</option>
+            </select>
+
+            <select
+              value={selectedDept}
+              onChange={e => setSelectedDept(e.target.value)}
+              style={{ border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none', cursor: 'pointer', minWidth: 120, fontSize: 12 }}
+            >
+              <option value="All">All Departments</option>
+              {departments.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
             </select>
 
             <select
@@ -548,14 +523,12 @@ export default function Employees() {
               <option value="AlphabeticalZA">Name (Z to A)</option>
             </select>
 
-            {(searchTerm !== '' || selectedDept !== 'All' || selectedPosition !== 'All' || selectedWorkingHours !== 'All' || selectedDayNight !== 'All' || selectedBranch !== 'All' || selectedStatus !== 'All' || sortBy !== 'Default') && (
+            {(searchTerm !== '' || selectedDept !== 'All' || selectedDayNight !== 'All' || selectedBranch !== 'All' || selectedStatus !== 'All' || sortBy !== 'Default') && (
               <button 
                 className="btn btn-secondary"
                 onClick={() => {
                   setSearchTerm('');
                   setSelectedDept('All');
-                  setSelectedPosition('All');
-                  setSelectedWorkingHours('All');
                   setSelectedDayNight('All');
                   setSelectedBranch('All');
                   setSelectedStatus('All');

@@ -970,7 +970,12 @@ export default function AttendanceTracker() {
               cursor: 'pointer'
             }}
           >
-            {['All', ...new Set(employees.map(emp => emp.branch).filter(Boolean))].map(br => (
+            {['All', ...[...new Set(employees.map(emp => emp.branch).filter(Boolean))].sort((a, b) => {
+              const numA = parseInt(a.replace(/\D/g, ''));
+              const numB = parseInt(b.replace(/\D/g, ''));
+              if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+              return a.localeCompare(b);
+            })].map(br => (
               <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
             ))}
           </select>
