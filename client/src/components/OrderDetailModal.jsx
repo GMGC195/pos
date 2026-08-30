@@ -58,8 +58,7 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
       This slip is only for order taking.<br>Please pick up your original slip from counter.<br>
       <span style="font-size: 13px; font-weight: bold; margin-top: 4px; display: block;" dir="rtl">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
     </p>
-    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Opening Time</div>
-    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">11 AM to 1 AM</div>
+    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Open 24/7</div>
     <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
     </div>
@@ -132,8 +131,7 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
               <img src={logo} alt="Logo" style={{ width: '50%', maxHeight: 80, objectFit: 'contain', marginTop: 0, marginBottom: 2 }} />
               <p style={{ margin: '4px 0', fontSize: 11 }}>{BRAND_ADDRESS}</p>
               <p style={{ margin: '4px 0', fontSize: 11 }}>Free Home Delivery</p>
-              <p style={{ margin: '4px 0', fontSize: 11 }}>Opening Time</p>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>11 AM to 1 AM</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Open 24/7</div>
               <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto' }}>
                 {order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
               </div>

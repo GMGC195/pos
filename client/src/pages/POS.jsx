@@ -491,8 +491,7 @@ export default function POS() {
       This slip is only for order taking.<br>Please pick up your original slip from counter.<br>
       <span style="font-size: 13px; font-weight: bold; margin-top: 4px; display: block;" dir="rtl">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
     </p>
-    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Opening Time</div>
-    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">11 AM to 1 AM</div>
+    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Open 24/7</div>
     <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${customerInfo.orderType}
     </div>
@@ -905,8 +904,7 @@ export default function POS() {
           <img src={slipLogo} alt="Logo" style={{ width: '50%', maxHeight: 80, objectFit: 'contain', margin: '0 auto 2px auto', display: 'block' }} />
           <p>Free Home Delivery</p>
           <p>{BRAND_ADDRESS}</p>
-          <p>Opening Time </p>
-          <p>11 AM to 1 AM</p>
+          <h2>Open 24/7</h2>
           <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto' }}>
             {customerInfo.orderType}
           </div>
@@ -1231,7 +1229,9 @@ export default function POS() {
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setQuickCompleteModal(null)}>Cancel</button>
-              <button className="btn btn-success" style={{ flex: 1 }} onClick={async () => {
+              <button className="btn btn-success" style={{ flex: 1 }} disabled={processing === 'quick-complete'} onClick={async () => {
+                if (processing === 'quick-complete') return;
+                setProcessing('quick-complete');
                 const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
                 try {
                   if (method === 'Payment Pending') {
@@ -1244,8 +1244,10 @@ export default function POS() {
                   fetchActiveOrders()
                 } catch(err) {
                   toast.error('Failed to complete order')
+                } finally {
+                  setProcessing(false);
                 }
-              }}>Complete</button>
+              }}>{processing === 'quick-complete' ? 'Completing...' : 'Complete'}</button>
             </div>
           </div>
         </div>
