@@ -1,11 +1,12 @@
 import { Printer, X, Edit } from 'lucide-react'
 import { CURRENCY } from '../config'
 import {
-  BRAND_LOGO as logo,
+  BRAND_SLIP_LOGO as logo,
   BRAND_NAME,
   BRAND_RECEIPT_FOOTER,
   BRAND_PHONE_DISPLAY,
-  BRAND_PHONE_DISPLAY1
+  BRAND_EMAIL,
+  BRAND_ADDRESS
 } from '../branding'
 
 export default function OrderDetailModal({ order, onClose, onEdit }) {
@@ -53,16 +54,19 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
 <body>
   <div class="center">
     <img src="${logo}" style="width: 50%; max-height: 100px; object-fit: contain; margin-top: 0; margin-bottom: 2px;" />
-    <p class="sub">Ahmad Town,Jarawala Road <br/>Khurrianwala </p>
+    <p style="font-size: 11px; margin: 6px 0; padding: 4px; border: 1px dashed #000; font-weight: bold; text-align: center;">
+      This slip is only for order taking.<br>Please pick up your original slip from counter.<br>
+      <span style="font-size: 13px; font-weight: bold; margin-top: 4px; display: block;" dir="rtl">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
+    </p>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Opening Time</div>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">11 AM to 1 AM</div>
+    <div style="font-size: 16px; font-weight: 900; margin: 6px 0; border: 2px solid #000; display: inline-block; padding: 2px 8px;">
+      ${order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
+    </div>
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
-      Order #${order.id} | ${order.slip_number || '-'}
+      Order #${order.slip_number || '-'}${order.edit_count > 0 ? String.fromCharCode(64 + order.edit_count) + ' / Edit' : ''} (ID: ${order.id})
     </div>
     <p class="sub">${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
-    <p style="margin: 4px 0; font-size: 13px; font-weight: bold; color: #000;">
-      ${order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
-    </p>
   </div>
   ${order.customer_name || order.customer_phone || (order.customer_address && order.customer_address !== 'Dine-In' && order.customer_address !== 'Takeaway') ? `
   <div class="divider"></div>
@@ -91,8 +95,9 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
     <p>Thank you for your order!</p>
     <p>Come back soon 🍕</p>
     <p>${BRAND_RECEIPT_FOOTER}</p>
-    <p style="margin-top:6px;">&#128222; ${BRAND_PHONE_DISPLAY}</p>
-    <p style="margin-top:6px;">&#128222; ${BRAND_PHONE_DISPLAY1}</p>
+    <p style="margin-top:6px;">📞 ${BRAND_PHONE_DISPLAY}</p>
+    <p>📧 ${BRAND_EMAIL}</p>
+    <p>📍 ${BRAND_ADDRESS}</p>
   </div>
   <div class="dotted"></div>
   <div class="center footer" style="margin-top:4px;font-size:11px;font-weight:bold;color:#000000;">
@@ -125,17 +130,17 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
           <div style={{ background: 'white', padding: '2px 20px 6px 5px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontFamily: 'monospace', color: '#333', fontSize: 13, width: '70mm', margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 20 }}>
               <img src={logo} alt="Logo" style={{ width: '50%', maxHeight: 80, objectFit: 'contain', marginTop: 0, marginBottom: 2 }} />
-              <p style={{ margin: '4px 0', fontSize: 11 }}>Ahmad Town,Jarawala Road <br />Khurrianwala</p>
+              <p style={{ margin: '4px 0', fontSize: 11 }}>{BRAND_ADDRESS}</p>
               <p style={{ margin: '4px 0', fontSize: 11 }}>Free Home Delivery</p>
               <p style={{ margin: '4px 0', fontSize: 11 }}>Opening Time</p>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>11 AM to 1 AM</div>
+              <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto', border: '2px solid #000', display: 'inline-block', padding: '2px 8px' }}>
+                {order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
+              </div>
               <div style={{ margin: '10px 0', fontSize: 18, fontWeight: 900 }}>
-                Order #{order.id} | {order.slip_number || '-'}
+                Order #{order.slip_number || '-'}{order.edit_count > 0 ? String.fromCharCode(64 + order.edit_count) + ' / Edit' : ''} (ID: {order.id})
               </div>
               <p style={{ margin: '4px 0', fontSize: 11, color: '#666' }}>{new Date(order.created_at).toLocaleString()}</p>
-              <p style={{ margin: '4px 0', fontSize: 13, fontWeight: 'bold', color: '#000' }}>
-                {order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
-              </p>
             </div>
 
             {/* Customer Info */}

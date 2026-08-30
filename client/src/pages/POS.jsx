@@ -34,7 +34,10 @@ import {
 import {
   BRAND_NAME,
   BRAND_LOGO as logo,
+  BRAND_SLIP_LOGO as slipLogo,
   BRAND_PHONE_DISPLAY,
+  BRAND_EMAIL,
+  BRAND_ADDRESS,
   BRAND_RECEIPT_FOOTER
 } from '../branding'
 
@@ -376,9 +379,10 @@ export default function POS() {
 
       const orderId = res?.data?.order?.id || editingOrderId || 'N/A'
       const slipNumber = res?.data?.order?.slip_number || '-'
+      const editCount = res?.data?.order?.edit_count || 0
       if (isOnline) {
         toast.success(method === 'Hold' ? 'Order updated to Hold status!' : 'Order Placed!', { duration: 3000 })
-        if (shouldPrint) printThermalSlip(method, orderId, slipNumber)
+        if (shouldPrint) printThermalSlip(method, orderId, slipNumber, editCount)
       }
 
       // Cleanup
@@ -401,7 +405,7 @@ export default function POS() {
     }
   }
 
-  const printThermalSlip = (method, orderId, slipNumber) => {
+  const printThermalSlip = (method, orderId, slipNumber, editCount = 0) => {
     const now2 = new Date()
     const paymentLabel = method === 'Hold' ? 'Hold (Pending)' : method;
     const itemRows = cart.map((item, index) => `
@@ -423,8 +427,11 @@ export default function POS() {
       margin: 0;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-weight: bold; }
+    html { margin: 0; padding: 0; background: #fff; }
     body {
       width: 100%;
+      max-width: 80mm; /* Ensure it looks like a slip in PDF */
+      margin: 0 auto;
       font-family: Tahoma, Geneva, sans-serif;
       font-size: 12px;
       color: #000;
@@ -479,11 +486,18 @@ export default function POS() {
 </head>
 <body>
   <div class="center">
-    <img src="${logo}" style="width: 50%; max-height: 100px; object-fit: contain; margin-top: 1px; margin-bottom: 2px;" />
+    <img src="${slipLogo}" style="width: 50%; max-height: 100px; object-fit: contain; margin-top: 1px; margin-bottom: 2px;" />
+    <p style="font-size: 11px; margin: 6px 0; padding: 4px; border: 1px dashed #000; font-weight: bold; text-align: center;">
+      This slip is only for order taking.<br>Please pick up your original slip from counter.<br>
+      <span style="font-size: 13px; font-weight: bold; margin-top: 4px; display: block;" dir="rtl">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
+    </p>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Opening Time</div>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">11 AM to 1 AM</div>
+    <div style="font-size: 16px; font-weight: 900; margin: 6px 0; border: 2px solid #000; display: inline-block; padding: 2px 8px;">
+      ${customerInfo.orderType}
+    </div>
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
-      Order #${orderId} | ${slipNumber || '-'}
+      Order #${slipNumber}${editCount > 0 ? String.fromCharCode(64 + editCount) + ' / Edit' : ''} (ID: ${orderId})
     </div>
     <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
   </div>
@@ -515,6 +529,8 @@ export default function POS() {
     <p>Come back soon 🍕</p>
     <p>${BRAND_RECEIPT_FOOTER}</p>
     <p style="margin-top:6px;">📞 ${BRAND_PHONE_DISPLAY}</p>
+    <p>📧 ${BRAND_EMAIL}</p>
+    <p>📍 ${BRAND_ADDRESS}</p>
   </div>
   <div class="dotted"></div>
   <div class="center footer" style="margin-top:4px;font-size:11px;font-weight:bold;color:#000000;">
@@ -809,7 +825,7 @@ export default function POS() {
             )}
           </div>
 
-          <div className="cart-items" style={{ flex: 'none', maxHeight: '50vh' }}>
+          <div className="cart-items" style={{ flex: 1, overflowY: 'auto' }}>
             {cart.length === 0
               ? (
                 <div className="cart-empty">
@@ -886,13 +902,16 @@ export default function POS() {
       {/* Thermal Receipt - hidden, printing is done via printThermalSlip() popup */}
       <div className="receipt-section" ref={receiptRef} style={{ width: '80mm', padding: '2px 10px 6px 15px' }}>
         <div className="receipt-header" style={{ textAlign: 'center' }}>
-          <img src={logo} alt="Logo" style={{ width: '50%', maxHeight: 80, objectFit: 'contain', marginTop: 0, marginBottom: 2 }} />
+          <img src={slipLogo} alt="Logo" style={{ width: '50%', maxHeight: 80, objectFit: 'contain', margin: '0 auto 2px auto', display: 'block' }} />
           <p>Free Home Delivery</p>
-          <p>Ahmad Town,Jarawala Road <br />Khurrianwala</p>
+          <p>{BRAND_ADDRESS}</p>
           <p>Opening Time </p>
           <p>11 AM to 1 AM</p>
+          <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto', border: '2px solid #000', display: 'inline-block', padding: '2px 8px' }}>
+            {customerInfo.orderType}
+          </div>
           <div style={{ margin: '10px 0', fontSize: 18, fontWeight: 900 }}>
-            Order #... | ...
+            Order #--
           </div>
           <p>{now.toLocaleDateString()} {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
         </div>
@@ -971,14 +990,14 @@ export default function POS() {
                 return (
                   <button
                     className="btn btn-primary"
-                    style={{ width: '100%', padding: '16px', fontSize: 16, justifyContent: 'center', borderRadius: 10 }}
+                    style={{ width: '100%', padding: '12px 16px', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}
                     onClick={() => {
                       addToCart(sizeModalItem, { name: activeSize.name, price: activeSize.price });
                       setSizeModalItem(null);
                     }}
                   >
                     <span>Add <span style={{ fontWeight: 800 }}>{activeSize.name}</span> to Cart</span>
-                    <span style={{ margin: '0 8px', opacity: 0.5 }}>|</span>
+                    <span style={{ margin: '0 12px', opacity: 0.5 }}>|</span>
                     <span>{CURRENCY}{parseFloat(activeSize.price).toFixed(2)}</span>
                   </button>
                 )

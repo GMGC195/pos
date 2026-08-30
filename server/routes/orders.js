@@ -436,7 +436,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
            customer_name = $5, customer_phone = $6, customer_address = $7, discount = $8,
            client_order_id = COALESCE($9, client_order_id),
            order_type = $10, table_number = $11, order_taker = $12, comments = $13,
-           is_edited = TRUE
+           is_edited = TRUE,
+           edit_count = COALESCE(edit_count, 0) + 1
        WHERE id = $14 RETURNING *`,
       [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, order_type || null, table_number || null, order_taker || null, comments || null, req.params.id]
     );

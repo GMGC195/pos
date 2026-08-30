@@ -165,6 +165,8 @@ const pool = require('./db');
       await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS is_split_shift BOOLEAN DEFAULT false');
       await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_start_time_2 VARCHAR(20)');
       await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_end_time_2 VARCHAR(20)');
+      // Add edit_count for orders
+      await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0');
     } catch (e) {
       // Columns likely already exist
     }

@@ -1,5 +1,6 @@
 
 import BRAND_LOGO from '/1 al rasaq.png'
+import BRAND_SLIP_LOGO from '/AL RAWAQ (2).png'
 
 // ── Brand Identity ────────────────────────────────────────────────
 export const BRAND_NAME       = 'AL RAWAQ'
@@ -15,12 +16,12 @@ export const BRAND_PRIMARY_DARK  = '#D4A000' // Darker yellow for hover states
 export const BRAND_PRIMARY_GLOW  = 'rgba(244, 180, 0, 0.25)' // Glow/shadow for primary
 
 // ── Contact Information ───────────────────────────────────────────
-export const BRAND_ADDRESS    = 'Ahmad Town, Jaranwala Road, Khurrianwala'
-export const BRAND_PHONE      = ['0306-7086961', '0306-4446961', '0329-4265308']
-export const BRAND_PHONE_DISPLAY = '0306-7086961 | 0306-4446961 '
-export const BRAND_PHONE_DISPLAY1 = '| 0329-4265308 ' 
-export const BRAND_EMAIL      = 'admin@saucybite.com'
-export const BRAND_WEBSITE    = 'www.saucybite.com'
+export const BRAND_ADDRESS    = 'Al Mansur, At Taysir, Makkah 24231'
+export const BRAND_PHONE      = ['+966574573405', '+966544827221']
+export const BRAND_PHONE_DISPLAY = '+966574573405 | +966544827221'
+export const BRAND_PHONE_DISPLAY1 = '' 
+export const BRAND_EMAIL      = 'alrawaq2024@gmail.com'
+export const BRAND_WEBSITE    = ''
 
 // ── Financial ─────────────────────────────────────────────────────
 export const BRAND_CURRENCY   = 'Rs.'
@@ -41,4 +42,4 @@ export const STORAGE_TOKEN_KEY = 'saucybite_token'
 export const STORAGE_USER_KEY  = 'saucybite_user'
 
 // ── Re-export logo for use throughout the app ─────────────────────
-export { BRAND_LOGO }
+export { BRAND_LOGO, BRAND_SLIP_LOGO }
