@@ -188,6 +188,49 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
               <span>Payment Status</span>
               <span style={{ fontWeight: 'bold', color: order.status === 'Hold' ? 'orange' : 'green' }}>{order.status}</span>
             </div>
+
+            {/* Edit History Section - Visible only in UI, not printed */}
+            {order.edit_history && Array.isArray(order.edit_history) && order.edit_history.length > 0 && (
+              <div style={{ marginTop: 20, borderTop: '2px dashed #ddd', paddingTop: 10 }}>
+                <h4 style={{ fontSize: 14, marginBottom: 8, textAlign: 'center', color: '#444' }}>Edit History</h4>
+                {order.edit_history.map((edit, idx) => (
+                  <div key={idx} style={{ marginBottom: 12, fontSize: 11, background: '#fcfcfc', border: '1px solid #eee', padding: 8, borderRadius: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontWeight: 'bold', borderBottom: '1px solid #ddd', paddingBottom: 4 }}>
+                      <span>Edited By: {edit.edited_by || 'Unknown'}</span>
+                      <span style={{ color: '#666' }}>{new Date(edit.timestamp).toLocaleString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    {edit.changes && edit.changes.map((change, cidx) => (
+                      <div key={cidx} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                        {change.type === 'added' && (
+                          <>
+                            <span style={{ color: 'var(--green)' }}>{change.name}</span>
+                            <span style={{ color: 'var(--green)', fontWeight: 'bold', fontSize: 10, border: '1px solid var(--green)', padding: '0 4px', borderRadius: 2 }}>+ {change.qty} New</span>
+                          </>
+                        )}
+                        {change.type === 'removed' && (
+                          <>
+                            <span style={{ color: 'var(--red)', textDecoration: 'line-through' }}>{change.name}</span>
+                            <span style={{ color: 'var(--red)', fontWeight: 'bold' }}>Removed (-{change.qty})</span>
+                          </>
+                        )}
+                        {change.type === 'decreased' && (
+                          <>
+                            <span style={{ color: 'var(--red)' }}>{change.name}</span>
+                            <span style={{ color: 'var(--red)', fontWeight: 'bold' }}>Minus (-{change.diffQty})</span>
+                          </>
+                        )}
+                        {change.type === 'increased' && (
+                          <>
+                            <span style={{ color: 'var(--green)' }}>{change.name}</span>
+                            <span style={{ color: 'var(--green)', fontWeight: 'bold' }}>Added (+{change.diffQty})</span>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

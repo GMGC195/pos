@@ -420,11 +420,52 @@ router.put('/:id', authenticateToken, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Check if order exists
-    const orderCheck = await client.query('SELECT status FROM orders WHERE id = $1', [req.params.id]);
+    // Check if order exists and get existing items
+    const orderCheck = await client.query('SELECT status, edit_history FROM orders WHERE id = $1', [req.params.id]);
     if (orderCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const existingOrder = orderCheck.rows[0];
+    const oldItemsRes = await client.query('SELECT item_name, qty FROM order_items WHERE order_id = $1', [req.params.id]);
+    const oldItems = oldItemsRes.rows;
+
+    // Compute Diff
+    const diff = [];
+    const newItemsMap = {};
+    items.forEach(i => newItemsMap[i.name] = i.qty);
+    
+    const oldItemsMap = {};
+    oldItems.forEach(i => oldItemsMap[i.item_name] = i.qty);
+
+    // Check for removed or decreased qty
+    for (const oldName in oldItemsMap) {
+      const oldQty = oldItemsMap[oldName];
+      const newQty = newItemsMap[oldName] || 0;
+      if (newQty === 0) {
+        diff.push({ type: 'removed', name: oldName, qty: oldQty });
+      } else if (newQty < oldQty) {
+        diff.push({ type: 'decreased', name: oldName, diffQty: oldQty - newQty, oldQty, newQty });
+      } else if (newQty > oldQty) {
+        diff.push({ type: 'increased', name: oldName, diffQty: newQty - oldQty, oldQty, newQty });
+      }
+    }
+    // Check for newly added items
+    for (const newName in newItemsMap) {
+      if (!oldItemsMap[newName]) {
+        diff.push({ type: 'added', name: newName, qty: newItemsMap[newName] });
+      }
+    }
+
+    // Prepare edit history
+    let editHistory = existingOrder.edit_history || [];
+    if (diff.length > 0) {
+      editHistory.push({
+        timestamp: new Date().toISOString(),
+        edited_by: req.user?.username || req.user?.role || 'Unknown User',
+        changes: diff
+      });
     }
 
     const status = payment_method === 'Hold' ? 'Hold' : 'Completed';
@@ -437,9 +478,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
            client_order_id = COALESCE($9, client_order_id),
            order_type = $10, table_number = $11, order_taker = $12, comments = $13,
            is_edited = TRUE,
-           edit_count = COALESCE(edit_count, 0) + 1
-       WHERE id = $14 RETURNING *`,
-      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, order_type || null, table_number || null, order_taker || null, comments || null, req.params.id]
+           edit_count = COALESCE(edit_count, 0) + 1,
+           edit_history = $14
+       WHERE id = $15 RETURNING *`,
+      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, order_type || null, table_number || null, order_taker || null, comments || null, JSON.stringify(editHistory), req.params.id]
     );
 
     // Replace order items: Delete existing and insert new

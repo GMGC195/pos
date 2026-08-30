@@ -1,6 +1,15 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+
+// Handle unexpected errors (like Neon DB ECONNRESET on idle clients) to prevent app crash
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection:', reason);
+});
+
 const pool = require('./db');
 
 // Database initialization (reloaded)
