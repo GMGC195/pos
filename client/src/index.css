@@ -2760,3 +2760,26 @@ tbody tr:hover td {
 .mobile-fab-container {
   display: none;
 }
+
+@media (max-width: 640px) {
+  .pos-cat-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0;
+    border-bottom: none;
+  }
+  .pos-cat-tabs .cat-tab {
+    font-size: 11px;
+    padding: 4px 8px;
+    flex: 1 1 auto;
+    text-align: center;
+    border: 1px solid var(--surface-2);
+    border-radius: 20px;
+    background: var(--surface);
+  }
+  .pos-cat-tabs .cat-tab.active {
+    border-color: var(--primary);
+    background: rgba(244, 180, 0, 0.1);
+  }
+}

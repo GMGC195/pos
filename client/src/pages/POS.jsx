@@ -96,6 +96,7 @@ export default function POS() {
     'Delivery': false 
   })
   const [mobilePane, setMobilePane] = useState('none')
+  const [showMobileDotsMenu, setShowMobileDotsMenu] = useState(false)
   
   const toggleSection = (type) => {
     setExpandedSections(prev => ({ ...prev, [type]: !prev[type] }));
@@ -578,41 +579,54 @@ export default function POS() {
       <div className="pos-layout">
         {/* Left: Products */}
         <div className="pos-left">
-          {/* POS Compact Header (Dropdown + Search + Dots) */}
-          <div className="pos-mobile-header">
-            <select 
-              className="pos-mobile-dropdown" 
-              value={activeCategory} 
-              onChange={(e) => setActiveCategory(e.target.value)}
-            >
-              <option value="All">All Categories</option>
-              {categories.map(cat => (
-                <option key={cat.id} value={cat.name}>{cat.name}</option>
-              ))}
-            </select>
-            
-            <div className="pos-mobile-search">
-              <Search className="si" size={14} />
+          {/* POS Category Chips (Mobile & Desktop) */}
+          <div className="category-tabs pos-cat-tabs" style={{ marginTop: 2, marginBottom: 4 }}>
+            <button
+              className={`cat-tab${activeCategory === 'All' ? ' active' : ''}`}
+              onClick={() => setActiveCategory('All')}
+            >All</button>
+            {categories.map(cat => (
+              <button
+                key={cat.id}
+                className={`cat-tab${activeCategory === cat.name ? ' active' : ''}`}
+                onClick={() => setActiveCategory(cat.name)}
+              >{cat.name}</button>
+            ))}
+          </div>
+
+          {/* POS Compact Header (Search + Dots) */}
+          <div className="pos-mobile-header" style={{ display: 'flex', gap: 10, marginTop: 0, marginBottom: 4 }}>
+            <div className="pos-mobile-search" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search className="si" size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 placeholder="Search menu items..."
+                style={{ width: '100%', padding: '10px 10px 10px 32px', borderRadius: 8, border: '1px solid var(--surface-2)' }}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
-            
             <div 
               className="pos-mobile-dots" 
-              onClick={() => {
-                const el = document.getElementById('pos-mobile-dots-menu');
-                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMobileDotsMenu(prev => !prev);
               }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', borderRadius: 8, border: '1px solid var(--surface-2)', background: 'var(--surface)', cursor: 'pointer', position: 'relative' }}
             >
               <MoreVertical size={18} />
-              <div id="pos-mobile-dots-menu" className="pos-mobile-dots-menu" style={{ display: 'none' }}>
-                <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); document.getElementById('pos-mobile-dots-menu').style.display = 'none'; }}>+ New Type</button>
-                <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); document.getElementById('pos-mobile-dots-menu').style.display = 'none'; }}>Manage Categories</button>
-              </div>
+              {showMobileDotsMenu && (
+                <>
+                  <div 
+                    style={{ position: 'fixed', inset: 0, zIndex: 998 }} 
+                    onClick={(e) => { e.stopPropagation(); setShowMobileDotsMenu(false); }} 
+                  />
+                  <div className="pos-mobile-dots-menu" style={{ display: 'block', zIndex: 999 }}>
+                    <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); setShowMobileDotsMenu(false); }}>+ New Type</button>
+                    <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); setShowMobileDotsMenu(false); }}>Manage Categories</button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
