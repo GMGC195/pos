@@ -378,6 +378,26 @@ const pool = require('./db');
       )
     `);
 
+    // Create tables schema
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tables (
+        id SERIAL PRIMARY KEY,
+        table_number VARCHAR(50) NOT NULL UNIQUE,
+        status VARCHAR(20) DEFAULT 'Active',
+        available_branches JSONB DEFAULT '["Branch 1", "Branch 2", "Branch 3"]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Pre-fill 1 to 20 tables if the table is completely empty
+    const checkTables = await pool.query('SELECT COUNT(*) FROM tables');
+    if (parseInt(checkTables.rows[0].count) === 0) {
+      for (let i = 1; i <= 20; i++) {
+        await pool.query('INSERT INTO tables (table_number) VALUES ($1)', [String(i)]);
+      }
+      console.log('Migrated: Auto-created default tables 1 to 20');
+    }
+
     console.log('✅ Database schema verified: all columns and constraints up to date.');
   } catch (err) {
     console.warn('⚠️ Database schema verification warning:', err.message);
@@ -475,6 +495,7 @@ app.use('/api/support', require('./routes/support'));
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/payroll', require('./routes/payroll'));
+app.use('/api/tables', require('./routes/tables'));
 
 // Health check
 app.get('/api/health', (req, res) => {

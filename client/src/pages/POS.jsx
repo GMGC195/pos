@@ -3,8 +3,10 @@ import axios from '../api'
 import toast from 'react-hot-toast'
 import { CURRENCY } from '../config'
 import ManageCategoriesModal from '../components/ManageCategoriesModal'
+import ManageTablesModal from '../components/ManageTablesModal'
 import OrderDetailModal from '../components/OrderDetailModal'
 import AddCategoryModal from '../components/AddCategoryModal'
+import { socket } from '../socket'
 import {
   Search,
   ShoppingCart,
@@ -99,6 +101,27 @@ export default function POS() {
   })
   const [mobilePane, setMobilePane] = useState('none')
   const [showMobileDotsMenu, setShowMobileDotsMenu] = useState(false)
+  const [showTableDotsMenu, setShowTableDotsMenu] = useState(false)
+  const [tablesList, setTablesList] = useState([])
+  const [showManageTables, setShowManageTables] = useState(false)
+
+  const fetchTablesList = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/tables');
+      setTablesList(res.data);
+    } catch (err) {
+      console.error('Failed to fetch tables:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTablesList();
+    
+    socket.on('tables-updated', fetchTablesList);
+    return () => {
+      socket.off('tables-updated', fetchTablesList);
+    }
+  }, [fetchTablesList]);
   
   const toggleSection = (type) => {
     setExpandedSections(prev => ({ ...prev, [type]: !prev[type] }));
@@ -583,7 +606,7 @@ export default function POS() {
         <div className="pos-left">
           {customerInfo.orderType === 'Dine-In' && !customerInfo.tableNumber ? (
             <div className="table-selection-view" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginBottom: 20 }}>
                 {['Dine-In', 'Takeaway', 'Delivery'].map(type => (
                   <button 
                     key={type}
@@ -601,16 +624,40 @@ export default function POS() {
                     {type}
                   </button>
                 ))}
+                
+                {['admin', 'developer', 'order taker'].includes(user?.role?.toLowerCase()) && (
+                  <div style={{ position: 'relative' }}>
+                    <button 
+                      onClick={() => setShowTableDotsMenu(!showTableDotsMenu)}
+                      style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--surface-2)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <MoreVertical size={20} color="var(--text-secondary)" />
+                    </button>
+                    {showTableDotsMenu && (
+                      <>
+                        <div style={{ position: 'fixed', inset: 0, zIndex: 998 }} onClick={() => setShowTableDotsMenu(false)} />
+                        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 8, boxShadow: '0 4px 6px rgba(0,0,0,0.1)', zIndex: 999, minWidth: 150, overflow: 'hidden' }}>
+                          <button 
+                            style={{ width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 14 }}
+                            onClick={() => { setShowManageTables(true); setShowTableDotsMenu(false); }}
+                          >
+                            Manage Tables
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <h3 style={{ marginBottom: 16, textAlign: 'center' }}>Select a Table</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12 }}>
-                {Array.from({ length: 20 }, (_, i) => i + 1).map(num => {
-                  const tableStr = String(num);
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 200px)', paddingRight: 4, paddingBottom: 60 }}>
+                {tablesList.map(t => {
+                  const tableStr = String(t.table_number);
                   const activeOrder = activeOrders.find(o => (o.order_type === 'Dine-In' || (!o.order_type && o.customer_address?.startsWith('Table '))) && String(o.table_number || o.customer_address?.replace('Table ', '')) === tableStr && o.status === 'Hold');
                   const isBooked = !!activeOrder;
                   return (
                     <button
-                      key={num}
+                      key={t.id}
                       onClick={() => {
                         if (isBooked) {
                           loadOrderForEdit(activeOrder.id);
@@ -638,7 +685,7 @@ export default function POS() {
                       onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                       onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
                     >
-                      <span>Table {num}</span>
+                      <span>Table {t.table_number}</span>
                       {isBooked && <span style={{ fontSize: 11, fontWeight: 500, background: 'rgba(255,255,255,0.2)', padding: '2px 6px', borderRadius: 4 }}>Booked</span>}
                     </button>
                   )
@@ -692,6 +739,9 @@ export default function POS() {
                   <div className="pos-mobile-dots-menu" style={{ display: 'block', zIndex: 999 }}>
                     <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); setShowMobileDotsMenu(false); }}>+ New Type</button>
                     <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); setShowMobileDotsMenu(false); }}>Manage Categories</button>
+                    {['admin', 'developer', 'order taker'].includes(user?.role?.toLowerCase()) && (
+                      <button onClick={(e) => { e.stopPropagation(); setShowManageTables(true); setShowMobileDotsMenu(false); }}>Manage Tables</button>
+                    )}
                     <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }} />
                     <button onClick={(e) => { e.stopPropagation(); setCustomerInfo(p => ({ ...p, orderType: 'Dine-In' })); setShowMobileDotsMenu(false); }}>Switch to Dine-In</button>
                     <button onClick={(e) => { e.stopPropagation(); setCustomerInfo(p => ({ ...p, orderType: 'Takeaway' })); setShowMobileDotsMenu(false); }}>Switch to Takeaway</button>
@@ -1319,16 +1369,22 @@ export default function POS() {
           />
         )
       }
-      {
-        showAddCategory && (
-          <AddCategoryModal
-            categories={categories}
-            setCategories={setCategories}
-            onClose={() => setShowAddCategory(false)}
-            onCategoryAdded={(cat) => setActiveCategory(cat.name)}
-          />
-        )
-      }
+      {showAddCategory && (
+        <AddCategoryModal
+          onClose={() => setShowAddCategory(false)}
+          onCategoryAdded={(newCat) => {
+            setCategories([...categories, newCat])
+            setShowAddCategory(false)
+          }}
+        />
+      )}
+      
+      {showManageTables && (
+        <ManageTablesModal 
+          onClose={() => setShowManageTables(false)} 
+          onTableChange={() => fetchTablesList()} 
+        />
+      )}
     </>
   )
 }
