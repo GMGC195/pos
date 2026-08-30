@@ -149,6 +149,12 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     await client.query('COMMIT');
+    
+    // Emit real-time event for new order
+    if (req.io) {
+      req.io.emit('newOrder', order);
+    }
+    
     res.status(201).json({ success: true, order });
   } catch (err) {
     console.error('❌ Order insertion failed:', err);
@@ -218,7 +224,9 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       'UPDATE orders SET status=$1 WHERE id=$2 RETURNING *',
       [status, req.params.id]
     );
-    res.json(result.rows[0]);
+    const updatedOrder = result.rows[0];
+    if (req.io) req.io.emit('orderUpdated', updatedOrder);
+    res.json(updatedOrder);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -255,7 +263,9 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     await deductStock(req.params.id, client);
 
     await client.query('COMMIT');
-    res.json({ success: true, order: orderResult.rows[0] });
+    const updatedOrder = orderResult.rows[0];
+    if (req.io) req.io.emit('orderUpdated', updatedOrder);
+    res.json({ success: true, order: updatedOrder });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -296,7 +306,9 @@ router.patch('/:id/void', authenticateToken, isAdmin, async (req, res) => {
     await returnStock(req.params.id, client);
 
     await client.query('COMMIT');
-    res.json({ success: true, order: orderResult.rows[0] });
+    const updatedOrder = orderResult.rows[0];
+    if (req.io) req.io.emit('orderUpdated', updatedOrder);
+    res.json({ success: true, order: updatedOrder });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -317,7 +329,9 @@ router.patch('/:id/request-cancel', authenticateToken, async (req, res) => {
       'UPDATE orders SET cancel_requested = TRUE, cancel_reason = $1 WHERE id = $2 RETURNING *',
       [reason || 'No reason provided', req.params.id]
     );
-    res.json({ success: true, order: result.rows[0] });
+    const updatedOrder = result.rows[0];
+    if (req.io) req.io.emit('orderUpdated', updatedOrder);
+    res.json({ success: true, order: updatedOrder });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -345,7 +359,9 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdmin, async (re
          [req.params.id]
        );
        await client.query('COMMIT');
-       return res.json({ success: true, message: 'Cancellation request approved', order: orderResult.rows[0] });
+       const updatedOrder = orderResult.rows[0];
+       if (req.io) req.io.emit('orderUpdated', updatedOrder);
+       return res.json({ success: true, message: 'Cancellation request approved', order: updatedOrder });
     } else {
        // Reject: Just clear the request
        const result = await pool.query(
@@ -353,7 +369,9 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdmin, async (re
          [req.params.id]
        );
        await client.query('COMMIT');
-       return res.json({ success: true, message: 'Cancellation request rejected', order: result.rows[0] });
+       const updatedOrder = result.rows[0];
+       if (req.io) req.io.emit('orderUpdated', updatedOrder);
+       return res.json({ success: true, message: 'Cancellation request rejected', order: updatedOrder });
     }
   } catch (err) {
     await client.query('ROLLBACK');
@@ -404,6 +422,7 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
     await client.query('DELETE FROM orders WHERE id = $1', [req.params.id]);
     
     await client.query('COMMIT');
+    if (req.io) req.io.emit('orderUpdated', { id: req.params.id, deleted: true });
     res.json({ success: true, message: 'Order deleted successfully' });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -503,7 +522,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     );
 
     await client.query('COMMIT');
-    res.json({ success: true, order: orderResult.rows[0] });
+    const updatedOrder = orderResult.rows[0];
+    if (req.io) req.io.emit('orderUpdated', updatedOrder);
+    res.json({ success: true, order: updatedOrder });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

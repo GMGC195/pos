@@ -381,6 +381,10 @@ const pool = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const http = require('http');
+const { Server } = require('socket.io');
+
+const server = http.createServer(app);
 
 // CORS — allowed origins (add your deployed frontend URLs here)
 const ALLOWED_ORIGINS = [
@@ -424,6 +428,34 @@ app.use((req, res, next) => {
   next();
 });
 
+const io = new Server(server, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowed = ALLOWED_ORIGINS.some(o =>
+        typeof o === 'string' ? o === origin : o.test(origin)
+      );
+      if (allowed) return callback(null, true);
+      callback(new Error(`Socket.io CORS blocked: ${origin}`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log(`🔌 Socket.io client connected: ${socket.id}`);
+  socket.on('disconnect', () => {
+    console.log(`🔌 Socket.io client disconnected: ${socket.id}`);
+  });
+});
+
+// Middleware to expose io to routes
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/categories', require('./routes/categories'));
@@ -450,6 +482,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🍕 Pizza Shop Server running on http://localhost:${PORT}`);
 });

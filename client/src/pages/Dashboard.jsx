@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
+import { socket } from '../socket'
 import { toast } from 'react-hot-toast'
 import {
   Chart as ChartJS,
@@ -140,7 +141,17 @@ export default function Dashboard() {
   useEffect(() => {
     loadStats()
     const interval = setInterval(loadStats, 300000) // Auto-refresh every 5 mins
-    return () => clearInterval(interval)
+    
+    // Real-time socket events
+    const handleOrderEvent = () => loadStats();
+    socket.on('newOrder', handleOrderEvent);
+    socket.on('orderUpdated', handleOrderEvent);
+
+    return () => {
+      clearInterval(interval)
+      socket.off('newOrder', handleOrderEvent);
+      socket.off('orderUpdated', handleOrderEvent);
+    }
   }, [isDeveloper])
 
   const exportExcel = async () => {

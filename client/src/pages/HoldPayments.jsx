@@ -6,6 +6,7 @@ import OrderDetailModal from '../components/OrderDetailModal'
 import { useAuth } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
+import { socket } from '../socket'
 
 export default function HoldPayments() {
   const [orders, setOrders] = useState([])
@@ -43,9 +44,17 @@ export default function HoldPayments() {
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
+    
+    // Real-time socket events
+    const handleOrderEvent = () => loadHeldOrders();
+    socket.on('newOrder', handleOrderEvent);
+    socket.on('orderUpdated', handleOrderEvent);
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
       clearInterval(interval)
+      socket.off('newOrder', handleOrderEvent);
+      socket.off('orderUpdated', handleOrderEvent);
     }
   }, [])
 
