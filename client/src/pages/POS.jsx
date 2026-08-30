@@ -884,7 +884,7 @@ export default function POS() {
                 style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
                 disabled={processing}
               >
-                <ClipboardList size={18} /> Hold (Enter)
+                <ClipboardList size={18} /> Hold
               </button>
               <button
                 className="btn btn-success btn-lg"
@@ -1010,15 +1010,15 @@ export default function POS() {
       {
         confirmModal && (
           <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setConfirmModal(false) }}>
-            <div className="modal" style={{ maxWidth: 700, width: "90%", padding: 20 }}>
-              <div className="modal-header">
-                <h3>Confirm Order</h3>
+            <div className="modal" style={{ maxWidth: 700, width: "90%", padding: window.innerWidth <= 900 ? 12 : 20, maxHeight: '90vh', overflowY: 'auto' }}>
+              <div className="modal-header" style={{ paddingBottom: window.innerWidth <= 900 ? 0 : 16, marginBottom: window.innerWidth <= 900 ? 4 : 16, borderBottom: window.innerWidth <= 900 ? 'none' : '1px solid var(--surface-2)' }}>
+                <h3 style={{ fontSize: window.innerWidth <= 900 ? 13 : 24, margin: 0 }}>Confirm Order</h3>
                 <button className="modal-close" onClick={() => setConfirmModal(false)}>✕</button>
               </div>
-              <div style={{ display: 'flex', gap: 12, padding: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: window.innerWidth <= 900 ? 8 : 12, padding: window.innerWidth <= 900 ? 0 : 12, flexWrap: 'wrap' }}>
                 {/* Left Column: Order Summary */}
-                <div style={{ flex: '1 1 300px', borderRight: '1px solid var(--surface-2)', paddingRight: 16 }}>
-                  <h4 style={{ marginBottom: 16 }}>Receipt Preview</h4>
+                <div style={{ flex: '1 1 300px', borderRight: window.innerWidth > 900 ? '1px solid var(--surface-2)' : 'none', paddingRight: window.innerWidth > 900 ? 16 : 0, paddingBottom: window.innerWidth <= 900 ? 12 : 0, borderBottom: window.innerWidth <= 900 ? '1px solid var(--surface-2)' : 'none' }}>
+                  <h4 style={{ marginTop: window.innerWidth <= 900 ? 0 : 0, marginBottom: window.innerWidth <= 900 ? 4 : 16, fontSize: window.innerWidth <= 900 ? 14 : 16 }}>Receipt Preview</h4>
                   <div style={{ background: '#f8f9fa', padding: 12, borderRadius: 8, fontFamily: 'Tahoma, Geneva, sans-serif', fontSize: 13 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: 6, borderBottom: '1px solid #ddd', paddingBottom: 4 }}>
                       <span style={{ flex: 2 }}>Item</span>
@@ -1057,20 +1057,20 @@ export default function POS() {
 
                 {/* Right Column: Optional Info & Actions */}
                 <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div className="form-group" style={{ marginBottom: 4 }}>
-                    <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Order Type</label>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
+                  <div className="form-group" style={{ marginBottom: 1 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Order Type</label>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 1 }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
                         <input type="radio" name="orderType" value="Dine-In" checked={customerInfo.orderType === 'Dine-In'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Dine-In' }))} />
-                        <span style={{ fontSize: 13 }}>Dine-In</span>
+                        <span style={{ fontSize: 12 }}>Dine-In</span>
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
                         <input type="radio" name="orderType" value="Takeaway" checked={customerInfo.orderType === 'Takeaway'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Takeaway' }))} />
-                        <span style={{ fontSize: 13 }}>Takeaway</span>
+                        <span style={{ fontSize: 12 }}>Takeaway</span>
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
                         <input type="radio" name="orderType" value="Delivery" checked={customerInfo.orderType === 'Delivery'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Delivery' }))} />
-                        <span style={{ fontSize: 13 }}>Delivery</span>
+                        <span style={{ fontSize: 12 }}>Delivery</span>
                       </label>
                     </div>
                   </div>
@@ -1078,31 +1078,31 @@ export default function POS() {
                   {/* DINE-IN FORM */}
                   {customerInfo.orderType === 'Dine-In' && (
                     <>
-                      <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-                        <div className="form-group" style={{ flex: 1 }}>
-                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 1 }}>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>
                             <span>Table Number *</span>
                           </label>
-                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="e.g. 5" value={customerInfo.tableNumber || ''} onChange={e => setCustomerInfo(p => ({ ...p, tableNumber: e.target.value }))} />
+                          <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="e.g. 5" value={customerInfo.tableNumber || ''} onChange={e => setCustomerInfo(p => ({ ...p, tableNumber: e.target.value }))} />
                           {customerInfo.tableNumber && (
-                            <div style={{ color: activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'var(--red)' : 'var(--green)', fontWeight: 'bold', fontSize: 10, marginTop: 4 }}>
+                            <div style={{ color: activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'var(--red)' : 'var(--green)', fontWeight: 'bold', fontSize: 10, marginTop: 2 }}>
                               {activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'Already Booked' : 'Available'}
                             </div>
                           )}
                         </div>
-                        <div className="form-group" style={{ flex: 1 }}>
-                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name *</label>
-                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Customer Name *</label>
+                          <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-                        <div className="form-group" style={{ flex: 1 }}>
-                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Discount Amount</label>
-                          <input className="form-control" type="number" step="0.01" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 1 }}>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Discount Amount</label>
+                          <input className="form-control" type="number" step="0.01" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
                         </div>
-                        <div className="form-group" style={{ flex: 1 }}>
-                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Comments</label>
-                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Notes..." value={customerInfo.comments || ''} onChange={e => setCustomerInfo(p => ({ ...p, comments: e.target.value }))} />
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Comments</label>
+                          <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="Notes..." value={customerInfo.comments || ''} onChange={e => setCustomerInfo(p => ({ ...p, comments: e.target.value }))} />
                         </div>
                       </div>
                     </>
@@ -1111,23 +1111,23 @@ export default function POS() {
                   {/* DELIVERY FORM */}
                   {customerInfo.orderType === 'Delivery' && (
                     <>
-                      <div className="form-group" style={{ marginBottom: 4 }}>
-                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name</label>
-                        <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
+                      <div className="form-group" style={{ marginBottom: 1 }}>
+                        <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Customer Name</label>
+                        <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
                       </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 1 }}>
                         <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Phone Number *</label>
-                          <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Phone Number *</label>
+                          <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
                         </div>
                         <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Discount Amount</label>
-                          <input className="form-control" type="number" step="0.01" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Discount Amount</label>
+                          <input className="form-control" type="number" step="0.01" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
                         </div>
                       </div>
-                      <div className="form-group" style={{ marginBottom: 4 }}>
-                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Address *</label>
-                        <textarea className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="123 Main St" rows={1} value={customerInfo.address} onChange={e => setCustomerInfo(p => ({ ...p, address: e.target.value }))} />
+                      <div className="form-group" style={{ marginBottom: 1 }}>
+                        <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Address *</label>
+                        <textarea className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="123 Main St" rows={1} value={customerInfo.address} onChange={e => setCustomerInfo(p => ({ ...p, address: e.target.value }))} />
                       </div>
                     </>
                   )}
@@ -1135,29 +1135,31 @@ export default function POS() {
                   {/* TAKEAWAY FORM */}
                   {customerInfo.orderType === 'Takeaway' && (
                     <>
-                      <div className="form-group" style={{ marginBottom: 4 }}>
-                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Customer Name *</label>
-                        <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
+                      <div className="form-group" style={{ marginBottom: 1 }}>
+                        <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Customer Name *</label>
+                        <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
                       </div>
-                      <div className="form-group" style={{ marginBottom: 4 }}>
-                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Phone Number *</label>
-                        <input type="text" className="form-control" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
-                      </div>
-                      <div className="form-group" style={{ marginBottom: 4 }}>
-                        <label style={{ display: 'block', fontSize: 12, marginBottom: 2, color: 'var(--text-secondary)' }}>Discount Amount</label>
-                        <input className="form-control" type="number" step="0.01" style={{ padding: '6px 8px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 1 }}>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Phone Number *</label>
+                          <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
+                        </div>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label style={{ display: 'block', fontSize: 11, marginBottom: 0, color: 'var(--text-secondary)' }}>Discount Amount</label>
+                          <input className="form-control" type="number" step="0.01" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                        </div>
                       </div>
                     </>
                   )}
 
-                  <div className="form-group" style={{ marginBottom: 4 }}>
-                    <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>
+                  <div className="form-group" style={{ marginBottom: 1 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>
                       {customerInfo.orderType === 'Delivery' ? 'Delivery Boy Name' : 'Order Taker Name'}
                     </label>
                     <input
                       type="text"
                       className="form-control"
-                      style={{ padding: '6px 8px', fontSize: 13 }}
+                      style={{ padding: '4px 6px', fontSize: 13 }}
                       placeholder={customerInfo.orderType === 'Delivery' ? 'Delivery Boy Name' : 'Order Taker Name'}
                       value={customerInfo.orderTaker || ''}
                       onChange={e => setCustomerInfo(p => ({ ...p, orderTaker: e.target.value }))}
@@ -1165,8 +1167,8 @@ export default function POS() {
                   </div>
 
                   {paymentMethod !== 'Hold' && (
-                    <div className="form-group" style={{ marginBottom: 4, marginTop: 'auto' }}>
-                      <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>Payment Method</label>
+                    <div className="form-group" style={{ marginBottom: 1, marginTop: 'auto' }}>
+                      <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Payment Method</label>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {['Cash', 'Online', 'Payment Pending'].map(pm => (
                           <button 
@@ -1192,12 +1194,12 @@ export default function POS() {
                     </div>
                   )}
 
-                  <div style={{ paddingTop: 4, display: 'flex', gap: 10 }}>
-                    <button className="btn btn-secondary" style={{ flex: 1, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, false)} disabled={processing !== false}>
+                  <div style={{ paddingTop: window.innerWidth <= 900 ? 12 : 4, paddingBottom: window.innerWidth <= 900 ? 12 : 0, display: 'flex', gap: window.innerWidth <= 900 ? 6 : 10, position: window.innerWidth <= 900 ? 'sticky' : 'static', bottom: window.innerWidth <= 900 ? -12 : 'auto', background: 'white', zIndex: 10, borderTop: window.innerWidth <= 900 ? '1px solid #eee' : 'none', marginTop: window.innerWidth <= 900 ? 12 : 0 }}>
+                    <button className="btn btn-secondary" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14 }} onClick={() => handlePlaceOrder(paymentMethod, false)} disabled={processing !== false}>
                       {processing === 'punch' ? 'Punching...' : 'Punch Only'}
                     </button>
-                    <button className="btn btn-primary" style={{ flex: 2, padding: '10px 16px', fontSize: 14 }} onClick={() => handlePlaceOrder(paymentMethod, true)} disabled={processing !== false}>
-                      {processing === 'print' ? 'Processing...' : 'Print & Place Order'}
+                    <button className="btn btn-primary" style={{ flex: 1.5, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14 }} onClick={() => handlePlaceOrder(paymentMethod, true)} disabled={processing !== false}>
+                      {processing === 'print' ? 'Processing...' : 'Print & Punch'}
                     </button>
                   </div>
                 </div>
