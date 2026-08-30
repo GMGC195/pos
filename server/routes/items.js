@@ -15,6 +15,15 @@ router.get('/', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
+    // Branch isolation for Order Taker / Operator
+    if (req.user.role === 'Order Taker' || req.user.role === 'Operator') {
+      params.push(req.user.branch);
+      query += ` AND i.available_branches ? $${params.length}`;
+    } else if (req.query.branch && req.query.branch !== 'All') {
+      params.push(req.query.branch);
+      query += ` AND i.available_branches ? $${params.length}`;
+    }
+
     if (category && category !== 'All') {
       params.push(category);
       query += ` AND c.name = $${params.length}`;
@@ -51,10 +60,15 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   const { category_id, name, price, image_url, size_options, status } = req.body;
   try {
+    let available_branches = ['Branch 1', 'Branch 2', 'Branch 3'];
+    if (req.user.role === 'Order Taker' || req.user.role === 'Operator') {
+      available_branches = [req.user.branch];
+    }
+
     const result = await pool.query(
-      `INSERT INTO items (category_id, name, price, image_url, size_options, status)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [category_id, name, price, image_url || '', size_options || [], status || 'Active']
+      `INSERT INTO items (category_id, name, price, image_url, size_options, status, available_branches)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [category_id, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify(available_branches)]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -65,11 +79,73 @@ router.post('/', authenticateToken, async (req, res) => {
 // PUT update item
 router.put('/:id', authenticateToken, async (req, res) => {
   const { category_id, name, price, image_url, size_options, status } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch current item
+    const currentItemRes = await client.query('SELECT * FROM items WHERE id = $1', [req.params.id]);
+    if (currentItemRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    const currentItem = currentItemRes.rows[0];
+
+    const isRestrictedRole = req.user.role === 'Order Taker' || req.user.role === 'Operator';
+    const userBranch = req.user.branch;
+    let availableBranches = currentItem.available_branches || [];
+
+    // If it's a restricted user and the item is shared with other branches
+    if (isRestrictedRole && availableBranches.length > 1 && availableBranches.includes(userBranch)) {
+      // Remove this branch from the original item
+      const newOriginalBranches = availableBranches.filter(b => b !== userBranch);
+      await client.query('UPDATE items SET available_branches = $1 WHERE id = $2', [JSON.stringify(newOriginalBranches), req.params.id]);
+
+      // Create a new item for this branch with the updated details
+      const createResult = await client.query(
+        `INSERT INTO items (category_id, name, price, image_url, size_options, status, available_branches)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [category_id, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify([userBranch])]
+      );
+      
+      const newItem = createResult.rows[0];
+
+      // Copy recipes from old item to new item
+      const recipesRes = await client.query('SELECT * FROM recipes WHERE item_id = $1', [req.params.id]);
+      for (const recipe of recipesRes.rows) {
+        await client.query(
+          'INSERT INTO recipes (item_id, stock_id, quantity_used, size_label) VALUES ($1, $2, $3, $4)',
+          [newItem.id, recipe.stock_id, recipe.quantity_used, recipe.size_label]
+        );
+      }
+
+      await client.query('COMMIT');
+      return res.json(newItem);
+    } else {
+      // Normal update
+      const result = await client.query(
+        `UPDATE items SET category_id=$1, name=$2, price=$3, image_url=$4, size_options=$5, status=$6
+         WHERE id=$7 RETURNING *`,
+        [category_id, name, price, image_url || '', size_options || [], status || 'Active', req.params.id]
+      );
+      await client.query('COMMIT');
+      res.json(result.rows[0]);
+    }
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH update available branches
+router.patch('/:id/branches', authenticateToken, async (req, res) => {
+  const { available_branches } = req.body;
   try {
     const result = await pool.query(
-      `UPDATE items SET category_id=$1, name=$2, price=$3, image_url=$4, size_options=$5, status=$6
-       WHERE id=$7 RETURNING *`,
-      [category_id, name, price, image_url || '', size_options || [], status || 'Active', req.params.id]
+      'UPDATE items SET available_branches = $1 WHERE id = $2 RETURNING *',
+      [JSON.stringify(available_branches), req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item not found' });
     res.json(result.rows[0]);

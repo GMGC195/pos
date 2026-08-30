@@ -371,13 +371,28 @@ export default function Settings() {
                           onChange={e => setUserForm({...userForm, role: e.target.value, shift: e.target.value === 'Operator' ? userForm.shift : ''})}
                         >
                           <option value="Admin">Admin</option>
+                          <option value="Order Taker">Order Taker</option>
                           <option value="Operator">Operator</option>
+                          <option value="HR Manager">HR Manager</option>
                           <option value="Management">Management</option>
                           <option value="Employee">Employee</option>
                           {user?.role?.toLowerCase() === 'developer' && <option value="Developer">Developer</option>}
                         </select>
                       </div>
-                      {userForm.role === 'Operator' && (
+                      {(userForm.role === 'Order Taker' || userForm.role === 'Operator') && (
+                        <div className="form-group">
+                          <label>Assigned Restaurant</label>
+                          <select 
+                            value={userForm.branch || 'Branch 1'}
+                            onChange={e => setUserForm({...userForm, branch: e.target.value})}
+                          >
+                            <option value="Branch 1">Branch 1</option>
+                            <option value="Branch 2">Branch 2</option>
+                            <option value="Branch 3">Branch 3</option>
+                          </select>
+                        </div>
+                      )}
+                      {(userForm.role === 'Operator' || userForm.role === 'Employee') && (
                         <>
                         <div className="form-group" style={{ position: 'relative' }} ref={shiftDropdownRef}>
                           <label>Assigned Shift(s)</label>

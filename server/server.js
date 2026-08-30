@@ -58,6 +58,11 @@ const pool = require('./db');
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift VARCHAR(50) DEFAULT 'Day'
     `);
 
+    // Add strict_attendance column
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS strict_attendance BOOLEAN DEFAULT false
+    `);
+
     // Rename employee_shifts to employee_working_hours if it exists
     try {
       await pool.query('ALTER TABLE employee_shifts RENAME TO employee_working_hours');

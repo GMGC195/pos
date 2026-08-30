@@ -6,7 +6,8 @@ const { authenticateToken } = require('../middleware/auth');
 // GET all categories
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM categories ORDER BY id');
+    let query = 'SELECT * FROM categories ORDER BY id';
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

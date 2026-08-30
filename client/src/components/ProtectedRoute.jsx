@@ -14,12 +14,13 @@ export default function ProtectedRoute({ children, allowedRoles }) {
   }
 
   // If allowedRoles is provided, check if user's role is in the list
-  if (allowedRoles && !allowedRoles.includes(user?.role)) {
-    // Inconsistent case handling: allow 'admin' or 'Admin' etc. 
-    const userRole = user?.role?.charAt(0).toUpperCase() + user?.role?.slice(1).toLowerCase();
-    if (!allowedRoles.includes(userRole)) {
-      return <Navigate to="/" replace />
-    }
+  if (allowedRoles && !allowedRoles.some(r => r.toLowerCase() === user?.role?.toLowerCase())) {
+    // If not allowed, redirect to a safe page depending on role
+    if (user?.role?.toLowerCase() === 'order taker') return <Navigate to="/pos" replace />
+    if (user?.role?.toLowerCase() === 'operator') return <Navigate to="/pos" replace />
+    if (user?.role?.toLowerCase() === 'employee') return <Navigate to="/attendance" replace />
+    if (user?.role?.toLowerCase() === 'hr manager') return <Navigate to="/employees" replace />
+    return <Navigate to="/" replace />
   }
 
   return children

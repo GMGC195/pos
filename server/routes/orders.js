@@ -119,11 +119,12 @@ router.post('/', authenticateToken, async (req, res) => {
     );
     const slipNumber = slipResult.rows[0].next_slip;
 
+    const finalBranch = req.user.role === 'Order Taker' ? req.user.branch : (req.body.branch || 'Branch 1');
     // Insert order
     const orderResult = await client.query(
-      `INSERT INTO orders (subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, NULL, $10, FALSE, $11, $12, $13, $14) RETURNING *`,
-      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null]
+      `INSERT INTO orders (subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, NULL, $10, FALSE, $11, $12, $13, $14, $15) RETURNING *`,
+      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch]
     );
     const order = orderResult.rows[0];
 
@@ -185,6 +186,15 @@ router.get('/', authenticateToken, async (req, res) => {
         params.push(status);
         query += ` AND o.status = $${params.length}`;
       }
+    }
+
+    // Branch isolation
+    if (req.user.role === 'Order Taker') {
+      params.push(req.user.branch);
+      query += ` AND o.branch = $${params.length}`;
+    } else if (req.query.branch && req.query.branch !== 'All') {
+      params.push(req.query.branch);
+      query += ` AND o.branch = $${params.length}`;
     }
 
     query += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1}`;

@@ -135,7 +135,8 @@ export default function Employees() {
     employee_id: '',
     is_split_shift: false,
     start_time_2: '18:00',
-    end_time_2: '22:00'
+    end_time_2: '22:00',
+    strict_attendance: false
   })
   const [isCustomShift, setIsCustomShift] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -196,7 +197,8 @@ export default function Employees() {
       employee_id: '',
       is_split_shift: workingHours[0]?.is_split_shift || false,
       start_time_2: workingHours[0]?.start_time_2 || '18:00',
-      end_time_2: workingHours[0]?.end_time_2 || '22:00'
+      end_time_2: workingHours[0]?.end_time_2 || '22:00',
+      strict_attendance: false
     })
     setShowModal(true)
   }
@@ -224,7 +226,8 @@ export default function Employees() {
       employee_id: emp.employee_id || '',
       is_split_shift: matchedShift ? (matchedShift.is_split_shift || false) : false,
       start_time_2: matchedShift ? (matchedShift.start_time_2 || '18:00') : '18:00',
-      end_time_2: matchedShift ? (matchedShift.end_time_2 || '22:00') : '22:00'
+      end_time_2: matchedShift ? (matchedShift.end_time_2 || '22:00') : '22:00',
+      strict_attendance: emp.strict_attendance || false
     })
     setShowModal(true)
   }
@@ -850,6 +853,19 @@ export default function Employees() {
                       </div>
                     </div>
                   )}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, padding: '12px 16px', background: 'var(--surface-2)', borderRadius: 8 }}>
+                    <input 
+                      type="checkbox" 
+                      id="modalStrictAttendance"
+                      checked={formData.strict_attendance}
+                      onChange={e => setFormData({ ...formData, strict_attendance: e.target.checked })}
+                      style={{ width: 14, height: 14, cursor: 'pointer' }}
+                    />
+                    <label htmlFor="modalStrictAttendance" style={{ fontSize: 12, color: 'var(--text)', cursor: 'pointer', fontWeight: 600 }}>
+                      Strict Attendance (Double Deduction on &gt;= 30m late)
+                    </label>
+                  </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '16px 24px', borderTop: '1px solid var(--surface-2)', flexShrink: 0 }}>

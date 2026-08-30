@@ -16,7 +16,7 @@ export function AuthProvider({ children }) {
       const loginTime = localStorage.getItem('login_timestamp')
       if (loginTime) {
         const hoursPassed = (Date.now() - parseInt(loginTime, 10)) / (1000 * 60 * 60)
-        if (hoursPassed >= 23) {
+        if (hoursPassed >= 240) {
           localStorage.removeItem(STORAGE_TOKEN_KEY)
           localStorage.removeItem(STORAGE_USER_KEY)
           localStorage.removeItem('login_timestamp')
@@ -51,7 +51,7 @@ export function AuthProvider({ children }) {
       const loginTime = localStorage.getItem('login_timestamp')
       if (loginTime) {
         const hoursPassed = (Date.now() - parseInt(loginTime, 10)) / (1000 * 60 * 60)
-        if (hoursPassed >= 23) {
+        if (hoursPassed >= 240) {
           logout()
         }
       }

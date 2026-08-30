@@ -323,13 +323,14 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Fetch employee shift details
-    const empRes = await pool.query('SELECT working_hours, shift_hours, shift FROM employees WHERE id = $1', [employee_id]);
+    const empRes = await pool.query('SELECT working_hours, shift_hours, shift, strict_attendance FROM employees WHERE id = $1', [employee_id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
     const shift = empRes.rows[0].working_hours || 'R1';
     let shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
     const empShift = empRes.rows[0].shift || 'Day';
+    const strictAttendance = empRes.rows[0].strict_attendance || false;
 
     // Determine status (Present or Late)
     // Check if it's the first check-in of the day
@@ -402,6 +403,8 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       }
     }
 
+    let checkInTime = new Date();
+
     if (priorChecks.rows.length > 0) {
       // If they already checked in today, keep the status of the first session of the day
       status = priorChecks.rows[0].status;
@@ -421,6 +424,15 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       if (currentHours > thresholdHour || (currentHours === thresholdHour && currentMins > thresholdMins)) {
         status = 'Late';
       }
+
+      const currentTotalMins = currentHours * 60 + currentMins;
+      const startTotalMins = startHour * 60 + startMin;
+      let latenessMins = currentTotalMins - startTotalMins;
+      if (latenessMins < -12 * 60) latenessMins += 24 * 60;
+
+      if (strictAttendance && latenessMins >= 30) {
+        checkInTime = new Date(now.getTime() + (latenessMins * 60000));
+      }
     }
 
     // Verify operator shift matches employee shift
@@ -430,8 +442,8 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2) VALUES ($1, NOW(), $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime, isSplitShift, shiftStartTime2, shiftEndTime2]
+      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2) VALUES ($1, $11, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime, isSplitShift, shiftStartTime2, shiftEndTime2, checkInTime]
     );
 
     res.status(201).json(result.rows[0]);

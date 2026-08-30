@@ -42,6 +42,7 @@ import {
 } from '../branding'
 
 import { usePOS } from '../contexts/POSContext'
+import { useAuth } from '../contexts/AuthContext'
 
 const TAX_RATE = 0
 
@@ -56,6 +57,7 @@ const parseSizeOpt = (str, defaultPrice) => {
 };
 
 export default function POS() {
+  const { user } = useAuth();
   const {
     categories,
     setCategories,
@@ -342,7 +344,7 @@ export default function POS() {
         client_order_id: crypto.randomUUID(),
         order_type: customerInfo.orderType,
         table_number: customerInfo.tableNumber,
-        order_taker: customerInfo.orderTaker,
+        order_taker: user?.username || 'Guest',
         comments: customerInfo.comments
       }
 
@@ -579,9 +581,75 @@ export default function POS() {
       <div className="pos-layout">
         {/* Left: Products */}
         <div className="pos-left">
-          {/* POS Category Chips (Mobile & Desktop) */}
-          <div className="category-tabs pos-cat-tabs" style={{ marginTop: 2, marginBottom: 4 }}>
-            <button
+          {customerInfo.orderType === 'Dine-In' && !customerInfo.tableNumber ? (
+            <div className="table-selection-view" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginBottom: 20 }}>
+                {['Dine-In', 'Takeaway', 'Delivery'].map(type => (
+                  <button 
+                    key={type}
+                    onClick={() => setCustomerInfo(prev => ({ ...prev, orderType: type }))}
+                    style={{
+                      padding: '8px 20px',
+                      borderRadius: 8,
+                      border: customerInfo.orderType === type ? '2px solid var(--primary)' : '1px solid var(--surface-2)',
+                      background: customerInfo.orderType === type ? 'rgba(255,184,0,0.1)' : 'white',
+                      color: customerInfo.orderType === type ? 'var(--primary)' : 'var(--text-secondary)',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+              <h3 style={{ marginBottom: 16, textAlign: 'center' }}>Select a Table</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12 }}>
+                {Array.from({ length: 20 }, (_, i) => i + 1).map(num => {
+                  const tableStr = String(num);
+                  const activeOrder = activeOrders.find(o => (o.order_type === 'Dine-In' || (!o.order_type && o.customer_address?.startsWith('Table '))) && String(o.table_number || o.customer_address?.replace('Table ', '')) === tableStr && o.status === 'Hold');
+                  const isBooked = !!activeOrder;
+                  return (
+                    <button
+                      key={num}
+                      onClick={() => {
+                        if (isBooked) {
+                          loadOrderForEdit(activeOrder.id);
+                        } else {
+                          setCustomerInfo(prev => ({ ...prev, tableNumber: tableStr }));
+                        }
+                      }}
+                      style={{
+                        padding: '20px 10px',
+                        borderRadius: 12,
+                        border: 'none',
+                        background: isBooked ? '#3b82f6' : '#10b981',
+                        color: 'white',
+                        fontWeight: 800,
+                        fontSize: 16,
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 4,
+                        transition: 'transform 0.1s'
+                      }}
+                      onMouseDown={e => e.currentTarget.style.transform = 'scale(0.95)'}
+                      onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+                      onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                      <span>Table {num}</span>
+                      {isBooked && <span style={{ fontSize: 11, fontWeight: 500, background: 'rgba(255,255,255,0.2)', padding: '2px 6px', borderRadius: 4 }}>Booked</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* POS Category Chips (Mobile & Desktop) */}
+              <div className="category-tabs pos-cat-tabs" style={{ marginTop: 2, marginBottom: 4 }}>
+                <button
               className={`cat-tab${activeCategory === 'All' ? ' active' : ''}`}
               onClick={() => setActiveCategory('All')}
             >All</button>
@@ -624,6 +692,10 @@ export default function POS() {
                   <div className="pos-mobile-dots-menu" style={{ display: 'block', zIndex: 999 }}>
                     <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); setShowMobileDotsMenu(false); }}>+ New Type</button>
                     <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); setShowMobileDotsMenu(false); }}>Manage Categories</button>
+                    <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }} />
+                    <button onClick={(e) => { e.stopPropagation(); setCustomerInfo(p => ({ ...p, orderType: 'Dine-In' })); setShowMobileDotsMenu(false); }}>Switch to Dine-In</button>
+                    <button onClick={(e) => { e.stopPropagation(); setCustomerInfo(p => ({ ...p, orderType: 'Takeaway' })); setShowMobileDotsMenu(false); }}>Switch to Takeaway</button>
+                    <button onClick={(e) => { e.stopPropagation(); setCustomerInfo(p => ({ ...p, orderType: 'Delivery' })); setShowMobileDotsMenu(false); }}>Switch to Delivery</button>
                   </div>
                 </>
               )}
@@ -702,6 +774,8 @@ export default function POS() {
               })
             }
           </div>
+            </>
+          )}
         </div>
 
         {/* Right: Cart */}
@@ -1069,43 +1143,14 @@ export default function POS() {
 
                 {/* Right Column: Optional Info & Actions */}
                 <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div className="form-group" style={{ marginBottom: 1 }}>
-                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Order Type</label>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 1 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                        <input type="radio" name="orderType" value="Dine-In" checked={customerInfo.orderType === 'Dine-In'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Dine-In' }))} />
-                        <span style={{ fontSize: 12 }}>Dine-In</span>
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                        <input type="radio" name="orderType" value="Takeaway" checked={customerInfo.orderType === 'Takeaway'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Takeaway' }))} />
-                        <span style={{ fontSize: 12 }}>Takeaway</span>
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                        <input type="radio" name="orderType" value="Delivery" checked={customerInfo.orderType === 'Delivery'} onChange={() => setCustomerInfo(p => ({ ...p, orderType: 'Delivery' }))} />
-                        <span style={{ fontSize: 12 }}>Delivery</span>
-                      </label>
-                    </div>
-                  </div>
+
 
                   {/* DINE-IN FORM */}
                   {customerInfo.orderType === 'Dine-In' && (
                     <>
-                      <div style={{ display: 'flex', gap: 4, marginBottom: 1 }}>
-                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>
-                            <span>Table Number *</span>
-                          </label>
-                          <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="e.g. 5" value={customerInfo.tableNumber || ''} onChange={e => setCustomerInfo(p => ({ ...p, tableNumber: e.target.value }))} />
-                          {customerInfo.tableNumber && (
-                            <div style={{ color: activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'var(--red)' : 'var(--green)', fontWeight: 'bold', fontSize: 10, marginTop: 2 }}>
-                              {activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId)) ? 'Already Booked' : 'Available'}
-                            </div>
-                          )}
-                        </div>
-                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Customer Name *</label>
-                          <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
-                        </div>
+                      <div className="form-group" style={{ marginBottom: 1 }}>
+                        <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Customer Name *</label>
+                        <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="Enter Name" value={customerInfo.name} onChange={e => setCustomerInfo(p => ({ ...p, name: e.target.value }))} />
                       </div>
                       <div style={{ display: 'flex', gap: 4, marginBottom: 1 }}>
                         <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
@@ -1164,19 +1209,7 @@ export default function POS() {
                     </>
                   )}
 
-                  <div className="form-group" style={{ marginBottom: 1 }}>
-                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>
-                      {customerInfo.orderType === 'Delivery' ? 'Delivery Boy Name' : 'Order Taker Name'}
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      style={{ padding: '4px 6px', fontSize: 13 }}
-                      placeholder={customerInfo.orderType === 'Delivery' ? 'Delivery Boy Name' : 'Order Taker Name'}
-                      value={customerInfo.orderTaker || ''}
-                      onChange={e => setCustomerInfo(p => ({ ...p, orderTaker: e.target.value }))}
-                    />
-                  </div>
+
 
                   {paymentMethod !== 'Hold' && (
                     <div className="form-group" style={{ marginBottom: 1, marginTop: 'auto' }}>

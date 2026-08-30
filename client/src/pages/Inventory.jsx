@@ -12,7 +12,7 @@ import {
   CheckCircle2, 
   MoreVertical 
 } from 'lucide-react'
-
+import { useAuth } from '../contexts/AuthContext'
 import { usePOS } from '../contexts/POSContext'
 
 const SIZES = ['S', 'M', 'L' , 'XL', 'XXL', 'REGULAR']
@@ -45,6 +45,8 @@ export default function Inventory() {
     setSearch,
     loadData
   } = usePOS()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Admin' || user?.role === 'Developer'
 
   // const [catFilter, setCatFilter] = useState('All') // Removed for persistence
   const [modal, setModal] = useState(null) // null | 'add' | 'edit'
@@ -176,6 +178,23 @@ export default function Inventory() {
     });
   }
 
+  const toggleBranch = async (item, branchName) => {
+    try {
+      const branches = item.available_branches || [];
+      const newBranches = branches.includes(branchName)
+        ? branches.filter(b => b !== branchName)
+        : [...branches, branchName];
+      
+      // Optimistic update
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, available_branches: newBranches } : i));
+      
+      await axios.patch(`/api/items/${item.id}/branches`, { available_branches: newBranches });
+    } catch (err) {
+      toast.error('Failed to update branch availability');
+      loadData(true);
+    }
+  };
+
   return (
     <>
       {/* Toolbar */}
@@ -211,6 +230,9 @@ export default function Inventory() {
                 <th>Category</th>
                 <th>Sizes & Prices</th>
                 <th>Status</th>
+                {isAdmin && <th>B1</th>}
+                {isAdmin && <th>B2</th>}
+                {isAdmin && <th>B3</th>}
                 <th>Actions</th>
               </tr>
             </thead>
@@ -218,7 +240,7 @@ export default function Inventory() {
               {loading
                 ? Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: 7 }).map((__, j) => (
+                      {Array.from({ length: isAdmin ? 10 : 7 }).map((__, j) => (
                         <td key={j}><div className="skeleton" style={{ height: 18, width: '80%', borderRadius: 4 }} /></td>
                       ))}
                     </tr>
@@ -264,11 +286,50 @@ export default function Inventory() {
                       </td>
                       <td>
                         <span className={`badge ${item.status === 'Active' ? 'badge-success' : 'badge-danger'}`}>
-                          {item.status}
+                          {item.status || 'Active'}
                         </span>
                       </td>
+                      {isAdmin && (
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={(item.available_branches || []).includes('Branch 1')}
+                              onChange={() => toggleBranch(item, 'Branch 1')}
+                              style={{ cursor: 'pointer', width: 20, height: 20, accentColor: 'var(--primary)' }}
+                              title="Toggle Branch 1"
+                            />
+                          </div>
+                        </td>
+                      )}
+                      {isAdmin && (
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={(item.available_branches || []).includes('Branch 2')}
+                              onChange={() => toggleBranch(item, 'Branch 2')}
+                              style={{ cursor: 'pointer', width: 20, height: 20, accentColor: 'var(--primary)' }}
+                              title="Toggle Branch 2"
+                            />
+                          </div>
+                        </td>
+                      )}
+                      {isAdmin && (
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={(item.available_branches || []).includes('Branch 3')}
+                              onChange={() => toggleBranch(item, 'Branch 3')}
+                              style={{ cursor: 'pointer', width: 20, height: 20, accentColor: 'var(--primary)' }}
+                              title="Toggle Branch 3"
+                            />
+                          </div>
+                        </td>
+                      )}
                       <td>
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div className="table-actions" style={{ display: 'flex', gap: 8 }}>
                           <button className="btn btn-sm btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => openEdit(item)}><Edit size={14} /> Edit</button>
                           <button className="btn btn-sm btn-danger" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => handleDelete(item.id)}><Trash2 size={16} /></button>
                         </div>
