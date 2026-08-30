@@ -87,7 +87,12 @@ export default function POS() {
   const [tableConflictData, setTableConflictData] = useState(null)
   const [quickCompleteModal, setQuickCompleteModal] = useState(null)
   const [detailOrder, setDetailOrder] = useState(null)
-  const [expandedSections, setExpandedSections] = useState({ 'Dine-In': true, 'Takeaway': false, 'Delivery': false })
+  const [expandedSections, setExpandedSections] = useState({ 
+    'Dine-In': false, 
+    'Takeaway': false, 
+    'Delivery': false 
+  })
+  const [mobilePane, setMobilePane] = useState('none')
   
   const toggleSection = (type) => {
     setExpandedSections(prev => ({ ...prev, [type]: !prev[type] }));
@@ -97,13 +102,12 @@ export default function POS() {
     setExpandedSections(prev => {
       let changed = false;
       const next = { ...prev };
-      ['Takeaway', 'Delivery'].forEach(type => {
-        const hasOrders = activeOrders.some(o => o.order_type === type);
-        if (hasOrders && !prev[type]) {
-          next[type] = true;
-          changed = true;
-        }
-      });
+      // Only auto-expand Dine-In if there are orders, as requested
+      const hasDineInOrders = activeOrders.some(o => (o.order_type === 'Dine-In') || (!o.order_type && o.customer_address?.startsWith('Table ')));
+      if (hasDineInOrders && !prev['Dine-In']) {
+        next['Dine-In'] = true;
+        changed = true;
+      }
       return changed ? next : prev;
     });
   }, [activeOrders]);
@@ -275,6 +279,12 @@ export default function POS() {
       if (ex) return prev.map(c => c.cartId === cartId ? { ...c, qty: c.qty + 1 } : c)
       return [...prev, { ...item, cartId, name: finalName, price: finalPrice, qty: 1 }]
     })
+    // Auto-open cart when item is added
+    if (window.innerWidth <= 900) {
+      setMobilePane('cart');
+    } else {
+      setShowCart(true);
+    }
   }, [])
 
   const updateQty = (cartId, delta) => {
@@ -553,43 +563,42 @@ export default function POS() {
       <div className="pos-layout">
         {/* Left: Products */}
         <div className="pos-left">
-          {/* Category Tabs */}
-          <div className="category-tabs">
-            <button
-              className={`cat-tab${activeCategory === 'All' ? ' active' : ''}`}
-              onClick={() => setActiveCategory('All')}
-            >All</button>
-            {categories.map(cat => (
-              <button
-                key={cat.id}
-                className={`cat-tab${activeCategory === cat.name ? ' active' : ''}`}
-                onClick={() => setActiveCategory(cat.name)}
-              >{cat.name}</button>
-            ))}
-            <div style={{ marginLeft: 'auto', display: 'flex' }}>
-              <button
-                className="cat-tab"
-                onClick={() => setShowAddCategory(true)}
-                style={{ color: 'var(--red)', background: 'rgba(239, 68, 68, 0.05)', fontWeight: 'bold' }}
-              >+ New Type</button>
-              <button
-                className="cat-tab"
-                onClick={() => setShowManageCategories(true)}
-                style={{ color: 'var(--text-primary)', padding: '10px 12px', display: 'flex', alignItems: 'center' }}
-                title="Manage Categories"
-              ><MoreVertical size={16} /></button>
+          {/* POS Compact Header (Dropdown + Search + Dots) */}
+          <div className="pos-mobile-header">
+            <select 
+              className="pos-mobile-dropdown" 
+              value={activeCategory} 
+              onChange={(e) => setActiveCategory(e.target.value)}
+            >
+              <option value="All">All Categories</option>
+              {categories.map(cat => (
+                <option key={cat.id} value={cat.name}>{cat.name}</option>
+              ))}
+            </select>
+            
+            <div className="pos-mobile-search">
+              <Search className="si" size={14} />
+              <input
+                type="text"
+                placeholder="Search menu items..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
             </div>
-          </div>
-
-          {/* Search */}
-          <div className="pos-search">
-            <Search className="si" size={16} style={{ color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              placeholder="Search menu items..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
+            
+            <div 
+              className="pos-mobile-dots" 
+              onClick={() => {
+                const el = document.getElementById('pos-mobile-dots-menu');
+                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+              }}
+            >
+              <MoreVertical size={18} />
+              <div id="pos-mobile-dots-menu" className="pos-mobile-dots-menu" style={{ display: 'none' }}>
+                <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); document.getElementById('pos-mobile-dots-menu').style.display = 'none'; }}>+ New Type</button>
+                <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); document.getElementById('pos-mobile-dots-menu').style.display = 'none'; }}>Manage Categories</button>
+              </div>
+            </div>
           </div>
 
           {/* Product grid */}
@@ -668,18 +677,36 @@ export default function POS() {
 
         {/* Right: Cart */}
         
+        {/* Mobile FAB Container */}
+        <div className="mobile-fab-container">
+          <button className="mobile-fab orders" onClick={() => setMobilePane(mobilePane === 'orders' ? 'none' : 'orders')}>
+            <ClipboardList size={24} />
+            {activeOrders.length > 0 && <span className="cart-badge-dot">{activeOrders.length}</span>}
+          </button>
+          <button className="mobile-fab cart" onClick={() => setMobilePane(mobilePane === 'cart' ? 'none' : 'cart')}>
+            <ShoppingCart size={24} />
+            {cart.reduce((s, c) => s + c.qty, 0) > 0 && <span className="cart-badge-dot">{cart.reduce((s, c) => s + c.qty, 0)}</span>}
+          </button>
+        </div>
+
         {/* Right Panel: Cart OR Active Orders */}
-        <div className={`pos-right ${showCart ? 'has-cart-open' : ''}`} style={{ position: 'relative' }}>
+        <div className={`pos-right ${mobilePane !== 'none' ? 'mobile-open' : ''}`}>
+          
           
           <button 
             className="btn btn-primary" 
             style={{ position: 'absolute', top: 12, right: 12, zIndex: 100, borderRadius: '50%', width: 44, height: 44, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }} 
-            onClick={() => setShowCart(!showCart)}
+            onClick={() => {
+              if (window.innerWidth <= 900) {
+                setMobilePane(mobilePane === 'cart' ? 'none' : 'cart');
+              } else {
+                setShowCart(!showCart);
+              }
+            }}
           >
             <ShoppingCart size={20} />
             {cart.reduce((s, c) => s + c.qty, 0) > 0 && <span className="cart-badge-dot" style={{ top: -4, right: -4 }}>{cart.reduce((s, c) => s + c.qty, 0)}</span>}
           </button>
-
           <div className="active-orders-panel">
               <div className="active-orders-list" style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflow: 'hidden', padding: '8px 12px 12px' }}>
                 {['Dine-In', 'Takeaway', 'Delivery'].map(type => {
@@ -687,7 +714,7 @@ export default function POS() {
                   const isExpanded = expandedSections[type];
                   
                   return (
-                    <div key={type} className="order-group" style={{ display: 'flex', flexDirection: 'column', flex: isExpanded ? (type === 'Dine-In' ? 2 : 1) : 'none', minHeight: isExpanded ? 0 : 'auto', transition: 'all 0.2s ease-in-out', flexShrink: 0, borderTop: type !== 'Dine-In' ? '1px dashed #ccc' : 'none', marginTop: type !== 'Dine-In' ? 4 : 0, paddingTop: type !== 'Dine-In' ? 4 : 0 }}>
+                    <div key={type} className="order-group" style={{ display: 'flex', flexDirection: 'column', flex: isExpanded ? (type === 'Dine-In' ? '2 0 0' : '1 0 0') : '0 0 auto', transition: 'all 0.2s ease-in-out', borderTop: type !== 'Dine-In' ? '1px dashed #ccc' : 'none', marginTop: type !== 'Dine-In' ? 4 : 0, paddingTop: type !== 'Dine-In' ? 4 : 0 }}>
                       <div className="order-group-header" onClick={() => toggleSection(type)} style={{ cursor: 'pointer' }}>
                         <h5 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                           {type === 'Dine-In' ? <CheckCircle2 size={14} /> : type === 'Takeaway' ? <ClipboardList size={14} /> : <ShoppingCart size={14}/>}
@@ -744,9 +771,10 @@ export default function POS() {
               </div>
             </div>
           
-          <div className={`pos-right-inner ${showCart ? 'cart-open' : 'cart-closed'}`}>
+          <div className={`pos-right-inner ${(window.innerWidth > 900 ? showCart : mobilePane === 'cart') ? 'cart-open' : 'cart-closed'}`}>
           <div className="cart-header" style={{ paddingRight: 60 }}>
             <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {window.innerWidth <= 900 && <button className="btn btn-secondary btn-sm" onClick={() => setMobilePane('none')} style={{ padding: '4px 8px', marginRight: 4 }}>✕</button>}
               <ShoppingCart size={20} />
               {editingOrderId ? <span style={{ color: 'var(--red)' }}>Editing Order #{editingOrderId}</span> : 'Cart'}
             </h3>
@@ -781,7 +809,7 @@ export default function POS() {
             )}
           </div>
 
-          <div className="cart-items">
+          <div className="cart-items" style={{ flex: 'none', maxHeight: '50vh' }}>
             {cart.length === 0
               ? (
                 <div className="cart-empty">
