@@ -493,20 +493,20 @@ export default function POS() {
     </p>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Opening Time</div>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">11 AM to 1 AM</div>
-    <div style="font-size: 16px; font-weight: 900; margin: 6px 0; border: 2px solid #000; display: inline-block; padding: 2px 8px;">
+    <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${customerInfo.orderType}
     </div>
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
-      Order #${slipNumber}${editCount > 0 ? String.fromCharCode(64 + editCount) + ' / Edit' : ''} (ID: ${orderId})
+      Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
     </div>
     <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
   </div>
-  ${customerInfo.name || customerInfo.phone || customerInfo.address ? `
+  ${customerInfo.name || customerInfo.phone || (customerInfo.address && customerInfo.address !== 'Dine-In' && customerInfo.address !== 'Takeaway') ? `
   <div class="divider"></div>
   <div style="text-align: left; font-size: 11px;">
     ${customerInfo.name ? `<p style="margin: 2px 0;"><strong>Customer:</strong> ${customerInfo.name}</p>` : ''}
     ${customerInfo.phone ? `<p style="margin: 2px 0;"><strong>Phone:</strong> ${customerInfo.phone}</p>` : ''}
-    ${customerInfo.address ? `<p style="margin: 2px 0;"><strong>${customerInfo.orderType === 'Dine-In' ? 'Dine-In:' : 'Address:'}</strong> ${customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber ? `Table ${customerInfo.tableNumber}` : customerInfo.address}</p>` : ''}
+    ${customerInfo.address && customerInfo.address !== 'Dine-In' && customerInfo.address !== 'Takeaway' ? `<p style="margin: 2px 0;"><strong>${customerInfo.orderType === 'Dine-In' ? 'Dine-In:' : 'Address:'}</strong> ${customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber ? `Table ${customerInfo.tableNumber}` : customerInfo.address}</p>` : ''}
   </div>
   ` : ''}
   <div class="divider"></div>
@@ -907,7 +907,7 @@ export default function POS() {
           <p>{BRAND_ADDRESS}</p>
           <p>Opening Time </p>
           <p>11 AM to 1 AM</p>
-          <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto', border: '2px solid #000', display: 'inline-block', padding: '2px 8px' }}>
+          <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto' }}>
             {customerInfo.orderType}
           </div>
           <div style={{ margin: '10px 0', fontSize: 18, fontWeight: 900 }}>

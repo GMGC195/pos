@@ -60,11 +60,11 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
     </p>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Opening Time</div>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">11 AM to 1 AM</div>
-    <div style="font-size: 16px; font-weight: 900; margin: 6px 0; border: 2px solid #000; display: inline-block; padding: 2px 8px;">
+    <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
     </div>
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
-      Order #${order.slip_number || '-'}${order.edit_count > 0 ? String.fromCharCode(64 + order.edit_count) + ' / Edit' : ''} (ID: ${order.id})
+      Order #${order.id} - ${order.edit_count > 0 ? `Edit ${(order.slip_number || '-')}${String.fromCharCode(64 + order.edit_count)}` : (order.slip_number || '-')}
     </div>
     <p class="sub">${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
   </div>
@@ -134,11 +134,11 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
               <p style={{ margin: '4px 0', fontSize: 11 }}>Free Home Delivery</p>
               <p style={{ margin: '4px 0', fontSize: 11 }}>Opening Time</p>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>11 AM to 1 AM</div>
-              <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto', border: '2px solid #000', display: 'inline-block', padding: '2px 8px' }}>
+              <div style={{ fontSize: 16, fontWeight: 900, margin: '6px auto' }}>
                 {order.order_type || (order.customer_address?.startsWith('Table ') ? 'Dine-In' : order.customer_address === 'Takeaway' ? 'Takeaway' : order.customer_address === 'Dine-In' ? 'Dine-In' : 'Delivery')}
               </div>
               <div style={{ margin: '10px 0', fontSize: 18, fontWeight: 900 }}>
-                Order #{order.slip_number || '-'}{order.edit_count > 0 ? String.fromCharCode(64 + order.edit_count) + ' / Edit' : ''} (ID: {order.id})
+                Order #{order.id} - {order.edit_count > 0 ? `Edit ${(order.slip_number || '-')}${String.fromCharCode(64 + order.edit_count)}` : (order.slip_number || '-')}
               </div>
               <p style={{ margin: '4px 0', fontSize: 11, color: '#666' }}>{new Date(order.created_at).toLocaleString()}</p>
             </div>
