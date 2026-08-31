@@ -395,15 +395,33 @@ export default function Inventory() {
       {/* Modal */}
       {modal && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) closeModal() }}>
-          <div className="modal">
-            <div className="modal-header">
+          <style>{`
+            .inventory-modal-body::-webkit-scrollbar {
+              width: 12px;
+            }
+            .inventory-modal-body::-webkit-scrollbar-track {
+              background: var(--surface);
+              border-radius: 6px;
+            }
+            .inventory-modal-body::-webkit-scrollbar-thumb {
+              background: #cbd5e1;
+              border-radius: 6px;
+              border: 3px solid var(--surface);
+            }
+            .inventory-modal-body::-webkit-scrollbar-thumb:hover {
+              background: #94a3b8;
+            }
+          `}</style>
+          <div className="modal" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden', maxHeight: '90vh' }}>
+            <div className="modal-header" style={{ padding: '24px 24px 0 24px', marginBottom: 16, flexShrink: 0 }}>
               <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {modal === 'add' ? <><Plus size={20} /> Add New Item</> : <><Edit size={20} /> Edit Item</>}
               </h3>
               <button className="modal-close" onClick={closeModal}>✕</button>
             </div>
 
-            <div className="form-row">
+            <div className="inventory-modal-body" style={{ padding: '0 24px', overflowY: 'auto', flex: 1 }}>
+              <div className="form-row">
               <div className="form-group">
                 <label>Item Name *</label>
                 <input className="form-control" placeholder="e.g. Margherita Classic" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
@@ -525,7 +543,8 @@ export default function Inventory() {
               </div>
             </div>
 
-            <div className="modal-footer">
+            </div>
+            <div className="modal-footer" style={{ padding: '16px 24px 24px 24px', marginTop: 0, borderTop: '1px solid var(--surface-2)', flexShrink: 0 }}>
               <button className="btn btn-secondary" onClick={closeModal}>Cancel</button>
               <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving...' : modal === 'add' ? <><Plus size={18} /> Add Item</> : <><CheckCircle2 size={18} /> Save Changes</>}
