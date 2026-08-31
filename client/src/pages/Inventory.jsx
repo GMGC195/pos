@@ -15,7 +15,7 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import { usePOS } from '../contexts/POSContext'
 
-const SIZES = ['S', 'M', 'L' , 'XL', 'XXL', 'REGULAR']
+const SIZES = ['S', 'M', 'L', 'XL', 'XXL', 'REGULAR', 'HALF', 'FULL', 'HALF KG', '1 KG']
 
 const emptyForm = {
   name: '', category_id: '', price: '', image_url: '',
