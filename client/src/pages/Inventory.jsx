@@ -57,6 +57,7 @@ export default function Inventory() {
   const [imgPreview, setImgPreview] = useState('')
   const [branchFilter, setBranchFilter] = useState('All') // New branch filter
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [newCustomSize, setNewCustomSize] = useState('')
 
   // Filter items locally for the table
   const filteredItems = items.filter(item => {
@@ -90,7 +91,7 @@ export default function Inventory() {
     setModal('edit')
   }
 
-  const closeModal = () => { setModal(null); setForm(emptyForm); setImgPreview('') }
+  const closeModal = () => { setModal(null); setForm(emptyForm); setImgPreview(''); setNewCustomSize('') }
 
   const toggleSize = s => {
     setForm(f => {
@@ -511,35 +512,101 @@ export default function Inventory() {
             <div className="form-group">
               <label>Size Options & Specific Prices</label>
               <div className="size-checkboxes" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {SIZES.map(s => {
-                  const optStr = form.size_options.find(x => parseSizeOpt(x, 0).name === s);
-                  const isChecked = !!optStr;
-                  const optPrice = isChecked ? parseSizeOpt(optStr, form.price).price : parseFloat(form.price) || 0;
-                  return (
-                    <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div
-                        className={`size-check ${isChecked ? 'checked' : ''}`}
-                        onClick={() => toggleSize(s)}
-                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, minWidth: 60 }}
-                      >
-                        <input type="checkbox" checked={isChecked} readOnly />
-                        <span style={{ fontWeight: 600 }}>{s}</span>
+                {(() => {
+                  const displaySizes = [...SIZES];
+                  form.size_options.forEach(opt => {
+                    const parsedName = parseSizeOpt(opt, 0).name;
+                    if (!displaySizes.includes(parsedName) && parsedName.trim() !== '') {
+                      displaySizes.push(parsedName);
+                    }
+                  });
+                  return displaySizes.map(s => {
+                    const optStr = form.size_options.find(x => parseSizeOpt(x, 0).name === s);
+                    const isChecked = !!optStr;
+                    const optPrice = isChecked ? parseSizeOpt(optStr, form.price).price : parseFloat(form.price) || 0;
+                    return (
+                      <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div
+                          className={`size-check ${isChecked ? 'checked' : ''}`}
+                          onClick={() => toggleSize(s)}
+                          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, minWidth: 60 }}
+                        >
+                          <input type="checkbox" checked={isChecked} readOnly />
+                          <span style={{ fontWeight: 600 }}>{s}</span>
+                        </div>
+                        {isChecked && (
+                          <input 
+                            type="number" 
+                            step="0.01"
+                            className="form-control" 
+                            style={{ width: 120, padding: '4px 8px' }}
+                            value={optPrice} 
+                            onChange={e => updateSizePrice(s, e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            placeholder="Price"
+                          />
+                        )}
+                        {!SIZES.includes(s) && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{ padding: '6px', color: 'var(--red)', background: 'transparent' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setForm(f => ({
+                                ...f,
+                                size_options: f.size_options.filter(x => parseSizeOpt(x, 0).name !== s)
+                              }));
+                            }}
+                            title="Delete custom size"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
-                      {isChecked && (
-                        <input 
-                          type="number" 
-                          step="0.01"
-                          className="form-control" 
-                          style={{ width: 120, padding: '4px 8px' }}
-                          value={optPrice} 
-                          onChange={e => updateSizePrice(s, e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          placeholder="Price"
-                        />
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                })()}
+
+                {/* Custom size input row */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                  <input 
+                    className="form-control"
+                    style={{ flex: 1 }}
+                    placeholder="Enter Custom Size (e.g. T1)" 
+                    value={newCustomSize}
+                    onChange={e => setNewCustomSize(e.target.value.toUpperCase())}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (newCustomSize.trim()) {
+                          const name = newCustomSize.trim();
+                          const existing = form.size_options.find(x => parseSizeOpt(x, 0).name === name);
+                          if (!existing) {
+                            setForm(f => ({ ...f, size_options: [...f.size_options, `${name}:${parseFloat(f.price) || 0}`] }));
+                          }
+                          setNewCustomSize('');
+                        }
+                      }
+                    }}
+                  />
+                  <button 
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      if (newCustomSize.trim()) {
+                        const name = newCustomSize.trim();
+                        const existing = form.size_options.find(x => parseSizeOpt(x, 0).name === name);
+                        if (!existing) {
+                          setForm(f => ({ ...f, size_options: [...f.size_options, `${name}:${parseFloat(f.price) || 0}`] }));
+                        }
+                        setNewCustomSize('');
+                      }
+                    }}
+                  >
+                    Add Size
+                  </button>
+                </div>
               </div>
             </div>
 
