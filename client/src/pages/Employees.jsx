@@ -198,7 +198,9 @@ export default function Employees() {
       is_split_shift: workingHours[0]?.is_split_shift || false,
       start_time_2: workingHours[0]?.start_time_2 || '18:00',
       end_time_2: workingHours[0]?.end_time_2 || '22:00',
-      strict_attendance: false
+      strict_attendance: false,
+      custom_deduction_active: false,
+      custom_deduction_rules: []
     })
     setShowModal(true)
   }
@@ -227,7 +229,9 @@ export default function Employees() {
       is_split_shift: matchedShift ? (matchedShift.is_split_shift || false) : false,
       start_time_2: matchedShift ? (matchedShift.start_time_2 || '18:00') : '18:00',
       end_time_2: matchedShift ? (matchedShift.end_time_2 || '22:00') : '22:00',
-      strict_attendance: emp.strict_attendance || false
+      strict_attendance: emp.strict_attendance || false,
+      custom_deduction_active: emp.custom_deduction_active || false,
+      custom_deduction_rules: (typeof emp.custom_deduction_rules === 'string' ? JSON.parse(emp.custom_deduction_rules) : emp.custom_deduction_rules) || []
     })
     setShowModal(true)
   }
@@ -311,6 +315,28 @@ export default function Employees() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  const handleAddRule = () => {
+    setFormData(prev => ({
+      ...prev,
+      custom_deduction_rules: [...prev.custom_deduction_rules, { late_minutes: 0, type: 'minutes', value: 0 }]
+    }))
+  }
+
+  const handleRemoveRule = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      custom_deduction_rules: prev.custom_deduction_rules.filter((_, i) => i !== index)
+    }))
+  }
+
+  const handleRuleChange = (index, field, value) => {
+    setFormData(prev => {
+      const newRules = [...prev.custom_deduction_rules]
+      newRules[index] = { ...newRules[index], [field]: value }
+      return { ...prev, custom_deduction_rules: newRules }
+    })
   }
 
   const handleDelete = async (id, name) => {
@@ -865,6 +891,58 @@ export default function Employees() {
                     <label htmlFor="modalStrictAttendance" style={{ fontSize: 12, color: 'var(--text)', cursor: 'pointer', fontWeight: 600 }}>
                       Strict Attendance (Double Deduction on &gt;= 30m late)
                     </label>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16, padding: '16px', background: 'var(--surface-2)', borderRadius: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input 
+                        type="checkbox" 
+                        id="modalCustomDeduction"
+                        checked={formData.custom_deduction_active}
+                        onChange={e => setFormData({ ...formData, custom_deduction_active: e.target.checked })}
+                        style={{ width: 14, height: 14, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="modalCustomDeduction" style={{ fontSize: 12, color: 'var(--text)', cursor: 'pointer', fontWeight: 600 }}>
+                        Enable Custom Late Deduction Rules
+                      </label>
+                    </div>
+
+                    {formData.custom_deduction_active && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+                        {formData.custom_deduction_rules.map((rule, idx) => (
+                          <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end', background: 'var(--surface-1)', padding: 12, borderRadius: 8 }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Late by (Minutes)</label>
+                              <input 
+                                type="number" 
+                                min="1"
+                                value={rule.late_minutes || ''}
+                                onChange={e => handleRuleChange(idx, 'late_minutes', parseInt(e.target.value) || 0)}
+                                style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px', background: 'var(--surface-0)', color: 'var(--text)', outline: 'none' }}
+                                placeholder="e.g. 30"
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Penalty (Minutes to Cut)</label>
+                              <input 
+                                type="number" 
+                                min="1"
+                                value={rule.value || ''}
+                                onChange={e => handleRuleChange(idx, 'value', parseInt(e.target.value) || 0)}
+                                style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '8px', background: 'var(--surface-0)', color: 'var(--text)', outline: 'none' }}
+                                placeholder="e.g. 45"
+                              />
+                            </div>
+                            <button type="button" onClick={() => handleRemoveRule(idx)} style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                        <button type="button" onClick={handleAddRule} style={{ padding: '8px 16px', background: 'var(--surface-0)', border: '1px solid var(--surface-2)', borderRadius: 6, cursor: 'pointer', color: 'var(--text)', fontWeight: 600, fontSize: 12, alignSelf: 'flex-start' }}>
+                          + Add Rule Tier
+                        </button>
+                      </div>
+                    )}
                   </div>
               </div>
 

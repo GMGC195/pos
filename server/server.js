@@ -85,6 +85,15 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS strict_attendance BOOLEAN DEFAULT false
     `);
 
+    // Add custom deduction columns
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS custom_deduction_active BOOLEAN DEFAULT false
+    `);
+    
+    await pool.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS custom_deduction_rules JSONB DEFAULT '[]'::jsonb
+    `);
+
     // Rename employee_shifts to employee_working_hours if it exists
     try {
       await pool.query('ALTER TABLE employee_shifts RENAME TO employee_working_hours');

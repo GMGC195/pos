@@ -83,7 +83,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // POST new employee
 router.post('/', authenticateToken, async (req, res) => {
-  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2, strict_attendance } = req.body;
+  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2, strict_attendance, custom_deduction_active, custom_deduction_rules } = req.body;
   try {
     // Upsert employee working hours config
     if (shift_start_time && shift_end_time) {
@@ -94,7 +94,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO employees (name, role, salary, status, working_hours, shift_hours, department, position, employee_id, branch, shift, strict_attendance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *',
+      'INSERT INTO employees (name, role, salary, status, working_hours, shift_hours, department, position, employee_id, branch, shift, strict_attendance, custom_deduction_active, custom_deduction_rules) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *',
       [
         name, 
         role || 'Operator', 
@@ -107,7 +107,9 @@ router.post('/', authenticateToken, async (req, res) => {
         employee_id || null,
         branch || null,
         shift || 'Day',
-        strict_attendance || false
+        strict_attendance || false,
+        custom_deduction_active || false,
+        custom_deduction_rules ? JSON.stringify(custom_deduction_rules) : '[]'
       ]
     );
     const newEmp = result.rows[0];
@@ -130,7 +132,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // PUT update employee
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2, strict_attendance } = req.body;
+  const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2, strict_attendance, custom_deduction_active, custom_deduction_rules } = req.body;
   try {
     // Upsert employee working hours config
     if (shift_start_time && shift_end_time) {
@@ -141,7 +143,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'UPDATE employees SET name=$1, role=$2, salary=$3, status=$4, working_hours=$5, shift_hours=$6, department=$7, position=$8, employee_id=$9, branch=$10, shift=$11, strict_attendance=$12 WHERE id=$13 RETURNING *',
+      'UPDATE employees SET name=$1, role=$2, salary=$3, status=$4, working_hours=$5, shift_hours=$6, department=$7, position=$8, employee_id=$9, branch=$10, shift=$11, strict_attendance=$12, custom_deduction_active=$13, custom_deduction_rules=$14 WHERE id=$15 RETURNING *',
       [
         name, 
         role || 'Operator', 
@@ -155,6 +157,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         branch || null,
         shift || 'Day',
         strict_attendance || false,
+        custom_deduction_active || false,
+        custom_deduction_rules ? JSON.stringify(custom_deduction_rules) : '[]',
         req.params.id
       ]
     );

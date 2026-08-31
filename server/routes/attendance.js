@@ -323,7 +323,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Fetch employee shift details
-    const empRes = await pool.query('SELECT working_hours, shift_hours, shift, strict_attendance FROM employees WHERE id = $1', [employee_id]);
+    const empRes = await pool.query('SELECT working_hours, shift_hours, shift, strict_attendance, custom_deduction_active, custom_deduction_rules FROM employees WHERE id = $1', [employee_id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -331,6 +331,15 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     let shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
     const empShift = empRes.rows[0].shift || 'Day';
     const strictAttendance = empRes.rows[0].strict_attendance || false;
+    const customDeductionActive = empRes.rows[0].custom_deduction_active || false;
+    let customDeductionRules = [];
+    try {
+      customDeductionRules = typeof empRes.rows[0].custom_deduction_rules === 'string' 
+        ? JSON.parse(empRes.rows[0].custom_deduction_rules) 
+        : (empRes.rows[0].custom_deduction_rules || []);
+    } catch(e) {
+      customDeductionRules = [];
+    }
 
     // Determine status (Present or Late)
     // Check if it's the first check-in of the day
@@ -414,6 +423,16 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       const currentHours = now.getHours();
       const currentMins = now.getMinutes();
 
+      const currentTotalMins = currentHours * 60 + currentMins;
+      const startTotalMins = startHour * 60 + startMin;
+      let timeDiff = currentTotalMins - startTotalMins;
+      if (timeDiff < -12 * 60) timeDiff += 24 * 60; // handle wrap around midnight
+      
+      // Early check-in restriction for employees self-checking-in
+      if ((req.user.role === 'Employee' || req.user.role === 'employee') && timeDiff < -5) {
+        return res.status(403).json({ error: 'Your duty hours haven\'t started yet, you can just request check-in 5 minutes before.' });
+      }
+
       let thresholdMins = startMin + 15;
       let thresholdHour = startHour;
       if (thresholdMins >= 60) {
@@ -425,12 +444,22 @@ router.post('/check-in', authenticateToken, async (req, res) => {
         status = 'Late';
       }
 
-      const currentTotalMins = currentHours * 60 + currentMins;
-      const startTotalMins = startHour * 60 + startMin;
-      let latenessMins = currentTotalMins - startTotalMins;
-      if (latenessMins < -12 * 60) latenessMins += 24 * 60;
+      let latenessMins = timeDiff;
 
-      if (strictAttendance && latenessMins >= 30) {
+      // Apply penalty to checkInTime
+      if (customDeductionActive && Array.isArray(customDeductionRules) && customDeductionRules.length > 0 && latenessMins > 0) {
+        // Sort rules by late_minutes descending to find the highest applicable tier
+        const sortedRules = [...customDeductionRules].sort((a, b) => b.late_minutes - a.late_minutes);
+        const applicableRule = sortedRules.find(r => latenessMins >= r.late_minutes);
+        
+        if (applicableRule) {
+          const penalty = parseInt(applicableRule.value) || 0;
+          if (penalty > 0) {
+            checkInTime = new Date(now.getTime() + (penalty * 60000));
+          }
+        }
+      } else if (strictAttendance && latenessMins >= 30) {
+        // Default strict attendance logic
         checkInTime = new Date(now.getTime() + (latenessMins * 60000));
       }
     }
