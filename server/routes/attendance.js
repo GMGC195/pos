@@ -89,14 +89,22 @@ router.get('/notifications', authenticateToken, async (req, res) => {
         message: `Attendance request from ${row.employee_name} pending Admin approval.`
       }));
     } else if (userRole === 'operator') {
+      let userBranchStr = req.user.branch;
+      if (!userBranchStr) {
+        const uRes = await pool.query('SELECT branch FROM users WHERE id = $1', [req.user.id]);
+        if (uRes.rows.length > 0) userBranchStr = uRes.rows[0].branch;
+      }
+      
       let opQuery = `SELECT r.id, e.name AS employee_name, r.created_at
          FROM attendance_edit_requests r
          JOIN employees e ON r.employee_id = e.id
          WHERE r.status = 'Pending' AND r.target_role IN ('Operator', 'Both')`;
       let opParams = [];
-      if (req.user.branch) {
+      if (userBranchStr) {
         opQuery += ` AND COALESCE(e.branch, '') = ANY($1)`;
-        opParams.push(req.user.branch.split(',').map(s => s.trim()));
+        opParams.push(userBranchStr.split(',').map(s => s.trim()));
+      } else {
+        opQuery += ` AND 1=0`; // If operator has no branch, show no requests
       }
       const requestsRes = await pool.query(opQuery, opParams);
       requestNotifs = requestsRes.rows.map(row => ({
@@ -1182,8 +1190,18 @@ router.get('/edited-logs', authenticateToken, async (req, res) => {
     // Filters
     const conditions = [];
     if (userRole === 'operator') {
-      conditions.push(`ea.edited_by = $${paramCount++}`);
-      params.push(req.user.username);
+      let userBranchStr = req.user.branch;
+      if (!userBranchStr) {
+        const uRes = await pool.query('SELECT branch FROM users WHERE id = $1', [req.user.id]);
+        if (uRes.rows.length > 0) userBranchStr = uRes.rows[0].branch;
+      }
+      
+      if (userBranchStr) {
+        conditions.push(`COALESCE(emp.branch, '') = ANY($${paramCount++})`);
+        params.push(userBranchStr.split(',').map(s => s.trim()));
+      } else {
+        conditions.push(`1=0`);
+      }
     }
     if (month) {
       conditions.push(`TO_CHAR(ea.edited_at, 'YYYY-MM') = $${paramCount++}`);
@@ -1394,9 +1412,17 @@ router.get('/edit-requests', authenticateToken, async (req, res) => {
       query += ` WHERE r.target_role IN ('Admin', 'Both')`;
     } else if (userRole === 'operator') {
       query += ` WHERE r.target_role IN ('Operator', 'Both')`;
-      if (req.user.branch) {
+      let userBranchStr = req.user.branch;
+      if (!userBranchStr) {
+        const uRes = await pool.query('SELECT branch FROM users WHERE id = $1', [req.user.id]);
+        if (uRes.rows.length > 0) userBranchStr = uRes.rows[0].branch;
+      }
+      
+      if (userBranchStr) {
         query += ` AND COALESCE(e.branch, '') = ANY($1)`;
-        params.push(req.user.branch.split(',').map(s => s.trim()));
+        params.push(userBranchStr.split(',').map(s => s.trim()));
+      } else {
+        query += ` AND 1=0`; // Show no requests if operator has no branch
       }
     } else {
       // Employee role: show their own requests

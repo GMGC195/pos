@@ -33,6 +33,7 @@ import {
   getAllPendingOrders,
   removePendingOrder
 } from '../utils/db'
+import { printViaRawBT } from '../utils/rawbtPrinter'
 
 import {
   BRAND_NAME,
@@ -685,6 +686,37 @@ export default function POS() {
   ${footerHtml}
 </body>
 </html>`
+
+    const printMode = localStorage.getItem('printMode') || 'standard';
+
+    if (printMode === 'rawbt') {
+      const orderData = {
+        order_id: `${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}`,
+        order_type: currentInfo.orderType,
+        customer_name: currentInfo.name,
+        table_no: currentInfo.tableNumber,
+        items: currentCart.map(c => ({
+          name: c.name || c.item_name,
+          qty: c.qty,
+          price: parseFloat(c.price || c.unit_price)
+        })),
+        subtotal: parseFloat(currentSubtotal).toFixed(2),
+        tax_amount: parseFloat(currentTax).toFixed(2),
+        discount: parseFloat(currentInfo.discount || 0).toFixed(2),
+        total_amount: parseFloat(currentTotal - (parseFloat(currentInfo.discount) || 0)).toFixed(2)
+      };
+      
+      if (!isFullReceipt && diffData) {
+        // If it's just a difference (Void/Add), prefix items with their action
+        orderData.items = [
+          ...diffData.added.map(c => ({ name: `[ADDED] ${c.name || c.item_name}`, qty: c.qty, price: parseFloat(c.price || c.unit_price) })),
+          ...diffData.cancelled.map(c => ({ name: `[VOID] ${c.name || c.item_name}`, qty: c.qty, price: parseFloat(c.price || c.unit_price) }))
+        ];
+      }
+
+      printViaRawBT(orderData);
+      return;
+    }
 
     const w = 400, h = 600
     const left = Math.round((window.screen.width - w) / 2)

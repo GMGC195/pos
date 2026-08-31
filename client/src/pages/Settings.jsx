@@ -22,8 +22,9 @@ import api from '../api'
 
 export default function Settings() {
   const { user, updateUser } = useAuth()
-  const [activeTab, setActiveTab] = useState('account')
+  const [activeTab, setActiveTab] = useState('account') // 'account' | 'users' | 'hardware'
   const [loading, setLoading] = useState(false)
+  const [printMode, setPrintMode] = useState(localStorage.getItem('printMode') || 'standard')
   const shiftDropdownRef = useRef(null)
   const branchDropdownRef = useRef(null)
   
@@ -242,10 +243,46 @@ export default function Settings() {
               <Users size={18} /> User Management
             </button>
           )}
+          <button 
+            className={`settings-nav-item ${activeTab === 'hardware' ? 'active' : ''}`}
+            onClick={() => setActiveTab('hardware')}
+          >
+            <AlertCircle size={18} /> Hardware & Printers
+          </button>
         </aside>
 
         {/* Content Area */}
         <main className="settings-content">
+          {activeTab === 'hardware' && (
+            <div className="settings-card fade-in">
+              <div className="card-header">
+                <h2>Hardware & Printers</h2>
+                <p>Configure device-specific hardware settings (These settings apply only to this device)</p>
+              </div>
+              <div className="settings-form">
+                <div className="form-group" style={{ maxWidth: 400 }}>
+                  <label>Print Mode</label>
+                  <select 
+                    value={printMode} 
+                    onChange={e => {
+                      setPrintMode(e.target.value)
+                      localStorage.setItem('printMode', e.target.value)
+                      toast.success('Print mode saved for this device')
+                    }}
+                    style={{ padding: '12px', borderRadius: '8px', border: '1px solid var(--surface-2)', width: '100%' }}
+                  >
+                    <option value="standard">Standard Print (Browser / Laptop USB)</option>
+                    <option value="rawbt">RawBT App (Android Mobile Direct Print)</option>
+                  </select>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+                    {printMode === 'standard' 
+                      ? 'Uses the standard browser print dialog. Best for laptops or desktop computers connected to a USB printer.' 
+                      : 'Uses the RawBT Android app to print directly to a network/LAN printer. Best for waiters punching orders from mobile phones.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           {activeTab === 'account' && (
             <div className="settings-card fade-in">
               <div className="card-header">
