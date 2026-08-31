@@ -19,7 +19,7 @@ const SIZES = ['S', 'M', 'L' , 'XL', 'XXL', 'REGULAR']
 
 const emptyForm = {
   name: '', category_id: '', price: '', image_url: '',
-  size_options: [], status: 'Active',
+  size_options: [], status: 'Active', short_code: ''
 }
 
 const parseSizeOpt = (str, defaultPrice) => {
@@ -55,14 +55,18 @@ export default function Inventory() {
   const [showManageCategories, setShowManageCategories] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [imgPreview, setImgPreview] = useState('')
+  const [branchFilter, setBranchFilter] = useState('All') // New branch filter
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   // Filter items locally for the table
   const filteredItems = items.filter(item => {
     const matchesCategory = inventoryCategory === 'All' || item.category_name === inventoryCategory || item.category === inventoryCategory;
     const matchesSearch = !search || 
       item.name.toLowerCase().includes(search.toLowerCase()) || 
-      (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase()));
-    return matchesCategory && matchesSearch;
+      (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase())) ||
+      (item.short_code && item.short_code.toLowerCase().includes(search.toLowerCase()));
+    const matchesBranch = branchFilter === 'All' || (item.available_branches || []).includes(branchFilter);
+    return matchesCategory && matchesSearch && matchesBranch;
   });
 
   const openAdd = () => {
@@ -79,6 +83,7 @@ export default function Inventory() {
       image_url: item.image_url,
       size_options: item.size_options || [],
       status: item.status,
+      short_code: item.short_code || '',
       _id: item.id,
     })
     setImgPreview(item.image_url || '')
@@ -119,6 +124,7 @@ export default function Inventory() {
         image_url: form.image_url || '',
         size_options: form.size_options,
         status: form.status,
+        short_code: form.short_code,
       }
       if (modal === 'add') {
         const addRes = await axios.post('/api/items', payload)
@@ -132,11 +138,36 @@ export default function Inventory() {
       await loadData(true)
       toast.success(modal === 'add' ? 'Item Added' : 'Item Updated')
     } catch (err) {
-      toast.error('Save failed: ' + (err?.response?.data?.error || err.message))
+      console.error(err)
+      alert('Failed to save item.')
     } finally {
       setSaving(false)
     }
   }
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+      const res = await axios.post('/api/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      if (res.data && res.data.secure_url) {
+        setForm(f => ({ ...f, image_url: res.data.secure_url }));
+        setImgPreview(res.data.secure_url);
+      }
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('Failed to upload image. Make sure Cloudinary keys are set in the backend.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   const handleDelete = id => {
     toast((t) => (
@@ -213,6 +244,14 @@ export default function Inventory() {
           <option value="All">All Categories</option>
           {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
         </select>
+        {isAdmin && (
+          <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+            <option value="All">All Branches</option>
+            <option value="Branch 1">Restaurant 1</option>
+            <option value="Branch 2">Restaurant 2</option>
+            <option value="Branch 3">Restaurant 3</option>
+          </select>
+        )}
         <button className="btn btn-primary" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg, #ff9800, #ff4b4b)', color: 'white', border: 'none' }} onClick={openAdd}>
           <Plus size={18} /> Add New Item
         </button>
@@ -225,6 +264,7 @@ export default function Inventory() {
             <thead>
               <tr>
                 <th>#</th>
+                <th>Short Code</th>
                 <th>Image</th>
                 <th>Item Name</th>
                 <th>Category</th>
@@ -248,6 +288,9 @@ export default function Inventory() {
                 : filteredItems.map((item, index) => (
                     <tr key={item.id}>
                       <td style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{index + 1}</td>
+                      <td>
+                        {item.short_code ? <span className="badge" style={{ background: '#eee', color: '#333' }}>{item.short_code}</span> : '—'}
+                      </td>
                       <td>
                         {item.image_url ? (
                           <img
@@ -366,6 +409,10 @@ export default function Inventory() {
                 <input className="form-control" placeholder="e.g. Margherita Classic" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               </div>
               <div className="form-group">
+                <label>Short Code</label>
+                <input className="form-control" placeholder="e.g. SA1" value={form.short_code} onChange={e => setForm(f => ({ ...f, short_code: e.target.value }))} />
+              </div>
+              <div className="form-group">
                 <label>Regular Price ({CURRENCY})</label>
                 <input className="form-control" type="number" step="0.01" placeholder="0.00 (optional)" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
               </div>
@@ -411,12 +458,28 @@ export default function Inventory() {
 
             <div className="form-group">
               <label>Image URL</label>
-              <input
-                className="form-control"
-                placeholder="https://..."
-                value={form.image_url}
-                onChange={e => { setForm(f => ({ ...f, image_url: e.target.value })); setImgPreview(e.target.value) }}
-              />
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <input
+                  className="form-control"
+                  placeholder="https://..."
+                  value={form.image_url}
+                  onChange={e => { setForm(f => ({ ...f, image_url: e.target.value })); setImgPreview(e.target.value) }}
+                />
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleImageUpload}
+                  style={{ display: 'none' }} 
+                  id="imageUpload"
+                />
+                <label 
+                  htmlFor="imageUpload" 
+                  className="btn btn-secondary" 
+                  style={{ cursor: 'pointer', whiteSpace: 'nowrap', opacity: uploadingImage ? 0.6 : 1, display: 'flex', alignItems: 'center' }}
+                >
+                  {uploadingImage ? 'Uploading...' : 'Upload Image'}
+                </label>
+              </div>
               {imgPreview && (
                 <img
                   src={imgPreview}

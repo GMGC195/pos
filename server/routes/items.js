@@ -58,7 +58,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
 // POST create item
 router.post('/', authenticateToken, async (req, res) => {
-  const { category_id, name, price, image_url, size_options, status } = req.body;
+  const { category_id, name, price, image_url, size_options, status, short_code } = req.body;
   try {
     let available_branches = ['Branch 1', 'Branch 2', 'Branch 3'];
     if (req.user.role === 'Order Taker' || req.user.role === 'Operator') {
@@ -66,9 +66,9 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO items (category_id, name, price, image_url, size_options, status, available_branches)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [category_id, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify(available_branches)]
+      `INSERT INTO items (category_id, name, price, image_url, size_options, status, available_branches, short_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [category_id, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify(available_branches), short_code || '']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -78,7 +78,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // PUT update item
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { category_id, name, price, image_url, size_options, status } = req.body;
+  const { category_id, name, price, image_url, size_options, status, short_code } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -103,9 +103,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
       // Create a new item for this branch with the updated details
       const createResult = await client.query(
-        `INSERT INTO items (category_id, name, price, image_url, size_options, status, available_branches)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [category_id, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify([userBranch])]
+        `INSERT INTO items (category_id, name, price, image_url, size_options, status, available_branches, short_code)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [category_id, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify([userBranch]), short_code || '']
       );
       
       const newItem = createResult.rows[0];
@@ -124,9 +124,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     } else {
       // Normal update
       const result = await client.query(
-        `UPDATE items SET category_id=$1, name=$2, price=$3, image_url=$4, size_options=$5, status=$6
-         WHERE id=$7 RETURNING *`,
-        [category_id, name, price, image_url || '', size_options || [], status || 'Active', req.params.id]
+        `UPDATE items SET category_id=$1, name=$2, price=$3, image_url=$4, size_options=$5, status=$6, short_code=$7
+         WHERE id=$8 RETURNING *`,
+        [category_id, name, price, image_url || '', size_options || [], status || 'Active', short_code || '', req.params.id]
       );
       await client.query('COMMIT');
       res.json(result.rows[0]);

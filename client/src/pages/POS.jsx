@@ -25,7 +25,8 @@ import {
   Eye,
   Check,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ChevronLeft
 } from 'lucide-react'
 import {
   savePendingOrder,
@@ -85,6 +86,7 @@ export default function POS() {
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState(null)
+  const [originalCart, setOriginalCart] = useState(null)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [pendingCount, setPendingCount] = useState(0)
   const [syncing, setSyncing] = useState(false)
@@ -163,6 +165,7 @@ export default function POS() {
       }))
       
       setCart(loadedCart)
+      setOriginalCart(loadedCart)
       setCustomerInfo({
         name: order.customer_name || '',
         phone: order.customer_phone || '',
@@ -200,6 +203,7 @@ export default function POS() {
             qty: item.qty
           }))
           setCart(loadedCart)
+          setOriginalCart(loadedCart)
           setCustomerInfo({
             name: order.customer_name || '',
             phone: order.customer_phone || '',
@@ -381,7 +385,8 @@ export default function POS() {
           setPendingCount(prev => prev + 1)
           toast.success('Offline! Order saved locally and will sync when online.', { duration: 5000 })
           // We still "print" but it's offline
-          if (shouldPrint) if (shouldPrint) printThermalSlip(method, 'OFFLINE-' + orderData.client_order_id.slice(0, 8), '-')
+          const isFullReceiptOffline = method !== 'Hold'
+          if (shouldPrint) printThermalSlip(method, 'OFFLINE-' + orderData.client_order_id.slice(0, 8), '-', 0, isFullReceiptOffline, null)
         } else {
           try {
             res = await axios.post('/api/orders', orderData)
@@ -393,7 +398,8 @@ export default function POS() {
               await savePendingOrder(orderData)
               setPendingCount(prev => prev + 1)
               toast.error('Network Error! Order saved locally for later sync.')
-              printThermalSlip(method, 'OFFLINE-' + orderData.client_order_id.slice(0, 8), '-')
+              const isFullReceiptOffline = method !== 'Hold'
+              if (shouldPrint) printThermalSlip(method, 'OFFLINE-' + orderData.client_order_id.slice(0, 8), '-', 0, isFullReceiptOffline, null)
               throw netErr
             } else {
               // Server error (500 etc) - do not save offline, just show error
@@ -403,16 +409,40 @@ export default function POS() {
         }
       }
 
+      let diffData = null;
+      if (editingOrderId && method === 'Hold' && originalCart) {
+        const added = [];
+        const cancelled = [];
+        
+        cart.forEach(c => {
+          const orig = originalCart.find(o => o.cartId === c.cartId);
+          if (!orig) added.push({ ...c });
+          else if (c.qty > orig.qty) added.push({ ...c, qty: c.qty - orig.qty });
+        });
+
+        originalCart.forEach(o => {
+          const curr = cart.find(c => c.cartId === o.cartId);
+          if (!curr) cancelled.push({ ...o });
+          else if (o.qty > curr.qty) cancelled.push({ ...o, qty: o.qty - curr.qty });
+        });
+        
+        if (added.length > 0 || cancelled.length > 0) {
+          diffData = { added, cancelled };
+        }
+      }
+
       const orderId = res?.data?.order?.id || editingOrderId || 'N/A'
       const slipNumber = res?.data?.order?.slip_number || '-'
       const editCount = res?.data?.order?.edit_count || 0
+      const isFullReceipt = method !== 'Hold'
       if (isOnline) {
         toast.success(method === 'Hold' ? 'Order updated to Hold status!' : 'Order Placed!', { duration: 3000 })
-        if (shouldPrint) printThermalSlip(method, orderId, slipNumber, editCount)
+        if (shouldPrint) printThermalSlip(method, orderId, slipNumber, editCount, isFullReceipt, diffData)
       }
 
       // Cleanup
       clearCart()
+      setOriginalCart(null)
       setEditingOrderId(null)
       window.history.replaceState({}, '', '/pos')
       setPaymentMethod('Cash')
@@ -431,15 +461,97 @@ export default function POS() {
     }
   }
 
-  const printThermalSlip = (method, orderId, slipNumber, editCount = 0) => {
+  const printThermalSlip = (method, orderId, slipNumber, editCount = 0, isFullReceipt = true, diffData = null, customCart = null, customCustomerInfo = null) => {
     const now2 = new Date()
     const paymentLabel = method === 'Hold' ? 'Hold (Pending)' : method;
-    const itemRows = cart.map((item, index) => `
+    
+    const currentCart = customCart || cart;
+    const currentInfo = customCustomerInfo || customerInfo;
+
+    const currentSubtotal = currentCart.reduce((sum, i) => sum + (parseFloat(i.price || i.unit_price) * i.qty), 0);
+    const currentTax = currentSubtotal * TAX_RATE;
+    const currentTotal = currentSubtotal + currentTax;
+
+    let itemRows = '';
+    if (!isFullReceipt && diffData) {
+      itemRows = diffData.added.map((item, index) => `
       <div class="row">
         <span class="item-name">${index + 1}. ${item.name}</span>
         <span class="item-qty">${item.qty}</span>
         <span class="item-price">${CURRENCY}${parseFloat(item.price * item.qty).toFixed(2)}</span>
-      </div>`).join('')
+      </div>`).join('');
+      
+      itemRows += diffData.cancelled.map((item, index) => `
+      <div class="row" style="text-decoration: line-through; color: #555;">
+        <span class="item-name">${diffData.added.length + index + 1}. ${item.name}</span>
+        <span class="item-qty">${item.qty}</span>
+        <span class="item-price">${CURRENCY}${parseFloat(item.price * item.qty).toFixed(2)}</span>
+      </div>`).join('');
+    } else {
+      itemRows = currentCart.map((item, index) => `
+      <div class="row">
+        <span class="item-name">${index + 1}. ${item.name || item.item_name}</span>
+        <span class="item-qty">${item.qty}</span>
+        <span class="item-price">${CURRENCY}${parseFloat((item.price || item.unit_price) * item.qty).toFixed(2)}</span>
+      </div>`).join('');
+    }
+
+    const taker = currentInfo.order_taker || currentInfo.orderTaker || user?.username || 'Guest';
+    const comment = currentInfo.comments || '';
+    const customerName = currentInfo.name || '';
+    const metaRowParts = [];
+    if (currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber) metaRowParts.push(`Table ${currentInfo.tableNumber}`);
+    if (customerName) metaRowParts.push(`Cust: ${customerName}`);
+    if (taker) metaRowParts.push(`By: ${taker}`);
+    if (comment) metaRowParts.push(`Note: ${comment}`);
+    const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
+
+    const headerHtml = isFullReceipt ? `
+    <img src="${slipLogo}" style="width: 50%; max-height: 100px; object-fit: contain; margin-top: 1px; margin-bottom: 2px;" />
+    <p style="font-size: 11px; margin: 6px 0; padding: 4px; border: 1px dashed #000; font-weight: bold; text-align: center;">
+      This slip is only for order taking.<br>Please pick up your original slip from counter.<br>
+      <span style="font-size: 13px; font-weight: bold; margin-top: 4px; display: block;" dir="rtl">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
+    </p>
+    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Open 24/7</div>
+    <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
+      ${currentInfo.orderType}
+    </div>
+    ${metaRow}
+    <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
+      Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
+    </div>
+    <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
+    ` : `
+    <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
+      ${currentInfo.orderType}
+    </div>
+    <div style="font-size: 11px; font-weight: bold; margin: 2px 0; border: 1.5px solid #000; padding: 2px; text-align: center;">
+      This slip is only for order taking. Please pick up your original slip from counter.<br/>
+      <span dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; display: block; margin-top: 2px;">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
+    </div>
+    ${metaRow}
+    <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
+      Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
+    </div>
+    <p class="sub" style="margin-bottom: 2px; font-size: 10px;">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
+    `;
+
+    const footerHtml = isFullReceipt ? `
+    <div class="dotted"></div>
+    <div class="center footer">
+      <p>Thank you for your order!</p>
+      <p>Come back soon 🍕</p>
+      <p>${BRAND_RECEIPT_FOOTER}</p>
+      <p style="margin-top:6px;">📞 ${BRAND_PHONE_DISPLAY}</p>
+      <p>📧 ${BRAND_EMAIL}</p>
+      <p>📍 ${BRAND_ADDRESS}</p>
+    </div>
+    <div class="dotted"></div>
+    <div class="center footer" style="margin-top:4px;font-size:11px;font-weight:bold;color:#000000;">
+      <p>Software by Uzair</p>
+      <p>03062951312</p>
+    </div>
+    ` : '';
 
     const html = `<!DOCTYPE html>
 <html>
@@ -462,14 +574,14 @@ export default function POS() {
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 2px 10px 6px 15px;
+      padding: 0 10px 4px 15px; /* Reduced top/bottom padding */
     }
     .center { text-align: center; }
     h2 { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
     .sub { font-size: 11px; color: #000; margin-bottom: 2px; }
     .divider {
       border-top: 1px dashed #000;
-      margin: 6px 0;
+      margin: 4px 0; /* Reduced margin */
     }
     .row {
       display: flex;
@@ -512,26 +624,14 @@ export default function POS() {
 </head>
 <body>
   <div class="center">
-    <img src="${slipLogo}" style="width: 50%; max-height: 100px; object-fit: contain; margin-top: 1px; margin-bottom: 2px;" />
-    <p style="font-size: 11px; margin: 6px 0; padding: 4px; border: 1px dashed #000; font-weight: bold; text-align: center;">
-      This slip is only for order taking.<br>Please pick up your original slip from counter.<br>
-      <span style="font-size: 13px; font-weight: bold; margin-top: 4px; display: block;" dir="rtl">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
-    </p>
-    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Open 24/7</div>
-    <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
-      ${customerInfo.orderType}
-    </div>
-    <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
-      Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
-    </div>
-    <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
+    ${headerHtml}
   </div>
-  ${customerInfo.name || customerInfo.phone || (customerInfo.address && customerInfo.address !== 'Dine-In' && customerInfo.address !== 'Takeaway') ? `
+  ${isFullReceipt && (currentInfo.name || currentInfo.phone || (currentInfo.address && currentInfo.address !== 'Dine-In' && currentInfo.address !== 'Takeaway')) ? `
   <div class="divider"></div>
   <div style="text-align: left; font-size: 11px;">
-    ${customerInfo.name ? `<p style="margin: 2px 0;"><strong>Customer:</strong> ${customerInfo.name}</p>` : ''}
-    ${customerInfo.phone ? `<p style="margin: 2px 0;"><strong>Phone:</strong> ${customerInfo.phone}</p>` : ''}
-    ${customerInfo.address && customerInfo.address !== 'Dine-In' && customerInfo.address !== 'Takeaway' ? `<p style="margin: 2px 0;"><strong>${customerInfo.orderType === 'Dine-In' ? 'Dine-In:' : 'Address:'}</strong> ${customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber ? `Table ${customerInfo.tableNumber}` : customerInfo.address}</p>` : ''}
+    ${currentInfo.name ? `<p style="margin: 2px 0;"><strong>Customer:</strong> ${currentInfo.name}</p>` : ''}
+    ${currentInfo.phone ? `<p style="margin: 2px 0;"><strong>Phone:</strong> ${currentInfo.phone}</p>` : ''}
+    ${currentInfo.address && currentInfo.address !== 'Dine-In' && currentInfo.address !== 'Takeaway' ? `<p style="margin: 2px 0;"><strong>${currentInfo.orderType === 'Dine-In' ? 'Dine-In:' : 'Address:'}</strong> ${currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber ? `Table ${currentInfo.tableNumber}` : currentInfo.address}</p>` : ''}
   </div>
   ` : ''}
   <div class="divider"></div>
@@ -543,25 +643,12 @@ export default function POS() {
   <div class="divider"></div>
   ${itemRows}
   <div class="divider"></div>
-  <div class="total-row"><span>Total Items</span><span>${cart.reduce((s, c) => s + c.qty, 0)}</span></div>
-  <div class="total-row"><span>Subtotal</span><span>${CURRENCY}${parseFloat(subtotal).toFixed(2)}</span></div>
-  ${parseFloat(customerInfo.discount || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${CURRENCY}${parseFloat(customerInfo.discount).toFixed(2)}</span></div>` : ''}
-  <div class="total-row grand"><span>TOTAL</span><span>${CURRENCY}${parseFloat(total - (parseFloat(customerInfo.discount) || 0)).toFixed(2)}</span></div>
+  <div class="total-row"><span>Total Items</span><span>${currentCart.reduce((s, c) => s + c.qty, 0)}</span></div>
+  <div class="total-row"><span>Subtotal</span><span>${CURRENCY}${parseFloat(currentSubtotal).toFixed(2)}</span></div>
+  ${parseFloat(currentInfo.discount || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${CURRENCY}${parseFloat(currentInfo.discount).toFixed(2)}</span></div>` : ''}
+  <div class="total-row grand"><span>TOTAL</span><span>${CURRENCY}${parseFloat(currentTotal - (parseFloat(currentInfo.discount) || 0)).toFixed(2)}</span></div>
   <div class="total-row"><span>Payment</span><span>${paymentLabel}</span></div>
-  <div class="dotted"></div>
-  <div class="center footer">
-    <p>Thank you for your order!</p>
-    <p>Come back soon 🍕</p>
-    <p>${BRAND_RECEIPT_FOOTER}</p>
-    <p style="margin-top:6px;">📞 ${BRAND_PHONE_DISPLAY}</p>
-    <p>📧 ${BRAND_EMAIL}</p>
-    <p>📍 ${BRAND_ADDRESS}</p>
-  </div>
-  <div class="dotted"></div>
-  <div class="center footer" style="margin-top:4px;font-size:11px;font-weight:bold;color:#000000;">
-    <p>Software by Uzair</p>
-    <p>03062951312</p>
-  </div>
+  ${footerHtml}
 </body>
 </html>`
 
@@ -711,6 +798,14 @@ export default function POS() {
 
           {/* POS Compact Header (Search + Dots) */}
           <div className="pos-mobile-header" style={{ display: 'flex', gap: 10, marginTop: 0, marginBottom: 4 }}>
+            <button
+              className="pos-back-btn"
+              onClick={() => setCustomerInfo(prev => ({ ...prev, orderType: 'Dine-In', tableNumber: '' }))}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', borderRadius: 8, border: '1px solid var(--surface-2)', background: 'var(--surface)', cursor: 'pointer', color: 'var(--text-primary)' }}
+              title="Back to Tables"
+            >
+              <ChevronLeft size={18} />
+            </button>
             <div className="pos-mobile-search" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
               <Search className="si" size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
               <input
@@ -1326,8 +1421,8 @@ export default function POS() {
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setQuickCompleteModal(null)}>Cancel</button>
-              <button className="btn btn-success" style={{ flex: 1 }} disabled={processing === 'quick-complete'} onClick={async () => {
-                if (processing === 'quick-complete') return;
+              <button className="btn btn-primary" style={{ flex: 1 }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+                if (processing) return;
                 setProcessing('quick-complete');
                 const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
                 try {
@@ -1345,6 +1440,42 @@ export default function POS() {
                   setProcessing(false);
                 }
               }}>{processing === 'quick-complete' ? 'Completing...' : 'Complete'}</button>
+              <button className="btn btn-success" style={{ flex: 1.5 }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+                if (processing) return;
+                setProcessing('quick-complete-print');
+                const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
+                try {
+                  if (method === 'Payment Pending') {
+                    await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
+                  } else {
+                    await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
+                  }
+                  toast.success('Order completed & printing!')
+                  
+                  // Construct customInfo and customCart for printing
+                  const customInfo = {
+                    name: quickCompleteModal.customer_name || '',
+                    phone: quickCompleteModal.customer_phone || '',
+                    address: quickCompleteModal.customer_address || '',
+                    discount: quickCompleteModal.discount || 0,
+                    orderType: quickCompleteModal.order_type || (quickCompleteModal.customer_address?.startsWith('Table ') ? 'Dine-In' : 'Delivery'),
+                    tableNumber: quickCompleteModal.table_number || (quickCompleteModal.customer_address?.startsWith('Table ') ? quickCompleteModal.customer_address.replace('Table ', '') : ''),
+                  }
+                  
+                  // In POS.jsx 'total' variable uses 'subtotal' and 'tax'. We will temporary set it for calculation if we passed it?
+                  // Wait, 'total' inside printThermalSlip uses the global `total` state!
+                  // Let's modify the total inside printThermalSlip!
+                  
+                  printThermalSlip(method, quickCompleteModal.id, quickCompleteModal.slip_number, quickCompleteModal.edit_count, true, null, quickCompleteModal.items, customInfo)
+                  
+                  setQuickCompleteModal(null)
+                  fetchActiveOrders()
+                } catch(err) {
+                  toast.error('Failed to complete & print order')
+                } finally {
+                  setProcessing(false);
+                }
+              }}>{processing === 'quick-complete-print' ? 'Printing...' : 'Complete & Print'}</button>
             </div>
           </div>
         </div>

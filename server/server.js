@@ -490,6 +490,7 @@ app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/stock', require('./routes/stock'));
+app.use('/api/upload', require('./routes/upload'));
 app.use('/api/recipes', require('./routes/recipes'));
 app.use('/api/support', require('./routes/support'));
 app.use('/api/employees', require('./routes/employees'));
