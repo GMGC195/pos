@@ -117,6 +117,7 @@ export default function POS() {
   const [tablesList, setTablesList] = useState([])
   const [showManageTables, setShowManageTables] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now())
+  const [selectedBranch, setSelectedBranch] = useState('Branch 1')
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
@@ -125,12 +126,14 @@ export default function POS() {
 
   const fetchTablesList = useCallback(async () => {
     try {
-      const res = await axios.get('/api/tables');
+      const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase());
+      const branchQuery = isAdminOrDev ? `?branch=${encodeURIComponent(selectedBranch)}` : '';
+      const res = await axios.get(`/api/tables${branchQuery}`);
       setTablesList(res.data);
     } catch (err) {
       console.error('Failed to fetch tables:', err);
     }
-  }, []);
+  }, [user, selectedBranch]);
 
   useEffect(() => {
     fetchTablesList();
@@ -143,12 +146,14 @@ export default function POS() {
 
   const fetchActiveOrders = useCallback(async () => {
     try {
-      const res = await axios.get('/api/orders?status=Hold&limit=100')
+      const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase());
+      const branchQuery = isAdminOrDev ? `&branch=${encodeURIComponent(selectedBranch)}` : '';
+      const res = await axios.get(`/api/orders?status=Hold&limit=100${branchQuery}`)
       setActiveOrders(res.data)
     } catch (err) {
       console.error(err)
     }
-  }, [])
+  }, [user, selectedBranch])
 
   // Listen to real-time order events so booked table status updates INSTANTLY
   useEffect(() => {
@@ -321,13 +326,15 @@ export default function POS() {
     setPendingCount(remaining.length)
   }
 
-  // Filter items locally based on activeCategory and search
+  // Filter items locally based on activeCategory, search, and branch
   const filteredItems = items.filter(item => {
     const matchesCategory = activeCategory === 'All' || item.category_name === activeCategory || item.category === activeCategory;
     const matchesSearch = !search ||
       item.name.toLowerCase().includes(search.toLowerCase()) ||
       (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase()));
-    return matchesCategory && matchesSearch;
+    const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase());
+    const matchesBranch = !isAdminOrDev || (item.available_branches || []).includes(selectedBranch);
+    return matchesCategory && matchesSearch && matchesBranch;
   });
 
   // Cart computations
@@ -412,7 +419,8 @@ export default function POS() {
         order_type: customerInfo.orderType,
         table_number: customerInfo.tableNumber,
         order_taker: user?.username || 'Guest',
-        comments: customerInfo.comments
+        comments: customerInfo.comments,
+        branch: ['admin', 'developer'].includes(user?.role?.toLowerCase()) ? selectedBranch : undefined
       }
 
       let res;
@@ -541,9 +549,7 @@ export default function POS() {
     const customerName = currentInfo.name || '';
     const metaRowParts = [];
     if (currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber) metaRowParts.push(`Table ${currentInfo.tableNumber}`);
-    if (customerName) metaRowParts.push(`Cust: ${customerName}`);
     if (taker) metaRowParts.push(`By: ${taker}`);
-    if (comment) metaRowParts.push(`Note: ${comment}`);
     const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
 
     const headerHtml = isFullReceipt ? `
@@ -653,12 +659,13 @@ export default function POS() {
   <div class="center">
     ${headerHtml}
   </div>
-  ${isFullReceipt && (currentInfo.name || currentInfo.phone || (currentInfo.address && currentInfo.address !== 'Dine-In' && currentInfo.address !== 'Takeaway')) ? `
+  ${isFullReceipt && (currentInfo.name || currentInfo.phone || currentInfo.comments || (currentInfo.address && currentInfo.orderType !== 'Dine-In' && currentInfo.orderType !== 'Takeaway')) ? `
   <div class="divider"></div>
   <div style="text-align: left; font-size: 11px; display: flex; flex-wrap: wrap; justify-content: space-between;">
     ${currentInfo.name ? `<div style="width: 48%; margin: 2px 0;"><strong>Cust:</strong> ${currentInfo.name}</div>` : ''}
     ${currentInfo.phone ? `<div style="width: 48%; margin: 2px 0;"><strong>Phone:</strong> ${currentInfo.phone}</div>` : ''}
-    ${currentInfo.address && currentInfo.address !== 'Dine-In' && currentInfo.address !== 'Takeaway' ? `<div style="width: 100%; margin: 2px 0;"><strong>${currentInfo.orderType === 'Dine-In' ? 'Dine-In:' : 'Address:'}</strong> ${currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber ? `Table ${currentInfo.tableNumber}` : currentInfo.address}</div>` : ''}
+    ${currentInfo.address && currentInfo.orderType !== 'Dine-In' && currentInfo.orderType !== 'Takeaway' ? `<div style="width: 100%; margin: 2px 0;"><strong>Address:</strong> ${currentInfo.address}</div>` : ''}
+    ${currentInfo.comments ? `<div style="width: 100%; margin: 2px 0;"><strong>Note:</strong> ${currentInfo.comments}</div>` : ''}
   </div>
   ` : ''}
   <div class="divider"></div>
@@ -718,6 +725,20 @@ export default function POS() {
       <div className="pos-layout">
         {/* Left: Products */}
         <div className="pos-left">
+          {['admin', 'developer'].includes(user?.role?.toLowerCase()) && (
+            <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--surface-2)', background: 'white', position: 'sticky', top: 0, zIndex: 10 }}>
+              <label style={{ fontWeight: 'bold', color: 'var(--text-secondary)', fontSize: 14 }}>Select Branch:</label>
+              <select 
+                value={selectedBranch} 
+                onChange={e => setSelectedBranch(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ccc', fontSize: 14, flex: 1, maxWidth: 200, cursor: 'pointer' }}
+              >
+                <option value="Branch 1">Branch 1</option>
+                <option value="Branch 2">Branch 2</option>
+                <option value="Branch 3">Branch 3</option>
+              </select>
+            </div>
+          )}
           {customerInfo.orderType === 'Dine-In' && !customerInfo.tableNumber ? (
             <div className="table-selection-view" style={{ padding: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -1457,7 +1478,7 @@ export default function POS() {
               <button className="btn btn-secondary" style={{ flex: '0 0 44px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setQuickCompleteModal(null)} title="Cancel">
                 <X size={20} />
               </button>
-              <button className="btn btn-primary" style={{ flex: 1, fontSize: 13, padding: '8px 4px' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+              <button className="btn btn-primary" style={{ flex: 1, fontSize: 13, padding: '8px 4px', display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
                 if (processing) return;
                 setProcessing('quick-complete');
                 const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
@@ -1476,7 +1497,7 @@ export default function POS() {
                   setProcessing(false);
                 }
               }}>{processing === 'quick-complete' ? 'Completing...' : 'Complete'}</button>
-              <button className="btn btn-success" style={{ flex: 1.2, fontSize: 13, padding: '8px 4px' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+              <button className="btn btn-success" style={{ flex: 1.2, fontSize: 13, padding: '8px 4px', display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
                 if (processing) return;
                 setProcessing('quick-complete-print');
                 const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;

@@ -6,10 +6,10 @@ const pool = new Pool({
   ssl: {
     rejectUnauthorized: false, // Required for Neon managed SSL
   },
-  max: 5,                      // Neon free tier: keep connections low
-  min: 0,                      // Don't keep idle connections open
-  idleTimeoutMillis: 10000,    // Release idle connections after 10s
-  connectionTimeoutMillis: 10000,
+  max: 30,                     // Increased from 5 to handle concurrent socket.io fetches
+  min: 2,                      // Keep a couple of connections warm
+  idleTimeoutMillis: 30000,    // Release idle connections after 30s
+  connectionTimeoutMillis: 15000,
   allowExitOnIdle: true,
 });
 

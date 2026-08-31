@@ -16,6 +16,9 @@ router.get('/', authenticateToken, async (req, res) => {
     if (['order taker'].includes(userRole) && userBranch) {
       params.push(userBranch);
       query += ` AND available_branches ? $${params.length}`;
+    } else if (req.query.branch && req.query.branch !== 'All') {
+      params.push(req.query.branch);
+      query += ` AND available_branches ? $${params.length}`;
     }
 
     query += " ORDER BY NULLIF(regexp_replace(table_number, '\\D', '', 'g'), '')::int ASC, table_number ASC";

@@ -67,6 +67,10 @@ export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const isDeveloper = user?.role?.toLowerCase() === 'developer'
+  const isAdmin = user?.role?.toLowerCase() === 'admin'
+  const isAdminOrDev = isDeveloper || isAdmin
+  
+  const [dashboardView, setDashboardView] = useState(isDeveloper ? 'pos' : 'attendance')
 
   useEffect(() => {
     // Operator is now allowed to view dashboard
@@ -102,8 +106,8 @@ export default function Dashboard() {
       return;
     }
 
-    // Only fetch sales stats if the user is a developer
-    if (isDeveloper) {
+    // Only fetch sales stats if the user is a developer or admin
+    if (isAdminOrDev) {
       axios.get('/api/stats')
         .then(r => setStats(r.data))
         .catch(() => setStats({
@@ -152,10 +156,10 @@ export default function Dashboard() {
       socket.off('newOrder', handleOrderEvent);
       socket.off('orderUpdated', handleOrderEvent);
     }
-  }, [isDeveloper])
+  }, [isAdminOrDev])
 
   const exportExcel = async () => {
-    if (!isDeveloper) return
+    if (!isAdminOrDev) return
     const XLSX = await import('xlsx')
     const data = [
       { Metric: "Today Total Sale", Value: stats?.totalSale || 0 },
@@ -172,7 +176,7 @@ export default function Dashboard() {
   }
 
   const exportPDF = () => {
-    if (!isDeveloper) return
+    if (!isAdminOrDev) return
     const printWindow = window.open('', '', 'width=800,height=600');
     const html = `
       <html>
@@ -254,9 +258,48 @@ export default function Dashboard() {
   }
 
   // --- DEVELOPER DASHBOARD VIEW ---
-  if (isDeveloper) {
+  if (isAdminOrDev && dashboardView === 'pos') {
     return (
       <>
+        {/* POS Header with Toggle */}
+        <div style={{ marginBottom: 24, marginTop: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+          <div style={{ paddingLeft: '8px' }}>
+            <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Good evening, {user?.username} 👋</h2>
+            <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: 13 }}>Sales & Point of Sale Dashboard</p>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            {isAdminOrDev && (
+              <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4 }}>
+                <button 
+                  onClick={() => setDashboardView('attendance')}
+                  style={{
+                    padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
+                    background: dashboardView === 'attendance' ? 'var(--surface)' : 'transparent',
+                    color: dashboardView === 'attendance' ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: dashboardView === 'attendance' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    cursor: 'pointer', transition: 'all 0.2s'
+                  }}>
+                  Attendance
+                </button>
+                <button 
+                  onClick={() => setDashboardView('pos')}
+                  style={{
+                    padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
+                    background: dashboardView === 'pos' ? 'var(--surface)' : 'transparent',
+                    color: dashboardView === 'pos' ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: dashboardView === 'pos' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    cursor: 'pointer', transition: 'all 0.2s'
+                  }}>
+                  Sales & POS
+                </button>
+              </div>
+            )}
+            <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
+              <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+            </button>
+          </div>
+        </div>
+
         {/* Stat Cards */}
         <div className="stat-cards">
           {statCards.map(s => (
@@ -348,9 +391,6 @@ export default function Dashboard() {
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading}>
-                <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
-              </button>
               <button className="btn btn-secondary btn-sm" onClick={exportPDF}>
                 <Printer size={14} /> Export PDF
               </button>
@@ -892,9 +932,37 @@ export default function Dashboard() {
           <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Good evening, {user?.username} 👋</h2>
           <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: 13 }}>Restaurant Attendance & Operations Dashboard</p>
         </div>
-        <button className="btn btn-secondary btn-sm dashboard-refresh-btn" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
-          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {isAdminOrDev && (
+            <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4 }}>
+              <button 
+                onClick={() => setDashboardView('attendance')}
+                style={{
+                  padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
+                  background: dashboardView === 'attendance' ? 'var(--surface)' : 'transparent',
+                  color: dashboardView === 'attendance' ? 'var(--primary)' : 'var(--text-muted)',
+                  boxShadow: dashboardView === 'attendance' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  cursor: 'pointer', transition: 'all 0.2s'
+                }}>
+                Attendance
+              </button>
+              <button 
+                onClick={() => setDashboardView('pos')}
+                style={{
+                  padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
+                  background: dashboardView === 'pos' ? 'var(--surface)' : 'transparent',
+                  color: dashboardView === 'pos' ? 'var(--primary)' : 'var(--text-muted)',
+                  boxShadow: dashboardView === 'pos' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  cursor: 'pointer', transition: 'all 0.2s'
+                }}>
+                Sales & POS
+              </button>
+            </div>
+          )}
+          <button className="btn btn-secondary btn-sm dashboard-refresh-btn" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* 6 Attendance KPI Cards */}
