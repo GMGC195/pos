@@ -141,6 +141,15 @@ export default function POS() {
     }
   }, [fetchTablesList]);
 
+  const fetchActiveOrders = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/orders?status=Hold&limit=100')
+      setActiveOrders(res.data)
+    } catch (err) {
+      console.error(err)
+    }
+  }, [])
+
   // Listen to real-time order events so booked table status updates INSTANTLY
   useEffect(() => {
     const handleOrderChange = () => {
@@ -274,14 +283,7 @@ export default function POS() {
     getAllPendingOrders().then(orders => setPendingCount(orders.length))
   }, [isOnline])
 
-  const fetchActiveOrders = useCallback(async () => {
-    try {
-      const res = await axios.get('/api/orders?status=Hold&limit=100')
-      setActiveOrders(res.data)
-    } catch (err) {
-      console.error(err)
-    }
-  }, [])
+
 
   useEffect(() => {
     if (!showCart) fetchActiveOrders()
