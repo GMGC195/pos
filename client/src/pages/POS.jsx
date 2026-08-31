@@ -59,6 +59,16 @@ const parseSizeOpt = (str, defaultPrice) => {
   return { name: str, price: numDefault };
 };
 
+const getTimeElapsed = (dateString) => {
+  if (!dateString) return '';
+  const diffMinutes = Math.floor((new Date() - new Date(dateString)) / 60000);
+  if (diffMinutes < 1) return 'Just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const h = Math.floor(diffMinutes / 60);
+  const m = diffMinutes % 60;
+  return `${h}h ${m}m ago`;
+};
+
 export default function POS() {
   const { user } = useAuth();
   const {
@@ -106,6 +116,12 @@ export default function POS() {
   const [showTableDotsMenu, setShowTableDotsMenu] = useState(false)
   const [tablesList, setTablesList] = useState([])
   const [showManageTables, setShowManageTables] = useState(false)
+  const [currentTime, setCurrentTime] = useState(Date.now())
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchTablesList = useCallback(async () => {
     try {
@@ -124,6 +140,19 @@ export default function POS() {
       socket.off('tables-updated', fetchTablesList);
     }
   }, [fetchTablesList]);
+
+  // Listen to real-time order events so booked table status updates INSTANTLY
+  useEffect(() => {
+    const handleOrderChange = () => {
+      fetchActiveOrders();
+    };
+    socket.on('newOrder', handleOrderChange);
+    socket.on('orderUpdated', handleOrderChange);
+    return () => {
+      socket.off('newOrder', handleOrderChange);
+      socket.off('orderUpdated', handleOrderChange);
+    };
+  }, [fetchActiveOrders]);
   
   const toggleSection = (type) => {
     setExpandedSections(prev => ({ ...prev, [type]: !prev[type] }));
@@ -257,6 +286,15 @@ export default function POS() {
   useEffect(() => {
     if (!showCart) fetchActiveOrders()
   }, [showCart, fetchActiveOrders])
+
+  // Re-fetch INSTANTLY when table selection view opens so booked status is always fresh
+  useEffect(() => {
+    const isTableView = customerInfo.orderType === 'Dine-In' && !customerInfo.tableNumber;
+    if (isTableView) {
+      fetchActiveOrders();
+    }
+  }, [customerInfo.orderType, customerInfo.tableNumber, fetchActiveOrders])
+
 
   const syncPendingOrders = async () => {
     const orders = await getAllPendingOrders()
@@ -508,10 +546,6 @@ export default function POS() {
 
     const headerHtml = isFullReceipt ? `
     <img src="${slipLogo}" style="width: 50%; max-height: 100px; object-fit: contain; margin-top: 1px; margin-bottom: 2px;" />
-    <p style="font-size: 11px; margin: 6px 0; padding: 4px; border: 1px dashed #000; font-weight: bold; text-align: center;">
-      This slip is only for order taking.<br>Please pick up your original slip from counter.<br>
-      <span style="font-size: 13px; font-weight: bold; margin-top: 4px; display: block;" dir="rtl">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
-    </p>
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Open 24/7</div>
     <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${currentInfo.orderType}
@@ -524,10 +558,6 @@ export default function POS() {
     ` : `
     <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
       ${currentInfo.orderType}
-    </div>
-    <div style="font-size: 11px; font-weight: bold; margin: 2px 0; border: 1.5px solid #000; padding: 2px; text-align: center;">
-      This slip is only for order taking. Please pick up your original slip from counter.<br/>
-      <span dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; display: block; margin-top: 2px;">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
     </div>
     ${metaRow}
     <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
@@ -545,11 +575,6 @@ export default function POS() {
       <p style="margin-top:6px;">📞 ${BRAND_PHONE_DISPLAY}</p>
       <p>📧 ${BRAND_EMAIL}</p>
       <p>📍 ${BRAND_ADDRESS}</p>
-    </div>
-    <div class="dotted"></div>
-    <div class="center footer" style="margin-top:4px;font-size:11px;font-weight:bold;color:#000000;">
-      <p>Software by Uzair</p>
-      <p>03062951312</p>
     </div>
     ` : '';
 
@@ -628,10 +653,10 @@ export default function POS() {
   </div>
   ${isFullReceipt && (currentInfo.name || currentInfo.phone || (currentInfo.address && currentInfo.address !== 'Dine-In' && currentInfo.address !== 'Takeaway')) ? `
   <div class="divider"></div>
-  <div style="text-align: left; font-size: 11px;">
-    ${currentInfo.name ? `<p style="margin: 2px 0;"><strong>Customer:</strong> ${currentInfo.name}</p>` : ''}
-    ${currentInfo.phone ? `<p style="margin: 2px 0;"><strong>Phone:</strong> ${currentInfo.phone}</p>` : ''}
-    ${currentInfo.address && currentInfo.address !== 'Dine-In' && currentInfo.address !== 'Takeaway' ? `<p style="margin: 2px 0;"><strong>${currentInfo.orderType === 'Dine-In' ? 'Dine-In:' : 'Address:'}</strong> ${currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber ? `Table ${currentInfo.tableNumber}` : currentInfo.address}</p>` : ''}
+  <div style="text-align: left; font-size: 11px; display: flex; flex-wrap: wrap; justify-content: space-between;">
+    ${currentInfo.name ? `<div style="width: 48%; margin: 2px 0;"><strong>Cust:</strong> ${currentInfo.name}</div>` : ''}
+    ${currentInfo.phone ? `<div style="width: 48%; margin: 2px 0;"><strong>Phone:</strong> ${currentInfo.phone}</div>` : ''}
+    ${currentInfo.address && currentInfo.address !== 'Dine-In' && currentInfo.address !== 'Takeaway' ? `<div style="width: 100%; margin: 2px 0;"><strong>${currentInfo.orderType === 'Dine-In' ? 'Dine-In:' : 'Address:'}</strong> ${currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber ? `Table ${currentInfo.tableNumber}` : currentInfo.address}</div>` : ''}
   </div>
   ` : ''}
   <div class="divider"></div>
@@ -699,7 +724,9 @@ export default function POS() {
                     key={type}
                     onClick={() => setCustomerInfo(prev => ({ ...prev, orderType: type }))}
                     style={{
-                      padding: '8px 20px',
+                      padding: '8px 12px',
+                      fontSize: '14px',
+                      whiteSpace: 'nowrap',
                       borderRadius: 8,
                       border: customerInfo.orderType === type ? '2px solid var(--primary)' : '1px solid var(--surface-2)',
                       background: customerInfo.orderType === type ? 'rgba(255,184,0,0.1)' : 'white',
@@ -773,7 +800,12 @@ export default function POS() {
                       onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
                     >
                       <span>Table {t.table_number}</span>
-                      {isBooked && <span style={{ fontSize: 11, fontWeight: 500, background: 'rgba(255,255,255,0.2)', padding: '2px 6px', borderRadius: 4 }}>Booked</span>}
+                      {isBooked && (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                          <span style={{ fontSize: 11, fontWeight: 500, background: 'rgba(255,255,255,0.2)', padding: '2px 6px', borderRadius: 4 }}>Booked</span>
+                          <span style={{ fontSize: 10, fontWeight: 500, opacity: 0.9 }}>{getTimeElapsed(activeOrder.created_at)}</span>
+                        </div>
+                      )}
                     </button>
                   )
                 })}
@@ -782,7 +814,7 @@ export default function POS() {
           ) : (
             <>
               {/* POS Category Chips (Mobile & Desktop) */}
-              <div className="category-tabs pos-cat-tabs" style={{ marginTop: 2, marginBottom: 4 }}>
+              <div className="category-tabs pos-cat-tabs" style={{ marginTop: 0, marginBottom: 0 }}>
                 <button
               className={`cat-tab${activeCategory === 'All' ? ' active' : ''}`}
               onClick={() => setActiveCategory('All')}
@@ -797,7 +829,7 @@ export default function POS() {
           </div>
 
           {/* POS Compact Header (Search + Dots) */}
-          <div className="pos-mobile-header" style={{ display: 'flex', gap: 10, marginTop: 0, marginBottom: 4 }}>
+          <div className="pos-mobile-header" style={{ display: 'flex', gap: 10, marginTop: 0, marginBottom: 0 }}>
             <button
               className="pos-back-btn"
               onClick={() => setCustomerInfo(prev => ({ ...prev, orderType: 'Dine-In', tableNumber: '' }))}
@@ -811,7 +843,7 @@ export default function POS() {
               <input
                 type="text"
                 placeholder="Search menu items..."
-                style={{ width: '100%', padding: '10px 10px 10px 32px', borderRadius: 8, border: '1px solid var(--surface-2)' }}
+                style={{ width: '100%', padding: '6px 10px 6px 32px', borderRadius: 8, border: '1px solid var(--surface-2)' }}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
@@ -1420,8 +1452,10 @@ export default function POS() {
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setQuickCompleteModal(null)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+              <button className="btn btn-secondary" style={{ flex: '0 0 44px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setQuickCompleteModal(null)} title="Cancel">
+                <X size={20} />
+              </button>
+              <button className="btn btn-primary" style={{ flex: 1, fontSize: 13, padding: '8px 4px' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
                 if (processing) return;
                 setProcessing('quick-complete');
                 const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
@@ -1440,7 +1474,7 @@ export default function POS() {
                   setProcessing(false);
                 }
               }}>{processing === 'quick-complete' ? 'Completing...' : 'Complete'}</button>
-              <button className="btn btn-success" style={{ flex: 1.5 }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+              <button className="btn btn-success" style={{ flex: 1.2, fontSize: 13, padding: '8px 4px' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
                 if (processing) return;
                 setProcessing('quick-complete-print');
                 const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;

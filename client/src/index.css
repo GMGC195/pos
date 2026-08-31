@@ -2266,7 +2266,7 @@ tbody tr:hover td {
   .product-grid {
     grid-template-columns: repeat(3, 1fr);
     gap: 6px;
-    padding: 8px;
+    padding: 2px 8px 8px 8px;
   }
 
   .product-card img {
@@ -2351,8 +2351,8 @@ tbody tr:hover td {
 
   .cat-tab {
     border: 1px solid var(--surface-2);
-    border-radius: 20px;
-    padding: 6px 12px;
+    border-radius: 6px;
+    padding: 6px 10px;
     background: var(--surface);
   }
 
@@ -2763,19 +2763,32 @@ tbody tr:hover td {
 
 @media (max-width: 640px) {
   .pos-cat-tabs {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-rows: auto auto;
+    grid-auto-flow: column;
+    overflow-x: auto;
     gap: 6px;
-    padding: 0;
+    padding: 0 4px;
     border-bottom: none;
+    margin-bottom: 2px;
+  }
+  .pos-cat-tabs::-webkit-scrollbar {
+    height: 2px;
+  }
+  .pos-cat-tabs::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 2px;
+  }
+  .pos-cat-tabs::-webkit-scrollbar-track {
+    background: transparent;
   }
   .pos-cat-tabs .cat-tab {
     font-size: 11px;
     padding: 4px 8px;
-    flex: 1 1 auto;
+    white-space: nowrap;
     text-align: center;
     border: 1px solid var(--surface-2);
-    border-radius: 20px;
+    border-radius: 4px;
     background: var(--surface);
   }
   .pos-cat-tabs .cat-tab.active {

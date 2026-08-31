@@ -13,7 +13,29 @@ process.on('unhandledRejection', (reason, promise) => {
 const pool = require('./db');
 
 // Database initialization (reloaded)
+const runWithStartupRetry = async (fn, maxRetries = 3) => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await fn();
+      return;
+    } catch (err) {
+      const isTransient = err.message?.includes('Connection terminated') ||
+                          err.message?.includes('timeout') ||
+                          err.code === 'ECONNRESET';
+      if (isTransient && i < maxRetries - 1) {
+        const delay = 2000 * (i + 1);
+        console.warn(`⚠️ Database schema verification warning: ${err.message} — retrying in ${delay/1000}s...`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        console.warn('⚠️ Database schema verification warning:', err.message);
+        return;
+      }
+    }
+  }
+};
+
 (async () => {
+  await runWithStartupRetry(async () => {
   try {
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE');
     
@@ -400,8 +422,9 @@ const pool = require('./db');
 
     console.log('✅ Database schema verified: all columns and constraints up to date.');
   } catch (err) {
-    console.warn('⚠️ Database schema verification warning:', err.message);
+    throw err; // Let runWithStartupRetry handle it
   }
+  }); // end runWithStartupRetry
 })();
 
 const app = express();
