@@ -89,12 +89,16 @@ router.get('/notifications', authenticateToken, async (req, res) => {
         message: `Attendance request from ${row.employee_name} pending Admin approval.`
       }));
     } else if (userRole === 'operator') {
-      const requestsRes = await pool.query(
-        `SELECT r.id, e.name AS employee_name, r.created_at
+      let opQuery = `SELECT r.id, e.name AS employee_name, r.created_at
          FROM attendance_edit_requests r
          JOIN employees e ON r.employee_id = e.id
-         WHERE r.status = 'Pending' AND r.target_role IN ('Operator', 'Both')`
-      );
+         WHERE r.status = 'Pending' AND r.target_role IN ('Operator', 'Both')`;
+      let opParams = [];
+      if (req.user.branch) {
+        opQuery += ` AND COALESCE(e.branch, '') = ANY($1)`;
+        opParams.push(req.user.branch.split(',').map(s => s.trim()));
+      }
+      const requestsRes = await pool.query(opQuery, opParams);
       requestNotifs = requestsRes.rows.map(row => ({
         id: `attendance-request-${row.id}`,
         type: 'attendance_request',
@@ -762,18 +766,38 @@ router.get('/analytics', authenticateToken, async (req, res) => {
       WHERE ea.date >= CURRENT_DATE - INTERVAL '6 days' AND ea.status != 'Holiday'
     `;
     const weeklyParams = [];
-    if (userRole === 'operator' && req.user.shift) {
-      weeklyQueryStr += " AND COALESCE(e.shift, 'R1') = ANY($1)";
-      weeklyParams.push(req.user.shift.split(',').map(s => s.trim()));
+    if (userRole === 'operator') {
+      if (req.user.shift) {
+        weeklyQueryStr += " AND COALESCE(e.shift, 'R1') = ANY($1)";
+        weeklyParams.push(req.user.shift.split(',').map(s => s.trim()));
+      }
+      if (req.user.branch) {
+        if (weeklyParams.length === 1) {
+          weeklyQueryStr += " AND COALESCE(e.branch, '') = ANY($2)";
+        } else {
+          weeklyQueryStr += " AND COALESCE(e.branch, '') = ANY($1)";
+        }
+        weeklyParams.push(req.user.branch.split(',').map(s => s.trim()));
+      }
     }
     weeklyQueryStr += " GROUP BY ea.date ORDER BY ea.date ASC";
     const weeklyQuery = await pool.query(weeklyQueryStr, weeklyParams);
     
     let empsQueryStr = "SELECT COUNT(*) FROM employees WHERE status = 'Active'";
     const empsParams = [];
-    if (userRole === 'operator' && req.user.shift) {
-      empsQueryStr += " AND COALESCE(shift, 'R1') = ANY($1)";
-      empsParams.push(req.user.shift.split(',').map(s => s.trim()));
+    if (userRole === 'operator') {
+      if (req.user.shift) {
+        empsQueryStr += " AND COALESCE(shift, 'R1') = ANY($1)";
+        empsParams.push(req.user.shift.split(',').map(s => s.trim()));
+      }
+      if (req.user.branch) {
+        if (empsParams.length === 1) {
+          empsQueryStr += " AND COALESCE(branch, '') = ANY($2)";
+        } else {
+          empsQueryStr += " AND COALESCE(branch, '') = ANY($1)";
+        }
+        empsParams.push(req.user.branch.split(',').map(s => s.trim()));
+      }
     }
     const totalEmployeesRes = await pool.query(empsQueryStr, empsParams);
     const totalEmployees = parseInt(totalEmployeesRes.rows[0].count) || 1;
@@ -816,11 +840,21 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.toLowerCase();
     
     // Total employees count
-    let empsQueryStr = "SELECT id, shift FROM employees WHERE status = 'Active'";
+    let empsQueryStr = "SELECT id, shift, branch FROM employees WHERE status = 'Active'";
     const empsParams = [];
-    if (userRole === 'operator' && req.user.shift) {
-      empsQueryStr += " AND COALESCE(shift, 'R1') = ANY($1)";
-      empsParams.push(req.user.shift.split(',').map(s => s.trim()));
+    if (userRole === 'operator') {
+      if (req.user.shift) {
+        empsQueryStr += " AND COALESCE(shift, 'R1') = ANY($1)";
+        empsParams.push(req.user.shift.split(',').map(s => s.trim()));
+      }
+      if (req.user.branch) {
+        if (empsParams.length === 1) {
+          empsQueryStr += " AND COALESCE(branch, '') = ANY($2)";
+        } else {
+          empsQueryStr += " AND COALESCE(branch, '') = ANY($1)";
+        }
+        empsParams.push(req.user.branch.split(',').map(s => s.trim()));
+      }
     }
     const activeEmpsRes = await pool.query(empsQueryStr, empsParams);
     const activeEmps = activeEmpsRes.rows;
@@ -839,9 +873,19 @@ router.get('/stats', authenticateToken, async (req, res) => {
       WHERE ea.date = CURRENT_DATE
     `;
     const logsParams = [];
-    if (userRole === 'operator' && req.user.shift) {
-      logsQueryStr += " AND COALESCE(e.shift, 'R1') = ANY($1)";
-      logsParams.push(req.user.shift.split(',').map(s => s.trim()));
+    if (userRole === 'operator') {
+      if (req.user.shift) {
+        logsQueryStr += " AND COALESCE(e.shift, 'R1') = ANY($1)";
+        logsParams.push(req.user.shift.split(',').map(s => s.trim()));
+      }
+      if (req.user.branch) {
+        if (logsParams.length === 1) {
+          logsQueryStr += " AND COALESCE(e.branch, '') = ANY($2)";
+        } else {
+          logsQueryStr += " AND COALESCE(e.branch, '') = ANY($1)";
+        }
+        logsParams.push(req.user.branch.split(',').map(s => s.trim()));
+      }
     }
     logsQueryStr += " ORDER BY ea.employee_id, ea.check_in DESC";
     
@@ -1350,6 +1394,10 @@ router.get('/edit-requests', authenticateToken, async (req, res) => {
       query += ` WHERE r.target_role IN ('Admin', 'Both')`;
     } else if (userRole === 'operator') {
       query += ` WHERE r.target_role IN ('Operator', 'Both')`;
+      if (req.user.branch) {
+        query += ` AND COALESCE(e.branch, '') = ANY($1)`;
+        params.push(req.user.branch.split(',').map(s => s.trim()));
+      }
     } else {
       // Employee role: show their own requests
       // Find employee ID

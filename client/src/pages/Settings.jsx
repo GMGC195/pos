@@ -393,7 +393,6 @@ export default function Settings() {
                         </div>
                       )}
                       {(userForm.role === 'Operator' || userForm.role === 'Employee') && (
-                        <>
                         <div className="form-group" style={{ position: 'relative' }} ref={shiftDropdownRef}>
                           <label>Assigned Shift(s)</label>
                           <div 
@@ -481,7 +480,9 @@ export default function Settings() {
                             </div>
                           )}
                         </div>
-
+                      )}
+                      
+                      {(userForm.role === 'Employee') && (
                         <div className="form-group" style={{ position: 'relative' }} ref={branchDropdownRef}>
                           <label>Assigned Branch(es)</label>
                           <div 
@@ -572,7 +573,6 @@ export default function Settings() {
                             </div>
                           )}
                         </div>
-                        </>
                       )}
                       <div className="form-group">
                         <label>{editingUser ? 'New Password (Optional)' : 'Password'}</label>

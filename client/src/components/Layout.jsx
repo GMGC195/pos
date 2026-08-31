@@ -41,9 +41,9 @@ const navGroups = [
   {
     title: 'Main Menu',
     items: [
-      { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management'] },
-      { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Point of Sale & Billing', roles: ['Developer', 'Admin', 'Order Taker', 'Operator'] },
-      { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Order Taker', 'Operator'] },
+      { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management', 'Operator'] },
+      { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Point of Sale & Billing', roles: ['Developer', 'Admin', 'Order Taker'] },
+      { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Order Taker'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin'] },
     ]
@@ -58,7 +58,7 @@ const navGroups = [
   {
     title: 'Item Management',
     items: [
-      { to: '/inventory', icon: <PlusCircle size={18} strokeWidth={2.2} />, label: 'Add Item', roles: ['Developer', 'Admin', 'Order Taker', 'Operator'] },
+      { to: '/inventory', icon: <PlusCircle size={18} strokeWidth={2.2} />, label: 'Add Item', roles: ['Developer', 'Admin', 'Order Taker'] },
       { to: '/stock-management', icon: <Database size={18} strokeWidth={2.2} />, label: 'Stock Mangement', roles: ['Developer', 'Admin'] },
       { to: '/product-cost', icon: <Package size={18} strokeWidth={2.2} />, label: 'Inventory Management', roles: ['Developer', 'Admin'] },
     ]
@@ -67,11 +67,11 @@ const navGroups = [
     title: 'Employees & Attendance',
     items: [
       { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin', 'Management', 'HR Manager'] },
-      { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Management', 'Employee', 'HR Manager'] },
-      { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Management', 'HR Manager'] },
+      { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Management', 'Employee', 'HR Manager', 'Operator'] },
+      { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Management', 'HR Manager', 'Operator'] },
       { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Management', 'HR Manager'] },
       { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Management', 'HR Manager'] },
-      { to: '/edited-logs', icon: <AlertTriangle size={18} strokeWidth={2.2} />, label: 'Edit Attendance Logs', roles: ['Admin', 'HR Manager'] },
+      { to: '/edited-logs', icon: <AlertTriangle size={18} strokeWidth={2.2} />, label: 'Edit Attendance Logs', roles: ['Admin', 'HR Manager', 'Operator'] },
     ]
   }
 ]
@@ -119,7 +119,7 @@ export default function Layout() {
   useEffect(() => {
     if (user?.role?.toLowerCase() === 'employee' && location.pathname === '/') {
       navigate('/attendance', { replace: true });
-    } else if ((user?.role?.toLowerCase() === 'order taker' || user?.role?.toLowerCase() === 'operator') && location.pathname === '/') {
+    } else if ((user?.role?.toLowerCase() === 'order taker') && location.pathname === '/') {
       navigate('/pos', { replace: true });
     }
   }, [user, location.pathname, navigate]);

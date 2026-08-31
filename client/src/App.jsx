@@ -69,15 +69,15 @@ export default function App() {
                 }
               >
                 <Route path="/" element={
-                  <ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management']}>
+                  <ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator']}>
                     <Dashboard />
                   </ProtectedRoute>
                 } />
 
                 {/* Developer-only routes */}
-                <Route path="/pos"             element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker', 'Operator']}><POS /></ProtectedRoute>} />
-                <Route path="/inventory"       element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker', 'Operator']}><Inventory /></ProtectedRoute>} />
-                <Route path="/hold-payments"   element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker', 'Operator']}><HoldPayments /></ProtectedRoute>} />
+                <Route path="/pos"             element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker']}><POS /></ProtectedRoute>} />
+                <Route path="/inventory"       element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker']}><Inventory /></ProtectedRoute>} />
+                <Route path="/hold-payments"   element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker']}><HoldPayments /></ProtectedRoute>} />
                 <Route path="/today-sales"     element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><Reports isTodaySales={true} /></ProtectedRoute>} />
                 <Route path="/sales-item"      element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><SalesItem /></ProtectedRoute>} />
                 <Route path="/reports"         element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><Reports isTodaySales={false} /></ProtectedRoute>} />
@@ -88,10 +88,10 @@ export default function App() {
                 {/* Employee & Attendance routes */}
                 <Route path="/employees"          element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><Employees /></ProtectedRoute>} />
                 <Route path="/attendance"         element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'Employee', 'HR Manager', 'Operator']}><AttendanceTracker /></ProtectedRoute>} />
-                <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><TodayAttendance /></ProtectedRoute>} />
+                <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager', 'Operator']}><TodayAttendance /></ProtectedRoute>} />
                 <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><AttendanceReports /></ProtectedRoute>} />
                 <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><Payroll /></ProtectedRoute>} />
-                <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin', 'HR Manager']}><EditAttendanceLogs /></ProtectedRoute>} />
+                <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin', 'HR Manager', 'Operator']}><EditAttendanceLogs /></ProtectedRoute>} />
 
                 {/* Universal */}
                 <Route path="/settings"     element={<Settings />} />
