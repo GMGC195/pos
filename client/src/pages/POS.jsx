@@ -554,7 +554,6 @@ export default function POS() {
     const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
 
     const headerHtml = isFullReceipt ? `
-    <img src="${slipLogo}" style="width: 50%; max-height: 100px; object-fit: contain; margin-top: 1px; margin-bottom: 2px;" />
     <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Open 24/7</div>
     <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${currentInfo.orderType}
@@ -580,10 +579,6 @@ export default function POS() {
     <div class="center footer">
       <p>Thank you for your order!</p>
       <p>Come back soon 🍕</p>
-      <p>${BRAND_RECEIPT_FOOTER}</p>
-      <p style="margin-top:6px;">📞 ${BRAND_PHONE_DISPLAY}</p>
-      <p>📧 ${BRAND_EMAIL}</p>
-      <p>📍 ${BRAND_ADDRESS}</p>
     </div>
     ` : '';
 
@@ -1249,10 +1244,6 @@ export default function POS() {
         <div className="receipt-footer">
           <p>Thank you for your order!</p>
           <p>Come back soon 🍕</p>
-          <p>{BRAND_RECEIPT_FOOTER}</p>
-          <p style={{ marginTop: 6, fontSize: 11 }}>📞 {BRAND_PHONE_DISPLAY}</p>
-          <p style={{ marginTop: 6, fontWeight: 'bold', fontSize: 11, color: '#000000' }}>Software developed by Uzair</p>
-          <p style={{ fontSize: 11, fontWeight: 'bold', color: '#000000' }}>03062951312</p>
         </div>
       </div >
 

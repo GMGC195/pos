@@ -8,9 +8,12 @@ import {
   saveMenuItems as saveCachedMenuItems
 } from '../utils/db'
 
+import { useAuth } from './AuthContext'
+
 const POSContext = createContext()
 
 export function POSProvider({ children }) {
+  const { user } = useAuth()
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [cart, setCart] = useState([])
@@ -53,10 +56,12 @@ export function POSProvider({ children }) {
     }
   }, [isDataLoaded])
 
-  // Initial load when context mounts (once per app session)
+  // Load data when user logs in or app initializes with a user
   useEffect(() => {
-    loadData()
-  }, [])
+    if (user) {
+      loadData()
+    }
+  }, [user, loadData])
 
   const updateCart = (newCart) => setCart(newCart)
   const clearCart = () => {

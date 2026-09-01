@@ -737,6 +737,7 @@ export default function Settings() {
                         <option value="Operator">Operator</option>
                         <option value="Management">Management</option>
                         <option value="Employee">Employee</option>
+                        <option value="Order Taker">Order Taker</option>
                         <option value="Developer">Developer</option>
                       </select>
                     </div>

@@ -56,7 +56,7 @@ export const printViaRawBT = (orderData) => {
 
   // Footer
   receiptText += esc + 'a' + '\x01'; // Center align
-  receiptText += "\nThank you for dining with us!\n\n\n";
+  receiptText += "\nThank you for your order!\nCome back soon\n\n\n";
 
   // Feed and cut
   receiptText += "\n\n\n\n\n"; // empty lines for tearing

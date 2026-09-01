@@ -29,7 +29,7 @@ import {
 } from '../branding'
 import BRAND_LOGIN_LOGO from '../assets/1 al rasaq.png'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+const API = import.meta.env.API_URL || 'http://localhost:5000'
 
 const features = [
   { icon: LayoutDashboard, title: 'Smart Dashboard',            desc: 'Real-time insights for smarter decisions' },
