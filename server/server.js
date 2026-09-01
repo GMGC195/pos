@@ -453,8 +453,8 @@ const ALLOWED_ORIGINS = [
   'https://alrawaq.vercel.app',
   // Allow any Vercel preview URLs for this project
   /https:\/\/.*\.vercel\.app$/,
-  // Custom FRONTEND_URL from env (if set)
-  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+  // Custom FRONTEND_URL from env (if set, supports comma-separated values)
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(url => url.trim()) : []),
 ];
 
 app.use(cors({
