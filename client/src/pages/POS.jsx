@@ -554,7 +554,6 @@ export default function POS() {
     const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
 
     const headerHtml = isFullReceipt ? `
-    <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">Open 24/7</div>
     <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${currentInfo.orderType}
     </div>
@@ -864,7 +863,7 @@ export default function POS() {
           ) : (
             <>
               {/* POS Category Chips (Mobile & Desktop) */}
-              <div className="category-tabs pos-cat-tabs" style={{ marginTop: 0, marginBottom: 0 }}>
+              <div className="category-tabs pos-cat-tabs" style={{ marginTop: 4, marginBottom: 0 }}>
                 <button
               className={`cat-tab${activeCategory === 'All' ? ' active' : ''}`}
               onClick={() => setActiveCategory('All')}
@@ -878,33 +877,48 @@ export default function POS() {
             ))}
           </div>
 
-          {/* POS Compact Header (Search + Dots) */}
-          <div className="pos-mobile-header" style={{ display: 'flex', gap: 10, marginTop: 0, marginBottom: 0 }}>
-            <button
-              className="pos-back-btn"
-              onClick={() => setCustomerInfo(prev => ({ ...prev, orderType: 'Dine-In', tableNumber: '' }))}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', borderRadius: 8, border: '1px solid var(--surface-2)', background: 'var(--surface)', cursor: 'pointer', color: 'var(--text-primary)' }}
-              title="Back to Tables"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <div className="pos-mobile-search" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <Search className="si" size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
+          {/* POS Compact Header (Search + Dots + Order Types) */}
+          <div className="pos-mobile-header" style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, marginTop: 0, marginBottom: 4, alignItems: 'center' }}>
+            <div className="pos-mobile-search" style={{ flex: '1 1 auto', minWidth: '60px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search className="si" size={12} style={{ position: 'absolute', left: 4, color: 'var(--text-muted)' }} />
               <input
                 type="text"
-                placeholder="Search menu items..."
-                style={{ width: '100%', padding: '6px 10px 6px 32px', borderRadius: 8, border: '1px solid var(--surface-2)' }}
+                placeholder="Search..."
+                style={{ width: '100%', padding: '4px 4px 4px 18px', borderRadius: 8, border: '1px solid var(--surface-2)', fontSize: '12px' }}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
+            
+            <div style={{ display: 'flex', gap: 2, alignItems: 'center', flexShrink: 0 }}>
+              {['Dine-In', 'Takeaway', 'Delivery'].map(type => (
+                <button 
+                  key={type}
+                  onClick={() => setCustomerInfo(prev => ({ ...prev, orderType: type, tableNumber: type === 'Dine-In' ? '' : prev.tableNumber }))}
+                  style={{
+                    padding: window.innerWidth > 900 ? '6px 12px' : '4px 6px',
+                    fontSize: window.innerWidth > 900 ? '13px' : '9px',
+                    whiteSpace: 'nowrap',
+                    borderRadius: 6,
+                    border: customerInfo.orderType === type ? '1.5px solid var(--primary)' : '1px solid var(--surface-2)',
+                    background: customerInfo.orderType === type ? 'rgba(255,184,0,0.1)' : 'white',
+                    color: customerInfo.orderType === type ? 'var(--primary)' : 'var(--text-secondary)',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+
             <div 
               className="pos-mobile-dots" 
               onClick={(e) => {
                 e.stopPropagation();
                 setShowMobileDotsMenu(prev => !prev);
               }}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', borderRadius: 8, border: '1px solid var(--surface-2)', background: 'var(--surface)', cursor: 'pointer', position: 'relative' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 'none', borderRadius: 8, background: 'transparent', cursor: 'pointer', position: 'relative' }}
             >
               <MoreVertical size={18} />
               {showMobileDotsMenu && (
@@ -974,11 +988,12 @@ export default function POS() {
                               key={sz.name}
                               style={{
                                 fontSize: 10,
-                                background: 'var(--surface-2)',
+                                background: 'rgba(255, 255, 255, 0.3)',
+                                backdropFilter: 'blur(2px)',
                                 padding: '2px 6px',
                                 borderRadius: 4,
-                                color: 'var(--text-secondary)',
-                                fontWeight: 600,
+                                color: '#000',
+                                fontWeight: 700,
                               }}
                             >
                               {sz.name}
@@ -1191,22 +1206,14 @@ export default function POS() {
 
           {/* Actions */}
           <div className="cart-actions">
-            <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', width: '100%' }}>
+            <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px', width: '100%' }}>
               <button
                 className={`btn ${paymentMethod === 'Hold' ? 'btn-primary' : 'btn-warning'} btn-lg`}
                 onClick={() => handlePayClick('Hold')}
                 style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
                 disabled={processing}
               >
-                <ClipboardList size={18} /> Hold
-              </button>
-              <button
-                className="btn btn-success btn-lg"
-                style={{ justifyContent: 'center', gap: 6, padding: '12px 8px' }}
-                onClick={() => handlePayClick('Cash')}
-                disabled={processing}
-              >
-                <CheckCircle2 size={18} /> Complete Order
+                <ClipboardList size={18} /> Place Order
               </button>
             </div>
           </div>
@@ -1328,6 +1335,16 @@ export default function POS() {
                 {/* Left Column: Order Summary */}
                 <div style={{ flex: '1 1 300px', borderRight: window.innerWidth > 900 ? '1px solid var(--surface-2)' : 'none', paddingRight: window.innerWidth > 900 ? 16 : 0, paddingBottom: window.innerWidth <= 900 ? 12 : 0, borderBottom: window.innerWidth <= 900 ? '1px solid var(--surface-2)' : 'none' }}>
                   <h4 style={{ marginTop: window.innerWidth <= 900 ? 0 : 0, marginBottom: window.innerWidth <= 900 ? 4 : 16, fontSize: window.innerWidth <= 900 ? 14 : 16 }}>Receipt Preview</h4>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                    <span style={{ background: 'rgba(227,24,55,0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 6, fontSize: 13, border: '1px solid var(--primary)', fontWeight: 'bold' }}>
+                      {customerInfo.orderType}
+                    </span>
+                    {customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber && (
+                      <span style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', padding: '4px 10px', borderRadius: 6, fontSize: 13, border: '1px solid #3b82f6', fontWeight: 'bold' }}>
+                        Table {customerInfo.tableNumber}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ background: '#f8f9fa', padding: 12, borderRadius: 8, fontFamily: 'Tahoma, Geneva, sans-serif', fontSize: 13 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: 6, borderBottom: '1px solid #ddd', paddingBottom: 4 }}>
                       <span style={{ flex: 2 }}>Item</span>

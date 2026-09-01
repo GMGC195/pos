@@ -74,10 +74,6 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
     ${orderType}
   </div>
-  <div style="font-size: 11px; font-weight: bold; margin: 2px 0; border: 1.5px solid #000; padding: 2px; text-align: center;">
-    This slip is only for order taking. Please pick up your original slip from counter.<br/>
-    <span dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; display: block; margin-top: 2px;">هذا الإيصال لأخذ الطلبات فقط. يرجى استلام الإيصال الأصلي من الكاونتر.</span>
-  </div>
   ${metaRow}
   <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
     Order #${order.id} - ${order.edit_count > 0 ? `Edit ${(order.slip_number || '-')}${String.fromCharCode(64 + order.edit_count)}` : (order.slip_number || '-')}

@@ -42,7 +42,7 @@ const navGroups = [
     title: 'Main Menu',
     items: [
       { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management', 'Operator'] },
-      { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Point of Sale & Billing', roles: ['Developer', 'Admin', 'Order Taker'] },
+      { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Order Taker'] },
       { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Order Taker'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin'] },
@@ -256,7 +256,7 @@ export default function Layout() {
 
   const pageTitle = {
     '/': 'Dashboard Overview',
-    '/pos': 'Point of Sale & Billing',
+    '/pos': 'Order Taking',
     '/inventory': 'Add Item',
     '/hold-payments': 'Hold Payment Queue',
     '/today-sales': "Today Sale Analysis",
