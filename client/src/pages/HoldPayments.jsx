@@ -23,13 +23,13 @@ export default function HoldPayments() {
   const menuRef = useRef(null)
   const navigate = useNavigate()
   const { user } = useAuth()
-  const role = user?.role?.toLowerCase()
+  const role = user?.role?.trim().toLowerCase()
   const isAdmin = role === 'admin' || role === 'developer'
 
   const loadHeldOrders = () => {
     setLoading(true)
     // Fetch with a high limit to ensure summary accuracy
-    axios.get('/api/orders', { params: { status: 'Hold,Payment Pending', limit: 500, branch } })
+    axios.get('/api/orders', { params: { status: 'Hold,Payment Pending,Payment Requested', limit: 500, branch } })
       .then(res => setOrders(res.data))
       .catch(err => console.error(err))
       .finally(() => setLoading(false))
@@ -260,13 +260,15 @@ export default function HoldPayments() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-                          <button 
-                            className="btn btn-success btn-sm" 
-                            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                            onClick={() => handlePay(o.id, 'Cash')}
-                          >
-                            <Banknote size={16} /> Pay Cash
-                          </button>
+                          {role !== 'order taker' && (
+                            <button 
+                              className="btn btn-success btn-sm" 
+                              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                              onClick={() => handlePay(o.id, 'Cash')}
+                            >
+                              <Banknote size={16} /> Pay Cash
+                            </button>
+                          )}
                           
                           <div style={{ position: 'relative' }}>
                             <button 
@@ -294,10 +296,12 @@ export default function HoldPayments() {
                                   padding: '6px'
                                 }}
                               >
-                                <button onClick={() => handlePay(o.id, 'Card')} className="dropdown-item">
-                                  <CreditCard size={16} color="#3b82f6" /> 
-                                  <span>Pay Card</span>
-                                </button>
+                                {role !== 'order taker' && (
+                                  <button onClick={() => handlePay(o.id, 'Card')} className="dropdown-item">
+                                    <CreditCard size={16} color="#3b82f6" /> 
+                                    <span>Pay Card</span>
+                                  </button>
+                                )}
                                 <button onClick={() => handleEdit(o.id)} className="dropdown-item">
                                   <Pencil size={16} color="var(--text-secondary)" /> 
                                   <span>Edit Order</span>

@@ -127,7 +127,7 @@ export default function POS() {
 
   const fetchTablesList = useCallback(async () => {
     try {
-      const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase());
+      const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.trim().toLowerCase());
       const branchQuery = isAdminOrDev ? `?branch=${encodeURIComponent(selectedBranch)}` : '';
       const res = await axios.get(`/api/tables${branchQuery}`);
       setTablesList(res.data);
@@ -147,9 +147,9 @@ export default function POS() {
 
   const fetchActiveOrders = useCallback(async () => {
     try {
-      const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase());
+      const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.trim().toLowerCase());
       const branchQuery = isAdminOrDev ? `&branch=${encodeURIComponent(selectedBranch)}` : '';
-      const res = await axios.get(`/api/orders?status=Hold&limit=100${branchQuery}`)
+      const res = await axios.get(`/api/orders?status=Hold,Payment Requested&limit=100${branchQuery}`)
       setActiveOrders(res.data)
     } catch (err) {
       console.error(err)
@@ -333,7 +333,7 @@ export default function POS() {
     const matchesSearch = !search ||
       item.name.toLowerCase().includes(search.toLowerCase()) ||
       (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase()));
-    const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase());
+    const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.trim().toLowerCase());
     const matchesBranch = !isAdminOrDev || (item.available_branches || []).includes(selectedBranch);
     return matchesCategory && matchesSearch && matchesBranch;
   });
@@ -421,7 +421,7 @@ export default function POS() {
         table_number: customerInfo.tableNumber,
         order_taker: user?.username || 'Guest',
         comments: customerInfo.comments,
-        branch: ['admin', 'developer'].includes(user?.role?.toLowerCase()) ? selectedBranch : undefined
+        branch: ['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) ? selectedBranch : undefined
       }
 
       let res;
@@ -557,6 +557,9 @@ export default function POS() {
     <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${currentInfo.orderType}
     </div>
+    <div style="font-size: 14px; font-weight: bold; margin: 2px 0; text-align: center;">
+      ${selectedBranch || 'Branch 1'}
+    </div>
     ${metaRow}
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
@@ -565,6 +568,9 @@ export default function POS() {
     ` : `
     <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
       ${currentInfo.orderType}
+    </div>
+    <div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">
+      ${selectedBranch || 'Branch 1'}
     </div>
     ${metaRow}
     <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
@@ -749,7 +755,7 @@ export default function POS() {
       <div className="pos-layout">
         {/* Left: Products */}
         <div className="pos-left">
-          {['admin', 'developer'].includes(user?.role?.toLowerCase()) && (
+          {['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) && (
             <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--surface-2)', background: 'white', position: 'sticky', top: 0, zIndex: 10 }}>
               <label style={{ fontWeight: 'bold', color: 'var(--text-secondary)', fontSize: 14 }}>Select Branch:</label>
               <select 
@@ -786,7 +792,7 @@ export default function POS() {
                   </button>
                 ))}
                 
-                {['admin', 'developer', 'order taker'].includes(user?.role?.toLowerCase()) && (
+                {['admin', 'developer', 'order taker'].includes(user?.role?.trim().toLowerCase()) && (
                   <div style={{ position: 'relative' }}>
                     <button 
                       onClick={() => setShowTableDotsMenu(!showTableDotsMenu)}
@@ -846,7 +852,7 @@ export default function POS() {
                       onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                       onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
                     >
-                      <span>Table {t.table_number}</span>
+                      <span>Table {String(t.table_number).replace(/^Table\s*/i, '')}</span>
                       {isBooked && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                           <span style={{ fontSize: 11, fontWeight: 500, background: 'rgba(255,255,255,0.2)', padding: '2px 6px', borderRadius: 4 }}>Booked</span>
@@ -928,7 +934,7 @@ export default function POS() {
                   <div className="pos-mobile-dots-menu" style={{ display: 'block', zIndex: 999 }}>
                     <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); setShowMobileDotsMenu(false); }}>+ New Type</button>
                     <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); setShowMobileDotsMenu(false); }}>Manage Categories</button>
-                    {['admin', 'developer', 'order taker'].includes(user?.role?.toLowerCase()) && (
+                    {['admin', 'developer', 'order taker'].includes(user?.role?.trim().toLowerCase()) && (
                       <button onClick={(e) => { e.stopPropagation(); setShowManageTables(true); setShowMobileDotsMenu(false); }}>Manage Tables</button>
                     )}
                     <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }} />
@@ -1052,7 +1058,9 @@ export default function POS() {
           <div className="active-orders-panel">
               <div className="active-orders-list" style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflow: 'hidden', padding: '8px 12px 12px' }}>
                 {['Dine-In', 'Takeaway', 'Delivery'].map(type => {
-                  const orders = activeOrders.filter(o => (o.order_type === type) || (!o.order_type && type === 'Delivery' && o.customer_address && !o.customer_address.startsWith('Table ')) || (!o.order_type && type === 'Dine-In' && o.customer_address?.startsWith('Table ')));
+                  const orders = activeOrders
+                    .filter(o => (o.order_type === type) || (!o.order_type && type === 'Delivery' && o.customer_address && !o.customer_address.startsWith('Table ')) || (!o.order_type && type === 'Dine-In' && o.customer_address?.startsWith('Table ')))
+                    .sort((a, b) => (a.status === 'Payment Requested' ? -1 : (b.status === 'Payment Requested' ? 1 : 0)));
                   const isExpanded = expandedSections[type];
                   
                   return (
@@ -1074,9 +1082,12 @@ export default function POS() {
                       <div className="order-cards" style={{ overflowY: 'auto', flex: 1 }}>
                         {orders.map(o => (
                           <div key={o.id} className="active-order-card">
-                            <div className="order-head" style={{ marginBottom: 4 }}>
+                            <div className="order-head" style={{ marginBottom: 4, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                               <span style={{ fontWeight: 800, color: '#a22020', fontSize: 13 }}>Order #{o.id} | {o.slip_number}</span>
-                              <span style={{ fontWeight: 800, color: '#a22020', fontSize: 13 }}>{CURRENCY}{parseFloat(o.grand_total).toFixed(2)}</span>
+                              {o.status === 'Payment Requested' && (
+                                <span className="badge" style={{ background: 'var(--orange)', color: 'white', fontSize: 10, padding: '2px 6px' }}>Payment Pending</span>
+                              )}
+                              <span style={{ fontWeight: 800, color: '#a22020', fontSize: 13, marginLeft: 'auto' }}>{CURRENCY}{parseFloat(o.grand_total).toFixed(2)}</span>
                             </div>
                             <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--text-primary)', lineHeight: 1.4 }}>
                               {o.items ? o.items.map((i, idx) => (
@@ -1097,9 +1108,13 @@ export default function POS() {
                                 )}
                               </div>
                               <div className="order-actions" style={{ display: 'flex', gap: 4 }}>
-                                <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => loadOrderForEdit(o.id)} title="Edit"><Edit size={14} color="var(--text-muted)"/></button>
+                                {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
+                                  <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => loadOrderForEdit(o.id)} title="Edit"><Edit size={14} color="var(--text-muted)"/></button>
+                                )}
                                 <button className="btn btn-sm btn-secondary" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600, background: '#f5f5f5', color: '#333' }} onClick={() => setDetailOrder(o)}>Detail View</button>
-                                <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700 }} onClick={() => setQuickCompleteModal(o)}>Complete</button>
+                                {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
+                                  <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700 }} onClick={() => setQuickCompleteModal(o)}>Complete</button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1207,19 +1222,21 @@ export default function POS() {
               <button
                 className={`btn ${paymentMethod === 'Hold' ? 'btn-primary' : 'btn-warning'} btn-lg`}
                 onClick={() => handlePayClick('Hold')}
-                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
+                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px', gridColumn: user?.role?.trim().toLowerCase() === 'order taker' ? '1 / -1' : undefined }}
                 disabled={processing}
               >
                 <ClipboardList size={18} /> Place Order
               </button>
-              <button
-                className="btn btn-success btn-lg"
-                onClick={() => handlePayClick('Cash')}
-                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
-                disabled={processing}
-              >
-                <ClipboardList size={18} /> Pay & Settled
-              </button>
+              {user?.role?.trim().toLowerCase() !== 'order taker' && (
+                <button
+                  className="btn btn-success btn-lg"
+                  onClick={() => handlePayClick('Cash')}
+                  style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
+                  disabled={processing}
+                >
+                  <ClipboardList size={18} /> Pay & Settled
+                </button>
+              )}
             </div>
           </div>
           </div>        </div>
@@ -1502,83 +1519,109 @@ export default function POS() {
       {quickCompleteModal && (
         <div className="modal-overlay" style={{ zIndex: 9999 }}>
           <div className="modal" style={{ maxWidth: 360, padding: 24, textAlign: 'center' }}>
-            <h3 style={{ marginBottom: 16 }}>Complete Order #{quickCompleteModal.id}</h3>
+            <h3 style={{ marginBottom: 16 }}>Complete Order #{quickCompleteModal.id} (Slip #{quickCompleteModal.slip_number})</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left', marginBottom: 24 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
-                <input type="radio" name="quickPayment" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
-                <span style={{ fontSize: 15, fontWeight: 500 }}>Cash</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
-                <input type="radio" name="quickPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
-                <span style={{ fontSize: 15, fontWeight: 500 }}>Online</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
-                <input type="radio" name="quickPayment" value="Payment Pending" checked={paymentMethod === 'Payment Pending' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Payment Pending')} />
-                <span style={{ fontSize: 15, fontWeight: 500 }}>Pending</span>
-              </label>
-            </div>
+            {user?.role?.trim().toLowerCase() === 'order taker' ? (
+              <>
+                <div style={{ padding: '20px 0', fontSize: 15, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                  Customer sent to counter for payment. Table is free.
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn btn-secondary" style={{ flex: '0 0 44px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setQuickCompleteModal(null)} title="Cancel">
+                    <X size={20} />
+                  </button>
+                  <button className="btn btn-primary" style={{ flex: 1, background: 'var(--primary)', color: '#fff' }} disabled={processing === 'quick-complete'} onClick={async () => {
+                    if (processing) return;
+                    setProcessing('quick-complete');
+                    try {
+                      await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: 'Payment Requested' });
+                      toast.success('Sent to counter for payment');
+                      setQuickCompleteModal(null);
+                      fetchActiveOrders();
+                    } catch(err) {
+                      toast.error('Failed to update order');
+                    } finally {
+                      setProcessing(false);
+                    }
+                  }}>
+                    {processing === 'quick-complete' ? 'Processing...' : 'Send to Counter'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left', marginBottom: 24 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
+                    <input type="radio" name="quickPayment" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
+                    <span style={{ fontSize: 15, fontWeight: 500 }}>Cash</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
+                    <input type="radio" name="quickPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
+                    <span style={{ fontSize: 15, fontWeight: 500 }}>Online</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
+                    <input type="radio" name="quickPayment" value="Payment Pending" checked={paymentMethod === 'Payment Pending' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Payment Pending')} />
+                    <span style={{ fontSize: 15, fontWeight: 500 }}>Pending</span>
+                  </label>
+                </div>
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-secondary" style={{ flex: '0 0 44px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setQuickCompleteModal(null)} title="Cancel">
-                <X size={20} />
-              </button>
-              <button className="btn btn-primary" style={{ flex: 1, fontSize: 13, padding: '8px 4px', display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
-                if (processing) return;
-                setProcessing('quick-complete');
-                const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
-                try {
-                  if (method === 'Payment Pending') {
-                    await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
-                  } else {
-                    await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
-                  }
-                  toast.success('Order completed!')
-                  setQuickCompleteModal(null)
-                  fetchActiveOrders()
-                } catch(err) {
-                  toast.error('Failed to complete order')
-                } finally {
-                  setProcessing(false);
-                }
-              }}>{processing === 'quick-complete' ? 'Completing...' : 'Complete'}</button>
-              <button className="btn btn-success" style={{ flex: 1.2, fontSize: 13, padding: '8px 4px', display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
-                if (processing) return;
-                setProcessing('quick-complete-print');
-                const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
-                try {
-                  if (method === 'Payment Pending') {
-                    await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
-                  } else {
-                    await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
-                  }
-                  toast.success('Order completed & printing!')
-                  
-                  // Construct customInfo and customCart for printing
-                  const customInfo = {
-                    name: quickCompleteModal.customer_name || '',
-                    phone: quickCompleteModal.customer_phone || '',
-                    address: quickCompleteModal.customer_address || '',
-                    discount: quickCompleteModal.discount || 0,
-                    orderType: quickCompleteModal.order_type || (quickCompleteModal.customer_address?.startsWith('Table ') ? 'Dine-In' : 'Delivery'),
-                    tableNumber: quickCompleteModal.table_number || (quickCompleteModal.customer_address?.startsWith('Table ') ? quickCompleteModal.customer_address.replace('Table ', '') : ''),
-                  }
-                  
-                  // In POS.jsx 'total' variable uses 'subtotal' and 'tax'. We will temporary set it for calculation if we passed it?
-                  // Wait, 'total' inside printThermalSlip uses the global `total` state!
-                  // Let's modify the total inside printThermalSlip!
-                  
-                  printThermalSlip(method, quickCompleteModal.id, quickCompleteModal.slip_number, quickCompleteModal.edit_count, true, null, quickCompleteModal.items, customInfo)
-                  
-                  setQuickCompleteModal(null)
-                  fetchActiveOrders()
-                } catch(err) {
-                  toast.error('Failed to complete & print order')
-                } finally {
-                  setProcessing(false);
-                }
-              }}>{processing === 'quick-complete-print' ? 'Printing...' : 'Complete & Print'}</button>
-            </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn btn-secondary" style={{ flex: '0 0 44px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setQuickCompleteModal(null)} title="Cancel">
+                    <X size={20} />
+                  </button>
+                  <button className="btn btn-primary" style={{ flex: 1, fontSize: 13, padding: '8px 4px', display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+                    if (processing) return;
+                    setProcessing('quick-complete');
+                    const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
+                    try {
+                      if (method === 'Payment Pending') {
+                        await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
+                      } else {
+                        await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
+                      }
+                      toast.success('Order completed!')
+                      setQuickCompleteModal(null)
+                      fetchActiveOrders()
+                    } catch(err) {
+                      toast.error('Failed to complete order')
+                    } finally {
+                      setProcessing(false);
+                    }
+                  }}>{processing === 'quick-complete' ? 'Completing...' : 'Complete'}</button>
+                  <button className="btn btn-success" style={{ flex: 1.2, fontSize: 13, padding: '8px 4px', display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }} disabled={processing === 'quick-complete' || processing === 'quick-complete-print'} onClick={async () => {
+                    if (processing) return;
+                    setProcessing('quick-complete-print');
+                    const method = paymentMethod === 'Hold' ? 'Payment Pending' : paymentMethod;
+                    try {
+                      if (method === 'Payment Pending') {
+                        await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
+                      } else {
+                        await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
+                      }
+                      toast.success('Order completed & printing!')
+                      
+                      const customInfo = {
+                        name: quickCompleteModal.customer_name || '',
+                        phone: quickCompleteModal.customer_phone || '',
+                        address: quickCompleteModal.customer_address || '',
+                        discount: quickCompleteModal.discount || 0,
+                        orderType: quickCompleteModal.order_type || (quickCompleteModal.customer_address?.startsWith('Table ') ? 'Dine-In' : 'Delivery'),
+                        tableNumber: quickCompleteModal.table_number || (quickCompleteModal.customer_address?.startsWith('Table ') ? quickCompleteModal.customer_address.replace('Table ', '') : ''),
+                      }
+                      
+                      printThermalSlip(method, quickCompleteModal.id, quickCompleteModal.slip_number, quickCompleteModal.edit_count, true, null, quickCompleteModal.items, customInfo)
+                      
+                      setQuickCompleteModal(null)
+                      fetchActiveOrders()
+                    } catch(err) {
+                      toast.error('Failed to complete & print order')
+                    } finally {
+                      setProcessing(false);
+                    }
+                  }}>{processing === 'quick-complete-print' ? 'Printing...' : 'Complete & Print'}</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

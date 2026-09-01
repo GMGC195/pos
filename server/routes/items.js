@@ -16,7 +16,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const params = [];
 
     // Branch isolation for Order Taker / Operator
-    if (req.user.role === 'Order Taker' || req.user.role === 'Operator') {
+    if (['order taker', 'operator', 'cashier'].includes(req.user.role?.trim().toLowerCase())) {
       params.push(req.user.branch);
       query += ` AND i.available_branches ? $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {
@@ -61,7 +61,7 @@ router.post('/', authenticateToken, async (req, res) => {
   const { category_id, name, price, image_url, size_options, status, short_code } = req.body;
   try {
     let available_branches = ['Branch 1', 'Branch 2', 'Branch 3'];
-    if (req.user.role === 'Order Taker' || req.user.role === 'Operator') {
+    if (['order taker', 'operator', 'cashier'].includes(req.user.role?.trim().toLowerCase())) {
       available_branches = [req.user.branch];
     }
 
@@ -91,7 +91,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
     const currentItem = currentItemRes.rows[0];
 
-    const isRestrictedRole = req.user.role === 'Order Taker' || req.user.role === 'Operator';
+    const isRestrictedRole = ['order taker', 'operator', 'cashier'].includes(req.user.role?.trim().toLowerCase());
     const userBranch = req.user.branch;
     let availableBranches = currentItem.available_branches || [];
 

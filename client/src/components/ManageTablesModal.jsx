@@ -198,7 +198,7 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
                   ) : (
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 700, fontSize: 15 }}>Table {t.table_number}</span>
+                        <span style={{ fontWeight: 700, fontSize: 15 }}>Table {String(t.table_number).replace(/^Table\s*/i, '')}</span>
                         <div style={{ display: 'flex', gap: 8 }}>
                           <button className="btn btn-sm btn-secondary" style={{ padding: '4px 8px' }} onClick={() => { 
                             setEditingId(t.id); 

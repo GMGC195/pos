@@ -42,9 +42,9 @@ const navGroups = [
     title: 'Main Menu',
     items: [
       { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management', 'Operator'] },
-      { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Order Taker'] },
-      { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Order Taker'] },
-      { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin'] },
+      { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Order Taker', 'Cashier'] },
+      { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Order Taker', 'Cashier'] },
+      { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin', 'Cashier'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin'] },
     ]
   },
@@ -58,7 +58,7 @@ const navGroups = [
   {
     title: 'Item Management',
     items: [
-      { to: '/inventory', icon: <PlusCircle size={18} strokeWidth={2.2} />, label: 'Add Item', roles: ['Developer', 'Admin', 'Order Taker'] },
+      { to: '/inventory', icon: <PlusCircle size={18} strokeWidth={2.2} />, label: 'Add Item', roles: ['Developer', 'Admin', 'Order Taker', 'Cashier'] },
       { to: '/stock-management', icon: <Database size={18} strokeWidth={2.2} />, label: 'Stock Mangement', roles: ['Developer', 'Admin'] },
       { to: '/product-cost', icon: <Package size={18} strokeWidth={2.2} />, label: 'Inventory Management', roles: ['Developer', 'Admin'] },
     ]
@@ -117,9 +117,10 @@ export default function Layout() {
   };
 
   useEffect(() => {
-    if (user?.role?.toLowerCase() === 'employee' && location.pathname === '/') {
+    const role = user?.role?.trim().toLowerCase();
+    if (role === 'employee' && location.pathname === '/') {
       navigate('/attendance', { replace: true });
-    } else if ((user?.role?.toLowerCase() === 'order taker') && location.pathname === '/') {
+    } else if ((role === 'order taker' || role === 'cashier') && location.pathname === '/') {
       navigate('/pos', { replace: true });
     }
   }, [user, location.pathname, navigate]);
@@ -133,7 +134,7 @@ export default function Layout() {
 
       let combinedAlerts = [];
 
-      if (role !== 'employee') {
+      if (['admin', 'developer'].includes(role)) {
         const stockRes = await axios.get('/api/stock/alerts');
         const stockAlerts = stockRes.data.map(item => ({
           id: `stock-${item.id}`,
@@ -448,9 +449,9 @@ export default function Layout() {
             <span className="nav-icon"><HelpCircle size={18} strokeWidth={2.2} /></span>Help & Support
           </NavLink>
         </nav>
-        <div className="sidebar-footer">
+        <div className="sidebar-footer" style={{ padding: '8px 12px 8px 12px' }}>
           {/* User info block */}
-          <div style={{ padding: '12px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 8 }}>
+          <div style={{ padding: '4px 10px 8px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{
                 width: 36, height: 36, borderRadius: 10,
@@ -467,6 +468,13 @@ export default function Layout() {
                 <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {user?.email || ''}
                 </div>
+                {user?.role && (
+                  <div style={{ color: 'var(--primary)', fontSize: 10, fontWeight: 700, marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    {user.role}
+                    {['cashier', 'order taker'].includes(user.role.toLowerCase()) && user.branch ? ` • ${user.branch}` : ''}
+                    {user.role.toLowerCase() === 'operator' ? ` • ${BRAND_NAME}` : ''}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -474,15 +482,16 @@ export default function Layout() {
           <button
             onClick={handleLogout}
             style={{
-              width: '100%', padding: '10px 14px',
+              width: '100%', padding: '6px 12px',
               background: 'rgba(255,69,58,0.1)',
               border: '1px solid rgba(255,69,58,0.25)',
               borderRadius: 8,
               color: '#ff6b6b',
-              fontSize: 14, fontWeight: 600,
+              fontSize: 13, fontWeight: 600,
               cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 8,
               transition: 'background 0.2s',
+              marginBottom: 4,
             }}
             onMouseOver={e => e.currentTarget.style.background = 'rgba(255,69,58,0.2)'}
             onMouseOut={e => e.currentTarget.style.background = 'rgba(255,69,58,0.1)'}
@@ -642,6 +651,11 @@ export default function Layout() {
                     <div className="dropdown-user-info">
                       <span className="dropdown-username">{user?.username || 'Admin'}</span>
                       <span className="dropdown-email">{user?.email || BRAND_EMAIL}</span>
+                      {user?.role && (
+                        <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700, marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          {user.role}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="dropdown-divider"></div>

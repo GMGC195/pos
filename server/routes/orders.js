@@ -3,6 +3,17 @@ const router = express.Router();
 const pool = require('../db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 
+async function checkBranchAccess(req, orderId) {
+  const role = req.user.role?.trim().toLowerCase();
+  if (['order taker', 'cashier'].includes(role)) {
+    const check = await pool.query('SELECT branch FROM orders WHERE id = $1', [orderId]);
+    if (check.rows.length > 0 && check.rows[0].branch !== req.user.branch) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Helper to deduct stock based on recipe (FIFO)
 async function deductStock(orderId, client) {
   const orderItems = await client.query('SELECT id, item_id, qty FROM order_items WHERE order_id = $1', [orderId]);
@@ -111,15 +122,17 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const status = (payment_method === 'Hold' || payment_method === 'Payment Pending') ? payment_method : 'Completed';
 
-    // Calculate daily resetting slip number
+    const role = req.user.role?.trim().toLowerCase();
+    const finalBranch = (role === 'order taker' || role === 'cashier') ? req.user.branch : (req.body.branch || 'Branch 1');
+
+    // Calculate daily resetting slip number per branch
     const slipResult = await client.query(
       `SELECT COALESCE(MAX(slip_number), 0) + 1 as next_slip 
        FROM orders 
-       WHERE created_at >= CURRENT_DATE`
+       WHERE created_at >= CURRENT_DATE AND branch = $1`,
+      [finalBranch]
     );
     const slipNumber = slipResult.rows[0].next_slip;
-
-    const finalBranch = req.user.role === 'Order Taker' ? req.user.branch : (req.body.branch || 'Branch 1');
     // Insert order
     const orderResult = await client.query(
       `INSERT INTO orders (subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch) 
@@ -189,7 +202,8 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     // Branch isolation
-    if (req.user.role === 'Order Taker') {
+    const role = req.user.role?.trim().toLowerCase();
+    if (role === 'order taker' || role === 'cashier') {
       params.push(req.user.branch);
       query += ` AND o.branch = $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {
@@ -210,6 +224,9 @@ router.get('/', authenticateToken, async (req, res) => {
 // GET order by ID with items
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
+    if (!(await checkBranchAccess(req, req.params.id))) {
+      return res.status(403).json({ error: 'Access denied: Order belongs to another branch' });
+    }
     const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
     if (orderResult.rows.length === 0) {
       return res.status(404).json({ error: 'Order not found' });
@@ -230,6 +247,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.patch('/:id/status', authenticateToken, async (req, res) => {
   const { status } = req.body;
   try {
+    if (!(await checkBranchAccess(req, req.params.id))) {
+      return res.status(403).json({ error: 'Access denied: Order belongs to another branch' });
+    }
     const result = await pool.query(
       'UPDATE orders SET status=$1 WHERE id=$2 RETURNING *',
       [status, req.params.id]
@@ -250,6 +270,9 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
   }
   const client = await pool.connect();
   try {
+    if (!(await checkBranchAccess(req, req.params.id))) {
+      return res.status(403).json({ error: 'Access denied: Order belongs to another branch' });
+    }
     await client.query('BEGIN');
     
     // Update order status to Completed
@@ -447,6 +470,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
   const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments } = req.body;
   const client = await pool.connect();
   try {
+    if (!(await checkBranchAccess(req, req.params.id))) {
+      return res.status(403).json({ error: 'Access denied: Order belongs to another branch' });
+    }
     await client.query('BEGIN');
 
     // Check if order exists and get existing items

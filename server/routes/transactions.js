@@ -4,9 +4,12 @@ const pool = require('../db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 // GET transactions with date filter
-router.get('/', authenticateToken, isAdmin, async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { from, to, branch } = req.query;
+    let { from, to, branch } = req.query;
+    const role = req.user?.role?.toLowerCase();
+    const isAdminRole = role === 'admin' || role === 'developer';
+    if (!isAdminRole) branch = req.user?.branch;
     let query = `
       SELECT t.*, o.grand_total, o.subtotal, o.tax, o.status as order_status, o.slip_number, o.is_edited, o.branch, o.order_type,
              (SELECT string_agg(qty || 'x ' || item_name, ', ') FROM order_items WHERE order_id = o.id) as items
@@ -39,9 +42,12 @@ router.get('/', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // GET summary (cash vs card totals for date range)
-router.get('/summary', authenticateToken, isAdmin, async (req, res) => {
+router.get('/summary', authenticateToken, async (req, res) => {
   try {
-    const { from, to, branch } = req.query;
+    let { from, to, branch } = req.query;
+    const role = req.user?.role?.toLowerCase();
+    const isAdminRole = role === 'admin' || role === 'developer';
+    if (!isAdminRole) branch = req.user?.branch;
     let whereClause = 'WHERE 1=1';
     const params = [];
 

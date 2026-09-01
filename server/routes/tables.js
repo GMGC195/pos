@@ -12,8 +12,8 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = 'SELECT * FROM tables WHERE status = $1';
     let params = ['Active'];
 
-    // If order taker and has a branch, filter tables available in that branch
-    if (['order taker'].includes(userRole) && userBranch) {
+    // If restricted role and has a branch, filter tables available in that branch
+    if (['order taker', 'cashier', 'operator'].includes(userRole) && userBranch) {
       params.push(userBranch);
       query += ` AND available_branches ? $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {

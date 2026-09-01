@@ -409,6 +409,7 @@ export default function Settings() {
                         >
                           <option value="Admin">Admin</option>
                           <option value="Order Taker">Order Taker</option>
+                          <option value="Cashier">Cashier</option>
                           <option value="Operator">Operator</option>
                           <option value="HR Manager">HR Manager</option>
                           <option value="Management">Management</option>
@@ -416,7 +417,7 @@ export default function Settings() {
                           {user?.role?.toLowerCase() === 'developer' && <option value="Developer">Developer</option>}
                         </select>
                       </div>
-                      {(userForm.role === 'Order Taker' || userForm.role === 'Operator') && (
+                      {(userForm.role === 'Order Taker' || userForm.role === 'Cashier' || userForm.role === 'Operator') && (
                         <div className="form-group">
                           <label>Assigned Restaurant</label>
                           <select 
@@ -748,6 +749,7 @@ export default function Settings() {
                         <option value="Management">Management</option>
                         <option value="Employee">Employee</option>
                         <option value="Order Taker">Order Taker</option>
+                        <option value="Cashier">Cashier</option>
                         <option value="Developer">Developer</option>
                       </select>
                     </div>
