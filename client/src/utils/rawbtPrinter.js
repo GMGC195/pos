@@ -36,22 +36,22 @@ export const printViaRawBT = (orderData) => {
       if (item.selected_variations && item.selected_variations.length > 0) {
         receiptText += `   + ${item.selected_variations.map(v => v.name).join(', ')}\n`;
       }
-      receiptText += `   Rs. ${item.total_price || (item.price * item.qty)}\n`;
+      receiptText += `   SAR ${item.total_price || (item.price * item.qty)}\n`;
     });
   }
   receiptText += "--------------------------------\n";
 
   // Totals
   receiptText += esc + 'a' + '\x02'; // Right align
-  receiptText += `Subtotal: Rs. ${orderData.subtotal}\n`;
+  receiptText += `Subtotal: SAR ${orderData.subtotal}\n`;
   if (orderData.tax_amount > 0) {
-    receiptText += `Tax: Rs. ${orderData.tax_amount}\n`;
+    receiptText += `Tax: SAR ${orderData.tax_amount}\n`;
   }
   if (orderData.discount > 0) {
-    receiptText += `Discount: Rs. ${orderData.discount}\n`;
+    receiptText += `Discount: SAR ${orderData.discount}\n`;
   }
   receiptText += esc + '!' + '\x10'; // Double height for Total
-  receiptText += `TOTAL: Rs. ${orderData.total_amount}\n`;
+  receiptText += `TOTAL: SAR ${orderData.total_amount}\n`;
   receiptText += esc + '!' + '\x00'; // Normal text
 
   // Footer

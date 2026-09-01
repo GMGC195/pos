@@ -1070,7 +1070,7 @@ export default function POS() {
                               {o.items ? o.items.map((i, idx) => (
                                 <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
                                   <span>{i.qty}x {i.name}</span>
-                                  <span>Rs.{(i.price ? parseFloat(i.price) * i.qty : 0).toFixed(2)}</span>
+                                  <span>SAR {(i.price ? parseFloat(i.price) * i.qty : 0).toFixed(2)}</span>
                                 </div>
                               )) : 'No items'}
                             </div>

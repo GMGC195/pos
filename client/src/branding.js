@@ -24,7 +24,7 @@ export const BRAND_EMAIL      = 'alrawaq2024@gmail.com'
 export const BRAND_WEBSITE    = ''
 
 // ── Financial ─────────────────────────────────────────────────────
-export const BRAND_CURRENCY   = 'Rs.'
+export const BRAND_CURRENCY   = 'SAR '
 export const BRAND_TAX_NUMBER = ''
 
 // ── Print Templates ───────────────────────────────────────────────

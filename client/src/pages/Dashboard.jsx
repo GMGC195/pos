@@ -324,32 +324,7 @@ export default function Dashboard() {
               {loading
                 ? <div className="skeleton" style={{ height: '100%' }} />
                 : stats?.topItems?.length > 0
-                  ? (
-                    <>
-                      <Doughnut data={donutData} options={donutOpts} />
-                      <div className="donut-logo-overlay" style={{
-                        position: 'absolute',
-                        top: '36%',
-                        left: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        pointerEvents: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'all 0.25s ease-in-out',
-                      }}>
-                        <img
-                          src={BRAND_LOGO}
-                          alt="Logo"
-                          style={{
-                            width: 105,
-                            height: 105,
-                            objectFit: 'contain'
-                          }}
-                        />
-                      </div>
-                    </>
-                  )
+                  ? <Doughnut data={donutData} options={donutOpts} />
                   : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af' }}>No sales data yet</div>
               }
             </div>

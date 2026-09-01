@@ -243,7 +243,7 @@ export default function ProductCostManagement() {
                 <option value="">-- Choose from Stock --</option>
                 {stockItems.map(stock => (
                   <option key={stock.id} value={stock.id}>
-                    {stock.name} — Rs {Number(stock.price_per_unit).toFixed(2)} per {stock.unit}
+                    {stock.name} — SAR {Number(stock.price_per_unit).toFixed(2)} per {stock.unit}
                   </option>
                 ))}
               </select>
@@ -343,8 +343,8 @@ export default function ProductCostManagement() {
                               </td>
                               <td style={{ fontWeight: 500 }}>{ing.stock_name}</td>
                               <td><span className="badge badge-info">{displayQty}</span></td>
-                              <td style={{ color: 'var(--text-secondary)' }}>Rs {Number(ing.price_per_unit).toFixed(2)} / {ing.unit}</td>
-                              <td style={{ color: 'var(--red)', fontWeight: 'bold' }}>Rs {Number(ing.ingredient_cost).toFixed(2)}</td>
+                              <td style={{ color: 'var(--text-secondary)' }}>SAR {Number(ing.price_per_unit).toFixed(2)} / {ing.unit}</td>
+                              <td style={{ color: 'var(--red)', fontWeight: 'bold' }}>SAR {Number(ing.ingredient_cost).toFixed(2)}</td>
                               <td style={{ textAlign: 'right' }}>
                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                                   <button className="btn btn-sm btn-secondary" title="Edit" onClick={() => handleOpenEdit(ing)} style={{ padding: '5px 8px' }}><Pencil size={14} /></button>
@@ -365,8 +365,8 @@ export default function ProductCostManagement() {
                         <tr key={ing.id}>
                           <td style={{ fontWeight: 500 }}>{ing.stock_name}</td>
                           <td><span className="badge badge-info">{displayQty}</span></td>
-                          <td style={{ color: 'var(--text-secondary)' }}>Rs {Number(ing.price_per_unit).toFixed(2)} / {ing.unit}</td>
-                          <td style={{ color: 'var(--red)', fontWeight: 'bold' }}>Rs {Number(ing.ingredient_cost).toFixed(2)}</td>
+                          <td style={{ color: 'var(--text-secondary)' }}>SAR {Number(ing.price_per_unit).toFixed(2)} / {ing.unit}</td>
+                          <td style={{ color: 'var(--red)', fontWeight: 'bold' }}>SAR {Number(ing.ingredient_cost).toFixed(2)}</td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                               <button className="btn btn-sm btn-secondary" title="Edit" onClick={() => handleOpenEdit(ing)} style={{ padding: '5px 8px' }}><Pencil size={14} /></button>
@@ -404,10 +404,10 @@ export default function ProductCostManagement() {
                           boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
                         }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>{name}</div>
-                          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>Price: Rs {sellingPrice.toFixed(2)}</div>
-                          <div style={{ fontSize: 18, fontWeight: 800, color: '#ff6b6b' }}>Cost: Rs {productionCost.toFixed(2)}</div>
+                          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>Price: SAR {sellingPrice.toFixed(2)}</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: '#ff6b6b' }}>Cost: SAR {productionCost.toFixed(2)}</div>
                           <div style={{ fontSize: 12, color: profit >= 0 ? '#10b981' : '#ef4444', marginTop: 8, fontWeight: 700, background: profit >= 0 ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', padding: '4px', borderRadius: '6px' }}>
-                            {profit >= 0 ? 'Profit' : 'Loss'}: Rs {profit.toFixed(2)}
+                            {profit >= 0 ? 'Profit' : 'Loss'}: SAR {profit.toFixed(2)}
                           </div>
                         </div>
                       )
@@ -421,16 +421,16 @@ export default function ProductCostManagement() {
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <span style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-secondary)' }}>Total Cost to Produce</span>
-                    <span style={{ fontSize: 18, fontWeight: 'bold', color: '#ff6b6b' }}>Rs {Number(recipeData.totalCost).toFixed(2)}</span>
+                    <span style={{ fontSize: 18, fontWeight: 'bold', color: '#ff6b6b' }}>SAR {Number(recipeData.totalCost).toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <span style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-secondary)' }}>Sale Price</span>
-                    <span style={{ fontSize: 18, fontWeight: 'bold', color: 'var(--text-primary)' }}>Rs {Number(selectedItem.price).toFixed(2)}</span>
+                    <span style={{ fontSize: 18, fontWeight: 'bold', color: 'var(--text-primary)' }}>SAR {Number(selectedItem.price).toFixed(2)}</span>
                   </div>
                   <div style={{ paddingTop: 15, borderTop: '1px dashed var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Revenue / Profit</span>
                     <span style={{ fontSize: 26, fontWeight: 'bold', color: '#10b981' }}>
-                      Rs {(Number(selectedItem.price) - Number(recipeData.totalCost)).toFixed(2)}
+                      SAR {(Number(selectedItem.price) - Number(recipeData.totalCost)).toFixed(2)}
                     </span>
                   </div>
                 </>
@@ -440,7 +440,7 @@ export default function ProductCostManagement() {
               {hasSizes && (
                 <div style={{ paddingTop: 14, borderTop: '1px dashed var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Base Sale Price (default from menu)</span>
-                  <span style={{ fontSize: 17, fontWeight: 'bold', color: 'var(--text-primary)' }}>Rs {Number(selectedItem.price).toFixed(2)}</span>
+                  <span style={{ fontSize: 17, fontWeight: 'bold', color: 'var(--text-primary)' }}>SAR {Number(selectedItem.price).toFixed(2)}</span>
                 </div>
               )}
             </div>
@@ -501,7 +501,7 @@ export default function ProductCostManagement() {
                 filteredItems.map(item => (
                   <tr key={item.id}>
                     <td style={{ fontWeight: 600 }}>{item.name}</td>
-                    <td style={{ color: '#10b981', fontWeight: 500 }}>Rs {item.price}</td>
+                    <td style={{ color: '#10b981', fontWeight: 500 }}>SAR {item.price}</td>
                     <td>
                       {item.size_options?.length > 0
                         ? <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -585,7 +585,7 @@ export default function ProductCostManagement() {
             <div style={{ color: 'var(--text-secondary)', marginBottom: 2 }}>Ingredient Name</div>
             <strong style={{ color: 'var(--text-primary)', fontSize: 15 }}>{editingIngredient.stock_name}</strong>
             <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>
-              Rate: Rs {Number(editingIngredient.price_per_unit).toFixed(2)} / {editingIngredient.unit}
+              Rate: SAR {Number(editingIngredient.price_per_unit).toFixed(2)} / {editingIngredient.unit}
             </div>
           </div>
 
@@ -641,7 +641,7 @@ export default function ProductCostManagement() {
             }}>
               <div>
                 <div style={{ fontSize: 11, opacity: 0.9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimated Cost</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>Rs {estCost.toFixed(2)}</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>SAR {estCost.toFixed(2)}</div>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 10 }}>
                 <div style={{ fontSize: 10, fontWeight: 700 }}>VERIFIED</div>

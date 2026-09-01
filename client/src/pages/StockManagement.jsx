@@ -374,7 +374,7 @@ export default function StockManagement() {
                         <td style={{ color: 'var(--text-muted)' }}>
                           {item.low_stock_threshold > 0 ? `${Number(item.low_stock_threshold).toFixed(3)} ${item.unit}` : 'Not set'}
                         </td>
-                        <td style={{ color: 'var(--green)', fontWeight: 600 }}>Rs {Number(item.price_per_unit).toFixed(2)}</td>
+                        <td style={{ color: 'var(--green)', fontWeight: 600 }}>SAR {Number(item.price_per_unit).toFixed(2)}</td>
                         <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>
                           {new Date(item.updated_at || item.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </td>
@@ -425,8 +425,8 @@ export default function StockManagement() {
                   <tr key={h.id}>
                     <td style={{ fontWeight: 500 }}>{h.stock_name}</td>
                     <td><span className="badge badge-success">+{Number(h.quantity).toFixed(3)} {h.unit}</span></td>
-                    <td>Rs {Number(h.price_per_unit).toFixed(2)}</td>
-                    <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>Rs {Number(h.total_price).toFixed(2)}</td>
+                    <td>SAR {Number(h.price_per_unit).toFixed(2)}</td>
+                    <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>SAR {Number(h.total_price).toFixed(2)}</td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>
                       {new Date(h.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
                     </td>
@@ -476,7 +476,7 @@ export default function StockManagement() {
             </div>
 
             <div className="form-group" style={{ marginBottom: 20 }}>
-              <label>Total Price (Rs)</label>
+              <label>Total Price (SAR )</label>
               <input className="form-control" type="number" step="0.01" value={dailyData.total_price} onChange={e => updateDailyPricing('total_price', e.target.value)} />
             </div>
 
@@ -610,7 +610,7 @@ export default function StockManagement() {
             </div>
 
             <div className="form-group" style={{ marginBottom: 20 }}>
-              <label>Total Price (Rs)</label>
+              <label>Total Price (SAR )</label>
               <input className="form-control" type="number" step="0.01" value={editHistoryData.total_price} onChange={e => {
                 const t = parseFloat(e.target.value) || 0;
                 const q = parseFloat(editHistoryData.quantity) || 0;
