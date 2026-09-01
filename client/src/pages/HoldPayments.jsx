@@ -11,6 +11,7 @@ import { socket } from '../socket'
 export default function HoldPayments() {
   const [orders, setOrders] = useState([])
   const [search, setSearch] = useState('')
+  const [branch, setBranch] = useState('All')
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [showOrderDetails, setShowOrderDetails] = useState(false)
@@ -28,7 +29,7 @@ export default function HoldPayments() {
   const loadHeldOrders = () => {
     setLoading(true)
     // Fetch with a high limit to ensure summary accuracy
-    axios.get('/api/orders', { params: { status: 'Hold,Payment Pending', limit: 500 } })
+    axios.get('/api/orders', { params: { status: 'Hold,Payment Pending', limit: 500, branch } })
       .then(res => setOrders(res.data))
       .catch(err => console.error(err))
       .finally(() => setLoading(false))
@@ -56,7 +57,7 @@ export default function HoldPayments() {
       socket.off('newOrder', handleOrderEvent);
       socket.off('orderUpdated', handleOrderEvent);
     }
-  }, [])
+  }, [branch])
 
   const handlePay = (orderId, method) => {
     toast((t) => (
@@ -195,6 +196,18 @@ export default function HoldPayments() {
                 className="pos-search-input"
                 style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
               />
+              {isAdmin && (
+                <select
+                  value={branch}
+                  onChange={e => setBranch(e.target.value)}
+                  style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
+                >
+                  <option value="All">All Branches</option>
+                  <option value="Branch 1">Branch 1</option>
+                  <option value="Branch 2">Branch 2</option>
+                  <option value="Branch 3">Branch 3</option>
+                </select>
+              )}
             </div>
             <button className="btn btn-secondary btn-sm" onClick={loadHeldOrders} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><RefreshCw size={14} /> Refresh</button>
           </div>
@@ -204,6 +217,7 @@ export default function HoldPayments() {
                 <tr>
                   <th>#</th>
                   <th>Order ID</th>
+                  <th>Branch</th>
                   <th>Subtotal</th>
                   <th>Grand Total</th>
                   <th>Date & Time</th>
@@ -214,7 +228,7 @@ export default function HoldPayments() {
               {loading
                 ? Array.from({ length: 3 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: 5 }).map((__, j) => (
+                      {Array.from({ length: 7 }).map((__, j) => (
                         <td key={j}><div className="skeleton" style={{ height: 18, width: '80%', borderRadius: 4 }} /></td>
                       ))}
                     </tr>
@@ -229,6 +243,7 @@ export default function HoldPayments() {
                           {o.cancel_requested && <span className="badge badge-error" style={{ fontSize: 10, padding: '2px 6px' }}>Req. Pending</span>}
                         </div>
                       </td>
+                      <td>{o.branch || '-'}</td>
                       <td>{CURRENCY}{parseFloat(o.subtotal).toFixed(2)}</td>
                       <td style={{ fontWeight: 700, color: 'var(--red)' }}>{CURRENCY}{parseFloat(o.grand_total).toFixed(2)}</td>
                       <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>

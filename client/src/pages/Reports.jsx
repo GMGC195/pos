@@ -33,6 +33,7 @@ export default function Reports({ isTodaySales = false }) {
   const [summary, setSummary] = useState([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [branch, setBranch] = useState('All')
   const [loading, setLoading] = useState(true)
   const [showTodaySummary, setShowTodaySummary] = useState(false)
   const [showDetailsInModal, setShowDetailsInModal] = useState(false)
@@ -45,8 +46,8 @@ export default function Reports({ isTodaySales = false }) {
   const load = () => {
     setLoading(true)
     Promise.all([
-      axios.get('/api/transactions', { params: { from, to } }),
-      axios.get('/api/transactions/summary', { params: { from, to } }),
+      axios.get('/api/transactions', { params: { from, to, branch } }),
+      axios.get('/api/transactions/summary', { params: { from, to, branch } }),
     ])
       .then(([txRes, sumRes]) => {
         setTransactions(txRes.data)
@@ -59,7 +60,7 @@ export default function Reports({ isTodaySales = false }) {
     load()
     const interval = setInterval(load, 300000) // Auto-refresh every 5 mins
     return () => clearInterval(interval)
-  }, [from, to])
+  }, [from, to, branch])
 
   useEffect(() => {
     setFrom(isTodaySales ? today() : weekAgo())
@@ -73,7 +74,7 @@ export default function Reports({ isTodaySales = false }) {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [from, to, search, statusFilter])
+  }, [from, to, search, statusFilter, branch])
 
   const cashRow = summary.find(r => r.payment_method === 'Cash')
   const cardRow = summary.find(r => r.payment_method === 'Card')
@@ -195,6 +196,7 @@ export default function Reports({ isTodaySales = false }) {
               <tr>
                 <th>#</th>
                 <th>Order ID</th>
+                <th>Branch</th>
                 <th>Items</th>
                 <th>Amount</th>
                 <th>Status</th>
@@ -211,6 +213,7 @@ export default function Reports({ isTodaySales = false }) {
                 <tr>
                   <td><strong style="color:#E31837">${t.slip_number || '-'}</strong></td>
                   <td><strong>#${t.order_id}</strong> ${t.is_edited ? '<span style="font-size:10px;color:#666">(Edited)</span>' : ''}</td>
+                  <td>${t.branch || '-'}</td>
                   <td>${t.items || '-'}</td>
                   <td><strong>${CURRENCY}${parseFloat(t.amount).toFixed(2)}</strong></td>
                   <td><span class="badge ${badgeClass}">${t.payment_method === t.order_status ? t.order_status : `${t.payment_method} - ${t.order_status}`}</span></td>
@@ -450,6 +453,16 @@ export default function Reports({ isTodaySales = false }) {
               <option value="Cancelled">Cancelled</option>
               <option value="Returned">Returned</option>
             </select>
+            <select
+              value={branch}
+              onChange={e => setBranch(e.target.value)}
+              style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
+            >
+              <option value="All">All Branches</option>
+              <option value="Branch 1">Branch 1</option>
+              <option value="Branch 2">Branch 2</option>
+              <option value="Branch 3">Branch 3</option>
+            </select>
           </div>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
         </div>
@@ -460,6 +473,7 @@ export default function Reports({ isTodaySales = false }) {
                 <th>#</th>
                 <th>Order ID</th>
                 <th>Txn ID</th>
+                <th>Branch</th>
                 <th>Items</th>
                 <th>Amount</th>
                 <th>Status</th>
@@ -471,7 +485,7 @@ export default function Reports({ isTodaySales = false }) {
               {loading
                 ? Array.from({ length: 5 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: 7 }).map((__, j) => (
+                      {Array.from({ length: 8 }).map((__, j) => (
                         <td key={j}><div className="skeleton" style={{ height: 18, width: '80%', borderRadius: 4 }} /></td>
                       ))}
                     </tr>
@@ -486,6 +500,7 @@ export default function Reports({ isTodaySales = false }) {
                         </div>
                       </td>
                       <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>#{t.id}</td>
+                      <td>{t.branch || '-'}</td>
                       <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.items}>
                         {t.items || '-'}
                       </td>

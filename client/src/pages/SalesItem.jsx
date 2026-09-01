@@ -20,6 +20,7 @@ export default function SalesItem() {
   const [from, setFrom] = useState(today())
   const [to, setTo] = useState(today())
   const [catFilter, setCatFilter] = useState('All')
+  const [branch, setBranch] = useState('All')
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -27,7 +28,7 @@ export default function SalesItem() {
 
   const load = () => {
     setLoading(true)
-    axios.get('/api/reports/sales-items', { params: { from, to } })
+    axios.get('/api/reports/sales-items', { params: { from, to, branch } })
       .then(res => {
         setData(res.data)
       })
@@ -42,7 +43,7 @@ export default function SalesItem() {
     load()
     const interval = setInterval(load, 30000) // Auto-refresh every 30s
     return () => clearInterval(interval)
-  }, [from, to])
+  }, [from, to, branch])
 
   const exportExcel = async () => {
     const XLSX = await import('xlsx')
@@ -212,6 +213,26 @@ export default function SalesItem() {
             >
               <option value="All">All Categories</option>
               {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="filter-group" style={{ flex: 1, minWidth: '240px' }}>
+            <label style={{ fontWeight: 600, fontSize: 14 }}>Branch:</label>
+            <select 
+              value={branch} 
+              onChange={e => setBranch(e.target.value)}
+              style={{ 
+                padding: '8px 12px', 
+                borderRadius: '8px', 
+                border: '1.5px solid var(--surface-2)',
+                flex: 1,
+                fontFamily: 'inherit',
+                fontSize: '14px'
+              }}
+            >
+              <option value="All">All Branches</option>
+              <option value="Branch 1">Branch 1</option>
+              <option value="Branch 2">Branch 2</option>
+              <option value="Branch 3">Branch 3</option>
             </select>
           </div>
           

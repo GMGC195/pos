@@ -596,8 +596,6 @@ export default function POS() {
     html { margin: 0; padding: 0; background: #fff; }
     body {
       width: 100%;
-      max-width: 80mm; /* Ensure it looks like a slip in PDF */
-      margin: 0 auto;
       font-family: Tahoma, Geneva, sans-serif;
       font-size: 12px;
       color: #000;

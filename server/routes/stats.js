@@ -6,12 +6,23 @@ const { authenticateToken } = require('../middleware/auth');
 // GET comprehensive stats for Dashboard
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    const { branch } = req.query;
+    let branchCond = '';
+    let branchCondO = '';
+    let params = [];
+    
+    if (branch && branch !== 'All') {
+      branchCond = 'AND branch = $1';
+      branchCondO = 'AND o.branch = $1';
+      params.push(branch);
+    }
+
     // Total Saleh (Today's completed orders grand total)
     const totalSaleResult = await pool.query(`
       SELECT COALESCE(SUM(grand_total), 0) as total_sale
       FROM orders
-      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed'
-    `);
+      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond}
+    `, params);
 
     // Daily Revenue (Today's Sales - Produce Cost)
     const dailyRevenueResult = await pool.query(`
@@ -35,7 +46,7 @@ router.get('/', authenticateToken, async (req, res) => {
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         WHERE o.status = 'Completed'
-          AND DATE(o.created_at) = CURRENT_DATE
+          AND DATE(o.created_at) = CURRENT_DATE ${branchCondO}
         GROUP BY oi.item_id
       )
       SELECT 
@@ -43,19 +54,19 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(SUM(COALESCE(rc.produce_cost_per_unit, 0) * s.total_qty), 0) as product_cost
       FROM day_items s
       LEFT JOIN recipe_costs rc ON s.item_id = rc.item_id
-    `);
+    `, params);
 
     // Total fulfilled orders today
     const totalOrdersResult = await pool.query(`
       SELECT COUNT(*) as count FROM orders
-      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed'
-    `);
+      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond}
+    `, params);
 
     // Guest Today (Today's total orders excluding cancelled)
     const guestsTodayResult = await pool.query(`
       SELECT COUNT(*) as count FROM orders
-      WHERE DATE(created_at) = CURRENT_DATE AND status != 'Cancelled'
-    `);
+      WHERE DATE(created_at) = CURRENT_DATE AND status != 'Cancelled' ${branchCond}
+    `, params);
 
     // Last 7 days sales data guaranteed using Postgres generate_series
     const last7DaysQuery = await pool.query(`
@@ -67,10 +78,10 @@ router.get('/', authenticateToken, async (req, res) => {
         FROM generate_series(6, 0, -1) i
       ) d
       LEFT JOIN orders o 
-        ON DATE(o.created_at) = d.date AND o.status = 'Completed'
+        ON DATE(o.created_at) = d.date AND o.status = 'Completed' ${branchCondO}
       GROUP BY d.date
       ORDER BY d.date ASC
-    `);
+    `, params);
 
     const days = last7DaysQuery.rows.map(r => ({
       label: r.label,
@@ -79,12 +90,14 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Top selling items overall
     const topItems = await pool.query(`
-      SELECT item_name, SUM(qty) as total_qty
-      FROM order_items
-      GROUP BY item_name
+      SELECT oi.item_name, SUM(oi.qty) as total_qty
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE 1=1 ${branchCondO}
+      GROUP BY oi.item_name
       ORDER BY total_qty DESC
       LIMIT 6
-    `);
+    `, params);
 
     res.json({
       totalSale: parseFloat(totalSaleResult.rows[0].total_sale),

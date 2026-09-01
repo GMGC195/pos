@@ -6,9 +6,9 @@ const { authenticateToken, isAdmin } = require('../middleware/auth');
 // GET transactions with date filter
 router.get('/', authenticateToken, isAdmin, async (req, res) => {
   try {
-    const { from, to } = req.query;
+    const { from, to, branch } = req.query;
     let query = `
-      SELECT t.*, o.grand_total, o.subtotal, o.tax, o.status as order_status, o.slip_number, o.is_edited,
+      SELECT t.*, o.grand_total, o.subtotal, o.tax, o.status as order_status, o.slip_number, o.is_edited, o.branch,
              (SELECT string_agg(qty || 'x ' || item_name, ', ') FROM order_items WHERE order_id = o.id) as items
       FROM transactions t
       JOIN orders o ON t.order_id = o.id
@@ -24,6 +24,10 @@ router.get('/', authenticateToken, isAdmin, async (req, res) => {
       params.push(to);
       query += ` AND t.created_at < ($${params.length}::date + INTERVAL '1 day')`;
     }
+    if (branch && branch !== 'All') {
+      params.push(branch);
+      query += ` AND o.branch = $${params.length}`;
+    }
 
     query += ' ORDER BY t.created_at DESC';
 
@@ -37,27 +41,32 @@ router.get('/', authenticateToken, isAdmin, async (req, res) => {
 // GET summary (cash vs card totals for date range)
 router.get('/summary', authenticateToken, isAdmin, async (req, res) => {
   try {
-    const { from, to } = req.query;
+    const { from, to, branch } = req.query;
     let whereClause = 'WHERE 1=1';
     const params = [];
 
     if (from) {
       params.push(from);
-      whereClause += ` AND created_at >= $${params.length}::date`;
+      whereClause += ` AND t.created_at >= $${params.length}::date`;
     }
     if (to) {
       params.push(to);
-      whereClause += ` AND created_at < ($${params.length}::date + INTERVAL '1 day')`;
+      whereClause += ` AND t.created_at < ($${params.length}::date + INTERVAL '1 day')`;
+    }
+    if (branch && branch !== 'All') {
+      params.push(branch);
+      whereClause += ` AND o.branch = $${params.length}`;
     }
 
     const result = await pool.query(
       `SELECT 
-        payment_method, 
+        t.payment_method, 
         COUNT(*) as count, 
-        SUM(amount) as total 
-       FROM transactions 
+        SUM(t.amount) as total 
+       FROM transactions t
+       JOIN orders o ON t.order_id = o.id
        ${whereClause}
-       GROUP BY payment_method`,
+       GROUP BY t.payment_method`,
       params
     );
     res.json(result.rows);

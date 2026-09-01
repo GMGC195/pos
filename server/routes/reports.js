@@ -5,9 +5,16 @@ const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 // GET Sales Item Report
 router.get('/sales-items', authenticateToken, isAdmin, async (req, res) => {
-  const { from, to } = req.query;
+  const { from, to, branch } = req.query;
   
   try {
+    let branchCond = '';
+    const params = [from, to];
+    if (branch && branch !== 'All') {
+      params.push(branch);
+      branchCond = `AND o.branch = $${params.length}`;
+    }
+
     const query = `
       WITH fifo_costs AS (
         SELECT 
@@ -20,6 +27,7 @@ router.get('/sales-items', authenticateToken, isAdmin, async (req, res) => {
         WHERE o.status = 'Completed'
           AND DATE(o.created_at) >= $1 
           AND DATE(o.created_at) <= $2
+          ${branchCond}
         GROUP BY oi.item_id
       ),
       item_stats AS (
@@ -40,6 +48,7 @@ router.get('/sales-items', authenticateToken, isAdmin, async (req, res) => {
         WHERE o.status = 'Completed'
           AND DATE(o.created_at) >= $1 
           AND DATE(o.created_at) <= $2
+          ${branchCond}
         GROUP BY c.name, oi.item_name, oi.item_id
       )
       SELECT 
@@ -56,7 +65,7 @@ router.get('/sales-items', authenticateToken, isAdmin, async (req, res) => {
       ORDER BY s.category_name, s.item_name;
     `;
     
-    const result = await pool.query(query, [from, to]);
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error('❌ Sales item report failed:', err);
