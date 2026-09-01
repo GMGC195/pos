@@ -133,11 +133,18 @@ router.post('/', authenticateToken, async (req, res) => {
       [finalBranch]
     );
     const slipNumber = slipResult.rows[0].next_slip;
+    let seqName = 'order_id_branch_1';
+    if (finalBranch === 'Branch 2') seqName = 'order_id_branch_2';
+    else if (finalBranch === 'Branch 3') seqName = 'order_id_branch_3';
+
+    const seqResult = await client.query(`SELECT nextval('${seqName}') as next_id`);
+    const newOrderId = seqResult.rows[0].next_id;
+
     // Insert order
     const orderResult = await client.query(
-      `INSERT INTO orders (subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, NULL, $10, FALSE, $11, $12, $13, $14, $15) RETURNING *`,
-      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch]
+      `INSERT INTO orders (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16) RETURNING *`,
+      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch]
     );
     const order = orderResult.rows[0];
 

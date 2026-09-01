@@ -44,6 +44,11 @@ CREATE TABLE items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Orders Sequences
+CREATE SEQUENCE IF NOT EXISTS order_id_branch_1 START 1;
+CREATE SEQUENCE IF NOT EXISTS order_id_branch_2 START 20000;
+CREATE SEQUENCE IF NOT EXISTS order_id_branch_3 START 30000;
+
 -- Orders
 CREATE TABLE orders (
   id SERIAL PRIMARY KEY,
