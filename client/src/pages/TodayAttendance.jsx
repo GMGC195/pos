@@ -799,7 +799,7 @@ export default function TodayAttendance() {
                   <div>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>Select Date Range</label>
                     <div style={{ display: 'flex', gap: 10 }}>
-                      {['today', 'previous'].filter(m => !(user?.role?.toLowerCase() === 'operator' && m === 'previous')).map(mode => (
+                      {['today', 'previous'].map(mode => (
                         <button
                           key={mode}
                           onClick={() => {
@@ -820,7 +820,7 @@ export default function TodayAttendance() {
                     </div>
                   </div>
 
-                  {editDateMode === 'previous' && (
+                  {editDateMode === 'previous' && user?.role?.toLowerCase() !== 'operator' && (
                     <div>
                       <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select Date <span style={{ color: 'var(--red)' }}>(no future dates)</span></label>
                       <input
@@ -830,6 +830,11 @@ export default function TodayAttendance() {
                         onChange={e => setEditDate(e.target.value)}
                         style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
                       />
+                    </div>
+                  )}
+                  {editDateMode === 'previous' && user?.role?.toLowerCase() === 'operator' && (
+                    <div style={{ padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
+                      Editing attendance for: <strong>{new Date(yesterdayStr).toLocaleDateString()}</strong> (Yesterday)
                     </div>
                   )}
 

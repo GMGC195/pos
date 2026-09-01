@@ -420,12 +420,22 @@ export default function Settings() {
                         <div className="form-group">
                           <label>Assigned Restaurant</label>
                           <select 
-                            value={userForm.branch || 'Branch 1'}
+                            value={userForm.branch || (userForm.role === 'Operator' ? 'Restaurant 1' : 'Branch 1')}
                             onChange={e => setUserForm({...userForm, branch: e.target.value})}
                           >
-                            <option value="Branch 1">Branch 1</option>
-                            <option value="Branch 2">Branch 2</option>
-                            <option value="Branch 3">Branch 3</option>
+                            {userForm.role === 'Operator' ? (
+                              <>
+                                <option value="Restaurant 1">Restaurant 1</option>
+                                <option value="Restaurant 2">Restaurant 2</option>
+                                <option value="Restaurant 3">Restaurant 3</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="Branch 1">Branch 1</option>
+                                <option value="Branch 2">Branch 2</option>
+                                <option value="Branch 3">Branch 3</option>
+                              </>
+                            )}
                           </select>
                         </div>
                       )}

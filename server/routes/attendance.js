@@ -26,6 +26,35 @@ const autoCheckoutOldSessions = async (req, res, next) => {
 router.use(autoCheckoutOldSessions);
 
 // GET notifications for attendance (> 15 hours checked in)
+// Helper to verify Operator 24-hour edit limit based on shift start time
+async function verifyOperator24HourLimit(employee_id, recordDate, pool) {
+  const empRes = await pool.query('SELECT working_hours FROM employees WHERE id = $1', [employee_id]);
+  if (empRes.rows.length === 0) return { allowed: false, error: 'Employee not found.' };
+  
+  const shift = empRes.rows[0].working_hours || 'R1';
+  
+  let startHour = 9, startMin = 0;
+  const shiftDetails = await pool.query('SELECT start_time FROM employee_working_hours WHERE name = $1', [shift]);
+  
+  if (shiftDetails.rows.length > 0 && shiftDetails.rows[0].start_time) {
+    const timeMatch = shiftDetails.rows[0].start_time.match(/^(\d+):(\d+)/);
+    if (timeMatch) {
+      startHour = parseInt(timeMatch[1], 10);
+      startMin = parseInt(timeMatch[2], 10);
+    }
+  } else if (shift === 'R2') { startHour = 9; }
+  else if (shift === 'R3') { startHour = 15; }
+
+  const shiftStartDateTime = new Date(recordDate);
+  shiftStartDateTime.setHours(startHour, startMin, 0, 0);
+
+  const diffHours = (Date.now() - shiftStartDateTime.getTime()) / (1000 * 60 * 60);
+  if (diffHours > 24) {
+    return { allowed: false, error: 'Operators can only modify attendance within 24 hours of the employee\'s shift start time.' };
+  }
+  return { allowed: true };
+}
+
 router.get('/notifications', authenticateToken, async (req, res) => {
   try {
     const userRole = req.user.role?.toLowerCase();
@@ -999,13 +1028,9 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.toLowerCase();
     
     if (userRole === 'operator') {
-      // Allow if record date is within the last 48 hours to account for night shifts and timezones
-      const recordTime = recordDate instanceof Date ? recordDate.getTime() : new Date(recordDate).getTime();
-      const nowTime = Date.now();
-      const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
-      
-      if (diffHours > 48) {
-        return res.status(403).json({ error: "Access denied: Operators can only modify recent attendance." });
+      const limitCheck = await verifyOperator24HourLimit(employee_id, recordDate, pool);
+      if (!limitCheck.allowed) {
+        return res.status(403).json({ error: limitCheck.error });
       }
     } else if (userRole !== 'admin' && userRole !== 'developer') {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
@@ -1048,11 +1073,9 @@ router.post('/session', authenticateToken, async (req, res) => {
 
   const userRole = req.user.role?.toLowerCase();
   if (userRole === 'operator') {
-    const recordTime = new Date(date).getTime();
-    const nowTime = Date.now();
-    const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
-    if (diffHours > 48) {
-      return res.status(403).json({ error: "Access denied: Operators can only add recent attendance." });
+    const limitCheck = await verifyOperator24HourLimit(employee_id, date, pool);
+    if (!limitCheck.allowed) {
+      return res.status(403).json({ error: "Access denied: Operators can only add attendance within 24 hours of shift start time." });
     }
   } else if (userRole !== 'admin' && userRole !== 'developer') {
     return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
@@ -1074,18 +1097,17 @@ router.delete('/session/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
 
   try {
-    const sessionRes = await pool.query('SELECT date FROM employee_attendance WHERE id = $1', [id]);
+    const sessionRes = await pool.query('SELECT employee_id, date FROM employee_attendance WHERE id = $1', [id]);
     if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Attendance log not found.' });
     
     const recordDate = sessionRes.rows[0].date;
+    const employee_id = sessionRes.rows[0].employee_id;
     const userRole = req.user.role?.toLowerCase();
     
     if (userRole === 'operator') {
-      const recordTime = recordDate instanceof Date ? recordDate.getTime() : new Date(recordDate).getTime();
-      const nowTime = Date.now();
-      const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
-      if (diffHours > 48) {
-        return res.status(403).json({ error: "Access denied: Operators can only delete recent attendance." });
+      const limitCheck = await verifyOperator24HourLimit(employee_id, recordDate, pool);
+      if (!limitCheck.allowed) {
+        return res.status(403).json({ error: "Access denied: Operators can only delete attendance within 24 hours of shift start time." });
       }
     } else if (userRole !== 'admin' && userRole !== 'developer') {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
@@ -1134,11 +1156,9 @@ router.post('/edit', authenticateToken, async (req, res) => {
     // Restrictions for Operator role
     const userRole = req.user.role?.toLowerCase();
     if (userRole === 'operator') {
-      const recordTime = recordDate instanceof Date ? recordDate.getTime() : new Date(recordDate).getTime();
-      const nowTime = Date.now();
-      const diffHours = Math.abs(nowTime - recordTime) / (1000 * 60 * 60);
-      if (diffHours > 48) {
-        return res.status(403).json({ error: "Access denied: Operators can only modify recent attendance." });
+      const limitCheck = await verifyOperator24HourLimit(employee_id, recordDate, pool);
+      if (!limitCheck.allowed) {
+        return res.status(403).json({ error: "Access denied: Operators can only modify attendance within 24 hours of shift start time." });
       }
     } else if (userRole !== 'admin' && userRole !== 'developer') {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
@@ -1489,15 +1509,13 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
         return res.status(400).json({ error: 'Approved check-out time cannot be in the future.' });
       }
 
-      // Operator date constraint: only today and yesterday
+      // Operator 24-hour constraint based on shift start
       const attendanceDate = new Date(request.attendance_date || effectiveCheckIn || Date.now());
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      
-      if (req.user.role?.toLowerCase() === 'operator' && attendanceDate < yesterday) {
-        return res.status(403).json({ error: 'Operators can only approve requests for today and yesterday. Please reject this request or forward it to the Admin.' });
+      if (req.user.role?.toLowerCase() === 'operator') {
+        const limitCheck = await verifyOperator24HourLimit(request.employee_id, attendanceDate, pool);
+        if (!limitCheck.allowed) {
+          return res.status(403).json({ error: 'Operators can only approve requests within 24 hours of shift start. Please reject this request or forward it to the Admin.' });
+        }
       }
 
       // 1. Update status to Approved
