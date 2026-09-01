@@ -428,7 +428,7 @@ export default function Layout() {
                   onClick={() => setIsSidebarOpen(false)}
                 >
                   <span className="nav-icon">{item.icon}</span>
-                  {item.label}
+                  <span className="nav-label">{item.label}</span>
                 </NavLink>
               ))}
             </div>
@@ -439,64 +439,53 @@ export default function Layout() {
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             onClick={() => setIsSidebarOpen(false)}
           >
-            <span className="nav-icon"><Settings size={18} strokeWidth={2.2} /></span>Settings
+            <span className="nav-icon"><Settings size={18} strokeWidth={2.2} /></span>
+            <span className="nav-label">Settings</span>
           </NavLink>
           <NavLink 
             to="/help-support" 
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             onClick={() => setIsSidebarOpen(false)}
           >
-            <span className="nav-icon"><HelpCircle size={18} strokeWidth={2.2} /></span>Help & Support
+            <span className="nav-icon"><HelpCircle size={18} strokeWidth={2.2} /></span>
+            <span className="nav-label">Help & Support</span>
           </NavLink>
         </nav>
-        <div className="sidebar-footer" style={{ padding: '8px 12px 8px 12px' }}>
+        <div className="sidebar-footer">
           {/* User info block */}
-          <div style={{ padding: '4px 10px 8px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: 'linear-gradient(135deg, #F4B400, #D4A000)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#000', fontWeight: 700, fontSize: 15, flexShrink: 0
-              }}>
+          <div className="user-profile-block">
+            <div className="user-avatar-container">
+              <div className="user-avatar">
                 {user?.username?.[0]?.toUpperCase() || 'A'}
               </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ color: '#fff', fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>
-                  {user?.username || 'Admin'}
-                </div>
-                <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {user?.email || ''}
-                </div>
-                {user?.role && (
-                  <div style={{ color: 'var(--primary)', fontSize: 10, fontWeight: 700, marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    {user.role}
-                    {['cashier', 'order taker'].includes(user.role.toLowerCase()) && user.branch ? ` • ${user.branch}` : ''}
-                    {user.role.toLowerCase() === 'operator' ? ` • ${BRAND_NAME}` : ''}
-                  </div>
-                )}
+              {/* Role visible when collapsed */}
+              <div className="user-role-collapsed">
+                {user?.role || 'Admin'}
               </div>
+            </div>
+            
+            <div className="user-details">
+              <div className="user-name">
+                {user?.username || 'Admin'}
+              </div>
+              <div className="user-email">
+                {user?.email || ''}
+              </div>
+              {user?.role && (
+                <div className="user-role-expanded">
+                  {user.role}
+                  {['cashier', 'order taker'].includes(user.role.toLowerCase()) && user.branch ? ` • ${user.branch}` : ''}
+                  {user.role.toLowerCase() === 'operator' ? ` • ${BRAND_NAME}` : ''}
+                </div>
+              )}
             </div>
           </div>
           {/* Logout button */}
-          <button
-            onClick={handleLogout}
-            style={{
-              width: '100%', padding: '6px 12px',
-              background: 'rgba(255,69,58,0.1)',
-              border: '1px solid rgba(255,69,58,0.25)',
-              borderRadius: 8,
-              color: '#ff6b6b',
-              fontSize: 13, fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 8,
-              transition: 'background 0.2s',
-              marginBottom: 4,
-            }}
-            onMouseOver={e => e.currentTarget.style.background = 'rgba(255,69,58,0.2)'}
-            onMouseOut={e => e.currentTarget.style.background = 'rgba(255,69,58,0.1)'}
-          >
-            <LogOut size={16} strokeWidth={2.5} /> Logout
+          <button className="logout-btn" onClick={handleLogout}>
+            <div className="logout-icon-container">
+              <LogOut size={16} strokeWidth={2.5} />
+            </div>
+            <span className="logout-text">Logout</span>
           </button>
         </div>
       </aside>

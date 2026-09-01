@@ -883,6 +883,23 @@ export default function POS() {
 
           {/* POS Compact Header (Search + Dots + Order Types) */}
           <div className="pos-mobile-header" style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, marginTop: 0, marginBottom: 4, alignItems: 'center' }}>
+            
+            {/* Back button (Desktop only) */}
+            {window.innerWidth > 900 && customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber && (
+              <button 
+                onClick={() => setCustomerInfo(prev => ({ ...prev, tableNumber: '' }))}
+                title="Back to Tables"
+                style={{ 
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                  padding: '5px', borderRadius: 8, border: '1px solid var(--surface-2)',
+                  background: 'white', cursor: 'pointer', flexShrink: 0,
+                  color: 'var(--text-primary)'
+                }}
+              >
+                <ChevronLeft size={18} strokeWidth={2.5} />
+              </button>
+            )}
+
             <div className="pos-mobile-search" style={{ flex: '1 1 auto', minWidth: '60px', position: 'relative', display: 'flex', alignItems: 'center' }}>
               <Search className="si" size={12} style={{ position: 'absolute', left: 4, color: 'var(--text-muted)' }} />
               <input
