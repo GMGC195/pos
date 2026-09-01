@@ -1203,7 +1203,7 @@ export default function POS() {
 
           {/* Actions */}
           <div className="cart-actions">
-            <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px', width: '100%' }}>
+            <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', width: '100%' }}>
               <button
                 className={`btn ${paymentMethod === 'Hold' ? 'btn-primary' : 'btn-warning'} btn-lg`}
                 onClick={() => handlePayClick('Hold')}
@@ -1211,6 +1211,14 @@ export default function POS() {
                 disabled={processing}
               >
                 <ClipboardList size={18} /> Place Order
+              </button>
+              <button
+                className="btn btn-success btn-lg"
+                onClick={() => handlePayClick('Cash')}
+                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
+                disabled={processing}
+              >
+                <ClipboardList size={18} /> Pay & Settled
               </button>
             </div>
           </div>
