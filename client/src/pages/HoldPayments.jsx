@@ -197,16 +197,23 @@ export default function HoldPayments() {
                 style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
               />
               {isAdmin && (
-                <select
-                  value={branch}
-                  onChange={e => setBranch(e.target.value)}
-                  style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
-                >
-                  <option value="All">All Branches</option>
-                  <option value="Branch 1">Branch 1</option>
-                  <option value="Branch 2">Branch 2</option>
-                  <option value="Branch 3">Branch 3</option>
-                </select>
+                <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center' }}>
+                  {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
+                    <button
+                      key={b}
+                      onClick={() => setBranch(b)}
+                      style={{
+                        padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
+                        background: branch === b ? 'var(--surface)' : 'transparent',
+                        color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
+                        boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                        cursor: 'pointer', transition: 'all 0.2s'
+                      }}
+                    >
+                      {b === 'All' ? 'All Branches' : b}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
             <button className="btn btn-secondary btn-sm" onClick={loadHeldOrders} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><RefreshCw size={14} /> Refresh</button>
@@ -218,6 +225,7 @@ export default function HoldPayments() {
                   <th>#</th>
                   <th>Order ID</th>
                   <th>Branch</th>
+                  <th>Type</th>
                   <th>Subtotal</th>
                   <th>Grand Total</th>
                   <th>Date & Time</th>
@@ -244,6 +252,7 @@ export default function HoldPayments() {
                         </div>
                       </td>
                       <td>{o.branch || '-'}</td>
+                      <td>{o.order_type || '-'}</td>
                       <td>{CURRENCY}{parseFloat(o.subtotal).toFixed(2)}</td>
                       <td style={{ fontWeight: 700, color: 'var(--red)' }}>{CURRENCY}{parseFloat(o.grand_total).toFixed(2)}</td>
                       <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>

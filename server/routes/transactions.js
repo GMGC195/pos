@@ -8,7 +8,7 @@ router.get('/', authenticateToken, isAdmin, async (req, res) => {
   try {
     const { from, to, branch } = req.query;
     let query = `
-      SELECT t.*, o.grand_total, o.subtotal, o.tax, o.status as order_status, o.slip_number, o.is_edited, o.branch,
+      SELECT t.*, o.grand_total, o.subtotal, o.tax, o.status as order_status, o.slip_number, o.is_edited, o.branch, o.order_type,
              (SELECT string_agg(qty || 'x ' || item_name, ', ') FROM order_items WHERE order_id = o.id) as items
       FROM transactions t
       JOIN orders o ON t.order_id = o.id

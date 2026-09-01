@@ -197,6 +197,7 @@ export default function Reports({ isTodaySales = false }) {
                 <th>#</th>
                 <th>Order ID</th>
                 <th>Branch</th>
+                <th>Type</th>
                 <th>Items</th>
                 <th>Amount</th>
                 <th>Status</th>
@@ -214,6 +215,7 @@ export default function Reports({ isTodaySales = false }) {
                   <td><strong style="color:#E31837">${t.slip_number || '-'}</strong></td>
                   <td><strong>#${t.order_id}</strong> ${t.is_edited ? '<span style="font-size:10px;color:#666">(Edited)</span>' : ''}</td>
                   <td>${t.branch || '-'}</td>
+                  <td>${t.order_type || '-'}</td>
                   <td>${t.items || '-'}</td>
                   <td><strong>${CURRENCY}${parseFloat(t.amount).toFixed(2)}</strong></td>
                   <td><span class="badge ${badgeClass}">${t.payment_method === t.order_status ? t.order_status : `${t.payment_method} - ${t.order_status}`}</span></td>
@@ -453,16 +455,23 @@ export default function Reports({ isTodaySales = false }) {
               <option value="Cancelled">Cancelled</option>
               <option value="Returned">Returned</option>
             </select>
-            <select
-              value={branch}
-              onChange={e => setBranch(e.target.value)}
-              style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
-            >
-              <option value="All">All Branches</option>
-              <option value="Branch 1">Branch 1</option>
-              <option value="Branch 2">Branch 2</option>
-              <option value="Branch 3">Branch 3</option>
-            </select>
+            <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center' }}>
+              {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
+                <button
+                  key={b}
+                  onClick={() => setBranch(b)}
+                  style={{
+                    padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
+                    background: branch === b ? 'var(--surface)' : 'transparent',
+                    color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                >
+                  {b === 'All' ? 'All Branches' : b}
+                </button>
+              ))}
+            </div>
           </div>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
         </div>
@@ -474,6 +483,7 @@ export default function Reports({ isTodaySales = false }) {
                 <th>Order ID</th>
                 <th>Txn ID</th>
                 <th>Branch</th>
+                <th>Type</th>
                 <th>Items</th>
                 <th>Amount</th>
                 <th>Status</th>
@@ -501,6 +511,7 @@ export default function Reports({ isTodaySales = false }) {
                       </td>
                       <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>#{t.id}</td>
                       <td>{t.branch || '-'}</td>
+                      <td>{t.order_type || '-'}</td>
                       <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.items}>
                         {t.items || '-'}
                       </td>
@@ -646,6 +657,7 @@ export default function Reports({ isTodaySales = false }) {
                     <tr>
                       <th style={{ padding: '10px 12px' }}>#</th>
                       <th style={{ padding: '10px 12px' }}>Order ID</th>
+                      <th style={{ padding: '10px 12px' }}>Type</th>
                       <th style={{ padding: '10px 12px' }}>Items</th>
                       <th style={{ padding: '10px 12px' }}>Amount</th>
                       <th style={{ padding: '10px 12px' }}>Status</th>
@@ -660,6 +672,7 @@ export default function Reports({ isTodaySales = false }) {
                           Order #{t.order_id} / {t.slip_number}
                           {t.is_edited && <span style={{ fontSize: 10, color: '#999', marginLeft: 6 }}>(Edit)</span>}
                         </td>
+                        <td style={{ padding: '10px 12px' }}>{t.order_type || '-'}</td>
                         <td style={{ padding: '10px 12px', maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.items}>
                           {t.items || '-'}
                         </td>
