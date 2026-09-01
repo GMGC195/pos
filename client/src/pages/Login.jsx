@@ -65,7 +65,7 @@ export default function Login() {
       login(data.user, data.token)
       setIsFlipped(true)
       setTimeout(() => {
-        if (data.user?.role?.toLowerCase() === 'operator') {
+        if (data.user?.role?.trim().toLowerCase() === 'operator') {
           navigate('/attendance', { replace: true })
         } else {
           navigate('/pos', { replace: true })

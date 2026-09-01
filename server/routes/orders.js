@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { authenticateToken, isAdmin, isAdminOrCashier } = require('../middleware/auth');
 
 async function checkBranchAccess(req, orderId) {
   const role = req.user.role?.trim().toLowerCase();
@@ -377,8 +377,8 @@ router.patch('/:id/request-cancel', authenticateToken, async (req, res) => {
   }
 });
 
-// PATCH handle cancellation request (Admin Only)
-router.patch('/:id/handle-cancel-request', authenticateToken, isAdmin, async (req, res) => {
+// PATCH handle cancellation request (Admin or Cashier)
+router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, async (req, res) => {
   const { action } = req.body; // 'approve' or 'reject'
   const client = await pool.connect();
   try {

@@ -45,7 +45,7 @@ const navGroups = [
       { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Order Taker', 'Cashier'] },
       { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Order Taker', 'Cashier'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin', 'Cashier'] },
-      { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin'] },
+      { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin', 'Cashier'] },
     ]
   },
   {
@@ -283,12 +283,12 @@ export default function Layout() {
 
   const filteredNavGroups = navGroups.map(group => {
     let items = group.items.filter(item => {
-      if (user?.role?.toLowerCase() === 'developer') return true
+      if (user?.role?.trim().toLowerCase() === 'developer') return true
       if (!item.roles) return true
-      return item.roles.some(r => r.toLowerCase() === user?.role?.toLowerCase())
+      return item.roles.some(r => r.toLowerCase() === user?.role?.trim().toLowerCase())
     });
 
-    if (user?.role?.toLowerCase() === 'employee') {
+    if (user?.role?.trim().toLowerCase() === 'employee') {
       items = items.map(item => {
         if (item.to === '/attendance') {
           return { ...item, label: 'My Attendance' };
@@ -473,9 +473,9 @@ export default function Layout() {
               </div>
               {user?.role && (
                 <div className="user-role-expanded">
-                  {user.role}
-                  {['cashier', 'order taker'].includes(user.role.toLowerCase()) && user.branch ? ` • ${user.branch}` : ''}
-                  {user.role.toLowerCase() === 'operator' ? ` • ${BRAND_NAME}` : ''}
+                  {user.role.trim()}
+                  {['cashier', 'order taker'].includes(user.role.trim().toLowerCase()) && user.branch ? ` • ${user.branch}` : ''}
+                  {user.role.trim().toLowerCase() === 'operator' ? ` • ${BRAND_NAME}` : ''}
                 </div>
               )}
             </div>

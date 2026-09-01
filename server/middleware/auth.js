@@ -23,4 +23,13 @@ const isAdmin = (req, res, next) => {
   }
 };
 
-module.exports = { authenticateToken, isAdmin };
+const isAdminOrCashier = (req, res, next) => {
+  const role = req.user?.role?.toLowerCase();
+  if (role === 'admin' || role === 'developer' || role === 'cashier') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Admin or Cashier access required' });
+  }
+};
+
+module.exports = { authenticateToken, isAdmin, isAdminOrCashier };

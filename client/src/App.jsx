@@ -81,7 +81,7 @@ export default function App() {
                 <Route path="/today-sales"     element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Cashier']}><Reports isTodaySales={true} /></ProtectedRoute>} />
                 <Route path="/sales-item"      element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><SalesItem /></ProtectedRoute>} />
                 <Route path="/reports"         element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><Reports isTodaySales={false} /></ProtectedRoute>} />
-                <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><CancelRequests /></ProtectedRoute>} />
+                <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Cashier']}><CancelRequests /></ProtectedRoute>} />
                 <Route path="/stock-management" element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><StockManagement /></ProtectedRoute>} />
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><ProductCostManagement /></ProtectedRoute>} />
 
