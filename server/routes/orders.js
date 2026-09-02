@@ -5,7 +5,8 @@ const { authenticateToken, isAdmin, isAdminOrCashier } = require('../middleware/
 
 async function checkBranchAccess(req, orderId) {
   const role = req.user.role?.trim().toLowerCase();
-  if (['order taker', 'cashier'].includes(role)) {
+  const isAdmin = role === 'admin' || role === 'developer';
+  if (!isAdmin && req.user.branch) {
     const check = await pool.query('SELECT branch FROM orders WHERE id = $1', [orderId]);
     if (check.rows.length > 0 && check.rows[0].branch !== req.user.branch) {
       return false;
@@ -123,7 +124,8 @@ router.post('/', authenticateToken, async (req, res) => {
     const status = (payment_method === 'Hold' || payment_method === 'Payment Pending') ? payment_method : 'Completed';
 
     const role = req.user.role?.trim().toLowerCase();
-    const finalBranch = (role === 'order taker' || role === 'cashier') ? req.user.branch : (req.body.branch || 'Branch 1');
+    const isAdmin = role === 'admin' || role === 'developer';
+    const finalBranch = (!isAdmin && req.user.branch) ? req.user.branch : (req.body.branch || 'Branch 1');
 
     // Calculate daily resetting slip number per branch
     const slipResult = await client.query(
@@ -210,7 +212,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Branch isolation
     const role = req.user.role?.trim().toLowerCase();
-    if (role === 'order taker' || role === 'cashier') {
+    const isAdmin = role === 'admin' || role === 'developer';
+    if (!isAdmin && req.user.branch) {
       params.push(req.user.branch);
       query += ` AND o.branch = $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {

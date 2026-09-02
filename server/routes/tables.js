@@ -12,8 +12,9 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = 'SELECT * FROM tables WHERE status = $1';
     let params = ['Active'];
 
+    const isAdmin = userRole === 'admin' || userRole === 'developer';
     // If restricted role and has a branch, filter tables available in that branch
-    if (['order taker', 'cashier', 'operator'].includes(userRole) && userBranch) {
+    if (!isAdmin && userBranch) {
       params.push(userBranch);
       query += ` AND available_branches ? $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {
@@ -53,8 +54,9 @@ router.post('/', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.toLowerCase() || '';
     let branchesToSave = available_branches || ['Branch 1', 'Branch 2', 'Branch 3'];
     
-    // If order taker creates a table, restrict it to their branch only
-    if (['order taker'].includes(userRole) && req.user.branch) {
+    const isAdmin = userRole === 'admin' || userRole === 'developer';
+    // If restricted role creates a table, restrict it to their branch only
+    if (!isAdmin && req.user.branch) {
       branchesToSave = [req.user.branch];
     }
 

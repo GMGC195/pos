@@ -6,7 +6,12 @@ const { authenticateToken } = require('../middleware/auth');
 // GET comprehensive stats for Dashboard
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { branch } = req.query;
+    let { branch } = req.query;
+    const role = req.user.role?.trim().toLowerCase();
+    const isAdmin = role === 'admin' || role === 'developer';
+    if (!isAdmin && req.user.branch) {
+      branch = req.user.branch;
+    }
     let branchCond = '';
     let branchCondO = '';
     let params = [];
