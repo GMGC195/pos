@@ -2233,13 +2233,31 @@ tbody tr:hover td {
     display: block;
   }
 
-  .main-content {
-    margin-left: 0;
+  .sidebar.open .sidebar-label,
+  .sidebar.open .nav-label,
+  .sidebar.open .user-role-collapsed,
+  .sidebar.open .user-details,
+  .sidebar.open .logout-text {
+    opacity: 1;
+  }
+
+  .sidebar.open .sidebar-logo .logo-text {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .main-content,
+  .sidebar:hover ~ .main-content,
+  .sidebar.open ~ .main-content {
+    margin-left: 0 !important;
+    max-width: 100% !important;
     width: 100%;
   }
 
-  .topbar {
-    left: 0;
+  .topbar,
+  .sidebar:hover ~ .main-content .topbar,
+  .sidebar.open ~ .main-content .topbar {
+    left: 0 !important;
     padding: 0 16px;
     gap: 12px;
   }
