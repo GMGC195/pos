@@ -19,7 +19,7 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   const taker = order.order_taker || 'Guest';
   const comment = order.comments || '';
   const metaRowParts = [];
-  if (orderType === 'Dine-In' && tableNum) metaRowParts.push(`Table ${tableNum}`);
+  if (orderType === 'Dine-In' && tableNum) metaRowParts.push(`Table ${String(tableNum).replace(/^Table\s*/i, '')}`);
   if (taker) metaRowParts.push(`By: ${taker}`);
   if (comment) metaRowParts.push(`Note: ${comment}`);
   const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';

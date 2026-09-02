@@ -26,7 +26,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  ChevronLeft
+  ChevronLeft,
+  Ban
 } from 'lucide-react'
 import {
   savePendingOrder,
@@ -119,6 +120,12 @@ export default function POS() {
   const [showManageTables, setShowManageTables] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now())
   const [selectedBranch, setSelectedBranch] = useState('Branch 1')
+  
+  // Cancel Request States
+  const [cancelRequestModal, setCancelRequestModal] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [processingCancel, setProcessingCancel] = useState(false)
+  const [confirmCancelAction, setConfirmCancelAction] = useState(null)
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
@@ -168,6 +175,44 @@ export default function POS() {
       socket.off('orderUpdated', handleOrderChange);
     };
   }, [fetchActiveOrders]);
+
+  const handleRequestCancel = async () => {
+    if (!cancelReason.trim()) return toast.error('Please provide a reason')
+    setProcessingCancel(true)
+    try {
+      const formattedReason = `[CANCELLED] ${cancelReason}`
+      await axios.patch(`/api/orders/${cancelRequestModal.id}/request-cancel`, { reason: formattedReason })
+      toast.success('Cancel request sent to Cashier/Admin')
+      setCancelRequestModal(null)
+      setCancelReason('')
+      fetchActiveOrders()
+    } catch (err) {
+      toast.error('Failed to send request: ' + (err?.response?.data?.error || err.message))
+    } finally {
+      setProcessingCancel(false)
+    }
+  }
+
+  const handleActionCancel = (orderId, action) => {
+    setConfirmCancelAction({ orderId, action })
+  }
+
+  const executeActionCancel = async () => {
+    if (!confirmCancelAction) return
+    const { orderId, action } = confirmCancelAction
+    
+    setProcessingCancel(true)
+    try {
+      await axios.patch(`/api/orders/${orderId}/handle-cancel-request`, { action })
+      toast.success(action === 'approve' ? 'Order Cancelled!' : 'Request Rejected!')
+      fetchActiveOrders()
+    } catch (err) {
+      toast.error('Failed to process request: ' + (err?.response?.data?.error || err.message))
+    } finally {
+      setProcessingCancel(false)
+      setConfirmCancelAction(null)
+    }
+  }
   
   const toggleSection = (type) => {
     setExpandedSections(prev => ({ ...prev, [type]: !prev[type] }));
@@ -414,7 +459,7 @@ export default function POS() {
         payment_method: method,
         customer_name: customerInfo.name,
         customer_phone: customerInfo.phone,
-        customer_address: customerInfo.orderType === 'Dine-In' ? (customerInfo.tableNumber ? `Table ${customerInfo.tableNumber}` : 'Dine-In') : customerInfo.address,
+        customer_address: customerInfo.orderType === 'Dine-In' ? (customerInfo.tableNumber ? `Table ${String(customerInfo.tableNumber).replace(/^Table\s*/i, '')}` : 'Dine-In') : customerInfo.address,
         discount: finalDiscount,
         client_order_id: crypto.randomUUID(),
         order_type: customerInfo.orderType,
@@ -549,7 +594,7 @@ export default function POS() {
     const comment = currentInfo.comments || '';
     const customerName = currentInfo.name || '';
     const metaRowParts = [];
-    if (currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber) metaRowParts.push(`Table ${currentInfo.tableNumber}`);
+    if (currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber) metaRowParts.push(`Table ${String(currentInfo.tableNumber).replace(/^Table\s*/i, '')}`);
     if (taker) metaRowParts.push(`By: ${taker}`);
     const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
 
@@ -1102,6 +1147,9 @@ export default function POS() {
                           <div key={o.id} className="active-order-card">
                             <div className="order-head" style={{ marginBottom: 4, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                               <span style={{ fontWeight: 800, color: '#a22020', fontSize: 13 }}>Order #{o.id} | {o.slip_number}</span>
+                              {o.cancel_requested && (
+                                <span style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 800 }}>Cancel Request</span>
+                              )}
                               {o.status === 'Payment Requested' && (
                                 <span className="badge" style={{ background: 'var(--orange)', color: 'white', fontSize: 10, padding: '2px 6px' }}>Payment Pending</span>
                               )}
@@ -1122,16 +1170,30 @@ export default function POS() {
                                 ) : type === 'Takeaway' ? (
                                   <>{o.customer_name || 'Guest'}</>
                                 ) : (
-                                  <>Table: {o.table_number || (o.customer_address ? o.customer_address.replace('Table ', '') : '-')} {o.customer_name && ` | ${o.customer_name}`}</>
+                                  <>Table {String(o.table_number || (o.customer_address ? o.customer_address.replace('Table ', '') : '-')).replace(/^Table\s*/i, '')} {o.customer_name && ` | ${o.customer_name}`}</>
                                 )}
                               </div>
                               <div className="order-actions" style={{ display: 'flex', gap: 4 }}>
-                                {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
-                                  <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => loadOrderForEdit(o.id)} title="Edit"><Edit size={14} color="var(--text-muted)"/></button>
-                                )}
-                                <button className="btn btn-sm btn-secondary" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600, background: '#f5f5f5', color: '#333' }} onClick={() => setDetailOrder(o)}>Detail View</button>
-                                {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
-                                  <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700 }} onClick={() => setQuickCompleteModal(o)}>Complete</button>
+                                {o.cancel_requested ? (
+                                  ['admin', 'developer', 'cashier'].includes(user?.role?.trim().toLowerCase()) ? (
+                                    <div style={{ display: 'flex', gap: 4 }}>
+                                      <button className="btn btn-sm btn-success" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 700 }} onClick={() => handleActionCancel(o.id, 'approve')} disabled={processingCancel}>Approve</button>
+                                      <button className="btn btn-sm btn-secondary" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 700, color: 'var(--red)' }} onClick={() => handleActionCancel(o.id, 'reject')} disabled={processingCancel}>Reject</button>
+                                    </div>
+                                  ) : (
+                                    <span className="badge" style={{ background: 'var(--orange)', color: 'white', fontSize: 10, padding: '2px 6px' }}>Cancel Pending</span>
+                                  )
+                                ) : (
+                                  <>
+                                    <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => setCancelRequestModal({ id: o.id })} title="Request Cancel"><Ban size={14} color="var(--red)"/></button>
+                                    {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
+                                      <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => loadOrderForEdit(o.id)} title="Edit"><Edit size={14} color="var(--text-muted)"/></button>
+                                    )}
+                                    <button className="btn btn-sm btn-secondary" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600, background: '#f5f5f5', color: '#333' }} onClick={() => setDetailOrder(o)}>Detail View</button>
+                                    {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
+                                      <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700 }} onClick={() => setQuickCompleteModal(o)}>Complete</button>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -1381,7 +1443,7 @@ export default function POS() {
                     </span>
                     {customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber && (
                       <span style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', padding: '4px 10px', borderRadius: 6, fontSize: 13, border: '1px solid #3b82f6', fontWeight: 'bold' }}>
-                        Table {customerInfo.tableNumber}
+                        Table {String(customerInfo.tableNumber).replace(/^Table\s*/i, '')}
                       </span>
                     )}
                   </div>
@@ -1678,6 +1740,67 @@ export default function POS() {
           onClose={() => setShowManageTables(false)} 
           onTableChange={() => fetchTablesList()} 
         />
+      )}
+
+      {/* Cancel Request Modal */}
+      {cancelRequestModal && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setCancelRequestModal(null) }}>
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h3>Request Cancel</h3>
+              <button className="modal-close" onClick={() => setCancelRequestModal(null)}>✕</button>
+            </div>
+            <div style={{ padding: 20 }}>
+              <p style={{ marginBottom: 16, fontSize: 14 }}>Please provide a reason for cancelling <b>Order #{cancelRequestModal.id}</b>:</p>
+              <textarea 
+                className="form-control"
+                style={{ width: '100%', height: 100, padding: 12, borderRadius: 8, border: '1px solid var(--surface-2)', marginBottom: 20, resize: 'none' }}
+                placeholder="Type your reason here..."
+                value={cancelReason}
+                onChange={e => setCancelReason(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setCancelRequestModal(null)}>Back</button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ flex: 2, background: 'var(--red)' }} 
+                  onClick={handleRequestCancel}
+                  disabled={processingCancel}
+                >
+                  {processingCancel ? 'Sending...' : 'Send Request'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Cancel Action Modal */}
+      {confirmCancelAction && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h2>Confirm Action</h2>
+              <button className="btn-close" onClick={() => setConfirmCancelAction(null)}><X size={20} /></button>
+            </div>
+            <div className="modal-body" style={{ textAlign: 'center', padding: '20px 0' }}>
+              <p style={{ fontSize: 16, marginBottom: 20 }}>
+                Are you sure you want to <strong>{confirmCancelAction.action}</strong> this cancellation request?
+              </p>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                <button className="btn btn-secondary" style={{ padding: '10px 24px' }} onClick={() => setConfirmCancelAction(null)}>Close</button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '10px 24px', background: confirmCancelAction.action === 'approve' ? 'var(--green)' : 'var(--red)' }} 
+                  onClick={executeActionCancel}
+                  disabled={processingCancel}
+                >
+                  {processingCancel ? 'Processing...' : 'Yes, Confirm'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

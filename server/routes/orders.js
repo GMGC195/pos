@@ -191,7 +191,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // GET all orders with pagination
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { status, limit = 50 } = req.query;
+    const { status, limit = 50, cancel_requested } = req.query;
     let query = `
       SELECT o.*, 
         (SELECT json_agg(json_build_object('id', oi.item_id, 'cartId', oi.item_id, 'name', oi.item_name, 'qty', oi.qty, 'price', oi.unit_price)) 
@@ -208,6 +208,10 @@ router.get('/', authenticateToken, async (req, res) => {
         params.push(status);
         query += ` AND o.status = $${params.length}`;
       }
+    }
+
+    if (cancel_requested === 'true') {
+      query += ` AND o.cancel_requested = TRUE`;
     }
 
     // Branch isolation
@@ -369,7 +373,6 @@ router.patch('/:id/request-cancel', authenticateToken, async (req, res) => {
   try {
     const orderCheck = await pool.query('SELECT status FROM orders WHERE id = $1', [req.params.id]);
     if (orderCheck.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
-    if (orderCheck.rows[0].status !== 'Hold') return res.status(400).json({ error: 'Only held orders can be cancelled' });
 
     const result = await pool.query(
       'UPDATE orders SET cancel_requested = TRUE, cancel_reason = $1 WHERE id = $2 RETURNING *',

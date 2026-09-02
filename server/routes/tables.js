@@ -15,11 +15,11 @@ router.get('/', authenticateToken, async (req, res) => {
     const isAdmin = userRole === 'admin' || userRole === 'developer';
     // If restricted role and has a branch, filter tables available in that branch
     if (!isAdmin && userBranch) {
-      params.push(userBranch);
-      query += ` AND available_branches ? $${params.length}`;
+      params.push(`%"${userBranch}"%`);
+      query += ` AND available_branches::text LIKE $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {
-      params.push(req.query.branch);
-      query += ` AND available_branches ? $${params.length}`;
+      params.push(`%"${req.query.branch}"%`);
+      query += ` AND available_branches::text LIKE $${params.length}`;
     }
 
     query += " ORDER BY NULLIF(regexp_replace(table_number, '\\D', '', 'g'), '')::int ASC, table_number ASC";

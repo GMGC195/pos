@@ -7,24 +7,44 @@ const { authenticateToken } = require('../middleware/auth');
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { category, search } = req.query;
-    let query = `
-      SELECT i.*, c.name as category_name 
-      FROM items i
-      LEFT JOIN categories c ON i.category_id = c.id
-      WHERE 1=1
-    `;
-    const params = [];
-
     // Branch isolation for Order Taker / Operator / Cashier
     const userRole = req.user.role?.trim().toLowerCase();
     const userBranch = req.user.branch;
+    
+    let targetBranch = null;
 
     if (['order taker', 'operator', 'cashier'].includes(userRole) && userBranch) {
-      params.push(userBranch);
-      query += ` AND i.available_branches ? $${params.length}`;
+      targetBranch = userBranch;
     } else if (req.query.branch && req.query.branch !== 'All') {
-      params.push(req.query.branch);
-      query += ` AND i.available_branches ? $${params.length}`;
+      targetBranch = req.query.branch;
+    }
+
+    let query = `
+      SELECT i.*, c.name as category_name, COALESCE(s.sold_qty, 0) as sold_qty
+      FROM items i
+      LEFT JOIN categories c ON i.category_id = c.id
+      LEFT JOIN (
+        SELECT oi.item_id, SUM(oi.qty) as sold_qty
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.status = 'Completed' 
+    `;
+    const params = [];
+
+    if (targetBranch) {
+      params.push(targetBranch);
+      query += ` AND o.branch = $${params.length}`;
+    }
+    
+    query += `
+        GROUP BY oi.item_id
+      ) s ON s.item_id = i.id
+      WHERE 1=1
+    `;
+
+    if (targetBranch) {
+      params.push(`%"${targetBranch}"%`);
+      query += ` AND i.available_branches::text LIKE $${params.length}`;
     }
 
     if (category && category !== 'All') {
@@ -37,7 +57,7 @@ router.get('/', authenticateToken, async (req, res) => {
       query += ` AND i.name ILIKE $${params.length}`;
     }
 
-    query += ' ORDER BY i.id';
+    query += ' ORDER BY sold_qty DESC, i.id ASC';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {

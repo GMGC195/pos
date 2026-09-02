@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import axios from '../api'
 import { Ban, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, MessageSquare } from 'lucide-react'
 import { CURRENCY } from '../config'
@@ -14,13 +14,9 @@ export default function CancelRequests() {
 
   const loadRequests = () => {
     setLoading(true)
-    // We'll fetch all 'Hold' orders and filter for cancel_requested in frontend for simplicity
-    // or update the API to filter. Given we already updated the API, let's use it.
-    axios.get('/api/orders', { params: { status: 'Hold', limit: 500 } })
+    axios.get('/api/orders', { params: { cancel_requested: true, limit: 500 } })
       .then(res => {
-        // Filter for those with cancel_requested = true
-        const pending = res.data.filter(o => o.cancel_requested)
-        setRequests(pending)
+        setRequests(res.data)
       })
       .catch(() => toast.error('Error loading requests'))
       .finally(() => setLoading(false))
@@ -112,40 +108,49 @@ export default function CancelRequests() {
                   </td>
                 </tr>
               ) : (
-                requests.map(order => (
-                  <tr key={order.id} onClick={() => viewOrderDetail(order.id)} style={{ cursor: 'pointer' }} className="hover-row">
-                    <td><span className="badge badge-warning">Order #{order.id}</span></td>
-                    <td style={{ fontWeight: 700 }}>{CURRENCY}{parseFloat(order.grand_total).toFixed(2)}</td>
-                    <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{new Date(order.created_at).toLocaleString()}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-primary)', fontSize: 13 }}>
-                        <MessageSquare size={14} className="text-muted" />
-                        <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {order.cancel_reason || 'No reason provided'}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
-                        <button 
-                          className="btn btn-success btn-sm" 
-                          style={{ padding: '6px 12px' }}
-                          onClick={() => handleAction(order.id, 'approve')}
-                          disabled={processingId === order.id}
-                        >
-                          Approve
-                        </button>
-                        <button 
-                          className="btn btn-secondary btn-sm" 
-                          style={{ padding: '6px 12px', color: 'var(--red)' }}
-                          onClick={() => handleAction(order.id, 'reject')}
-                          disabled={processingId === order.id}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                [...new Set(requests.map(r => r.branch || 'Unknown Branch'))].map(branch => (
+                  <Fragment key={branch}>
+                    <tr>
+                      <td colSpan={5} style={{ background: 'var(--surface-2)', fontWeight: 700, textAlign: 'center', padding: '12px' }}>
+                        {branch}
+                      </td>
+                    </tr>
+                    {requests.filter(r => (r.branch || 'Unknown Branch') === branch).map(order => (
+                      <tr key={order.id} onClick={() => viewOrderDetail(order.id)} style={{ cursor: 'pointer' }} className="hover-row">
+                        <td><span className="badge badge-warning">Order #{order.id}</span></td>
+                        <td style={{ fontWeight: 700 }}>{CURRENCY}{parseFloat(order.grand_total).toFixed(2)}</td>
+                        <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{new Date(order.created_at).toLocaleString()}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-primary)', fontSize: 13 }}>
+                            <MessageSquare size={14} className="text-muted" />
+                            <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {order.cancel_reason || 'No reason provided'}
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
+                            <button 
+                              className="btn btn-success btn-sm" 
+                              style={{ padding: '6px 12px' }}
+                              onClick={() => handleAction(order.id, 'approve')}
+                              disabled={processingId === order.id}
+                            >
+                              Approve
+                            </button>
+                            <button 
+                              className="btn btn-secondary btn-sm" 
+                              style={{ padding: '6px 12px', color: 'var(--red)' }}
+                              onClick={() => handleAction(order.id, 'reject')}
+                              disabled={processingId === order.id}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))
               )}
             </tbody>

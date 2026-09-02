@@ -46,6 +46,12 @@ export default function Reports({ isTodaySales = false }) {
   const [modalPage, setModalPage] = useState(1)
   const pageSize = 10
 
+  // Cancel Request Modal States
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelOrderTarget, setCancelOrderTarget] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [processingCancel, setProcessingCancel] = useState(false)
+
   const load = () => {
     setLoading(true)
     Promise.all([
@@ -318,6 +324,33 @@ export default function Reports({ isTodaySales = false }) {
     ), { duration: Infinity, id: 'confirm-void', position: 'top-center', style: { minWidth: 320 } })
   }
 
+  const handleRequestVoid = async () => {
+    if (!cancelReason.trim()) return toast.error('Please provide a reason')
+    setProcessingCancel(true)
+    try {
+      const formattedReason = `[${cancelOrderTarget.type.toUpperCase()}] ${cancelReason}`
+      await axios.patch(`/api/orders/${cancelOrderTarget.id}/request-cancel`, { reason: formattedReason })
+      toast.success(`${cancelOrderTarget.type} request sent to Admin`)
+      setShowCancelModal(false)
+      setCancelReason('')
+      setCancelOrderTarget(null)
+      load()
+    } catch (err) {
+      toast.error('Failed to send request: ' + (err?.response?.data?.error || err.message))
+    } finally {
+      setProcessingCancel(false)
+    }
+  }
+
+  const onVoidButtonClick = (orderId, type) => {
+    if (isAdminOrDev) {
+      handleVoid(orderId, type)
+    } else {
+      setCancelOrderTarget({ id: orderId, type })
+      setShowCancelModal(true)
+    }
+  }
+
   const viewOrderDetail = async (orderId) => {
     try {
       const res = await axios.get(`/api/orders/${orderId}`)
@@ -530,12 +563,12 @@ export default function Reports({ isTodaySales = false }) {
                         {new Date(t.created_at).toLocaleString()}
                       </td>
                       <td>
-                        {(isAdminOrDev && !['Cancelled', 'Returned'].includes(t.order_status)) && (
+                        {(!['Cancelled', 'Returned'].includes(t.order_status)) && (
                           <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
                             <button 
                               className="btn btn-sm" 
                               style={{ padding: '4px 8px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: 4 }}
-                              onClick={() => handleVoid(t.order_id, 'Cancelled')}
+                              onClick={() => onVoidButtonClick(t.order_id, 'Cancelled')}
                               title="Cancel Order"
                             >
                               <Ban size={14} /> Cancel
@@ -543,7 +576,7 @@ export default function Reports({ isTodaySales = false }) {
                             <button 
                               className="btn btn-sm" 
                               style={{ padding: '4px 8px', background: 'rgba(217, 119, 6, 0.1)', color: '#d97706', border: '1px solid rgba(217, 119, 6, 0.2)', display: 'flex', alignItems: 'center', gap: 4 }}
-                              onClick={() => handleVoid(t.order_id, 'Returned')}
+                              onClick={() => onVoidButtonClick(t.order_id, 'Returned')}
                               title="Return Order"
                             >
                               <Undo2 size={14} /> Return
@@ -745,6 +778,38 @@ export default function Reports({ isTodaySales = false }) {
           order={selectedOrder} 
           onClose={() => { setShowOrderDetails(false); setSelectedOrder(null); }} 
         />
+      )}
+
+      {showCancelModal && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setShowCancelModal(false) }}>
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h3>Request {cancelOrderTarget?.type}</h3>
+              <button className="modal-close" onClick={() => setShowCancelModal(false)}>✕</button>
+            </div>
+            <div style={{ padding: 20 }}>
+              <p style={{ marginBottom: 16, fontSize: 14 }}>Please provide a reason for requesting {cancelOrderTarget?.type} of <b>Order #{cancelOrderTarget?.id}</b>:</p>
+              <textarea 
+                className="pos-search-input"
+                style={{ width: '100%', height: 100, padding: 12, borderRadius: 8, border: '1px solid var(--surface-2)', marginBottom: 20, resize: 'none' }}
+                placeholder="Manager needs to approve this request..."
+                value={cancelReason}
+                onChange={e => setCancelReason(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCancelModal(false)}>Back</button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ flex: 2, background: 'var(--orange)' }} 
+                  onClick={handleRequestVoid}
+                  disabled={processingCancel}
+                >
+                  {processingCancel ? 'Sending...' : 'Send Request'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

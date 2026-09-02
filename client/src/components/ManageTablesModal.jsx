@@ -21,6 +21,7 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
 
   // Use fixed branches for now as in Items
   const ALL_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3'];
+  const [selectedBranch, setSelectedBranch] = useState('All');
 
   const fetchTables = async () => {
     try {
@@ -157,13 +158,30 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
         </div>
 
         <div style={{ maxHeight: '50vh', overflowY: 'auto', padding: '16px' }}>
+          {isAdmin && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>Filter by Branch:</label>
+              <select 
+                value={selectedBranch} 
+                onChange={e => setSelectedBranch(e.target.value)}
+                className="form-control"
+                style={{ flex: 1, maxWidth: 200, padding: '6px 12px', fontSize: 13 }}
+              >
+                <option value="All">All Branches</option>
+                {ALL_BRANCHES.map(b => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {loading ? (
             <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Loading tables...</p>
           ) : tables.length === 0 ? (
             <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No tables found.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {tables.map(t => (
+              {tables.filter(t => !isAdmin || selectedBranch === 'All' || (t.available_branches || []).includes(selectedBranch)).map(t => (
                 <div key={t.id} style={{ display: 'flex', flexDirection: 'column', padding: '12px', border: '1px solid var(--surface-2)', borderRadius: 8 }}>
                   {editingId === t.id ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

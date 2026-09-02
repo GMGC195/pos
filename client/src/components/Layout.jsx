@@ -255,7 +255,7 @@ export default function Layout() {
     }
   }, [isNotifOpen])
 
-  const pageTitle = {
+  let currentTitle = {
     '/': 'Dashboard Overview',
     '/pos': 'Order Taking',
     '/inventory': 'Add Item',
@@ -275,6 +275,15 @@ export default function Layout() {
     '/help-support': 'Help & Support Center',
     '/edited-logs': 'Edit Attendance Audit Logs'
   }[location.pathname] || `${BRAND_NAME} Pro`
+
+  if (location.pathname === '/pos' && ['cashier', 'order taker'].includes(user?.role?.trim().toLowerCase()) && user?.branch) {
+    const shortBranch = user.branch.replace(/Branch\s*/i, 'B')
+    currentTitle = (
+      <span>
+        Order Taking - <span className="branch-full">{user.branch}</span><span className="branch-short">{shortBranch}</span>
+      </span>
+    )
+  }
 
   const handleLogout = () => {
     logout()
@@ -388,6 +397,18 @@ export default function Layout() {
 
   return (
     <div className="app-layout">
+      <style>
+        {`
+          @media (max-width: 900px) {
+            .branch-full { display: none !important; }
+            .branch-short { display: inline !important; }
+          }
+          @media (min-width: 901px) {
+            .branch-full { display: inline !important; }
+            .branch-short { display: none !important; }
+          }
+        `}
+      </style>
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -505,7 +526,7 @@ export default function Layout() {
               <Menu size={20} />
             </button>
             <div>
-              <div className="page-title">{pageTitle}</div>
+              <div className="page-title">{currentTitle}</div>
               <div className="page-subtitle">
                 {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
               </div>

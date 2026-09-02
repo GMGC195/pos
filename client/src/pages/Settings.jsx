@@ -58,6 +58,7 @@ export default function Settings() {
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [userSearchTerm, setUserSearchTerm] = useState('')
   const [userRoleFilter, setUserRoleFilter] = useState('All')
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState(null)
 
   useEffect(() => {
     const handleOutsideClick = (e) => {
@@ -149,8 +150,12 @@ export default function Settings() {
   const handleCreateUser = async (e) => {
     e.preventDefault()
     setLoading(true)
+    const payload = { ...userForm };
+    if (['Order Taker', 'Cashier'].includes(payload.role) && !payload.branch) payload.branch = 'Branch 1';
+    if (payload.role === 'Operator' && !payload.branch) payload.branch = 'Restaurant 1';
+    
     try {
-      await api.post('/api/auth/users', userForm)
+      await api.post('/api/auth/users', payload)
       toast.success('User created successfully')
       setIsAddingUser(false)
       setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '' })
@@ -168,8 +173,12 @@ export default function Settings() {
   const handleUpdateUser = async (e) => {
     e.preventDefault()
     setLoading(true)
+    const payload = { ...userForm };
+    if (['Order Taker', 'Cashier'].includes(payload.role) && !payload.branch) payload.branch = 'Branch 1';
+    if (payload.role === 'Operator' && !payload.branch) payload.branch = 'Restaurant 1';
+    
     try {
-      await api.put(`/api/auth/users/${editingUser.id}`, userForm)
+      await api.put(`/api/auth/users/${editingUser.id}`, payload)
       toast.success('User updated successfully')
       setEditingUser(null)
       setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '' })
@@ -184,14 +193,20 @@ export default function Settings() {
     }
   }
 
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to delete this user?')) return
+  const handleDeleteUser = (userId) => {
+    setConfirmDeleteUser(userId)
+  }
+
+  const executeDeleteUser = async () => {
+    if (!confirmDeleteUser) return
     try {
-      await api.delete(`/api/auth/users/${userId}`)
+      await api.delete(`/api/auth/users/${confirmDeleteUser}`)
       toast.success('User deleted')
       fetchUsers()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Deletion failed')
+    } finally {
+      setConfirmDeleteUser(null)
     }
   }
 
@@ -1254,6 +1269,33 @@ export default function Settings() {
           }
         }
       `}</style>
+
+      {/* Confirm Delete User Modal */}
+      {confirmDeleteUser && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h2>Confirm Deletion</h2>
+              <button className="btn-close" onClick={() => setConfirmDeleteUser(null)}><X size={20} /></button>
+            </div>
+            <div className="modal-body" style={{ textAlign: 'center', padding: '20px 0' }}>
+              <p style={{ fontSize: 16, marginBottom: 20 }}>
+                Are you sure you want to delete this user?
+              </p>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                <button className="btn btn-secondary" style={{ padding: '10px 24px' }} onClick={() => setConfirmDeleteUser(null)}>Cancel</button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '10px 24px', background: 'var(--red)' }} 
+                  onClick={executeDeleteUser}
+                >
+                  Yes, Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
