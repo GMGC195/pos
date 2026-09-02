@@ -213,7 +213,10 @@ router.get('/', authenticateToken, async (req, res) => {
     // Branch isolation
     const role = req.user.role?.trim().toLowerCase();
     const isAdmin = role === 'admin' || role === 'developer';
-    if (!isAdmin && req.user.branch) {
+    if (!isAdmin) {
+      if (!req.user?.branch || req.user.branch === 'All') {
+        return res.json([]);
+      }
       params.push(req.user.branch);
       query += ` AND o.branch = $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {

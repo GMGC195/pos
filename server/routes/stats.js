@@ -9,7 +9,18 @@ router.get('/', authenticateToken, async (req, res) => {
     let { branch } = req.query;
     const role = req.user.role?.trim().toLowerCase();
     const isAdmin = role === 'admin' || role === 'developer';
-    if (!isAdmin && req.user.branch) {
+    if (!isAdmin) {
+      if (!req.user?.branch || req.user.branch === 'All') {
+        return res.json({
+          totalSale: 0,
+          dailyRevenue: 0,
+          totalProductCost: 0,
+          totalOrders: 0,
+          guestsToday: 0,
+          last7Days: [],
+          topItems: []
+        });
+      }
       branch = req.user.branch;
     }
     let branchCond = '';

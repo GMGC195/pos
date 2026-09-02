@@ -7,9 +7,14 @@ const { authenticateToken, isAdmin } = require('../middleware/auth');
 router.get('/', authenticateToken, async (req, res) => {
   try {
     let { from, to, branch } = req.query;
-    const role = req.user?.role?.toLowerCase();
+    const role = req.user?.role?.trim().toLowerCase();
     const isAdminRole = role === 'admin' || role === 'developer';
-    if (!isAdminRole) branch = req.user?.branch;
+    if (!isAdminRole) {
+      if (!req.user?.branch || req.user.branch === 'All') {
+        return res.json([]);
+      }
+      branch = req.user.branch;
+    }
     let query = `
       SELECT t.*, o.grand_total, o.subtotal, o.tax, o.status as order_status, o.slip_number, o.is_edited, o.branch, o.order_type,
              (SELECT string_agg(qty || 'x ' || item_name, ', ') FROM order_items WHERE order_id = o.id) as items
@@ -45,9 +50,14 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/summary', authenticateToken, async (req, res) => {
   try {
     let { from, to, branch } = req.query;
-    const role = req.user?.role?.toLowerCase();
+    const role = req.user?.role?.trim().toLowerCase();
     const isAdminRole = role === 'admin' || role === 'developer';
-    if (!isAdminRole) branch = req.user?.branch;
+    if (!isAdminRole) {
+      if (!req.user?.branch || req.user.branch === 'All') {
+        return res.json([]);
+      }
+      branch = req.user.branch;
+    }
     let whereClause = 'WHERE 1=1';
     const params = [];
 
