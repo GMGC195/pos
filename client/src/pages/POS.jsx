@@ -606,7 +606,8 @@ export default function POS() {
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 0 10px 4px 15px; /* Reduced top/bottom padding */
+      padding: 0 15mm 4px 15px;
+      margin-right: 10mm;
     }
     .center { text-align: center; }
     h2 { font-size: 14px; font-weight: bold; margin-bottom: 4px; }

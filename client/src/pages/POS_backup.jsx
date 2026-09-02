@@ -419,9 +419,9 @@ export default function POS() {
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 2px 10px 6px 15px;
-    }
-    .center { text-align: center; }
+      padding: 0 15mm 4px 15px;
+      margin-right: 10mm;
+    }.center { text-align: center; }
     h2 { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
     .sub { font-size: 11px; color: #000; margin-bottom: 2px; }
     .divider {

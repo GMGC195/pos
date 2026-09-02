@@ -110,7 +110,8 @@ ${parseFloat(order.discount || 0) > 0 ? `<div class="total-row"><span>Discount</
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 0 10px 4px 15px; /* Reduced top padding */
+      padding: 0 15mm 4px 15px;
+      margin-right: 10mm;
     }
     .center { text-align: center; }
     .divider { border-top: 1px dashed #000; margin: 4px 0; } /* Reduced margin */

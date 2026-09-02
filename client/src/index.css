@@ -1865,6 +1865,9 @@ tbody tr:hover td {
     left: 0;
     width: 72mm;
     padding: 10mm;
+    padding-right: 15mm;
+    margin-right: 10mm;
+    box-sizing: border-box;
     font-family: Tahoma, Geneva, sans-serif;
     font-size: 12px;
   }
