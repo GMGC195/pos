@@ -1,9 +1,13 @@
-const pool = require('./db');
-async function test() {
-  const { rows } = await pool.query("SELECT id, username, role, branch FROM users");
-  console.log(rows);
-  const items = await pool.query("SELECT id, name, available_branches FROM items LIMIT 5");
-  console.log(items.rows);
-  process.exit(0);
-}
-test();
+const { Pool } = require('pg');
+const pool = new Pool({ connectionString: 'postgresql://postgres:postgres@localhost:5432/pizza_shop' });
+
+pool.query("SELECT id, username, role, branch FROM users WHERE username LIKE '%Umer%' OR username LIKE '%01A%' ORDER BY id DESC")
+  .then(res => {
+    console.log("DB RESULT:");
+    console.log(JSON.stringify(res.rows, null, 2));
+    process.exit(0);
+  })
+  .catch(err => {
+    console.error(err);
+    process.exit(1);
+  });

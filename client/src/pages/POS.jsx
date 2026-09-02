@@ -796,6 +796,15 @@ export default function POS() {
 
   const now = new Date()
 
+  if (['cashier', 'order taker'].includes(user?.role?.trim().toLowerCase()) && !user?.branch) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 'calc(100vh - 80px)', gap: 16 }}>
+        <h2 style={{ fontSize: 24, color: 'var(--text-primary)', fontWeight: 800 }}>0 Menu Items</h2>
+        <p style={{ fontSize: 16, color: 'var(--text-secondary)' }}>You have not been assigned any branch.</p>
+      </div>
+    )
+  }
+
   return (
     <>
       <div className="pos-layout">

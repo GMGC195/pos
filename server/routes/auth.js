@@ -110,9 +110,13 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
     }
 
     const password_hash = await bcrypt.hash(password, 10);
+    let finalBranch = branch;
+    if (['Order Taker', 'Cashier'].includes(role) && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Branch 1';
+    if (role === 'Operator' && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Restaurant 1';
+
     const result = await pool.query(
       'INSERT INTO users (username, email, password_hash, role, shift, branch) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, username, email, role, shift, branch',
-      [username, email, password_hash, role || 'Operator', shift || null, branch || null]
+      [username, email, password_hash, role || 'Operator', shift || null, finalBranch || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -136,8 +140,12 @@ router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
       return res.status(403).json({ error: 'Only Developers can modify Developer accounts' });
     }
 
+    let finalBranch = branch;
+    if (['Order Taker', 'Cashier'].includes(role) && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Branch 1';
+    if (role === 'Operator' && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Restaurant 1';
+
     let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4, branch = $5';
-    const params = [username, email, role, shift || null, branch || null, id];
+    const params = [username, email, role, shift || null, finalBranch || null, id];
 
     if (password) {
       const password_hash = await bcrypt.hash(password, 10);

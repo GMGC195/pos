@@ -1,4 +1,5 @@
 import { useEffect, useState, Fragment } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import axios from '../api'
 import { Ban, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, MessageSquare } from 'lucide-react'
 import { CURRENCY } from '../config'
@@ -6,6 +7,7 @@ import toast from 'react-hot-toast'
 import OrderDetailModal from '../components/OrderDetailModal'
 
 export default function CancelRequests() {
+  const { user } = useAuth()
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState(null)
@@ -130,22 +132,28 @@ export default function CancelRequests() {
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
-                            <button 
-                              className="btn btn-success btn-sm" 
-                              style={{ padding: '6px 12px' }}
-                              onClick={() => handleAction(order.id, 'approve')}
-                              disabled={processingId === order.id}
-                            >
-                              Approve
-                            </button>
-                            <button 
-                              className="btn btn-secondary btn-sm" 
-                              style={{ padding: '6px 12px', color: 'var(--red)' }}
-                              onClick={() => handleAction(order.id, 'reject')}
-                              disabled={processingId === order.id}
-                            >
-                              Reject
-                            </button>
+                            {order.status === 'Completed' && !['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) ? (
+                              <span className="badge badge-warning" style={{ fontSize: 11, padding: '4px 8px' }}>Request Pending (Admin Approval Required)</span>
+                            ) : (
+                              <>
+                                <button 
+                                  className="btn btn-success btn-sm" 
+                                  style={{ padding: '6px 12px' }}
+                                  onClick={() => handleAction(order.id, 'approve')}
+                                  disabled={processingId === order.id}
+                                >
+                                  Approve
+                                </button>
+                                <button 
+                                  className="btn btn-secondary btn-sm" 
+                                  style={{ padding: '6px 12px', color: 'var(--red)' }}
+                                  onClick={() => handleAction(order.id, 'reject')}
+                                  disabled={processingId === order.id}
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -420,7 +420,20 @@ export default function Settings() {
                         <label>Role</label>
                         <select 
                           value={userForm.role}
-                          onChange={e => setUserForm({...userForm, role: e.target.value, shift: e.target.value === 'Operator' ? userForm.shift : ''})}
+                          onChange={e => {
+                            const newRole = e.target.value;
+                            let newBranch = userForm.branch;
+                            if (['Order Taker', 'Cashier'].includes(newRole) && (!newBranch || newBranch.startsWith('Restaurant'))) newBranch = 'Branch 1';
+                            else if (newRole === 'Operator' && (!newBranch || newBranch.startsWith('Branch'))) newBranch = 'Restaurant 1';
+                            else if (!['Order Taker', 'Cashier', 'Operator', 'Employee'].includes(newRole)) newBranch = '';
+                            
+                            setUserForm({
+                              ...userForm, 
+                              role: newRole, 
+                              shift: newRole === 'Operator' ? (userForm.shift || 'Morning') : '',
+                              branch: newBranch
+                            });
+                          }}
                         >
                           <option value="Admin">Admin</option>
                           <option value="Order Taker">Order Taker</option>
