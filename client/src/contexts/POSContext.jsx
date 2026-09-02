@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import axios from '../api'
 import { STORAGE_TOKEN_KEY } from '../branding'
 import { 
@@ -23,6 +23,7 @@ export function POSProvider({ children }) {
   const [activeCategory, setActiveCategory] = useState('All')
   const [inventoryCategory, setInventoryCategory] = useState('All')
   const [search, setSearch] = useState('')
+  const retryTimerRef = useRef(null)
 
   const loadData = useCallback(async (force = false) => {
     if (isDataLoaded && !force) return
@@ -31,6 +32,12 @@ export function POSProvider({ children }) {
     const token = localStorage.getItem(STORAGE_TOKEN_KEY)
     if (!token) return
     
+    // Clear any existing retry timer to prevent overlaps
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+
     setLoading(true)
     try {
       // Load categories
@@ -40,6 +47,8 @@ export function POSProvider({ children }) {
 
       // Load all items (for general search/caching)
       const itemsRes = await axios.get('/api/items')
+      
+      // Some times network returns empty array due to transient issues, if so we might retry, but let's stick to true network failure for now.
       setItems(itemsRes.data)
       saveCachedMenuItems(itemsRes.data).catch(console.error)
 
@@ -51,6 +60,12 @@ export function POSProvider({ children }) {
       
       const cachedItems = await getCachedMenuItems()
       if (cachedItems?.length) setItems(cachedItems)
+      
+      // Automatically retry after 30 seconds on failure
+      retryTimerRef.current = setTimeout(() => {
+        console.log('Retrying fetching POS data...')
+        loadData(true)
+      }, 30000)
     } finally {
       setLoading(false)
     }
@@ -60,6 +75,12 @@ export function POSProvider({ children }) {
   useEffect(() => {
     if (user) {
       loadData()
+    }
+    
+    return () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current)
+      }
     }
   }, [user, loadData])
 

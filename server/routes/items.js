@@ -15,9 +15,12 @@ router.get('/', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    // Branch isolation for Order Taker / Operator
-    if (['order taker', 'operator', 'cashier'].includes(req.user.role?.trim().toLowerCase())) {
-      params.push(req.user.branch);
+    // Branch isolation for Order Taker / Operator / Cashier
+    const userRole = req.user.role?.trim().toLowerCase();
+    const userBranch = req.user.branch;
+
+    if (['order taker', 'operator', 'cashier'].includes(userRole) && userBranch) {
+      params.push(userBranch);
       query += ` AND i.available_branches ? $${params.length}`;
     } else if (req.query.branch && req.query.branch !== 'All') {
       params.push(req.query.branch);
@@ -61,7 +64,8 @@ router.post('/', authenticateToken, async (req, res) => {
   const { category_id, name, price, image_url, size_options, status, short_code } = req.body;
   try {
     let available_branches = ['Branch 1', 'Branch 2', 'Branch 3'];
-    if (['order taker', 'operator', 'cashier'].includes(req.user.role?.trim().toLowerCase())) {
+    const userRole = req.user.role?.trim().toLowerCase();
+    if (['order taker', 'operator', 'cashier'].includes(userRole) && req.user.branch) {
       available_branches = [req.user.branch];
     }
 

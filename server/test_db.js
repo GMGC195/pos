@@ -1,13 +1,9 @@
 const pool = require('./db');
-
-(async () => {
-  try {
-    console.log('Attempting to connect to DB...');
-    const res = await pool.query('SELECT NOW()');
-    console.log('✅ Connection successful:', res.rows[0]);
-    process.exit(0);
-  } catch (err) {
-    console.error('❌ Connection failed:', err);
-    process.exit(1);
-  }
-})();
+async function test() {
+  const { rows } = await pool.query("SELECT id, username, role, branch FROM users");
+  console.log(rows);
+  const items = await pool.query("SELECT id, name, available_branches FROM items LIMIT 5");
+  console.log(items.rows);
+  process.exit(0);
+}
+test();
