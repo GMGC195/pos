@@ -321,7 +321,7 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
 });
 
 // PATCH cancel or return order
-router.patch('/:id/void', authenticateToken, isAdmin, async (req, res) => {
+router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) => {
   const { type } = req.body;
   const updateTo = ['Cancelled', 'Returned'].includes(type) ? type : 'Cancelled';
 

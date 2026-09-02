@@ -306,7 +306,7 @@ export default function HoldPayments() {
                                   <Pencil size={16} color="var(--text-secondary)" /> 
                                   <span>Edit Order</span>
                                 </button>
-                                {isAdmin ? (
+                                {isAdmin || role === 'cashier' ? (
                                   <>
                                     <div style={{ height: 1, background: 'var(--surface-2)', margin: '4px' }} />
                                     <button onClick={() => handleCancel(o.id)} className="dropdown-item danger" style={{ color: 'var(--red)' }}>

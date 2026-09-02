@@ -530,7 +530,7 @@ export default function Reports({ isTodaySales = false }) {
                         {new Date(t.created_at).toLocaleString()}
                       </td>
                       <td>
-                        {(!['Cancelled', 'Returned'].includes(t.order_status)) && (
+                        {(isAdminOrDev && !['Cancelled', 'Returned'].includes(t.order_status)) && (
                           <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
                             <button 
                               className="btn btn-sm" 
