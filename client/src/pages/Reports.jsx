@@ -15,7 +15,10 @@ import {
   ClipboardList, 
   Lock,
   Eye,
-  RefreshCw
+  RefreshCw,
+  History,
+  ChevronRight,
+  X
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import OrderDetailModal from '../components/OrderDetailModal'
@@ -52,11 +55,23 @@ export default function Reports({ isTodaySales = false }) {
   const [cancelReason, setCancelReason] = useState('')
   const [processingCancel, setProcessingCancel] = useState(false)
 
+  // Closing Modal States
+  const [showClosingModal, setShowClosingModal] = useState(false)
+  const [closingType, setClosingType] = useState(null) // 'Shift' | 'Daily'
+  const [closingProcessing, setClosingProcessing] = useState(false)
+
+  // History Modal States
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [closingHistory, setClosingHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyDate, setHistoryDate] = useState(today())
+  const [selectedHistoryReport, setSelectedHistoryReport] = useState(null)
+
   const load = () => {
     setLoading(true)
     Promise.all([
-      axios.get('/api/transactions', { params: { from, to, branch } }),
-      axios.get('/api/transactions/summary', { params: { from, to, branch } }),
+      axios.get('/api/transactions', { params: { from, to, branch, unclosed_only: isTodaySales } }),
+      axios.get('/api/transactions/summary', { params: { from, to, branch, unclosed_only: isTodaySales } }),
     ])
       .then(([txRes, sumRes]) => {
         setTransactions(txRes.data)
@@ -294,6 +309,94 @@ export default function Reports({ isTodaySales = false }) {
         </div>
       </div>
     ), { duration: Infinity, id: 'confirm-daily', position: 'top-center', style: { minWidth: 320 } })
+  }
+
+  const printClosingReport = (report) => {
+    const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '-'
+    const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString() : '-'
+    const items = Array.isArray(report.items_summary) ? report.items_summary : JSON.parse(report.items_summary || '[]')
+    const printWindow = window.open('', '', 'width=500,height=700')
+    const html = `
+      <html><head><title>${report.closing_type} Closing Report</title>
+      <style>
+        body { font-family: 'Courier New', monospace; padding: 20px; max-width: 380px; margin: 0 auto; font-size: 13px; color: #111; }
+        h2 { text-align: center; font-size: 16px; margin: 0 0 4px; }
+        .center { text-align: center; }
+        .divider { border-top: 1px dashed #999; margin: 10px 0; }
+        .row { display: flex; justify-content: space-between; padding: 2px 0; }
+        .label { color: #555; }
+        .bold { font-weight: bold; }
+        .highlight { color: #c0392b; font-weight: bold; font-size: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        th { text-align: left; border-bottom: 1px solid #ddd; padding: 4px 0; font-size: 12px; color: #555; }
+        td { padding: 4px 0; font-size: 13px; }
+        td:last-child { text-align: right; }
+      </style></head><body>
+      <h2>${report.closing_type === 'Daily' ? '⚡ DAILY CLOSING REPORT' : '🔄 SHIFT CLOSING REPORT'}</h2>
+      <p class="center" style="color:#666;font-size:12px;margin:0 0 10px">${fmtDate(report.login_time)}</p>
+      <div class="divider"></div>
+      <div class="row"><span class="label">Cashier:</span><span class="bold">${report.cashier_name}</span></div>
+      <div class="row"><span class="label">Branch:</span><span>${report.branch}</span></div>
+      <div class="row"><span class="label">Login Time:</span><span>${fmtTime(report.login_time)}</span></div>
+      <div class="row"><span class="label">Logout Time:</span><span>${fmtTime(report.logout_time)}</span></div>
+      <div class="row"><span class="label">Active Time:</span><span class="bold">${report.total_active_time}</span></div>
+      <div class="divider"></div>
+      <div class="row"><span class="label">Total Orders:</span><span class="bold">${report.total_orders}</span></div>
+      <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
+      <div class="divider"></div>
+      <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
+      <table>
+        <thead><tr><th>Category</th><th style="text-align:center">Qty</th><th>Amount</th></tr></thead>
+        <tbody>
+          ${items.map(i => `
+            <tr>
+              <td>${i.category}</td>
+              <td style="text-align:center">${i.qty}</td>
+              <td>${CURRENCY}${parseFloat(i.amount || 0).toFixed(2)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="divider"></div>
+      <p class="center" style="font-size:11px;color:#888;margin-top:12px">Generated: ${new Date().toLocaleString()}</p>
+    </body></html>`
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.focus()
+    setTimeout(() => { printWindow.print(); printWindow.close(); }, 300)
+  }
+
+  const handleClosingConfirm = async () => {
+    if (!closingType) return
+    setClosingProcessing(true)
+    try {
+      const endpoint = closingType === 'Shift' ? '/api/orders/shift-close' : '/api/orders/daily-closing'
+      const res = await axios.post(endpoint, { branch })
+      toast.success(`${closingType} closing complete!`)
+      setShowClosingModal(false)
+      setClosingType(null)
+      load()
+      // Auto-print the report
+      if (res.data?.report) {
+        setTimeout(() => printClosingReport(res.data.report), 400)
+      }
+    } catch (err) {
+      toast.error('Error: ' + (err?.response?.data?.error || err.message))
+    } finally {
+      setClosingProcessing(false)
+    }
+  }
+
+  const loadClosingHistory = async (date) => {
+    setHistoryLoading(true)
+    try {
+      const res = await axios.get('/api/orders/closings', { params: { date: date || historyDate } })
+      setClosingHistory(res.data)
+    } catch (err) {
+      toast.error('Failed to load history')
+    } finally {
+      setHistoryLoading(false)
+    }
   }
 
   const handleDirectVoidWithReason = async () => {
@@ -595,16 +698,22 @@ export default function Reports({ isTodaySales = false }) {
         )}
       </div>
 
-      {/* Daily Closing Button */}
-      <div style={{
-        position: 'fixed', bottom: 32, right: 32, zIndex: 50
-      }}>
+      {/* Closing FAB Buttons */}
+      <div style={{ position: 'fixed', bottom: 32, right: 32, zIndex: 50, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <button
+          className="btn btn-secondary btn-lg"
+          onClick={() => { setShowHistoryModal(true); loadClosingHistory(historyDate); }}
+          style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.15)', gap: 8, display: 'flex', alignItems: 'center', fontSize: 14 }}
+          title="View Past Closing Reports"
+        >
+          <History size={18} /> Past Reports
+        </button>
         <button
           className="btn btn-danger btn-lg"
-          onClick={handleDailyClosing}
+          onClick={() => setShowClosingModal(true)}
           style={{ boxShadow: '0 8px 24px rgba(239,68,68,0.4)', gap: 10, display: 'flex', alignItems: 'center' }}
         >
-          <Lock size={18} /> Daily Closing
+          <Lock size={18} /> Closing
         </button>
       </div>
 
@@ -746,6 +855,189 @@ export default function Reports({ isTodaySales = false }) {
           order={selectedOrder} 
           onClose={() => { setShowOrderDetails(false); setSelectedOrder(null); }} 
         />
+      )}
+
+      {/* ── CLOSING MODAL ── */}
+      {showClosingModal && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) { setShowClosingModal(false); setClosingType(null); } }}>
+          <div className="modal" style={{ maxWidth: 460, padding: 28 }}>
+            <div className="modal-header" style={{ marginBottom: 20 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Lock size={20} /> Closing</h3>
+              <button className="modal-close" onClick={() => { setShowClosingModal(false); setClosingType(null); }}>✕</button>
+            </div>
+
+            <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20 }}>
+              Select the type of closing to perform. <b>Hold orders</b> are never affected.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
+              {/* Shift Close */}
+              <div
+                onClick={() => setClosingType('Shift')}
+                style={{
+                  border: closingType === 'Shift' ? '2px solid var(--primary)' : '2px solid var(--surface-2)',
+                  borderRadius: 12,
+                  padding: 16,
+                  cursor: 'pointer',
+                  background: closingType === 'Shift' ? 'rgba(227,24,55,0.04)' : 'white',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 8 }}>🔄</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6, color: closingType === 'Shift' ? 'var(--primary)' : 'var(--text-primary)' }}>Shift Close</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>Clears <b>your shift's</b> sales from the screen. Saves your personal summary report (X-Report).</div>
+              </div>
+
+              {/* Daily Close */}
+              <div
+                onClick={() => setClosingType('Daily')}
+                style={{
+                  border: closingType === 'Daily' ? '2px solid #7c3aed' : '2px solid var(--surface-2)',
+                  borderRadius: 12,
+                  padding: 16,
+                  cursor: 'pointer',
+                  background: closingType === 'Daily' ? 'rgba(124,58,237,0.04)' : 'white',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 8 }}>⚡</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6, color: closingType === 'Daily' ? '#7c3aed' : 'var(--text-primary)' }}>Daily Close</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>Clears <b>all today's</b> sales from the screen. Finalizes the full-day summary (Z-Report).</div>
+              </div>
+            </div>
+
+            {closingType && (
+              <div style={{ background: closingType === 'Daily' ? '#faf5ff' : '#fff1f2', border: `1px solid ${closingType === 'Daily' ? '#ddd6fe' : '#fca5a5'}`, borderRadius: 8, padding: 12, marginBottom: 20, fontSize: 13 }}>
+                ⚠️ This will <b>clear completed orders</b> from the active screen and <b>print a closing report</b> automatically.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => { setShowClosingModal(false); setClosingType(null); }} disabled={closingProcessing}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 2, background: closingType === 'Daily' ? '#7c3aed' : 'var(--primary)', opacity: !closingType ? 0.5 : 1 }}
+                onClick={handleClosingConfirm}
+                disabled={!closingType || closingProcessing}
+              >
+                {closingProcessing ? 'Processing...' : `Confirm ${closingType || ''} Closing & Print`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── HISTORY MODAL ── */}
+      {showHistoryModal && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) { setShowHistoryModal(false); setSelectedHistoryReport(null); } }}>
+          <div className="modal" style={{ maxWidth: 720, width: '95vw', padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header" style={{ marginBottom: 16 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><History size={20} /> Past Closing Reports</h3>
+              <button className="modal-close" onClick={() => { setShowHistoryModal(false); setSelectedHistoryReport(null); }}>✕</button>
+            </div>
+
+            {/* Date filter */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
+              <input
+                type="date"
+                value={historyDate}
+                onChange={e => setHistoryDate(e.target.value)}
+                className="filter-input"
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-primary btn-sm" onClick={() => loadClosingHistory(historyDate)}>Search</button>
+            </div>
+
+            {historyLoading ? (
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading...</div>
+            ) : selectedHistoryReport ? (
+              /* ── Detail View ── */
+              <div>
+                <button className="btn btn-secondary btn-sm" style={{ marginBottom: 16 }} onClick={() => setSelectedHistoryReport(null)}>← Back to List</button>
+                <div style={{ background: '#f8f9fa', borderRadius: 10, padding: 20, border: '1px solid var(--surface-2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <span style={{ fontWeight: 800, fontSize: 16 }}>{selectedHistoryReport.closing_type === 'Daily' ? '⚡ Daily Closing' : '🔄 Shift Closing'}</span>
+                      <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--text-muted)' }}>{new Date(selectedHistoryReport.created_at).toLocaleString()}</span>
+                    </div>
+                    <button className="btn btn-primary btn-sm" onClick={() => printClosingReport(selectedHistoryReport)}>🖨️ Reprint</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}>
+                    {[
+                      { l: 'Cashier', v: selectedHistoryReport.cashier_name },
+                      { l: 'Branch', v: selectedHistoryReport.branch },
+                      { l: 'Login', v: new Date(selectedHistoryReport.login_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) },
+                      { l: 'Logout', v: new Date(selectedHistoryReport.logout_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) },
+                      { l: 'Active Time', v: selectedHistoryReport.total_active_time },
+                      { l: 'Total Orders', v: selectedHistoryReport.total_orders },
+                    ].map(({ l, v }) => (
+                      <div key={l} style={{ background: 'white', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--surface-2)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{l}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{v}</div>
+                      </div>
+                    ))}
+                    <div style={{ background: '#fff1f2', padding: '10px 14px', borderRadius: 8, border: '1px solid #fca5a5' }}>
+                      <div style={{ fontSize: 11, color: 'var(--primary)', marginBottom: 4 }}>Total Sales</div>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--primary)' }}>{CURRENCY}{parseFloat(selectedHistoryReport.total_sales || 0).toFixed(2)}</div>
+                    </div>
+                  </div>
+                  <h4 style={{ fontSize: 13, marginBottom: 8 }}>Sales by Category</h4>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: 'white', borderBottom: '2px solid var(--surface-2)' }}>
+                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Category</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(Array.isArray(selectedHistoryReport.items_summary) ? selectedHistoryReport.items_summary : JSON.parse(selectedHistoryReport.items_summary || '[]')).map((item, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                          <td style={{ padding: '8px 10px' }}>{item.category}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center' }}>{item.qty}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{CURRENCY}{parseFloat(item.amount || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              /* ── List View ── */
+              <div>
+                {closingHistory.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No closing reports found for this date.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {closingHistory.map(c => (
+                      <div
+                        key={c.id}
+                        onClick={() => setSelectedHistoryReport(c)}
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', background: '#f8f9fa', borderRadius: 10, border: '1px solid var(--surface-2)', cursor: 'pointer', transition: 'background 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#f0f0f0'}
+                        onMouseLeave={e => e.currentTarget.style.background = '#f8f9fa'}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ fontSize: 22 }}>{c.closing_type === 'Daily' ? '⚡' : '🔄'}</span>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{c.closing_type} Closing — {c.cashier_name}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                              {new Date(c.login_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} → {new Date(c.logout_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} · Active: {c.total_active_time} · {c.total_orders} orders
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ fontWeight: 800, color: 'var(--primary)', fontSize: 15 }}>{CURRENCY}{parseFloat(c.total_sales || 0).toFixed(2)}</span>
+                          <ChevronRight size={18} color="var(--text-muted)" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {showCancelModal && (

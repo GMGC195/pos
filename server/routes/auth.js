@@ -43,6 +43,9 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Update last_login
+    await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
+
     // Generate JWT token
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch, must_change_password: user.must_change_password, employee_id: user.employee_id },

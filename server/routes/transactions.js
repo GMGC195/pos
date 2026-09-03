@@ -36,6 +36,9 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(branch);
       query += ` AND o.branch = $${params.length}`;
     }
+    if (req.query.unclosed_only === 'true') {
+      query += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
+    }
 
     query += ' ORDER BY t.created_at DESC';
 
@@ -72,6 +75,9 @@ router.get('/summary', authenticateToken, async (req, res) => {
     if (branch && branch !== 'All') {
       params.push(branch);
       whereClause += ` AND o.branch = $${params.length}`;
+    }
+    if (req.query.unclosed_only === 'true') {
+      whereClause += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
     }
 
     const result = await pool.query(

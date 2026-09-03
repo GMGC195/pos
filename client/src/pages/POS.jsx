@@ -98,6 +98,7 @@ export default function POS() {
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState(null)
+  const [editingOrderSlip, setEditingOrderSlip] = useState(null)
   const [originalCart, setOriginalCart] = useState(null)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [pendingCount, setPendingCount] = useState(0)
@@ -266,6 +267,7 @@ export default function POS() {
         comments: order.comments || ''
       })
       setEditingOrderId(editId)
+      setEditingOrderSlip(order.slip_number)
       setPaymentMethod(order.status === 'Hold' ? 'Hold' : 'Cash')
     } catch (err) {
       console.error('Error loading order for edit:', err)
@@ -304,6 +306,7 @@ export default function POS() {
             comments: order.comments || ''
           })
           setShowCart(true)
+          setEditingOrderSlip(order.slip_number)
           setPaymentMethod(order.status === 'Hold' ? 'Hold' : 'Cash')
         })
         .catch(err => {
@@ -598,16 +601,18 @@ export default function POS() {
     if (taker) metaRowParts.push(`By: ${taker}`);
     const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
 
+    const effectiveBranch = currentInfo.branch || (user?.role?.trim().toLowerCase() !== 'admin' && user?.role?.trim().toLowerCase() !== 'developer' && user?.branch ? user.branch : selectedBranch) || 'Branch 1';
+
     const headerHtml = isFullReceipt ? `
     <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
       ${currentInfo.orderType}
     </div>
     <div style="font-size: 14px; font-weight: bold; margin: 2px 0; text-align: center;">
-      ${selectedBranch || 'Branch 1'}
+      ${effectiveBranch}
     </div>
     <div style="font-size: 10px; text-align: center; margin: 4px 0;">
-      Order taking slip. Please get original slip from counter.<br/>
-      إيصال لأخذ الطلب. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+      Kitchen slip. Please get original slip from counter.<br/>
+      إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
     </div>
     ${metaRow}
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
@@ -619,11 +624,11 @@ export default function POS() {
       ${currentInfo.orderType}
     </div>
     <div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">
-      ${selectedBranch || 'Branch 1'}
+      ${effectiveBranch}
     </div>
     <div style="font-size: 10px; text-align: center; margin: 4px 0;">
-      Order taking slip. Please get original slip from counter.<br/>
-      إيصال لأخذ الطلب. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+      Kitchen slip. Please get original slip from counter.<br/>
+      إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
     </div>
     ${metaRow}
     <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
@@ -1232,24 +1237,31 @@ export default function POS() {
             </div>
           
           <div className={`pos-right-inner ${(window.innerWidth > 900 ? showCart : mobilePane === 'cart') ? 'cart-open' : 'cart-closed'}`}>
-          <div className="cart-header" style={{ paddingRight: 60 }}>
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {window.innerWidth <= 900 && <button className="btn btn-secondary btn-sm" onClick={() => setMobilePane('none')} style={{ padding: '4px 8px', marginRight: 4 }}>✕</button>}
-              <ShoppingCart size={20} />
-              {editingOrderId ? <span style={{ color: 'var(--red)' }}>Editing Order #{editingOrderId}</span> : 'Cart'}
-            </h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {editingOrderId && (
+          <div className="cart-header" style={{ paddingRight: 55, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 16 }}>
+                {window.innerWidth <= 900 && <button className="btn btn-secondary btn-sm" onClick={() => setMobilePane('none')} style={{ padding: '4px 8px', marginRight: 4 }}>✕</button>}
+                <ShoppingCart size={18} />
+                {editingOrderId ? (
+                  <span style={{ color: 'var(--orange)', display: 'flex', flexDirection: 'column' }}>
+                    <span>Edit #{editingOrderId}</span>
+                    {editingOrderSlip && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Slip: {editingOrderSlip}</span>}
+                  </span>
+                ) : 'Cart'}
+              </h3>
+              <span className="cart-count" style={{ fontSize: 12, padding: '4px 8px' }}>{cart.reduce((s, c) => s + c.qty, 0)} items</span>
+            </div>
+            {editingOrderId && (
+              <div>
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => { clearCart(); setEditingOrderId(null); setShowCart(false); window.history.replaceState({}, '', '/pos'); }}
-                  style={{ fontSize: 11, padding: '4px 8px' }}
+                  onClick={() => { clearCart(); setEditingOrderId(null); setEditingOrderSlip(null); setShowCart(false); window.history.replaceState({}, '', '/pos'); }}
+                  style={{ fontSize: 12, padding: '6px 12px', width: '100%', display: 'flex', justifyContent: 'center' }}
                 >
                   Cancel Edit
                 </button>
-              )}
-              <span className="cart-count">{cart.reduce((s, c) => s + c.qty, 0)} items</span>
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Offline/Sync indicators */}

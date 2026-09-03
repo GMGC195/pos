@@ -42,6 +42,11 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const isGET = event.request.method === 'GET';
 
+  // ── Never intercept Vite dev server modules or hot updates ──────────────────
+  if (url.pathname.includes('/@vite') || url.pathname.includes('/@id/') || url.pathname.includes('/node_modules/') || url.search.includes('v=')) {
+    return;
+  }
+
   // ── Never intercept non-GET API mutations (POST/PUT/PATCH/DELETE) ─────────
   // The Cache API cannot store non-GET requests.
   // Let POST/PUT/PATCH/DELETE go straight to the network with no SW interference.

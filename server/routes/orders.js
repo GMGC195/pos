@@ -431,16 +431,146 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
   }
 });
 
-// POST daily closing
-router.post('/daily-closing', authenticateToken, isAdmin, async (req, res) => {
+// POST shift closing
+router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    let branch = req.body?.branch || req.user?.branch || 'Branch 1';
+    const role = req.user?.role?.trim().toLowerCase();
+    const isAdminRole = role === 'admin' || role === 'developer';
+    if (!isAdminRole && req.user?.branch && req.user.branch !== 'All') {
+      branch = req.user.branch;
+    }
+    if (branch === 'All') branch = 'Branch 1';
     
-    // We retain Hold orders in Hold status (they are not cancelled during daily closing)
+    const totals = await client.query(`
+      SELECT 
+        COUNT(id) as total_orders, 
+        COALESCE(SUM(grand_total), 0) as total_sales 
+      FROM orders 
+      WHERE is_shift_closed = FALSE 
+        AND status IN ('Completed', 'Returned') 
+        AND branch = $1
+    `, [branch]);
+
+    const itemsResult = await client.query(`
+      SELECT c.name as category, SUM(oi.qty) as qty, SUM(oi.qty * oi.unit_price) as amount
+      FROM order_items oi
+      JOIN items i ON oi.item_id = i.id
+      JOIN categories c ON i.category_id = c.id
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+      GROUP BY c.name
+      ORDER BY amount DESC
+    `, [branch]);
+
+    const loginTimeRes = await client.query('SELECT last_login FROM users WHERE id = $1', [req.user.id]);
+    const loginTime = loginTimeRes.rows[0]?.last_login || new Date();
+    const logoutTime = new Date();
+    const diffMs = logoutTime - new Date(loginTime);
+    const diffHrs = Math.floor(diffMs / 3600000);
+    const diffMins = Math.floor((diffMs % 3600000) / 60000);
+    const totalActiveTime = `${diffHrs}h ${diffMins}m`;
+
+    const insertRes = await client.query(`
+      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, total_orders, items_summary, closing_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Shift')
+      RETURNING *
+    `, [
+      req.user.id,
+      req.user.username,
+      branch,
+      loginTime,
+      logoutTime,
+      totalActiveTime,
+      totals.rows[0].total_sales,
+      totals.rows[0].total_orders,
+      JSON.stringify(itemsResult.rows)
+    ]);
+
+    await client.query(`
+      UPDATE orders 
+      SET is_shift_closed = TRUE 
+      WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1
+    `, [branch]);
     
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Daily closing complete.' });
+    res.json({ success: true, message: 'Shift closing complete.', report: insertRes.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST daily closing
+router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let branch = req.body?.branch || req.user?.branch || 'Branch 1';
+    const role = req.user?.role?.trim().toLowerCase();
+    const isAdminRole = role === 'admin' || role === 'developer';
+    if (!isAdminRole && req.user?.branch && req.user.branch !== 'All') {
+      branch = req.user.branch;
+    }
+    if (branch === 'All') branch = 'Branch 1';
+    
+    const totals = await client.query(`
+      SELECT 
+        COUNT(id) as total_orders, 
+        COALESCE(SUM(grand_total), 0) as total_sales 
+      FROM orders 
+      WHERE is_daily_closed = FALSE 
+        AND status IN ('Completed', 'Returned') 
+        AND branch = $1
+    `, [branch]);
+
+    const itemsResult = await client.query(`
+      SELECT c.name as category, SUM(oi.qty) as qty, SUM(oi.qty * oi.unit_price) as amount
+      FROM order_items oi
+      JOIN items i ON oi.item_id = i.id
+      JOIN categories c ON i.category_id = c.id
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.is_daily_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+      GROUP BY c.name
+      ORDER BY amount DESC
+    `, [branch]);
+
+    const loginTimeRes = await client.query('SELECT last_login FROM users WHERE id = $1', [req.user.id]);
+    const loginTime = loginTimeRes.rows[0]?.last_login || new Date();
+    const logoutTime = new Date();
+    const diffMs = logoutTime - new Date(loginTime);
+    const diffHrs = Math.floor(diffMs / 3600000);
+    const diffMins = Math.floor((diffMs % 3600000) / 60000);
+    const totalActiveTime = `${diffHrs}h ${diffMins}m`;
+
+    const insertRes = await client.query(`
+      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, total_orders, items_summary, closing_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Daily')
+      RETURNING *
+    `, [
+      req.user.id,
+      req.user.username,
+      branch,
+      loginTime,
+      logoutTime,
+      totalActiveTime,
+      totals.rows[0].total_sales,
+      totals.rows[0].total_orders,
+      JSON.stringify(itemsResult.rows)
+    ]);
+
+    await client.query(`
+      UPDATE orders 
+      SET is_daily_closed = TRUE, is_shift_closed = TRUE
+      WHERE is_daily_closed = FALSE AND status != 'Hold' AND branch = $1
+    `, [branch]);
+    
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Daily closing complete.', report: insertRes.rows[0] });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -583,6 +713,34 @@ router.put('/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// GET past closings
+router.get('/closings', authenticateToken, async (req, res) => {
+  try {
+    let { date, cashier_id } = req.query;
+    const branch = req.user.branch || 'Branch 1';
+    
+    let query = 'SELECT * FROM shift_closings WHERE branch = $1';
+    const params = [branch];
+    
+    if (date) {
+      params.push(date);
+      query += ` AND created_at::date = $${params.length}::date`;
+    }
+    
+    if (cashier_id) {
+      params.push(cashier_id);
+      query += ` AND cashier_id = $${params.length}`;
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -9,15 +9,24 @@ createRoot(document.getElementById('root')).render(
   </StrictMode>,
 )
 
-// Register Service Worker
+// Service Worker handling
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => {
-        console.log('SW Registered:', reg.scope);
-        // Force checking for updates on reload
-        reg.update();
-      })
-      .catch(err => console.log('SW Error:', err));
-  });
+  if (import.meta.env.PROD) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => {
+          console.log('SW Registered:', reg.scope);
+          reg.update();
+        })
+        .catch(err => console.log('SW Error:', err));
+    });
+  } else {
+    // In dev mode, unregister any active service worker to prevent stale dev bundle caching
+    navigator.serviceWorker.getRegistrations().then(registrations => {
+      for (let reg of registrations) {
+        reg.unregister();
+        console.log('Unregistered SW in DEV mode:', reg.scope);
+      }
+    });
+  }
 }

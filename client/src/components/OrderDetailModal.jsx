@@ -78,8 +78,8 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
     ${order.branch || 'Branch 1'}
   </div>
   <div style="font-size: 10px; text-align: center; margin: 4px 0; font-weight: normal;">
-    Order taking slip. Please get original slip from counter.<br/>
-    إيصال لأخذ الطلب. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+    Kitchen slip. Please get original slip from counter.<br/>
+    إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
   </div>
   ${metaRow}
   <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
@@ -107,7 +107,7 @@ ${parseFloat(order.discount || 0) > 0 ? `<div class="total-row"><span>Discount</
 <html>
 <head>
   <meta charset="UTF-8"/>
-  <title>Order Taking Slip</title>
+  <title>Kitchen Slip</title>
   <style>
     @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; font-weight: bold; }
