@@ -605,6 +605,10 @@ export default function POS() {
     <div style="font-size: 14px; font-weight: bold; margin: 2px 0; text-align: center;">
       ${selectedBranch || 'Branch 1'}
     </div>
+    <div style="font-size: 10px; text-align: center; margin: 4px 0;">
+      Order taking slip. Please get original slip from counter.<br/>
+      إيصال لأخذ الطلب. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+    </div>
     ${metaRow}
     <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
@@ -616,6 +620,10 @@ export default function POS() {
     </div>
     <div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">
       ${selectedBranch || 'Branch 1'}
+    </div>
+    <div style="font-size: 10px; text-align: center; margin: 4px 0;">
+      Order taking slip. Please get original slip from counter.<br/>
+      إيصال لأخذ الطلب. يرجى الحصول على الإيصال الأصلي من الكاونتر.
     </div>
     ${metaRow}
     <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
@@ -762,15 +770,17 @@ export default function POS() {
       return;
     }
 
-    const w = 400, h = 600
-    const left = Math.round((window.screen.width - w) / 2)
-    const top = Math.round((window.screen.height - h) / 2)
-    const win = window.open('', '_blank',
-      `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`)
-    win.document.write(html)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 500)
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    iframe.contentDocument.write(html);
+    iframe.contentDocument.close();
+    
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+    }, 500);
   }
 
   // Keyboard shortcuts
@@ -1045,8 +1055,12 @@ export default function POS() {
 
                 return (
                   <div key={item.id} className="product-card" title={item.name} onClick={() => {
-                    setSizeModalItem({ ...item, sizeOptionsParsed });
-                    setSizeModalSelected(sizeOptionsParsed[0].name);
+                    if (sizeOptionsParsed.length === 1) {
+                      addToCart(item, sizeOptionsParsed[0]);
+                    } else {
+                      setSizeModalItem({ ...item, sizeOptionsParsed });
+                      setSizeModalSelected(sizeOptionsParsed[0].name);
+                    }
                   }}>
                     {item.image_url && (
                       <img

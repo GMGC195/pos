@@ -326,8 +326,9 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
 
 // PATCH cancel or return order
 router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) => {
-  const { type } = req.body;
+  const { type, reason } = req.body;
   const updateTo = ['Cancelled', 'Returned'].includes(type) ? type : 'Cancelled';
+  const finalReason = reason || null;
 
   const client = await pool.connect();
   try {
@@ -335,8 +336,8 @@ router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) 
     
     // Update order status and clear cancellation request if any
     const orderResult = await client.query(
-      `UPDATE orders SET status = $1, cancel_requested = FALSE, cancel_reason = NULL WHERE id = $2 RETURNING *`,
-      [updateTo, req.params.id]
+      `UPDATE orders SET status = $1, cancel_requested = FALSE, cancel_reason = $3 WHERE id = $2 RETURNING *`,
+      [updateTo, req.params.id, finalReason]
     );
     
     if (orderResult.rows.length === 0) {

@@ -74,6 +74,13 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
     ${orderType}
   </div>
+  <div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">
+    ${order.branch || 'Branch 1'}
+  </div>
+  <div style="font-size: 10px; text-align: center; margin: 4px 0; font-weight: normal;">
+    Order taking slip. Please get original slip from counter.<br/>
+    إيصال لأخذ الطلب. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+  </div>
   ${metaRow}
   <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
     Order #${order.id} - ${order.edit_count > 0 ? `Edit ${(order.slip_number || '-')}${String.fromCharCode(64 + order.edit_count)}` : (order.slip_number || '-')}
@@ -129,14 +136,17 @@ ${slipBody}
 </html>`;
 
   const handlePrint = () => {
-    const w = 400, h = 600
-    const left = Math.round((window.screen.width - w) / 2)
-    const top = Math.round((window.screen.height - h) / 2)
-    const win = window.open('', '_blank', `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`)
-    win.document.write(htmlWrapper)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 500)
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    iframe.contentDocument.write(htmlWrapper);
+    iframe.contentDocument.close();
+    
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+    }, 500);
   }
 
   return (

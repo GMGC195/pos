@@ -296,59 +296,27 @@ export default function Reports({ isTodaySales = false }) {
     ), { duration: Infinity, id: 'confirm-daily', position: 'top-center', style: { minWidth: 320 } })
   }
 
-  const handleVoid = (orderId, type) => {
-    toast((t) => (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <p style={{ margin: 0, fontWeight: 500 }}>Mark Order #{orderId} as <b>{type.toUpperCase()}</b>?</p>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => toast.dismiss(t.id)}>No</button>
-          <button 
-            className="btn btn-primary" 
-            style={{ padding: '6px 12px', fontSize: 13, background: 'var(--red)', color: 'white' }} 
-            onClick={async () => {
-              toast.dismiss(t.id)
-              try {
-                await axios.patch(`/api/orders/${orderId}/void`, { type })
-                toast.success(`Order marked as ${type}.`)
-                load() // Refresh table and stats
-              } catch (err) {
-                console.error(err)
-                toast.error('Error updating order: ' + (err?.response?.data?.error || err.message))
-              }
-            }}
-          >
-            Yes, {type}
-          </button>
-        </div>
-      </div>
-    ), { duration: Infinity, id: 'confirm-void', position: 'top-center', style: { minWidth: 320 } })
-  }
-
-  const handleRequestVoid = async () => {
+  const handleDirectVoidWithReason = async () => {
     if (!cancelReason.trim()) return toast.error('Please provide a reason')
     setProcessingCancel(true)
     try {
       const formattedReason = `[${cancelOrderTarget.type.toUpperCase()}] ${cancelReason}`
-      await axios.patch(`/api/orders/${cancelOrderTarget.id}/request-cancel`, { reason: formattedReason })
-      toast.success(`${cancelOrderTarget.type} request sent to Admin`)
+      await axios.patch(`/api/orders/${cancelOrderTarget.id}/void`, { type: cancelOrderTarget.type, reason: formattedReason })
+      toast.success(`Order marked as ${cancelOrderTarget.type}.`)
       setShowCancelModal(false)
       setCancelReason('')
       setCancelOrderTarget(null)
       load()
     } catch (err) {
-      toast.error('Failed to send request: ' + (err?.response?.data?.error || err.message))
+      toast.error('Failed to update order: ' + (err?.response?.data?.error || err.message))
     } finally {
       setProcessingCancel(false)
     }
   }
 
   const onVoidButtonClick = (orderId, type) => {
-    if (isAdminOrDev) {
-      handleVoid(orderId, type)
-    } else {
-      setCancelOrderTarget({ id: orderId, type })
-      setShowCancelModal(true)
-    }
+    setCancelOrderTarget({ id: orderId, type })
+    setShowCancelModal(true)
   }
 
   const viewOrderDetail = async (orderId) => {
@@ -784,15 +752,15 @@ export default function Reports({ isTodaySales = false }) {
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setShowCancelModal(false) }}>
           <div className="modal" style={{ maxWidth: 400 }}>
             <div className="modal-header">
-              <h3>Request {cancelOrderTarget?.type}</h3>
+              <h3>Confirm {cancelOrderTarget?.type}</h3>
               <button className="modal-close" onClick={() => setShowCancelModal(false)}>✕</button>
             </div>
             <div style={{ padding: 20 }}>
-              <p style={{ marginBottom: 16, fontSize: 14 }}>Please provide a reason for requesting {cancelOrderTarget?.type} of <b>Order #{cancelOrderTarget?.id}</b>:</p>
+              <p style={{ marginBottom: 16, fontSize: 14 }}>Please provide a reason for marking <b>Order #{cancelOrderTarget?.id}</b> as {cancelOrderTarget?.type}:</p>
               <textarea 
                 className="pos-search-input"
                 style={{ width: '100%', height: 100, padding: 12, borderRadius: 8, border: '1px solid var(--surface-2)', marginBottom: 20, resize: 'none' }}
-                placeholder="Manager needs to approve this request..."
+                placeholder="Reason..."
                 value={cancelReason}
                 onChange={e => setCancelReason(e.target.value)}
               />
@@ -800,11 +768,11 @@ export default function Reports({ isTodaySales = false }) {
                 <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCancelModal(false)}>Back</button>
                 <button 
                   className="btn btn-primary" 
-                  style={{ flex: 2, background: 'var(--orange)' }} 
-                  onClick={handleRequestVoid}
+                  style={{ flex: 1, background: 'var(--red)' }} 
+                  onClick={handleDirectVoidWithReason}
                   disabled={processingCancel}
                 >
-                  {processingCancel ? 'Sending...' : 'Send Request'}
+                  {processingCancel ? 'Processing...' : `Confirm ${cancelOrderTarget?.type}`}
                 </button>
               </div>
             </div>
