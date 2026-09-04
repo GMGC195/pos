@@ -432,24 +432,24 @@ export default function POS() {
   }
 
   
-  const handlePlaceOrder = (method = paymentMethod, shouldPrint = true) => {
+  const handlePlaceOrder = (method = paymentMethod, shouldPrint = true, actionType = null) => {
     if (cart.length === 0) return
     if (customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber && method !== 'Hold') {
       const isTableBooked = activeOrders.some(o => o.order_type === 'Dine-In' && o.table_number === customerInfo.tableNumber && o.status === 'Hold' && o.id !== parseInt(editingOrderId));
       if (isTableBooked) {
-        setTableConflictData({ method, shouldPrint })
+        setTableConflictData({ method, shouldPrint, actionType })
         return
       }
     }
-    executeOrder(method, shouldPrint)
+    executeOrder(method, shouldPrint, actionType)
   }
 
-  const executeOrder = async (method = paymentMethod, shouldPrint = true) => {
+  const executeOrder = async (method = paymentMethod, shouldPrint = true, actionType = null) => {
     if (cart.length === 0) return
     
 
     
-    setProcessing(shouldPrint ? 'print' : 'punch')
+    setProcessing(actionType || (shouldPrint ? 'print' : 'punch'))
     const finalDiscount = parseFloat(customerInfo.discount) || 0;
     const finalTotal = total - finalDiscount;
 
@@ -1329,29 +1329,49 @@ export default function POS() {
           </div>
 
           {/* Payment method */}
-          
+          <div style={{ padding: "0 24px 16px" }}>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input type="radio" name="cartPayment" value="Cash" checked={paymentMethod === 'Cash' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Cash')} />
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Cash</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input type="radio" name="cartPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Online</span>
+              </label>
+            </div>
+          </div>
 
           {/* Actions */}
           <div className="cart-actions">
-            <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', width: '100%' }}>
+            <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px', width: '100%' }}>
               <button
-                className={`btn ${paymentMethod === 'Hold' ? 'btn-primary' : 'btn-warning'} btn-lg`}
-                onClick={() => handlePayClick('Hold')}
-                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px', gridColumn: user?.role?.trim().toLowerCase() === 'order taker' ? '1 / -1' : undefined }}
+                className="btn btn-warning btn-lg"
+                onClick={() => handlePlaceOrder('Hold', true, 'placing')}
+                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px', gridColumn: user?.role?.trim().toLowerCase() === 'order taker' ? '1 / -2' : undefined }}
                 disabled={processing}
               >
-                <ClipboardList size={18} /> Place Order
+                <ClipboardList size={18} /> {processing === 'placing' ? 'Placing...' : 'Place Order'}
               </button>
               {user?.role?.trim().toLowerCase() !== 'order taker' && (
                 <button
                   className="btn btn-success btn-lg"
-                  onClick={() => handlePayClick('Cash')}
+                  onClick={() => handlePlaceOrder(paymentMethod === 'Hold' ? 'Cash' : paymentMethod, true, 'paying')}
                   style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
                   disabled={processing}
                 >
-                  <ClipboardList size={18} /> Pay & Settled
+                  <ClipboardList size={18} /> {processing === 'paying' ? 'Paying...' : 'Pay & Settled'}
                 </button>
               )}
+              <button
+                className="btn btn-secondary btn-lg"
+                onClick={() => setConfirmModal(true)}
+                title="Open Confirm Modal"
+                style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                disabled={processing}
+              >
+                C
+              </button>
             </div>
           </div>
           </div>        </div>
