@@ -217,23 +217,23 @@ export default function SalesItem() {
           </div>
           <div className="filter-group" style={{ flex: 1, minWidth: '240px' }}>
             <label style={{ fontWeight: 600, fontSize: 14 }}>Branch:</label>
-            <select 
-              value={branch} 
-              onChange={e => setBranch(e.target.value)}
-              style={{ 
-                padding: '8px 12px', 
-                borderRadius: '8px', 
-                border: '1.5px solid var(--surface-2)',
-                flex: 1,
-                fontFamily: 'inherit',
-                fontSize: '14px'
-              }}
-            >
-              <option value="All">All Branches</option>
-              <option value="Branch 1">Branch 1</option>
-              <option value="Branch 2">Branch 2</option>
-              <option value="Branch 3">Branch 3</option>
-            </select>
+            <div style={{ width: '100%', display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, overflowX: 'auto' }}>
+              {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
+                <button
+                  key={b}
+                  onClick={() => setBranch(b)}
+                  style={{
+                    flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, border: 'none', borderRadius: 6,
+                    background: branch === b ? 'var(--surface)' : 'transparent',
+                    color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center'
+                  }}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
           </div>
           
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

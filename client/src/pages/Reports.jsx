@@ -538,9 +538,9 @@ export default function Reports({ isTodaySales = false }) {
       </div>
 
       {/* Transactions Table */}
-      <div className="card" style={{ padding: 0, marginBottom: 80, background: '#f8fafc' }}>
+      <div className="card" style={{ padding: 0, marginBottom: 160, background: '#f8fafc' }}>
         <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               <ClipboardList size={20} /> Transactions ({filteredTransactions.length})
             </h3>
@@ -563,26 +563,28 @@ export default function Reports({ isTodaySales = false }) {
               <option value="Cancelled">Cancelled</option>
               <option value="Returned">Returned</option>
             </select>
-            {isAdminOrDev && (
-              <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center' }}>
-                {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
-                  <button
-                    key={b}
-                    onClick={() => setBranch(b)}
-                    style={{
-                      padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
-                      background: branch === b ? 'var(--surface)' : 'transparent',
-                      color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
-                      boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                      cursor: 'pointer', transition: 'all 0.2s'
-                    }}
-                  >
-                    {b === 'All' ? 'All Branches' : b}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
+
+          {isAdminOrDev && (
+            <div style={{ width: '100%', display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, overflowX: 'auto', marginTop: 8 }}>
+              {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
+                <button
+                  key={b}
+                  onClick={() => setBranch(b)}
+                  style={{
+                    flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, border: 'none', borderRadius: 6,
+                    background: branch === b ? 'var(--surface)' : 'transparent',
+                    color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center'
+                  }}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+          )}
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
         </div>
         <div className="table-wrap">

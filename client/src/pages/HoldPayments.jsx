@@ -184,7 +184,7 @@ export default function HoldPayments() {
 
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Clock size={16} /> Held Orders List
               </h3>
@@ -196,27 +196,28 @@ export default function HoldPayments() {
                 className="pos-search-input"
                 style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
               />
-              {isAdmin && (
-                <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center' }}>
-                  {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
-                    <button
-                      key={b}
-                      onClick={() => setBranch(b)}
-                      style={{
-                        padding: '6px 12px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 6,
-                        background: branch === b ? 'var(--surface)' : 'transparent',
-                        color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
-                        boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                        cursor: 'pointer', transition: 'all 0.2s'
-                      }}
-                    >
-                      {b === 'All' ? 'All Branches' : b}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
             <button className="btn btn-secondary btn-sm" onClick={loadHeldOrders} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><RefreshCw size={14} /> Refresh</button>
+
+            {isAdmin && (
+              <div style={{ width: '100%', display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, overflowX: 'auto', marginTop: 8 }}>
+                {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
+                  <button
+                    key={b}
+                    onClick={() => setBranch(b)}
+                    style={{
+                      flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, border: 'none', borderRadius: 6,
+                      background: branch === b ? 'var(--surface)' : 'transparent',
+                      color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
+                      boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                      cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center'
+                    }}
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="table-wrap" style={{ minHeight: '300px' }}>
             <table>
