@@ -656,7 +656,7 @@ export default function POS() {
       size: 80mm auto;
       margin: 0;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-weight: bold; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-weight: normal; }
     html { margin: 0; padding: 0; background: #fff; }
     body {
       width: 100%;

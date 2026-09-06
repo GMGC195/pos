@@ -319,7 +319,8 @@ export default function Reports({ isTodaySales = false }) {
     const html = `
       <html><head><title>${report.closing_type} Closing Report</title>
       <style>
-        body { font-family: 'Courier New', monospace; padding: 20px; max-width: 380px; margin: 0 auto; font-size: 13px; color: #111; }
+        @page { size: 80mm auto; margin: 0; }
+        body { font-family: 'Courier New', monospace; padding: 10px 15px; max-width: 380px; margin: 0 auto; font-size: 13px; color: #111; }
         h2 { text-align: center; font-size: 16px; margin: 0 0 4px; }
         .center { text-align: center; }
         .divider { border-top: 1px dashed #999; margin: 10px 0; }
@@ -366,7 +367,7 @@ export default function Reports({ isTodaySales = false }) {
     setTimeout(() => { printWindow.print(); printWindow.close(); }, 300)
   }
 
-  const handleClosingConfirm = async () => {
+  const handleClosingConfirm = async (shouldPrint = true) => {
     if (!closingType) return
     setClosingProcessing(true)
     try {
@@ -376,8 +377,8 @@ export default function Reports({ isTodaySales = false }) {
       setShowClosingModal(false)
       setClosingType(null)
       load()
-      // Auto-print the report
-      if (res.data?.report) {
+      // Auto-print the report if requested
+      if (shouldPrint && res.data?.report) {
         setTimeout(() => printClosingReport(res.data.report), 400)
       }
     } catch (err) {
@@ -908,19 +909,27 @@ export default function Reports({ isTodaySales = false }) {
 
             {closingType && (
               <div style={{ background: closingType === 'Daily' ? '#faf5ff' : '#fff1f2', border: `1px solid ${closingType === 'Daily' ? '#ddd6fe' : '#fca5a5'}`, borderRadius: 8, padding: 12, marginBottom: 20, fontSize: 13 }}>
-                ⚠️ This will <b>clear completed orders</b> from the active screen and <b>print a closing report</b> automatically.
+                ⚠️ This will <b>clear completed orders</b> from the active screen and optionally <b>print a closing report</b>.
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => { setShowClosingModal(false); setClosingType(null); }} disabled={closingProcessing}>Cancel</button>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" style={{ flex: 1, minWidth: '100px' }} onClick={() => { setShowClosingModal(false); setClosingType(null); }} disabled={closingProcessing}>Cancel</button>
               <button
                 className="btn btn-primary"
-                style={{ flex: 2, background: closingType === 'Daily' ? '#7c3aed' : 'var(--primary)', opacity: !closingType ? 0.5 : 1 }}
-                onClick={handleClosingConfirm}
+                style={{ flex: 1, background: '#f59e0b', minWidth: '120px', opacity: !closingType ? 0.5 : 1 }}
+                onClick={() => handleClosingConfirm(false)}
                 disabled={!closingType || closingProcessing}
               >
-                {closingProcessing ? 'Processing...' : `Confirm ${closingType || ''} Closing & Print`}
+                {closingProcessing ? '...' : `Just Close`}
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1.5, background: closingType === 'Daily' ? '#7c3aed' : 'var(--primary)', minWidth: '140px', opacity: !closingType ? 0.5 : 1 }}
+                onClick={() => handleClosingConfirm(true)}
+                disabled={!closingType || closingProcessing}
+              >
+                {closingProcessing ? 'Processing...' : `Close & Print`}
               </button>
             </div>
           </div>

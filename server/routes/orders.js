@@ -238,6 +238,34 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// GET past closings
+router.get('/closings', authenticateToken, async (req, res) => {
+  try {
+    let { date, cashier_id } = req.query;
+    const branch = req.user.branch || 'Branch 1';
+    
+    let query = 'SELECT * FROM shift_closings WHERE branch = $1';
+    const params = [branch];
+    
+    if (date) {
+      params.push(date);
+      query += ` AND created_at::date = $${params.length}::date`;
+    }
+    
+    if (cashier_id) {
+      params.push(cashier_id);
+      query += ` AND cashier_id = $${params.length}`;
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET order by ID with items
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
@@ -713,34 +741,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
-  }
-});
-
-// GET past closings
-router.get('/closings', authenticateToken, async (req, res) => {
-  try {
-    let { date, cashier_id } = req.query;
-    const branch = req.user.branch || 'Branch 1';
-    
-    let query = 'SELECT * FROM shift_closings WHERE branch = $1';
-    const params = [branch];
-    
-    if (date) {
-      params.push(date);
-      query += ` AND created_at::date = $${params.length}::date`;
-    }
-    
-    if (cashier_id) {
-      params.push(cashier_id);
-      query += ` AND cashier_id = $${params.length}`;
-    }
-    
-    query += ' ORDER BY created_at DESC';
-    
-    const result = await pool.query(query, params);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 
