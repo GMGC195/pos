@@ -2,7 +2,7 @@ import axios from 'axios'
 import { STORAGE_TOKEN_KEY, STORAGE_USER_KEY } from './branding'
 
 const api = axios.create({
-  baseURL: import.meta.env.API_URL || '',
+  baseURL: import.meta.env.VITE_API_URL || '',
 })
 
 // Add request interceptor — attach token
