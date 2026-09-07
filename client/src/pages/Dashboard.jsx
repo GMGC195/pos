@@ -89,6 +89,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [personalStats, setPersonalStats] = useState(null)
   const [salesSelectedBranch, setSalesSelectedBranch] = useState('All')
+  const [salesSelectedClosing, setSalesSelectedClosing] = useState('current')
+  const [pastClosings, setPastClosings] = useState([])
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('')
   const [attendanceSelectedDayNight, setAttendanceSelectedDayNight] = useState('All')
   const [attendanceSelectedStatus, setAttendanceSelectedStatus] = useState('All')
@@ -109,13 +111,23 @@ export default function Dashboard() {
 
     // Only fetch sales stats if the user is a developer or admin
     if (isAdminOrDev) {
-      axios.get('/api/stats', { params: { branch: salesSelectedBranch } })
+      const statsParams = { branch: salesSelectedBranch }
+      if (salesSelectedClosing !== 'current') {
+        statsParams.closing_id = salesSelectedClosing
+      }
+      
+      axios.get('/api/stats', { params: statsParams })
         .then(r => setStats(r.data))
         .catch(() => setStats({
           totalSale: 0, dailyRevenue: 0, totalProductCost: 0, totalOrders: 0, guestsToday: 0,
           last7Days: Array.from({ length: 7 }, (_, i) => ({ label: `Day ${i + 1}`, total: 0 })),
           topItems: [],
         }))
+        
+      // Fetch today's closings for filter dropdown
+      axios.get('/api/orders/closings', { params: { date: new Date().toISOString().split('T')[0] } })
+        .then(r => setPastClosings(r.data))
+        .catch(() => setPastClosings([]))
     }
 
     // Fetch attendance statistics
@@ -159,7 +171,7 @@ export default function Dashboard() {
         socket.off('orderUpdated', handleOrderEvent)
       }
     }
-  }, [user, navigate, isAdminOrDev, salesSelectedBranch])
+  }, [user, navigate, isAdminOrDev, salesSelectedBranch, salesSelectedClosing])
 
   const exportExcel = async () => {
     if (!isAdminOrDev) return
@@ -298,16 +310,30 @@ export default function Dashboard() {
               </div>
             )}
             {isAdminOrDev && dashboardView === 'pos' && (
-              <select
-                value={salesSelectedBranch}
-                onChange={e => setSalesSelectedBranch(e.target.value)}
-                style={{ padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', height: 38 }}
-              >
-                <option value="All">All Branches</option>
-                <option value="Branch 1">Branch 1</option>
-                <option value="Branch 2">Branch 2</option>
-                <option value="Branch 3">Branch 3</option>
-              </select>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <select
+                  value={salesSelectedBranch}
+                  onChange={e => setSalesSelectedBranch(e.target.value)}
+                  style={{ padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', height: 38 }}
+                >
+                  <option value="All">All Branches</option>
+                  <option value="Branch 1">Branch 1</option>
+                  <option value="Branch 2">Branch 2</option>
+                  <option value="Branch 3">Branch 3</option>
+                </select>
+                <select
+                  value={salesSelectedClosing}
+                  onChange={e => setSalesSelectedClosing(e.target.value)}
+                  style={{ padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', height: 38, maxWidth: 200 }}
+                >
+                  <option value="current">Current Shift (Live)</option>
+                  {pastClosings.map(c => (
+                    <option key={c.id} value={c.id}>
+                      [{c.closing_type}] {c.cashier_name} (#{c.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
             <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
               <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh

@@ -6,7 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 // GET comprehensive stats for Dashboard
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    let { branch } = req.query;
+    let { branch, closing_id } = req.query;
     const role = req.user.role?.trim().toLowerCase();
     const isAdmin = role === 'admin' || role === 'developer';
     if (!isAdmin) {
@@ -33,11 +33,39 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(branch);
     }
 
+    // If closing_id is provided (usually by admin), fetch from shift_closings
+    if (closing_id) {
+      const closingRes = await pool.query(`SELECT * FROM shift_closings WHERE id = $1`, [closing_id]);
+      if (closingRes.rows.length > 0) {
+        const closing = closingRes.rows[0];
+        
+        let items = [];
+        try { items = JSON.parse(closing.items_summary); } catch (e) {}
+        
+        // We might not have full history and guests for a specific shift easily, 
+        // but we can return the exact sales and orders.
+        return res.json({
+          totalSale: parseFloat(closing.total_sales || 0),
+          dailyRevenue: parseFloat(closing.total_sales || 0), // approximation or we can leave it
+          totalProductCost: 0, // Not saved in shift_closings yet
+          totalOrders: parseInt(closing.total_orders || 0),
+          guestsToday: parseInt(closing.total_orders || 0),
+          last7Days: [],
+          topItems: items.map(i => ({ name: i.category, value: parseInt(i.qty) }))
+        });
+      }
+    }
+
+    // Cashier should only see the current unclosed shift
+    const isCashier = role === 'cashier';
+    const shiftCond = isCashier ? 'AND is_shift_closed = FALSE' : '';
+    const shiftCondO = isCashier ? 'AND o.is_shift_closed = FALSE' : '';
+
     // Total Saleh (Today's completed orders grand total)
     const totalSaleResult = await pool.query(`
       SELECT COALESCE(SUM(grand_total), 0) as total_sale
       FROM orders
-      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond}
+      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond} ${shiftCond}
     `, params);
 
     // Daily Revenue (Today's Sales - Produce Cost)
@@ -62,7 +90,7 @@ router.get('/', authenticateToken, async (req, res) => {
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         WHERE o.status = 'Completed'
-          AND DATE(o.created_at) = CURRENT_DATE ${branchCondO}
+          AND DATE(o.created_at) = CURRENT_DATE ${branchCondO} ${shiftCondO}
         GROUP BY oi.item_id
       )
       SELECT 
@@ -75,13 +103,13 @@ router.get('/', authenticateToken, async (req, res) => {
     // Total fulfilled orders today
     const totalOrdersResult = await pool.query(`
       SELECT COUNT(*) as count FROM orders
-      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond}
+      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond} ${shiftCond}
     `, params);
 
     // Guest Today (Today's total orders excluding cancelled)
     const guestsTodayResult = await pool.query(`
       SELECT COUNT(*) as count FROM orders
-      WHERE DATE(created_at) = CURRENT_DATE AND status != 'Cancelled' ${branchCond}
+      WHERE DATE(created_at) = CURRENT_DATE AND status != 'Cancelled' ${branchCond} ${shiftCond}
     `, params);
 
     // Last 7 days sales data guaranteed using Postgres generate_series
@@ -94,7 +122,7 @@ router.get('/', authenticateToken, async (req, res) => {
         FROM generate_series(6, 0, -1) i
       ) d
       LEFT JOIN orders o 
-        ON DATE(o.created_at) = d.date AND o.status = 'Completed' ${branchCondO}
+        ON DATE(o.created_at) = d.date AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
       GROUP BY d.date
       ORDER BY d.date ASC
     `, params);
@@ -109,7 +137,7 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT oi.item_name, SUM(oi.qty) as total_qty
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      WHERE 1=1 ${branchCondO}
+      WHERE 1=1 ${branchCondO} ${shiftCondO}
       GROUP BY oi.item_name
       ORDER BY total_qty DESC
       LIMIT 6

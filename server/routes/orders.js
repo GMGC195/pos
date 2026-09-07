@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { authenticateToken, isAdmin, isAdminOrCashier } = require('../middleware/auth');
+const { Resend } = require('resend');
 
 async function checkBranchAccess(req, orderId) {
   const role = req.user.role?.trim().toLowerCase();
@@ -459,6 +460,80 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
   }
 });
 
+async function sendClosingEmail(report, closingType) {
+  try {
+    const apiKey = process.env.RESEND_API_KEY;
+    const fromEmail = process.env.RESEND_FROM_EMAIL;
+    const toEmailsStr = process.env.REPORT_TO_EMAILS;
+    
+    if (!apiKey || !fromEmail || !toEmailsStr) {
+      console.log(`[Email System] Skipping: Missing Resend configuration in .env`);
+      return;
+    }
+    
+    console.log(`[Email System] Preparing to send ${closingType} report from ${fromEmail} to ${toEmailsStr}`);
+    const resend = new Resend(apiKey);
+    const toEmails = toEmailsStr.split(',').map(e => e.trim()).filter(Boolean);
+    
+    let itemsHtml = '';
+    try {
+      const items = JSON.parse(report.items_summary);
+      itemsHtml = items.map(cat => {
+        let catHtml = `<li style="margin-bottom: 12px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px;">
+          <div style="font-weight: bold; font-size: 16px; color: #111; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">
+            ${cat.category} <span style="float: right; color: #E31837;">SAR ${parseFloat(cat.amount).toFixed(2)} (${cat.qty} items)</span>
+          </div>
+          <ul style="list-style: none; padding-left: 0; margin: 0; font-size: 14px; color: #555;">`;
+        
+        if (cat.items && Array.isArray(cat.items)) {
+          cat.items.forEach(item => {
+            catHtml += `<li style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #f0f0f0;">
+              <span>${item.name}</span>
+              <span><strong>${item.qty}</strong> x SAR ${parseFloat(item.amount / item.qty).toFixed(2)} = SAR ${parseFloat(item.amount).toFixed(2)}</span>
+            </li>`;
+          });
+        }
+        
+        catHtml += `</ul></li>`;
+        return catHtml;
+      }).join('');
+    } catch(e) {
+      console.error('Error parsing items summary for email:', e);
+    }
+
+    const htmlContent = `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden; background: #fafafa;">
+        <div style="background-color: #E31837; padding: 20px; border-bottom: 1px solid #eaeaea; text-align: center; color: white;">
+          <h2 style="margin: 0; font-size: 22px;">${closingType} Closing Report</h2>
+          <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">${report.branch}</p>
+        </div>
+        <div style="padding: 24px;">
+          <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #eaeaea; margin-bottom: 20px;">
+            <p style="margin: 4px 0;"><strong>Cashier:</strong> ${report.cashier_name}</p>
+            <p style="margin: 4px 0;"><strong>Total Orders:</strong> ${report.total_orders}</p>
+            <p style="margin: 4px 0;"><strong>Total Sales:</strong> SAR ${parseFloat(report.total_sales).toFixed(2)}</p>
+            <p style="margin: 4px 0;"><strong>Active Time:</strong> ${report.total_active_time}</p>
+            <p style="margin: 4px 0; font-size: 12px; color: #777;">${new Date(report.login_time).toLocaleString()} - ${new Date(report.logout_time).toLocaleString()}</p>
+          </div>
+          
+          <h3 style="margin-top: 24px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Items Sold by Category</h3>
+          <ul style="list-style-type: none; padding-left: 0;">${itemsHtml || '<li style="text-align:center; color:#999; padding: 20px;">No items sold</li>'}</ul>
+        </div>
+      </div>
+    `;
+
+    await resend.emails.send({
+      from: `Reports <${fromEmail}>`,
+      to: toEmails,
+      subject: `${closingType} Closing Report - ${report.branch}`,
+      html: htmlContent
+    });
+    console.log('Closing email sent successfully.');
+  } catch(err) {
+    console.error('Error sending closing email:', err);
+  }
+}
+
 // POST shift closing
 router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res) => {
   const client = await pool.connect();
@@ -483,12 +558,26 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     `, [branch]);
 
     const itemsResult = await client.query(`
-      SELECT c.name as category, SUM(oi.qty) as qty, SUM(oi.qty * oi.unit_price) as amount
-      FROM order_items oi
-      JOIN items i ON oi.item_id = i.id
-      JOIN categories c ON i.category_id = c.id
-      JOIN orders o ON oi.order_id = o.id
-      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+      SELECT 
+        c.name as category, 
+        SUM(grouped_items.item_qty) as qty, 
+        SUM(grouped_items.item_amount) as amount,
+        json_agg(
+          json_build_object(
+            'name', grouped_items.name,
+            'qty', grouped_items.item_qty,
+            'amount', grouped_items.item_amount
+          )
+        ) as items
+      FROM (
+        SELECT i.category_id, i.name, SUM(oi.qty) as item_qty, SUM(oi.qty * oi.unit_price) as item_amount
+        FROM order_items oi
+        JOIN items i ON oi.item_id = i.id
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+        GROUP BY i.category_id, i.name
+      ) grouped_items
+      JOIN categories c ON grouped_items.category_id = c.id
       GROUP BY c.name
       ORDER BY amount DESC
     `, [branch]);
@@ -522,6 +611,9 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       SET is_shift_closed = TRUE 
       WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1
     `, [branch]);
+    
+    // Send email report asynchronously
+    sendClosingEmail(insertRes.rows[0], 'Shift');
     
     await client.query('COMMIT');
     res.json({ success: true, message: 'Shift closing complete.', report: insertRes.rows[0] });
@@ -557,12 +649,26 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     `, [branch]);
 
     const itemsResult = await client.query(`
-      SELECT c.name as category, SUM(oi.qty) as qty, SUM(oi.qty * oi.unit_price) as amount
-      FROM order_items oi
-      JOIN items i ON oi.item_id = i.id
-      JOIN categories c ON i.category_id = c.id
-      JOIN orders o ON oi.order_id = o.id
-      WHERE o.is_daily_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+      SELECT 
+        c.name as category, 
+        SUM(grouped_items.item_qty) as qty, 
+        SUM(grouped_items.item_amount) as amount,
+        json_agg(
+          json_build_object(
+            'name', grouped_items.name,
+            'qty', grouped_items.item_qty,
+            'amount', grouped_items.item_amount
+          )
+        ) as items
+      FROM (
+        SELECT i.category_id, i.name, SUM(oi.qty) as item_qty, SUM(oi.qty * oi.unit_price) as item_amount
+        FROM order_items oi
+        JOIN items i ON oi.item_id = i.id
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.is_daily_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+        GROUP BY i.category_id, i.name
+      ) grouped_items
+      JOIN categories c ON grouped_items.category_id = c.id
       GROUP BY c.name
       ORDER BY amount DESC
     `, [branch]);
@@ -596,6 +702,9 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       SET is_daily_closed = TRUE, is_shift_closed = TRUE
       WHERE is_daily_closed = FALSE AND status != 'Hold' AND branch = $1
     `, [branch]);
+    
+    // Send email report asynchronously
+    sendClosingEmail(insertRes.rows[0], 'Daily');
     
     await client.query('COMMIT');
     res.json({ success: true, message: 'Daily closing complete.', report: insertRes.rows[0] });

@@ -59,6 +59,7 @@ export default function Reports({ isTodaySales = false }) {
   const [showClosingModal, setShowClosingModal] = useState(false)
   const [closingType, setClosingType] = useState(null) // 'Shift' | 'Daily'
   const [closingProcessing, setClosingProcessing] = useState(false)
+  const [closingProcessingType, setClosingProcessingType] = useState(null)
 
   // History Modal States
   const [showHistoryModal, setShowHistoryModal] = useState(false)
@@ -370,6 +371,7 @@ export default function Reports({ isTodaySales = false }) {
   const handleClosingConfirm = async (shouldPrint = true) => {
     if (!closingType) return
     setClosingProcessing(true)
+    setClosingProcessingType(shouldPrint ? 'close_print' : 'just_close')
     try {
       const endpoint = closingType === 'Shift' ? '/api/orders/shift-close' : '/api/orders/daily-closing'
       const res = await axios.post(endpoint, { branch })
@@ -385,6 +387,7 @@ export default function Reports({ isTodaySales = false }) {
       toast.error('Error: ' + (err?.response?.data?.error || err.message))
     } finally {
       setClosingProcessing(false)
+      setClosingProcessingType(null)
     }
   }
 
@@ -923,7 +926,7 @@ export default function Reports({ isTodaySales = false }) {
                 onClick={() => handleClosingConfirm(false)}
                 disabled={!closingType || closingProcessing}
               >
-                {closingProcessing ? '...' : `Just Close`}
+                {closingProcessing && closingProcessingType === 'just_close' ? '...' : `Just Close`}
               </button>
               <button
                 className="btn btn-primary"
@@ -931,7 +934,7 @@ export default function Reports({ isTodaySales = false }) {
                 onClick={() => handleClosingConfirm(true)}
                 disabled={!closingType || closingProcessing}
               >
-                {closingProcessing ? 'Processing...' : `Close & Print`}
+                {closingProcessing && closingProcessingType === 'close_print' ? 'Processing...' : `Close & Print`}
               </button>
             </div>
           </div>
