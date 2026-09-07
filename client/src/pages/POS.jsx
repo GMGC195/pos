@@ -597,17 +597,17 @@ export default function POS() {
     const comment = currentInfo.comments || '';
     const customerName = currentInfo.name || '';
     const metaRowParts = [];
-    if (currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber) metaRowParts.push(`Table ${String(currentInfo.tableNumber).replace(/^Table\s*/i, '')}`);
+    if (currentInfo.orderType === 'Dine-In' && currentInfo.tableNumber) metaRowParts.push(`<span style="font-weight: bold;">Table ${String(currentInfo.tableNumber).replace(/^Table\s*/i, '')}</span>`);
     if (taker) metaRowParts.push(`By: ${taker}`);
-    const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
+    const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: normal; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
 
     const effectiveBranch = currentInfo.branch || (user?.role?.trim().toLowerCase() !== 'admin' && user?.role?.trim().toLowerCase() !== 'developer' && user?.branch ? user.branch : selectedBranch) || 'Branch 1';
 
     const headerHtml = isFullReceipt ? `
-    <div style="font-size: 16px; font-weight: 900; margin: 6px 0;">
+    <div style="font-size: 16px; font-weight: normal; margin: 6px 0;">
       ${currentInfo.orderType}
     </div>
-    <div style="font-size: 14px; font-weight: bold; margin: 2px 0; text-align: center;">
+    <div style="font-size: 14px; font-weight: normal; margin: 2px 0; text-align: center;">
       ${effectiveBranch}
     </div>
     <div style="font-size: 10px; text-align: center; margin: 4px 0;">
@@ -615,15 +615,15 @@ export default function POS() {
       إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
     </div>
     ${metaRow}
-    <div style="margin: 10px 0; font-size: 18px; font-weight: 900;">
+    <div style="margin: 10px 0; font-size: 16px; font-weight: bold;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
     </div>
     <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
     ` : `
-    <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
+    <div style="font-size: 14px; font-weight: normal; margin: 2px 0;">
       ${currentInfo.orderType}
     </div>
-    <div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">
+    <div style="font-size: 12px; font-weight: normal; margin: 2px 0; text-align: center;">
       ${effectiveBranch}
     </div>
     <div style="font-size: 10px; text-align: center; margin: 4px 0;">
@@ -631,7 +631,7 @@ export default function POS() {
       إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
     </div>
     ${metaRow}
-    <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
+    <div style="margin: 2px 0; font-size: 14px; font-weight: bold;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
     </div>
     <p class="sub" style="margin-bottom: 2px; font-size: 10px;">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
@@ -660,15 +660,16 @@ export default function POS() {
     html { margin: 0; padding: 0; background: #fff; }
     body {
       width: 100%;
-      font-family: Tahoma, Geneva, sans-serif;
+      font-weight: normal;
+      font-family: 'Courier New', Courier, monospace;
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 0 15mm 4px 15px;
-      margin-right: 10mm;
+      padding: 0 5px 0 5px; /* Removed top/bottom padding completely */
+      margin: 0;
     }
     .center { text-align: center; }
-    h2 { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
+    h2 { font-size: 14px; font-weight: normal; margin-bottom: 4px; }
     .sub { font-size: 11px; color: #000; margin-bottom: 2px; }
     .divider {
       border-top: 1px dashed #000;
@@ -704,13 +705,13 @@ export default function POS() {
     .grand {
       font-size: 16px;
       font-weight: bold;
-      border-top: 2px solid #000;
-      border-bottom: 2px solid #000;
+      border-top: 1px solid #000;
+      border-bottom: 1px solid #000;
       padding: 4px 0;
       margin: 4px 0;
     }
-    .footer { margin-top: 8px; font-size: 11px; color: #000; }
-    .dotted { border-top: 1px dotted #000; margin: 6px 0; }
+    .footer { margin-top: 4px; margin-bottom: 0; font-size: 11px; color: #000; }
+    .dotted { border-top: 1px dotted #000; margin: 4px 0; }
   </style>
 </head>
 <body>
@@ -727,7 +728,7 @@ export default function POS() {
   </div>
   ` : ''}
   <div class="divider"></div>
-  <div class="row" style="font-weight:bold;">
+  <div class="row" style="font-weight:normal;">
     <span class="item-name">Item</span>
     <span class="item-qty">QTY</span>
     <span class="item-price">Amount</span>
