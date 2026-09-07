@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { authenticateToken, isAdmin, isAdminOrManagement } = require('../middleware/auth');
 
 // GET Sales Item Report
-router.get('/sales-items', authenticateToken, isAdmin, async (req, res) => {
+router.get('/sales-items', authenticateToken, isAdminOrManagement, async (req, res) => {
   const { from, to, branch } = req.query;
   
   try {

@@ -51,8 +51,8 @@ const navGroups = [
   {
     title: 'Reports',
     items: [
-      { to: '/sales-item', icon: <ClipboardList size={18} strokeWidth={2.2} />, label: 'Sales Item & Revenue', roles: ['Developer', 'Admin'] },
-      { to: '/reports', icon: <TrendingUp size={18} strokeWidth={2.2} />, label: 'Reports', roles: ['Developer', 'Admin'] },
+      { to: '/sales-item', icon: <ClipboardList size={18} strokeWidth={2.2} />, label: 'Sales Item & Revenue', roles: ['Developer', 'Admin', 'Management'] },
+      { to: '/reports', icon: <TrendingUp size={18} strokeWidth={2.2} />, label: 'Reports', roles: ['Developer', 'Admin', 'Management'] },
     ]
   },
   {

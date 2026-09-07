@@ -23,6 +23,15 @@ const isAdmin = (req, res, next) => {
   }
 };
 
+const isAdminOrManagement = (req, res, next) => {
+  const role = req.user?.role?.toLowerCase();
+  if (role === 'admin' || role === 'developer' || role === 'management') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Admin or Management access required' });
+  }
+};
+
 const isAdminOrCashier = (req, res, next) => {
   const role = req.user?.role?.toLowerCase();
   if (role === 'admin' || role === 'developer' || role === 'cashier') {
@@ -32,4 +41,4 @@ const isAdminOrCashier = (req, res, next) => {
   }
 };
 
-module.exports = { authenticateToken, isAdmin, isAdminOrCashier };
+module.exports = { authenticateToken, isAdmin, isAdminOrManagement, isAdminOrCashier };

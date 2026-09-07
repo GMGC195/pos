@@ -8,7 +8,7 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     let { from, to, branch } = req.query;
     const role = req.user?.role?.trim().toLowerCase();
-    const isAdminRole = role === 'admin' || role === 'developer';
+    const isAdminRole = role === 'admin' || role === 'developer' || role === 'management';
     if (!isAdminRole) {
       if (!req.user?.branch || req.user.branch === 'All') {
         return res.json([]);
@@ -54,7 +54,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
   try {
     let { from, to, branch } = req.query;
     const role = req.user?.role?.trim().toLowerCase();
-    const isAdminRole = role === 'admin' || role === 'developer';
+    const isAdminRole = role === 'admin' || role === 'developer' || role === 'management';
     if (!isAdminRole) {
       if (!req.user?.branch || req.user.branch === 'All') {
         return res.json([]);

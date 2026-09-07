@@ -8,8 +8,11 @@ import {
   BRAND_EMAIL,
   BRAND_ADDRESS
 } from '../branding'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function OrderDetailModal({ order, onClose, onEdit }) {
+  const { user } = useAuth();
+  const isManagement = user?.role?.trim().toLowerCase() === 'management';
   if (!order) return null
 
   const now = new Date(order.created_at)
@@ -195,7 +198,7 @@ ${slipBody}
             <X size={20} />
           </button>
           {onEdit && (
-            <button className="btn btn-secondary" onClick={() => onEdit(order.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <button className="btn btn-secondary" disabled={isManagement} onClick={() => { if (!isManagement) onEdit(order.id) }} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}>
               <Edit size={18} /> Edit
             </button>
           )}

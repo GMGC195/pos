@@ -217,17 +217,18 @@ export default function SalesItem() {
           </div>
           <div className="filter-group" style={{ flex: 1, minWidth: '240px' }}>
             <label style={{ fontWeight: 600, fontSize: 14 }}>Branch:</label>
-            <div style={{ width: '100%', display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, overflowX: 'auto' }}>
+            <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4 }}>
               {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
                 <button
                   key={b}
                   onClick={() => setBranch(b)}
                   style={{
-                    flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, border: 'none', borderRadius: 6,
+                    flex: '1 1 auto', padding: '8px 12px', fontSize: 13, fontWeight: 700, border: 'none', borderRadius: 6,
                     background: branch === b ? 'var(--surface)' : 'transparent',
                     color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
                     boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                    cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center'
+                    cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center',
+                    minWidth: '80px'
                   }}
                 >
                   {b}
@@ -252,6 +253,7 @@ export default function SalesItem() {
           <table className="report-table">
             <thead>
               <tr>
+                <th>#</th>
                 <th>Category</th>
                 <th>Item Name</th>
                 <th style={{ textAlign: 'center' }}>Qty</th>
@@ -263,24 +265,27 @@ export default function SalesItem() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>
-                    {Array.from({ length: 8 }).map((__, j) => (
-                      <td key={j}><div className="skeleton" style={{ height: 18, width: '80%', borderRadius: 4 }} /></td>
-                    ))}
-                  </tr>
-                ))
-              ) : (
-                Object.entries(groupedData).map(([category, items]) => (
-                  <header key={category} style={{ display: 'contents' }}>
-                    <tr style={{ background: 'var(--surface-2)', fontWeight: 700 }}>
-                      <td colSpan={8} style={{ padding: '8px 24px', fontSize: 13, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        {category}
-                      </td>
+              {(() => {
+                let srNo = 1;
+                return loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={i}>
+                      {Array.from({ length: 9 }).map((__, j) => (
+                        <td key={j}><div className="skeleton" style={{ height: 18, width: '80%', borderRadius: 4 }} /></td>
+                      ))}
                     </tr>
+                  ))
+                ) : (
+                  Object.entries(groupedData).map(([category, items]) => (
+                    <header key={category} style={{ display: 'contents' }}>
+                      <tr style={{ background: 'var(--surface-2)', fontWeight: 700 }}>
+                        <td colSpan={9} style={{ padding: '8px 24px', fontSize: 13, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          {category}
+                        </td>
+                      </tr>
                     {items.map((item, idx) => (
                       <tr key={`${category}-${idx}`}>
+                        <td style={{ fontWeight: 800, color: 'var(--text-muted)' }}>{srNo++}</td>
                         <td style={{ paddingLeft: 32, opacity: 0.5, fontSize: 12 }}>{category}</td>
                         <td style={{ fontWeight: 600 }}>{item.item_name}</td>
                         <td style={{ textAlign: 'center' }}>
@@ -293,12 +298,13 @@ export default function SalesItem() {
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>{CURRENCY}{parseFloat(item.revenue).toFixed(2)}</td>
                       </tr>
                     ))}
-                  </header>
-                ))
-              )}
+                    </header>
+                  ))
+                )
+              })()}
               {!loading && data.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
                     <Pizza size={48} style={{ opacity: 0.1, marginBottom: 16 }} />
                     <p>No sales data found for this period.</p>
                   </td>

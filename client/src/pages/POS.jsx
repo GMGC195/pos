@@ -73,6 +73,7 @@ const getTimeElapsed = (dateString) => {
 
 export default function POS() {
   const { user } = useAuth();
+  const isManagement = user?.role?.trim().toLowerCase() === 'management';
   const {
     categories,
     setCategories,
@@ -1061,13 +1062,14 @@ export default function POS() {
 
                 return (
                   <div key={item.id} className="product-card" title={item.name} onClick={() => {
+                    if (isManagement) return;
                     if (sizeOptionsParsed.length === 1) {
                       addToCart(item, sizeOptionsParsed[0]);
                     } else {
                       setSizeModalItem({ ...item, sizeOptionsParsed });
                       setSizeModalSelected(sizeOptionsParsed[0].name);
                     }
-                  }}>
+                  }} style={isManagement ? { cursor: 'not-allowed' } : {}}>
                     {item.image_url && (
                       <img
                         src={item.image_url}
@@ -1214,13 +1216,13 @@ export default function POS() {
                                   )
                                 ) : (
                                   <>
-                                    <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => setCancelRequestModal({ id: o.id })} title="Request Cancel"><Ban size={14} color="var(--red)"/></button>
+                                    <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) setCancelRequestModal({ id: o.id }) }} disabled={isManagement} title="Request Cancel"><Ban size={14} color="var(--red)"/></button>
                                     {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
-                                      <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd' }} onClick={() => loadOrderForEdit(o.id)} title="Edit"><Edit size={14} color="var(--text-muted)"/></button>
+                                      <button className="btn btn-sm btn-secondary" style={{ padding: '2px 4px', background: 'transparent', border: '1px solid #ddd', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) loadOrderForEdit(o.id) }} disabled={isManagement} title="Edit"><Edit size={14} color="var(--text-muted)"/></button>
                                     )}
                                     <button className="btn btn-sm btn-secondary" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600, background: '#f5f5f5', color: '#333' }} onClick={() => setDetailOrder(o)}>Detail View</button>
                                     {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
-                                      <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700 }} onClick={() => setQuickCompleteModal(o)}>Complete</button>
+                                      <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) setQuickCompleteModal(o) }} disabled={isManagement}>Complete</button>
                                     )}
                                   </>
                                 )}
@@ -1348,28 +1350,28 @@ export default function POS() {
             <div className="cart-actions-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px', width: '100%' }}>
               <button
                 className="btn btn-warning btn-lg"
-                onClick={() => handlePlaceOrder('Hold', true, 'placing')}
-                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px', gridColumn: user?.role?.trim().toLowerCase() === 'order taker' ? '1 / -2' : undefined }}
-                disabled={processing}
+                onClick={() => { if (!isManagement) handlePlaceOrder('Hold', true, 'placing'); }}
+                style={{ gap: 6, justifyContent: 'center', padding: '12px 8px', gridColumn: user?.role?.trim().toLowerCase() === 'order taker' ? '1 / -2' : undefined, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                disabled={processing || isManagement}
               >
                 <ClipboardList size={18} /> {processing === 'placing' ? 'Placing...' : 'Place Order'}
               </button>
               {user?.role?.trim().toLowerCase() !== 'order taker' && (
                 <button
                   className="btn btn-success btn-lg"
-                  onClick={() => handlePlaceOrder(paymentMethod === 'Hold' ? 'Cash' : paymentMethod, true, 'paying')}
-                  style={{ gap: 6, justifyContent: 'center', padding: '12px 8px' }}
-                  disabled={processing}
+                  onClick={() => { if (!isManagement) handlePlaceOrder(paymentMethod === 'Hold' ? 'Cash' : paymentMethod, true, 'paying'); }}
+                  style={{ gap: 6, justifyContent: 'center', padding: '12px 8px', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                  disabled={processing || isManagement}
                 >
                   <ClipboardList size={18} /> {processing === 'paying' ? 'Paying...' : 'Pay & Settled'}
                 </button>
               )}
               <button
                 className="btn btn-secondary btn-lg"
-                onClick={() => setConfirmModal(true)}
-                title="Open Confirm Modal"
-                style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                disabled={processing}
+                onClick={() => { if (!isManagement) setConfirmModal(true); }}
+                title="Cancel/Clear Cart"
+                style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                disabled={processing || isManagement}
               >
                 C
               </button>
@@ -1638,10 +1640,10 @@ export default function POS() {
                   )}
 
                   <div style={{ paddingTop: window.innerWidth <= 900 ? 12 : 4, paddingBottom: window.innerWidth <= 900 ? 12 : 0, display: 'flex', gap: window.innerWidth <= 900 ? 6 : 10, position: window.innerWidth <= 900 ? 'sticky' : 'static', bottom: window.innerWidth <= 900 ? -12 : 'auto', background: 'white', zIndex: 10, borderTop: window.innerWidth <= 900 ? '1px solid #eee' : 'none', marginTop: window.innerWidth <= 900 ? 12 : 0 }}>
-                    <button className="btn btn-secondary" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14 }} onClick={() => handlePlaceOrder(paymentMethod, false)} disabled={processing !== false}>
+                    <button className="btn btn-secondary" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) handlePlaceOrder(paymentMethod, false) }} disabled={processing !== false || isManagement}>
                       {processing === 'punch' ? 'Punching...' : 'Punch Only'}
                     </button>
-                    <button className="btn btn-primary" style={{ flex: 1.5, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14 }} onClick={() => handlePlaceOrder(paymentMethod, true)} disabled={processing !== false}>
+                    <button className="btn btn-primary" style={{ flex: 1.5, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) handlePlaceOrder(paymentMethod, true) }} disabled={processing !== false || isManagement}>
                       {processing === 'print' ? 'Processing...' : 'Print & Punch'}
                     </button>
                   </div>

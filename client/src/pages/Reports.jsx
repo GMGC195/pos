@@ -33,13 +33,14 @@ const weekAgo = () => {
 export default function Reports({ isTodaySales = false }) {
   const { user } = useAuth()
   const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase())
+  const isManagement = user?.role?.toLowerCase() === 'management'
   const [from, setFrom] = useState(today())
   const [to, setTo] = useState(today())
   const [transactions, setTransactions] = useState([])
   const [summary, setSummary] = useState([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
-  const [branch, setBranch] = useState(isAdminOrDev ? 'All' : (user?.branch || 'All'))
+  const [branch, setBranch] = useState((isAdminOrDev || isManagement) ? 'All' : (user?.branch || 'All'))
   const [loading, setLoading] = useState(true)
   const [showTodaySummary, setShowTodaySummary] = useState(false)
   const [showDetailsInModal, setShowDetailsInModal] = useState(false)
@@ -47,7 +48,7 @@ export default function Reports({ isTodaySales = false }) {
   const [showOrderDetails, setShowOrderDetails] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [modalPage, setModalPage] = useState(1)
-  const pageSize = 10
+  const pageSize = 30
 
   // Cancel Request Modal States
   const [showCancelModal, setShowCancelModal] = useState(false)
@@ -88,7 +89,7 @@ export default function Reports({ isTodaySales = false }) {
   }, [from, to, branch])
 
   useEffect(() => {
-    setFrom(isTodaySales ? today() : weekAgo())
+    setFrom(today())
     setTo(today())
     setShowDetailsInModal(false)
     setShowTodaySummary(false)
@@ -569,18 +570,19 @@ export default function Reports({ isTodaySales = false }) {
           </div>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
 
-          {isAdminOrDev && (
-            <div style={{ width: '100%', display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, overflowX: 'auto', marginTop: 8 }}>
+          {(isAdminOrDev || isManagement) && (
+            <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, marginTop: 8 }}>
               {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
                 <button
                   key={b}
                   onClick={() => setBranch(b)}
                   style={{
-                    flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, border: 'none', borderRadius: 6,
+                    flex: '1 1 auto', padding: '8px 12px', fontSize: 13, fontWeight: 700, border: 'none', borderRadius: 6,
                     background: branch === b ? 'var(--surface)' : 'transparent',
                     color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
                     boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                    cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center'
+                    cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center',
+                    minWidth: '80px'
                   }}
                 >
                   {b}
@@ -615,9 +617,9 @@ export default function Reports({ isTodaySales = false }) {
                       ))}
                     </tr>
                   ))
-                : paginatedTransactions.map(t => (
+                : paginatedTransactions.map((t, index) => (
                     <tr key={t.id} onClick={() => viewOrderDetail(t.order_id)} style={{ cursor: 'pointer' }} className="hover-row">
-                      <td style={{ fontWeight: 800, color: 'var(--red)' }}>{t.slip_number || '-'}</td>
+                      <td style={{ fontWeight: 800, color: 'var(--red)' }}>{(currentPage - 1) * pageSize + index + 1}</td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span className="badge badge-info" style={{ fontWeight: 800 }}>Order #{t.order_id} / {t.slip_number}</span>
@@ -644,16 +646,18 @@ export default function Reports({ isTodaySales = false }) {
                           <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
                             <button 
                               className="btn btn-sm" 
-                              style={{ padding: '4px 8px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: 4 }}
-                              onClick={() => onVoidButtonClick(t.order_id, 'Cancelled')}
+                              style={{ padding: '4px 8px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: 4, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                              onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Cancelled') }}
+                              disabled={isManagement}
                               title="Cancel Order"
                             >
                               <Ban size={14} /> Cancel
                             </button>
                             <button 
                               className="btn btn-sm" 
-                              style={{ padding: '4px 8px', background: 'rgba(217, 119, 6, 0.1)', color: '#d97706', border: '1px solid rgba(217, 119, 6, 0.2)', display: 'flex', alignItems: 'center', gap: 4 }}
-                              onClick={() => onVoidButtonClick(t.order_id, 'Returned')}
+                              style={{ padding: '4px 8px', background: 'rgba(217, 119, 6, 0.1)', color: '#d97706', border: '1px solid rgba(217, 119, 6, 0.2)', display: 'flex', alignItems: 'center', gap: 4, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                              onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Returned') }}
+                              disabled={isManagement}
                               title="Return Order"
                             >
                               <Undo2 size={14} /> Return
@@ -714,13 +718,15 @@ export default function Reports({ isTodaySales = false }) {
         >
           <History size={18} /> Past Reports
         </button>
-        <button
-          className="btn btn-danger btn-lg"
-          onClick={() => setShowClosingModal(true)}
-          style={{ boxShadow: '0 8px 24px rgba(239,68,68,0.4)', gap: 10, display: 'flex', alignItems: 'center' }}
-        >
-          <Lock size={18} /> Closing
-        </button>
+        {!isManagement && (
+          <button
+            className="btn btn-danger btn-lg"
+            onClick={() => setShowClosingModal(true)}
+            style={{ boxShadow: '0 8px 24px rgba(239,68,68,0.4)', gap: 10, display: 'flex', alignItems: 'center' }}
+          >
+            <Lock size={18} /> Closing
+          </button>
+        )}
       </div>
 
       {/* Today's Summary Modal */}
@@ -786,9 +792,9 @@ export default function Reports({ isTodaySales = false }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedModalTransactions.map(t => (
+                    {paginatedModalTransactions.map((t, index) => (
                       <tr key={t.id} style={{ borderBottom: '1px solid #eee' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 800, color: 'var(--red)' }}>{t.slip_number}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 800, color: 'var(--red)' }}>{(modalPage - 1) * pageSize + index + 1}</td>
                         <td style={{ padding: '10px 12px', fontWeight: 700 }}>
                           Order #{t.order_id} / {t.slip_number}
                           {t.is_edited && <span style={{ fontSize: 10, color: '#999', marginLeft: 6 }}>(Edit)</span>}
