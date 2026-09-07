@@ -57,7 +57,9 @@ export default function Settings() {
   const BRANCH_OPTIONS = ['Restaurant 1', 'Restaurant 2', 'Restaurant 3'];
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [userSearchTerm, setUserSearchTerm] = useState('')
-  const [userRoleFilter, setUserRoleFilter] = useState('All')
+  const [userRoleFilter, setUserRoleFilter] = useState('Admin')
+  const [userTypeTab, setUserTypeTab] = useState('system') // 'system' | 'employee'
+  const [userBranchFilter, setUserBranchFilter] = useState('All') // 'All' | '1' | '2' | '3'
   const [confirmDeleteUser, setConfirmDeleteUser] = useState(null)
 
   useEffect(() => {
@@ -124,8 +126,38 @@ export default function Settings() {
     const matchesSearch = 
       (u.username && u.username.toLowerCase().includes(userSearchTerm.toLowerCase())) || 
       (u.email && u.email.toLowerCase().includes(userSearchTerm.toLowerCase()));
-    const matchesRole = userRoleFilter === 'All' || u.role === userRoleFilter;
-    return matchesSearch && matchesRole;
+      
+    const isEmployeeRole = u.role === 'Employee';
+    const matchesTypeTab = userTypeTab === 'system' ? !isEmployeeRole : isEmployeeRole;
+    
+    let matchesRole = false;
+    if (userRoleFilter === 'All') {
+      matchesRole = true;
+    } else {
+      matchesRole = u.role === userRoleFilter;
+    }
+
+    let matchesBranch = true;
+    if (userBranchFilter !== 'All') {
+      // Admins and Developers bypass branch filters because they have global access
+      if (u.role === 'Admin' || u.role === 'Developer' || u.role === 'Management') {
+        matchesBranch = true;
+      } else {
+        const bStr = u.branch || '';
+        matchesBranch = bStr.includes(`Branch ${userBranchFilter}`) || bStr.includes(`Restaurant ${userBranchFilter}`);
+      }
+    }
+
+    return matchesSearch && matchesTypeTab && matchesRole && matchesBranch;
+  }).sort((a, b) => {
+    // Sort Admins (and Developers) to the very top
+    const getRoleWeight = (role) => {
+      if (role === 'Developer') return 3;
+      if (role === 'Admin') return 2;
+      if (role === 'Management') return 1;
+      return 0;
+    };
+    return getRoleWeight(b.role) - getRoleWeight(a.role);
   })
 
   const handleUpdateProfile = async (e) => {
@@ -722,13 +754,45 @@ export default function Settings() {
                     </div>
                   </div>
                   
+                  {/* System vs Employee Tabs */}
+                  <div style={{ display: 'flex', gap: '8px', padding: '16px 24px 0 24px', background: 'var(--surface-1)' }}>
+                    <button 
+                      onClick={() => { setUserTypeTab('system'); setUserRoleFilter('Admin'); setUserBranchFilter('All'); }}
+                      style={{
+                        padding: '10px 20px',
+                        border: 'none',
+                        background: userTypeTab === 'system' ? 'var(--primary)' : 'var(--surface-2)',
+                        color: userTypeTab === 'system' ? 'white' : 'var(--text-muted)',
+                        borderRadius: '8px 8px 0 0',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      System Users
+                    </button>
+                    <button 
+                      onClick={() => { setUserTypeTab('employee'); setUserRoleFilter('Employee'); setUserBranchFilter('All'); }}
+                      style={{
+                        padding: '10px 20px',
+                        border: 'none',
+                        background: userTypeTab === 'employee' ? 'var(--primary)' : 'var(--surface-2)',
+                        color: userTypeTab === 'employee' ? 'white' : 'var(--text-muted)',
+                        borderRadius: '8px 8px 0 0',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Employees
+                    </button>
+                  </div>
+                  
                   {/* Filters Bar */}
                   <div style={{
                     display: 'flex',
                     flexWrap: 'wrap',
                     gap: '12px',
                     padding: '16px 24px',
-                    borderBottom: '1.5px solid var(--surface-2)',
+                    borderBottom: '1px solid var(--surface-2)',
                     background: 'var(--surface-1)',
                     alignItems: 'center'
                   }}>
@@ -755,32 +819,67 @@ export default function Settings() {
                         }}
                       />
                     </div>
-                    <div style={{ minWidth: '150px' }}>
-                      <select
-                        value={userRoleFilter}
-                        onChange={e => setUserRoleFilter(e.target.value)}
+                  </div>
+
+                  {/* Role Filters Row for System Users */}
+                  {userTypeTab === 'system' && (
+                    <div style={{
+                      display: 'flex',
+                      gap: '8px',
+                      padding: '12px 24px 0',
+                      background: 'var(--surface-1)',
+                      overflowX: 'auto'
+                    }}>
+                      {['Admin', 'Management', 'Operator', 'Cashier', 'Order Taker'].map(r => (
+                        <button
+                          key={r}
+                          onClick={() => setUserRoleFilter(r)}
+                          style={{
+                            padding: '6px 16px',
+                            border: '1px solid var(--surface-2)',
+                            background: userRoleFilter === r ? 'var(--primary)' : 'white',
+                            color: userRoleFilter === r ? 'white' : 'var(--text)',
+                            borderRadius: '20px',
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Branch Filters Row */}
+                  <div style={{
+                    display: 'flex',
+                    gap: '8px',
+                    padding: '12px 24px',
+                    background: 'var(--surface-1)',
+                    borderBottom: '1.5px solid var(--surface-2)',
+                    overflowX: 'auto'
+                  }}>
+                    {['All', '1', '2', '3'].map(b => (
+                      <button
+                        key={b}
+                        onClick={() => setUserBranchFilter(b)}
                         style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          border: '1.5px solid var(--surface-2)',
-                          borderRadius: '8px',
-                          background: 'var(--surface)',
-                          color: 'var(--text)',
-                          outline: 'none',
+                          padding: '6px 16px',
+                          border: '1px solid var(--surface-2)',
+                          background: userBranchFilter === b ? 'var(--primary)' : 'white',
+                          color: userBranchFilter === b ? 'white' : 'var(--text)',
+                          borderRadius: '20px',
                           fontSize: '13px',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
+                          fontWeight: 500,
+                          whiteSpace: 'nowrap'
                         }}
                       >
-                        <option value="All">All Roles</option>
-                        <option value="Admin">Admin</option>
-                        <option value="Operator">Operator</option>
-                        <option value="Management">Management</option>
-                        <option value="Employee">Employee</option>
-                        <option value="Order Taker">Order Taker</option>
-                        <option value="Cashier">Cashier</option>
-                        <option value="Developer">Developer</option>
-                      </select>
-                    </div>
+                        {b === 'All' ? 'All Branches' : `Branch ${b} (R${b})`}
+                      </button>
+                    ))}
                   </div>
 
                   {/* Desktop Table View */}

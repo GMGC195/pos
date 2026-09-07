@@ -581,6 +581,36 @@ export default function Employees() {
             )}
           </div>
         </div>
+
+        {/* Branch Filters Row */}
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          marginTop: '16px',
+          paddingTop: '16px',
+          borderTop: '1px solid var(--surface-2)',
+          overflowX: 'auto'
+        }}>
+          {['All', ...branchesList].map(b => (
+            <button
+              key={b}
+              onClick={() => setSelectedBranch(b)}
+              style={{
+                padding: '6px 16px',
+                border: '1px solid var(--surface-2)',
+                background: selectedBranch === b ? 'var(--primary)' : 'white',
+                color: selectedBranch === b ? 'white' : 'var(--text)',
+                borderRadius: '20px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                fontWeight: 500,
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {b === 'All' ? 'All Branches' : b}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Employees Table */}

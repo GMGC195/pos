@@ -477,7 +477,7 @@ async function sendClosingEmail(report, closingType) {
     
     let itemsHtml = '';
     try {
-      const items = JSON.parse(report.items_summary);
+      const items = typeof report.items_summary === 'string' ? JSON.parse(report.items_summary) : report.items_summary;
       itemsHtml = items.map(cat => {
         let catHtml = `<li style="margin-bottom: 12px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px;">
           <div style="font-weight: bold; font-size: 16px; color: #111; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">
