@@ -477,7 +477,24 @@ async function sendClosingEmail(report, closingType) {
     
     let itemsHtml = '';
     try {
-      const items = typeof report.items_summary === 'string' ? JSON.parse(report.items_summary) : report.items_summary;
+      let items = [];
+      if (typeof report.items_summary === 'string') {
+        if (report.items_summary === '[object Object]') {
+          console.warn('[Email System] items_summary is "[object Object]", defaulting to empty array.');
+        } else {
+          try {
+            items = JSON.parse(report.items_summary);
+          } catch(parseErr) {
+            console.error('[Email System] Failed to parse items_summary string:', parseErr.message);
+          }
+        }
+      } else if (Array.isArray(report.items_summary)) {
+        items = report.items_summary;
+      } else if (report.items_summary) {
+        // Fallback if it's an object but not an array, wrap it
+        items = [report.items_summary];
+      }
+
       itemsHtml = items.map(cat => {
         let catHtml = `<li style="margin-bottom: 12px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px;">
           <div style="font-weight: bold; font-size: 16px; color: #111; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">

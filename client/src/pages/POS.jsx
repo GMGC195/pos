@@ -1021,8 +1021,12 @@ export default function POS() {
                     onClick={(e) => { e.stopPropagation(); setShowMobileDotsMenu(false); }} 
                   />
                   <div className="pos-mobile-dots-menu" style={{ display: 'block', zIndex: 999 }}>
-                    <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); setShowMobileDotsMenu(false); }}>+ New Type</button>
-                    <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); setShowMobileDotsMenu(false); }}>Manage Categories</button>
+                    {!isManagement && (
+                      <>
+                        <button onClick={(e) => { e.stopPropagation(); setShowAddCategory(true); setShowMobileDotsMenu(false); }}>+ New Type</button>
+                        <button onClick={(e) => { e.stopPropagation(); setShowManageCategories(true); setShowMobileDotsMenu(false); }}>Manage Categories</button>
+                      </>
+                    )}
                     {['admin', 'developer', 'order taker'].includes(user?.role?.trim().toLowerCase()) && (
                       <button onClick={(e) => { e.stopPropagation(); setShowManageTables(true); setShowMobileDotsMenu(false); }}>Manage Tables</button>
                     )}

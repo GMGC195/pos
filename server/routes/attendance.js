@@ -524,7 +524,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
 
 // Check-out endpoint
 router.post('/check-out', authenticateToken, async (req, res) => {
-  const { employee_id } = req.body;
+  const { employee_id, overtime_reason } = req.body;
   try {
     // Find active session
     const activeSession = await pool.query(
@@ -545,10 +545,45 @@ router.post('/check-out', authenticateToken, async (req, res) => {
       totalBreakSecs += breakDuration;
     }
 
+    // Overtime Logic
+    const shiftHours = parseFloat(session.shift_hours || 12.0);
+    const checkInTime = new Date(session.check_in).getTime();
+    const expectedCheckoutTime = checkInTime + (shiftHours * 60 * 60 * 1000) + (totalBreakSecs * 1000);
+    const actualCheckoutTime = Date.now();
+    
+    let finalCheckoutTime = new Date();
+    const overtimeMs = actualCheckoutTime - expectedCheckoutTime;
+    const overtimeMins = Math.floor(overtimeMs / (1000 * 60));
+
+    if (overtimeMins > 0) {
+      if (overtimeMins <= 15) {
+        // Auto trim overtime to zero
+        finalCheckoutTime = new Date(expectedCheckoutTime);
+      } else {
+        // Overtime > 15 mins, require reason
+        if (!overtime_reason) {
+          return res.status(400).json({ 
+            error: 'Overtime requires a reason.', 
+            overtime_minutes: overtimeMins 
+          });
+        }
+      }
+    }
+
     const result = await pool.query(
-      'UPDATE employee_attendance SET check_out = NOW(), on_break = false, break_start = null, total_break_duration_seconds = $1 WHERE id = $2 RETURNING *',
-      [totalBreakSecs, session.id]
+      'UPDATE employee_attendance SET check_out = $1, on_break = false, break_start = null, total_break_duration_seconds = $2 WHERE id = $3 RETURNING *',
+      [finalCheckoutTime, totalBreakSecs, session.id]
     );
+
+    // If overtime exceeded 15 mins and reason was provided, log it as an Overtime Request for Admin
+    if (overtimeMins > 15 && overtime_reason) {
+      await pool.query(
+        `INSERT INTO attendance_edit_requests 
+         (attendance_id, employee_id, requested_by_user_id, target_role, request_type, reason, status) 
+         VALUES ($1, $2, $3, 'Admin', 'Overtime', $4, 'Pending')`,
+        [session.id, employee_id, req.user.id || null, `Overtime (${overtimeMins} min): ${overtime_reason}`]
+      );
+    }
 
     res.json(result.rows[0]);
   } catch (err) {

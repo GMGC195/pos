@@ -183,7 +183,8 @@ export default function AttendanceTracker() {
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
   const [confirmModal, setConfirmModal] = useState(null)
-  
+  const [overtimeModal, setOvertimeModal] = useState(null)
+  const [overtimeReason, setOvertimeReason] = useState('')
   // Shift Edit State
   const [activeDropdownId, setActiveDropdownId] = useState(null)
   const [showShiftModal, setShowShiftModal] = useState(false)
@@ -398,34 +399,62 @@ export default function AttendanceTracker() {
   }
 
   const handleCheckOut = (empId, name) => {
+    const emp = employees.find(e => e.employee_id === empId || e.id === empId) || {};
+    const checkInTime = new Date(emp.check_in).getTime();
+    const shiftHours = parseFloat(emp.shift_hours || 12.0);
+    let totalBreakSecs = emp.total_break_duration_seconds || 0;
+    if (emp.on_break && emp.break_start) {
+      totalBreakSecs += Math.floor((Date.now() - new Date(emp.break_start).getTime()) / 1000);
+    }
+    const expectedCheckoutTime = checkInTime + (shiftHours * 60 * 60 * 1000) + (totalBreakSecs * 1000);
+    const overtimeMins = Math.floor((Date.now() - expectedCheckoutTime) / (1000 * 60));
+
+    if (overtimeMins > 15) {
+      setOvertimeModal({ empId, name, overtimeMins });
+      setOvertimeReason('');
+      return;
+    }
+
+    proceedWithCheckout(empId, name, '');
+  }
+
+  const proceedWithCheckout = async (empId, name, reason = '') => {
     const actionKey = `check-out-${empId}`;
     if (pendingActions[actionKey]) return;
-    
-    setConfirmModal({
-      message: `Are you sure you want to Check Out "${name}"?`,
-      onConfirm: async () => {
-        setPendingActions(prev => ({ ...prev, [actionKey]: true }));
-        try {
-          await axios.post('/api/attendance/check-out', { employee_id: empId })
-          await loadAttendance()
-          toast.dismiss()
-          toast.success(`${name} Successfully Checked Out!`, { duration: 2000 })
-        } catch (err) {
-          toast.dismiss()
-          if (!navigator.onLine || err.message === 'Network Error') {
-            queueAttendanceAction({ type: 'check-out', employee_id: empId })
-            optimisticUpdate(empId, { 
-              check_out: new Date().toISOString()
-            })
-            toast.error('Offline Mode: Check-Out saved locally (pending sync)', { duration: 2500 })
-          } else {
-            toast.error(err?.response?.data?.error || 'Failed to check out', { duration: 2500 })
-          }
-        } finally {
-          setPendingActions(prev => ({ ...prev, [actionKey]: false }));
+
+    const doCheckOut = async () => {
+      setPendingActions(prev => ({ ...prev, [actionKey]: true }));
+      try {
+        await axios.post('/api/attendance/check-out', { employee_id: empId, overtime_reason: reason })
+        await loadAttendance()
+        toast.dismiss()
+        toast.success(`${name} Successfully Checked Out!`, { duration: 2000 })
+      } catch (err) {
+        toast.dismiss()
+        if (!navigator.onLine || err.message === 'Network Error') {
+          queueAttendanceAction({ type: 'check-out', employee_id: empId })
+          optimisticUpdate(empId, { 
+            check_out: new Date().toISOString()
+          })
+          toast.error('Offline Mode: Check-Out saved locally (pending sync)', { duration: 2500 })
+        } else {
+          toast.error(err?.response?.data?.error || 'Failed to check out', { duration: 2500 })
         }
+      } finally {
+        setPendingActions(prev => ({ ...prev, [actionKey]: false }));
       }
-    });
+    };
+
+    if (reason) {
+      // Reason provided, meaning they already went through the Overtime modal. Just execute.
+      doCheckOut();
+    } else {
+      // Normal checkout, ask for confirmation
+      setConfirmModal({
+        message: `Are you sure you want to Check Out "${name}"?`,
+        onConfirm: doCheckOut
+      });
+    }
   }
 
   const handleToggleBreak = async (empId, name) => {
@@ -1673,6 +1702,73 @@ export default function AttendanceTracker() {
           </div>
         </div>
       )}
+
+      {/* Overtime Reason Modal */}
+      {overtimeModal && (
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999 }}>
+          <div className="modal-content" style={{ width: 400, padding: 24, borderRadius: 16, background: 'var(--surface)', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Overtime Reason</h3>
+              <button 
+                onClick={() => setOvertimeModal(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={20} style={{ color: 'var(--text-muted)' }} />
+              </button>
+            </div>
+            
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ margin: '0 0 16px 0', fontSize: 14, color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                <strong style={{ color: 'var(--text)' }}>{overtimeModal.name}</strong> has worked <strong>{overtimeModal.overtimeMins} minutes</strong> of overtime. Please provide a reason to continue checking out. This reason will be sent to the Admin for approval.
+              </p>
+              <textarea
+                value={overtimeReason}
+                onChange={(e) => setOvertimeReason(e.target.value)}
+                placeholder="Enter overtime reason here..."
+                style={{
+                  width: '100%',
+                  height: 100,
+                  padding: 12,
+                  borderRadius: 8,
+                  border: '1.5px solid var(--surface-3)',
+                  background: 'var(--surface-1)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                  resize: 'none',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+            
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => setOvertimeModal(null)}
+                style={{ flex: 1, padding: '10px 0', fontWeight: 600, fontSize: 14 }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={() => {
+                  if (!overtimeReason.trim()) {
+                    toast.error('Overtime reason is required.');
+                    return;
+                  }
+                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, overtimeReason);
+                  setOvertimeModal(null);
+                }}
+                disabled={!overtimeReason.trim()}
+                style={{ flex: 1, padding: '10px 0', fontWeight: 600, fontSize: 14 }}
+              >
+                Submit & Check Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
