@@ -721,7 +721,7 @@ export default function AttendanceReports() {
 
       {/* ── Controls bar ─ sticky, never moves ── */}
       <div className="attendance-controls-bar">
-        <div className="attendance-controls-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="attendance-controls-card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {/* Top header row with Month selection */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
             <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -767,7 +767,7 @@ export default function AttendanceReports() {
           <div style={{ height: '1.5px', background: 'var(--surface-2)', width: '100%' }} />
 
           {/* Main search and icon actions row */}
-          <div className="attendance-search-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="attendance-search-row" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 120, position: 'relative' }}>
               <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input 
@@ -786,6 +786,33 @@ export default function AttendanceReports() {
                   boxSizing: 'border-box'
                 }}
               />
+            </div>
+            
+            {/* Branch Filter Buttons inline */}
+            <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 2, alignItems: 'center', gap: 2 }}>
+              {['All', ...new Set(employeesList.map(emp => emp.branch).filter(Boolean))].map(br => {
+                let label = br;
+                if (br === 'All') label = 'All';
+                else if (br.includes('1')) label = 'R1';
+                else if (br.includes('2')) label = 'R2';
+                else if (br.includes('3')) label = 'R3';
+
+                return (
+                  <button
+                    key={br}
+                    onClick={() => setSelectedBranch(br)}
+                    style={{
+                      padding: '6px 12px', fontSize: 12, fontWeight: 700, border: 'none', borderRadius: 6,
+                      background: selectedBranch === br ? 'var(--surface)' : 'transparent',
+                      color: selectedBranch === br ? 'var(--primary)' : 'var(--text-muted)',
+                      boxShadow: selectedBranch === br ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                      cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
             
             <button 
@@ -850,24 +877,6 @@ export default function AttendanceReports() {
       {showFilters && (
         <div style={{ padding: '0 28px', marginTop: 12 }}>
           <div className="attendance-controls-card" style={{ display: 'flex', gap: 16, padding: '16px 20px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <select 
-              value={selectedBranch}
-              onChange={e => setSelectedBranch(e.target.value)}
-              style={{
-                padding: '8px 12px',
-                background: 'var(--surface-1)',
-                border: '1.5px solid var(--surface-2)',
-                borderRadius: 8,
-                outline: 'none',
-                fontSize: 13,
-                minWidth: 150,
-                flex: 1
-              }}
-            >
-              {['All', ...new Set(employeesList.map(emp => emp.branch).filter(Boolean))].map(br => (
-                <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
-              ))}
-            </select>
 
             <select 
               value={selectedDayNight}
