@@ -106,7 +106,7 @@ router.get('/notifications', authenticateToken, async (req, res) => {
     let requestNotifs = [];
     if (userRole === 'admin' || userRole === 'developer') {
       const requestsRes = await pool.query(
-        `SELECT r.id, e.name AS employee_name, r.created_at
+        `SELECT r.id, e.name AS employee_name, r.created_at, r.request_type, r.reason
          FROM attendance_edit_requests r
          JOIN employees e ON r.employee_id = e.id
          WHERE r.status = 'Pending' AND r.target_role IN ('Admin', 'Both')`
@@ -114,8 +114,9 @@ router.get('/notifications', authenticateToken, async (req, res) => {
       requestNotifs = requestsRes.rows.map(row => ({
         id: `attendance-request-${row.id}`,
         type: 'attendance_request',
+        request_type: row.request_type,
         created_at: row.created_at,
-        message: `Attendance request from ${row.employee_name} pending Admin approval.`
+        message: row.request_type === 'Overtime' ? `Overtime request pending approval for ${row.employee_name}: ${row.reason}` : `Attendance correction request from ${row.employee_name} pending Admin approval.`
       }));
     } else if (userRole === 'operator') {
       let userBranchStr = req.user.branch;
@@ -124,7 +125,7 @@ router.get('/notifications', authenticateToken, async (req, res) => {
         if (uRes.rows.length > 0) userBranchStr = uRes.rows[0].branch;
       }
       
-      let opQuery = `SELECT r.id, e.name AS employee_name, r.created_at
+      let opQuery = `SELECT r.id, e.name AS employee_name, r.created_at, r.request_type, r.reason
          FROM attendance_edit_requests r
          JOIN employees e ON r.employee_id = e.id
          WHERE r.status = 'Pending' AND r.target_role IN ('Operator', 'Both')`;
@@ -139,8 +140,9 @@ router.get('/notifications', authenticateToken, async (req, res) => {
       requestNotifs = requestsRes.rows.map(row => ({
         id: `attendance-request-${row.id}`,
         type: 'attendance_request',
+        request_type: row.request_type,
         created_at: row.created_at,
-        message: `Attendance request from ${row.employee_name} pending Operator approval.`
+        message: row.request_type === 'Overtime' ? `Overtime request pending approval for ${row.employee_name}: ${row.reason}` : `Attendance correction request from ${row.employee_name} pending Operator approval.`
       }));
     } else if (userRole === 'employee' && employeeId) {
       // 1. Approved requests
@@ -524,7 +526,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
 
 // Check-out endpoint
 router.post('/check-out', authenticateToken, async (req, res) => {
-  const { employee_id, overtime_reason } = req.body;
+  const { employee_id, overtime_reason, ignore_overtime } = req.body;
   try {
     // Find active session
     const activeSession = await pool.query(
@@ -556,7 +558,7 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     const overtimeMins = Math.floor(overtimeMs / (1000 * 60));
 
     if (overtimeMins > 0) {
-      if (overtimeMins <= 15) {
+      if (overtimeMins <= 15 || ignore_overtime) {
         // Auto trim overtime to zero
         finalCheckoutTime = new Date(expectedCheckoutTime);
       } else {
@@ -576,12 +578,13 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     );
 
     // If overtime exceeded 15 mins and reason was provided, log it as an Overtime Request for Admin
-    if (overtimeMins > 15 && overtime_reason) {
+    if (overtimeMins > 15 && overtime_reason && !ignore_overtime) {
+      const actualCheckoutDate = new Date(actualCheckoutTime);
       await pool.query(
         `INSERT INTO attendance_edit_requests 
-         (attendance_id, employee_id, requested_by_user_id, target_role, request_type, reason, status) 
-         VALUES ($1, $2, $3, 'Admin', 'Overtime', $4, 'Pending')`,
-        [session.id, employee_id, req.user.id || null, `Overtime (${overtimeMins} min): ${overtime_reason}`]
+         (attendance_id, employee_id, requested_by_user_id, target_role, request_type, reason, status, requested_check_out) 
+         VALUES ($1, $2, $3, 'Admin', 'Overtime', $4, 'Pending', $5)`,
+        [session.id, employee_id, req.user.id || null, `Overtime (${overtimeMins} min): ${overtime_reason}`, actualCheckoutDate]
       );
     }
 
@@ -909,7 +912,7 @@ router.get('/analytics', authenticateToken, async (req, res) => {
 // Get dashboard statistics
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    const userRole = req.user.role?.toLowerCase();
+    const userRole = req.user.role?.trim().toLowerCase();
     
     // Total employees count
     let empsQueryStr = "SELECT id, shift, branch FROM employees WHERE status = 'Active'";
@@ -1224,7 +1227,7 @@ router.post('/edit', authenticateToken, async (req, res) => {
 // Get all edited attendance audit logs (Admin/Developer only)
 router.get('/edited-logs', authenticateToken, async (req, res) => {
   try {
-    const userRole = req.user.role?.toLowerCase();
+    const userRole = req.user.role?.trim().toLowerCase();
     if (userRole !== 'admin' && userRole !== 'developer' && userRole !== 'operator') {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -1267,8 +1270,8 @@ router.get('/edited-logs', authenticateToken, async (req, res) => {
       queryStr += ` WHERE ` + conditions.join(' AND ');
     }
 
-    // Sort order: Today's logs first, then remaining sorted descending
-    queryStr += ` ORDER BY CASE WHEN ea.edited_at::date = CURRENT_DATE THEN 0 ELSE 1 END ASC, ea.edited_at DESC`;
+    // Sort order: Newest first
+    queryStr += ` ORDER BY ea.edited_at DESC`;
 
     // Fetch total count for pagination
     let countQuery = `
@@ -1451,7 +1454,7 @@ router.post('/edit-requests', authenticateToken, async (req, res) => {
 // GET all edit requests (filtered by user role)
 router.get('/edit-requests', authenticateToken, async (req, res) => {
   try {
-    const userRole = req.user.role?.toLowerCase();
+    const userRole = req.user.role?.trim().toLowerCase();
     const username = req.user.username;
 
     let query = `
@@ -1546,7 +1549,7 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
 
       // Operator 24-hour constraint based on shift start
       const attendanceDate = new Date(request.attendance_date || effectiveCheckIn || Date.now());
-      if (req.user.role?.toLowerCase() === 'operator') {
+      if (req.user.role?.trim().toLowerCase() === 'operator') {
         const limitCheck = await verifyOperator24HourLimit(request.employee_id, attendanceDate, pool);
         if (!limitCheck.allowed) {
           return res.status(403).json({ error: 'Operators can only approve requests within 24 hours of shift start. Please reject this request or forward it to the Admin.' });

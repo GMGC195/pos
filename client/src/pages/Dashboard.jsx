@@ -36,6 +36,16 @@ import { BRAND_NAME, BRAND_PRIMARY, BRAND_SECONDARY, BRAND_LOGO } from '../brand
 
 const PALETTE = [BRAND_PRIMARY, BRAND_SECONDARY, '#10b981', '#3b82f6', '#8b5cf6', '#f97316']
 
+const decimalHoursToText = (hoursDec) => {
+  if (isNaN(hoursDec) || hoursDec === null || hoursDec === undefined || hoursDec <= 0) return '0 min';
+  const totalMins = Math.round(hoursDec * 60);
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hrs > 0 && mins > 0) return `${hrs} hr ${mins} min`;
+  if (hrs > 0) return `${hrs} hr`;
+  return `${mins} min`;
+};
+
 const statCards = [
   { key: 'totalSale', label: 'Total Sale', icon: <CircleDollarSign size={24} strokeWidth={2.5} />, color: BRAND_SECONDARY, prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
   { key: 'dailyRevenue', label: 'Daily Revenue', icon: <TrendingUp size={24} strokeWidth={2.5} />, color: '#10b981', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
@@ -649,7 +659,7 @@ export default function Dashboard() {
                   <Clock size={24} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{personalStats?.total_hours || 0} hrs</h3>
+                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{decimalHoursToText(personalStats?.total_hours || 0)}</h3>
                   <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Hours Worked</p>
                 </div>
               </div>
@@ -660,7 +670,7 @@ export default function Dashboard() {
                     <TrendingUp size={24} />
                   </div>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{personalStats?.overtime || 0} hrs</h3>
+                    <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{decimalHoursToText(personalStats?.overtime || 0)}</h3>
                     <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Overtime</p>
                   </div>
                 </div>
@@ -1158,7 +1168,7 @@ export default function Dashboard() {
                               In: {log.check_in ? new Date(log.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'}
                             </span>
                             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
-                              {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs
+                              {decimalHoursToText(parseFloat(log.total_hours_today || 0))}
                             </span>
                           </div>
                         </div>
@@ -1265,7 +1275,7 @@ export default function Dashboard() {
                               </span>
                             </div>
                             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
-                              {parseFloat(log.total_hours_today || 0).toFixed(1)} Hrs {otHours > 0 && <span style={{ color: 'var(--primary)' }}>({otHours.toFixed(1)} OT)</span>}
+                              {decimalHoursToText(parseFloat(log.total_hours_today || 0))} {otHours > 0 && <span style={{ color: 'var(--primary)' }}>({decimalHoursToText(otHours)} OT)</span>}
                             </span>
                           </div>
                         </div>

@@ -316,6 +316,9 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       }
     }
 
+    // Ensure Uzair is always Developer
+    await pool.query(`UPDATE users SET role = 'Developer' WHERE email = 'uzairshafqat106@gmail.com'`);
+
     // Create indexes
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_employee ON employee_attendance(employee_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON employee_attendance(date)`);

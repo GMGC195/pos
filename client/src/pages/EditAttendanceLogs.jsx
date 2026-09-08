@@ -33,7 +33,7 @@ export default function EditAttendanceLogs() {
         setLogs(res.data.logs || [])
         setTotalPages(res.data.pages || 1)
       })
-      .catch(() => toast.error('Error loading edit audit logs'))
+      .catch((err) => toast.error(err.response?.data?.error || 'Error loading edit audit logs'))
       .finally(() => setLoading(false))
   }
 
@@ -285,6 +285,7 @@ export default function EditAttendanceLogs() {
                   <tr style={{ background: 'var(--surface-1)' }}>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Code</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Employee Name</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Type</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Date</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Original In/Out</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Requested In/Out</th>
@@ -309,14 +310,32 @@ export default function EditAttendanceLogs() {
                       <tr key={req.id} style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
                         <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{req.employee_code}</td>
                         <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700 }}>{req.employee_name}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>
+                          <span style={{ 
+                            padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                            background: req.request_type === 'Overtime' ? 'rgba(139, 92, 246, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                            color: req.request_type === 'Overtime' ? '#8b5cf6' : '#3b82f6'
+                          }}>
+                            {req.request_type || 'Edit'}
+                          </span>
+                        </td>
                         <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{logDate}</td>
                         <td style={{ padding: '12px 14px', fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>
                           <div>In: {formatDateTime(req.original_check_in)}</div>
                           <div>Out: {formatDateTime(req.original_check_out)}</div>
                         </td>
                         <td style={{ padding: '12px 14px', fontSize: 12, textAlign: 'center', color: 'var(--green)', fontWeight: 600 }}>
-                          <div>In: {formatDateTime(req.requested_check_in)}</div>
-                          <div>Out: {formatDateTime(req.requested_check_out)}</div>
+                          {req.request_type === 'Overtime' ? (
+                            <>
+                              <div style={{ color: 'var(--text-muted)', fontWeight: 500 }}>--</div>
+                              <div>Out: {formatDateTime(req.requested_check_out)}</div>
+                            </>
+                          ) : (
+                            <>
+                              <div>In: {formatDateTime(req.requested_check_in)}</div>
+                              <div>Out: {formatDateTime(req.requested_check_out)}</div>
+                            </>
+                          )}
                         </td>
                         <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 500 }}>{req.reason}</td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>

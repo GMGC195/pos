@@ -15,7 +15,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 const isAdmin = (req, res, next) => {
-  const role = req.user?.role?.toLowerCase();
+  const role = req.user?.role?.trim().toLowerCase();
   if (role === 'admin' || role === 'developer') {
     next();
   } else {
@@ -24,7 +24,7 @@ const isAdmin = (req, res, next) => {
 };
 
 const isAdminOrManagement = (req, res, next) => {
-  const role = req.user?.role?.toLowerCase();
+  const role = req.user?.role?.trim().toLowerCase();
   if (role === 'admin' || role === 'developer' || role === 'management') {
     next();
   } else {
@@ -33,7 +33,7 @@ const isAdminOrManagement = (req, res, next) => {
 };
 
 const isAdminOrCashier = (req, res, next) => {
-  const role = req.user?.role?.toLowerCase();
+  const role = req.user?.role?.trim().toLowerCase();
   if (role === 'admin' || role === 'developer' || role === 'cashier') {
     next();
   } else {

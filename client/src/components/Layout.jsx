@@ -155,7 +155,8 @@ export default function Layout() {
           message: item.message,
           check_in: item.check_in,
           created_at: item.created_at,
-          employee_name: item.employee_name
+          employee_name: item.employee_name,
+          request_type: item.request_type
         }));
         combinedAlerts = [...combinedAlerts, ...attAlerts];
       } catch (err) {
@@ -617,7 +618,7 @@ export default function Layout() {
                                   color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : undefined 
                                 }}
                               >
-                                {item.type === 'attendance_warning' ? 'Long Session Warning' : item.type === 'attendance_request' ? 'Correction Request' : `Low Stock: ${item.name}`}
+                                {item.type === 'attendance_warning' ? 'Long Session Warning' : item.type === 'attendance_request' ? (item.request_type === 'Overtime' ? 'Overtime' : 'Correction Request') : `Low Stock: ${item.name}`}
                               </span>
                               <span className="notif-item-desc">
                                 {item.type === 'attendance_warning' || item.type === 'attendance_request' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}

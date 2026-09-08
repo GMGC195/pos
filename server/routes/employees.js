@@ -38,7 +38,7 @@ const autoCreateUserForEmployee = async (employee) => {
 
     const email = `${username}@alrawaq.com`;
     const passwordHash = await bcrypt.hash('user123', 10);
-
+    
     await pool.query(
       `INSERT INTO users (username, email, password_hash, role, employee_id, must_change_password)
        VALUES ($1, $2, $3, $4, $5, $6)`,

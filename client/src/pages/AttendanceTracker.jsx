@@ -418,14 +418,14 @@ export default function AttendanceTracker() {
     proceedWithCheckout(empId, name, '');
   }
 
-  const proceedWithCheckout = async (empId, name, reason = '') => {
+  const proceedWithCheckout = async (empId, name, reason = '', ignore_overtime = false) => {
     const actionKey = `check-out-${empId}`;
     if (pendingActions[actionKey]) return;
 
     const doCheckOut = async () => {
       setPendingActions(prev => ({ ...prev, [actionKey]: true }));
       try {
-        await axios.post('/api/attendance/check-out', { employee_id: empId, overtime_reason: reason })
+        await axios.post('/api/attendance/check-out', { employee_id: empId, overtime_reason: reason, ignore_overtime })
         await loadAttendance()
         toast.dismiss()
         toast.success(`${name} Successfully Checked Out!`, { duration: 2000 })
@@ -445,8 +445,8 @@ export default function AttendanceTracker() {
       }
     };
 
-    if (reason) {
-      // Reason provided, meaning they already went through the Overtime modal. Just execute.
+    if (reason || ignore_overtime) {
+      // Reason provided or override triggered, meaning they already went through the Overtime modal. Just execute.
       doCheckOut();
     } else {
       // Normal checkout, ask for confirmation
@@ -1281,12 +1281,12 @@ export default function AttendanceTracker() {
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: 'var(--text-muted)' }}>Duty Hours:</span>
-                        <span style={{ fontWeight: 600, color: 'var(--green)' }}>{Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)).toFixed(2)} hrs</span>
+                        <span style={{ fontWeight: 600, color: 'var(--green)' }}>{decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)))}</span>
                       </div>
                       {parseFloat(emp.total_hours_today || 0) > (parseFloat(emp.shift_hours) || 12.0) && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
                           <span style={{ color: 'var(--text-muted)' }}>Overtime:</span>
-                          <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{(parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0)).toFixed(2)} hrs</span>
+                          <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{decimalHoursToText(parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0))}</span>
                         </div>
                       )}
                     </div>
@@ -1706,7 +1706,7 @@ export default function AttendanceTracker() {
       {/* Overtime Reason Modal */}
       {overtimeModal && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999 }}>
-          <div className="modal-content" style={{ width: 400, padding: 24, borderRadius: 16, background: 'var(--surface)', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+          <div className="modal-content" style={{ width: 500, padding: 24, borderRadius: 16, background: 'var(--surface)', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Overtime Reason</h3>
               <button 
@@ -1719,7 +1719,16 @@ export default function AttendanceTracker() {
             
             <div style={{ marginBottom: 20 }}>
               <p style={{ margin: '0 0 16px 0', fontSize: 14, color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                <strong style={{ color: 'var(--text)' }}>{overtimeModal.name}</strong> has worked <strong>{overtimeModal.overtimeMins} minutes</strong> of overtime. Please provide a reason to continue checking out. This reason will be sent to the Admin for approval.
+                <strong style={{ color: 'var(--text)' }}>{overtimeModal.name}</strong> has worked <strong>
+                  {(() => {
+                    const m = overtimeModal.overtimeMins;
+                    const h = Math.floor(m / 60);
+                    const rm = m % 60;
+                    if (h > 0 && rm > 0) return `${h} hr ${rm} min`;
+                    if (h > 0) return `${h} hr`;
+                    return `${m} minutes`;
+                  })()}
+                </strong> of overtime. Please provide a reason to continue checking out. This reason will be sent to the Admin for approval.
               </p>
               <textarea
                 value={overtimeReason}
@@ -1745,9 +1754,19 @@ export default function AttendanceTracker() {
               <button 
                 className="btn btn-secondary" 
                 onClick={() => setOvertimeModal(null)}
-                style={{ flex: 1, padding: '10px 0', fontWeight: 600, fontSize: 14 }}
+                style={{ flex: 1, padding: '10px 12px', fontWeight: 600, fontSize: 14 }}
               >
                 Cancel
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => {
+                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, '', true);
+                  setOvertimeModal(null);
+                }}
+                style={{ flex: 1, padding: '10px 12px', fontWeight: 600, fontSize: 14, background: 'var(--surface-2)', color: 'var(--text)', whiteSpace: 'nowrap' }}
+              >
+                Ignore Overtime
               </button>
               <button 
                 className="btn btn-primary" 
@@ -1756,11 +1775,11 @@ export default function AttendanceTracker() {
                     toast.error('Overtime reason is required.');
                     return;
                   }
-                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, overtimeReason);
+                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, overtimeReason, false);
                   setOvertimeModal(null);
                 }}
                 disabled={!overtimeReason.trim()}
-                style={{ flex: 1, padding: '10px 0', fontWeight: 600, fontSize: 14 }}
+                style={{ flex: 1.2, padding: '10px 12px', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}
               >
                 Submit & Check Out
               </button>
