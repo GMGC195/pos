@@ -1459,10 +1459,12 @@ router.get('/edit-requests', authenticateToken, async (req, res) => {
 
     let query = `
       SELECT r.*, e.name AS employee_name, e.employee_id AS employee_code, 
-             ea.check_in AS original_check_in, ea.check_out AS original_check_out, ea.date AS attendance_date
+             ea.check_in AS original_check_in, ea.check_out AS original_check_out, ea.date AS attendance_date,
+             u.username AS requested_by_username
       FROM attendance_edit_requests r
       JOIN employees e ON r.employee_id = e.id
       LEFT JOIN employee_attendance ea ON r.attendance_id = ea.id
+      LEFT JOIN users u ON r.requested_by_user_id = u.id
     `;
     const params = [];
 

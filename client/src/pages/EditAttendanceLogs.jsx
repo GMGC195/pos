@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 export default function EditAttendanceLogs() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState('audit') // 'audit' | 'requests'
+  const [activeTab, setActiveTab] = useState('overtime') // 'overtime' | 'audit' | 'requests'
   const [logs, setLogs] = useState([])
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
@@ -151,6 +151,22 @@ export default function EditAttendanceLogs() {
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '2px solid var(--surface-2)', marginBottom: 20, gap: 16 }}>
         <button 
+          onClick={() => { setActiveTab('overtime'); setPage(1); }}
+          style={{
+            padding: '10px 16px',
+            border: 'none',
+            background: 'transparent',
+            color: activeTab === 'overtime' ? 'var(--primary)' : 'var(--text-muted)',
+            borderBottom: activeTab === 'overtime' ? '3px solid var(--primary)' : '3px solid transparent',
+            fontWeight: 700,
+            fontSize: 14,
+            cursor: 'pointer',
+            marginBottom: -2
+          }}
+        >
+          Overtime ({requests.filter(r => r.request_type === 'Overtime' && r.status === 'Pending').length})
+        </button>
+        <button 
           onClick={() => { setActiveTab('audit'); setPage(1); }}
           style={{
             padding: '10px 16px',
@@ -180,7 +196,7 @@ export default function EditAttendanceLogs() {
             marginBottom: -2
           }}
         >
-          Pending Correction Requests ({requests.filter(r => r.status === 'Pending').length})
+          Pending Correction Requests ({requests.filter(r => r.request_type !== 'Overtime' && r.status === 'Pending').length})
         </button>
       </div>
 
@@ -271,20 +287,26 @@ export default function EditAttendanceLogs() {
           </>
         )
       ) : (
-        requests.length === 0 ? (
-          <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-            <Clock size={48} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
-            <h3>No Pending Requests</h3>
-            <p style={{ color: 'var(--text-muted)' }}>There are no pending attendance correction requests to review.</p>
-          </div>
-        ) : (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="table-wrap">
-              <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        (() => {
+          const filteredReqs = activeTab === 'overtime' 
+            ? requests.filter(r => r.request_type === 'Overtime')
+            : requests.filter(r => r.request_type !== 'Overtime');
+
+          return filteredReqs.length === 0 ? (
+            <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+              <Clock size={48} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
+              <h3>No Pending {activeTab === 'overtime' ? 'Overtime' : 'Requests'}</h3>
+              <p style={{ color: 'var(--text-muted)' }}>There are no pending {activeTab === 'overtime' ? 'overtime' : 'attendance correction'} requests to review.</p>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div className="table-wrap">
+                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-1)' }}>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Code</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Employee Name</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Requested By</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Type</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Date</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Original In/Out</th>
@@ -295,7 +317,7 @@ export default function EditAttendanceLogs() {
                   </tr>
                 </thead>
                 <tbody>
-                  {requests.map((req, index) => {
+                  {filteredReqs.map((req, index) => {
                     const rowBg = index % 2 === 0 ? 'var(--surface)' : 'rgba(var(--primary-rgb), 0.025)'
                     const logDate = req.attendance_date ? new Date(req.attendance_date).toLocaleDateString() : '--';
                     
@@ -310,6 +332,7 @@ export default function EditAttendanceLogs() {
                       <tr key={req.id} style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
                         <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{req.employee_code}</td>
                         <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700 }}>{req.employee_name}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>{req.requested_by_username || '-'}</td>
                         <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>
                           <span style={{ 
                             padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
@@ -392,7 +415,8 @@ export default function EditAttendanceLogs() {
               </table>
             </div>
           </div>
-        )
+          )
+        })()
       )}
 
       {/* Forward Modal */}
