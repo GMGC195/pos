@@ -113,24 +113,62 @@ ${parseFloat(order.discount || 0) > 0 ? `<div class="total-row"><span>Discount</
   <title>Kitchen Slip</title>
   <style>
     @page { size: 80mm auto; margin: 0; }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-weight: bold; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-weight: normal; }
+    html { margin: 0; padding: 0; background: #fff; }
     body {
       width: 100%;
-      font-family: Tahoma, Geneva, sans-serif;
+      font-weight: normal;
+      font-family: 'Courier New', Courier, monospace;
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 0 15mm 4px 15px;
-      margin-right: 10mm;
+      padding: 0 25px 0 5px; /* Added 20px to the right as requested */
+      margin: 0;
     }
     .center { text-align: center; }
-    .divider { border-top: 1px dashed #000; margin: 4px 0; } /* Reduced margin */
-    .row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
-    .item-name { flex: 2; margin-right: 2px; word-break: break-word; }
-    .item-qty { width: 30px; text-align: center; margin-right: 2px; }
-    .item-price { flex: 1.2; text-align: right; white-space: nowrap; overflow: hidden; }
-    .total-row { display: flex; justify-content: space-between; padding: 2px 0; }
-    .grand { font-size: 16px; font-weight: bold; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 4px 0; margin: 4px 0; }
+    h2 { font-size: 14px; font-weight: normal; margin-bottom: 4px; }
+    .sub { font-size: 11px; color: #000; margin-bottom: 2px; }
+    .divider {
+      border-top: 1px dashed #000;
+      margin: 4px 0; /* Reduced margin */
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+      font-size: 12px;
+    }
+    .item-name {
+      flex: 2;
+      margin-right: 2px;
+      word-break: break-word;
+    }
+    .item-qty {
+      width: 30px;
+      text-align: center;
+      margin-right: 2px;
+    }
+    .item-price { 
+      flex: 1.2;
+      text-align: right; 
+      white-space: nowrap; 
+      overflow: hidden;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+    .grand {
+      font-size: 16px;
+      font-weight: bold;
+      border-top: 1px solid #000;
+      border-bottom: 1px solid #000;
+      padding: 4px 0;
+      margin: 4px 0;
+    }
+    .footer { margin-top: 4px; margin-bottom: 0; font-size: 11px; color: #000; }
+    .dotted { border-top: 1px dotted #000; margin: 4px 0; }
   </style>
 </head>
 <body>

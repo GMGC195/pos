@@ -666,7 +666,7 @@ export default function POS() {
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 0 5px 0 5px; /* Removed top/bottom padding completely */
+      padding: 0 25px 0 5px; /* Added 20px to the right as requested */
       margin: 0;
     }
     .center { text-align: center; }

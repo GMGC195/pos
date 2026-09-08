@@ -415,12 +415,13 @@ export default function POS() {
     * { box-sizing: border-box; margin: 0; padding: 0; font-weight: bold; }
     body {
       width: 100%;
-      font-family: Tahoma, Geneva, sans-serif;
+      font-weight: normal;
+      font-family: 'Courier New', Courier, monospace;
       font-size: 12px;
       color: #000;
       background: #fff;
-      padding: 0 15mm 4px 15px;
-      margin-right: 10mm;
+      padding: 0 25px 0 5px; /* Added 20px to the right as requested */
+      margin: 0;
     }.center { text-align: center; }
     h2 { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
     .sub { font-size: 11px; color: #000; margin-bottom: 2px; }
