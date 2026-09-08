@@ -17,6 +17,7 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     let query = `
       SELECT t.*, o.grand_total, o.subtotal, o.tax, o.status as order_status, o.slip_number, o.is_edited, o.branch, o.order_type,
+             o.order_taker, o.completed_by, o.completed_at, o.created_at as order_placed_at,
              (SELECT string_agg(qty || 'x ' || item_name, ', ') FROM order_items WHERE order_id = o.id) as items
       FROM transactions t
       JOIN orders o ON t.order_id = o.id

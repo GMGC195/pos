@@ -225,6 +225,8 @@ export default function HoldPayments() {
                 <tr>
                   <th>#</th>
                   <th>Order ID</th>
+                  <th>Placed By</th>
+                  <th>Completed By</th>
                   <th>Branch</th>
                   <th>Type</th>
                   <th>Subtotal</th>
@@ -251,6 +253,14 @@ export default function HoldPayments() {
                           {o.is_edited && <span className="badge badge-secondary" style={{ fontSize: 10, padding: '2px 6px', background: '#e5e7eb', color: '#4b5563' }}>Edited</span>}
                           {o.cancel_requested && <span className="badge badge-error" style={{ fontSize: 10, padding: '2px 6px' }}>Req. Pending</span>}
                         </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{o.order_taker || '-'}</div>
+                        {o.created_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{o.completed_by || '-'}</div>
+                        {o.completed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(o.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
                       </td>
                       <td>{o.branch || '-'}</td>
                       <td>{o.order_type || '-'}</td>

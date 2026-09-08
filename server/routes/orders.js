@@ -143,11 +143,15 @@ router.post('/', authenticateToken, async (req, res) => {
     const seqResult = await client.query(`SELECT nextval('${seqName}') as next_id`);
     const newOrderId = seqResult.rows[0].next_id;
 
+    const isCompleted = (status === 'Completed' || status === 'Cash' || status === 'Card' || status === 'Online');
+    const completedBy = isCompleted ? (req.user.username || order_taker || null) : null;
+    const completedAt = isCompleted ? new Date() : null;
+
     // Insert order
     const orderResult = await client.query(
-      `INSERT INTO orders (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16) RETURNING *`,
-      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch]
+      `INSERT INTO orders (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
+      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt]
     );
     const order = orderResult.rows[0];
 
@@ -323,8 +327,8 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     
     // Update order status to Completed
     const orderResult = await client.query(
-      `UPDATE orders SET status = 'Completed' WHERE id = $1 RETURNING *`,
-      [req.params.id]
+      `UPDATE orders SET status = 'Completed', completed_by = $2, completed_at = NOW() WHERE id = $1 RETURNING *`,
+      [req.params.id, req.user.username]
     );
     
     if (orderResult.rows.length === 0) {

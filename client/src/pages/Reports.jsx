@@ -599,6 +599,8 @@ export default function Reports({ isTodaySales = false }) {
                 <th>#</th>
                 <th>Order ID</th>
                 <th>Txn ID</th>
+                <th>Placed By</th>
+                <th>Completed By</th>
                 <th>Branch</th>
                 <th>Type</th>
                 <th>Items</th>
@@ -627,6 +629,14 @@ export default function Reports({ isTodaySales = false }) {
                         </div>
                       </td>
                       <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>#{t.id}</td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{t.order_taker || '-'}</div>
+                        {t.order_placed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(t.order_placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{t.completed_by || '-'}</div>
+                        {t.completed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(t.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
+                      </td>
                       <td>{t.branch || '-'}</td>
                       <td>{t.order_type || '-'}</td>
                       <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.items}>
