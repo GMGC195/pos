@@ -547,10 +547,29 @@ router.post('/check-out', authenticateToken, async (req, res) => {
       totalBreakSecs += breakDuration;
     }
 
+    // Fetch previous completed sessions for today to accumulate worked hours
+    const prevSessionsRes = await pool.query(
+      `SELECT check_in, check_out, total_break_duration_seconds 
+       FROM employee_attendance 
+       WHERE employee_id = $1 AND date = $2 AND id != $3 AND check_out IS NOT NULL`,
+      [employee_id, session.date, session.id]
+    );
+
+    let prevSessionsMs = 0;
+    prevSessionsRes.rows.forEach(r => {
+      const pIn = new Date(r.check_in).getTime();
+      const pOut = new Date(r.check_out).getTime();
+      const pBreak = (r.total_break_duration_seconds || 0) * 1000;
+      prevSessionsMs += (pOut - pIn - pBreak);
+    });
+
     // Overtime Logic
     const shiftHours = parseFloat(session.shift_hours || 12.0);
+    const expectedMs = shiftHours * 60 * 60 * 1000;
+    const remainingMs = Math.max(0, expectedMs - prevSessionsMs);
+    
     const checkInTime = new Date(session.check_in).getTime();
-    const expectedCheckoutTime = checkInTime + (shiftHours * 60 * 60 * 1000) + (totalBreakSecs * 1000);
+    const expectedCheckoutTime = checkInTime + remainingMs + (totalBreakSecs * 1000);
     const actualCheckoutTime = Date.now();
     
     let finalCheckoutTime = new Date();
@@ -558,11 +577,11 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     const overtimeMins = Math.floor(overtimeMs / (1000 * 60));
 
     if (overtimeMins > 0) {
-      if (overtimeMins <= 15 || ignore_overtime) {
-        // Auto trim overtime to zero
-        finalCheckoutTime = new Date(expectedCheckoutTime);
-      } else {
-        // Overtime > 15 mins, require reason
+      // Always trim attendance sheet checkout to the exact duty hour completion time
+      finalCheckoutTime = new Date(expectedCheckoutTime);
+      
+      if (overtimeMins > 15 && !ignore_overtime) {
+        // Overtime > 15 mins, require reason to generate a pending request
         if (!overtime_reason) {
           return res.status(400).json({ 
             error: 'Overtime requires a reason.', 
