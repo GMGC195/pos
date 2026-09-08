@@ -431,6 +431,11 @@ export default function AttendanceTracker() {
         toast.success(`${name} Successfully Checked Out!`, { duration: 2000 })
       } catch (err) {
         toast.dismiss()
+        if (err?.response?.status === 400 && err?.response?.data?.overtime_minutes !== undefined) {
+          setOvertimeModal({ empId, name, overtimeMins: err.response.data.overtime_minutes });
+          setOvertimeReason('');
+          return;
+        }
         if (!navigator.onLine || err.message === 'Network Error') {
           queueAttendanceAction({ type: 'check-out', employee_id: empId })
           optimisticUpdate(empId, { 
