@@ -25,6 +25,8 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState('account') // 'account' | 'users' | 'hardware'
   const [loading, setLoading] = useState(false)
   const [printMode, setPrintMode] = useState(localStorage.getItem('printMode') || 'standard')
+  const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
+  const [printerIp, setPrinterIp] = useState('127.0.0.1')
   const shiftDropdownRef = useRef(null)
   const branchDropdownRef = useRef(null)
   
@@ -111,7 +113,29 @@ export default function Settings() {
       fetchUsers()
       fetchShifts()
     }
+    if (activeTab === 'hardware' && isAdminRole) {
+      fetchCloudSettings()
+    }
   }, [activeTab, user?.role])
+
+  const fetchCloudSettings = async () => {
+    try {
+      const res = await api.get('/api/settings')
+      setAutoPrintEnabled(res.data.auto_print_enabled)
+      setPrinterIp(res.data.printer_ip)
+    } catch {
+      toast.error('Failed to fetch cloud print settings')
+    }
+  }
+
+  const saveCloudSettings = async (enabled, ip) => {
+    try {
+      await api.put('/api/settings', { auto_print_enabled: enabled, printer_ip: ip })
+      toast.success('Cloud print settings saved')
+    } catch {
+      toast.error('Failed to save cloud print settings')
+    }
+  }
 
   const fetchUsers = async () => {
     try {
@@ -325,6 +349,41 @@ export default function Settings() {
                     {printMode === 'standard' 
                       ? 'Uses the standard browser print dialog. Best for laptops or desktop computers connected to a USB printer.' 
                       : 'Uses the RawBT Android app to print directly to a network/LAN printer. Best for waiters punching orders from mobile phones.'}
+                  </p>
+                </div>
+                
+                <div className="form-group" style={{ maxWidth: 400, marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--surface-2)' }}>
+                  <label>Cloud Auto-Printing (Thermal Printer)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={autoPrintEnabled}
+                        onChange={e => {
+                          setAutoPrintEnabled(e.target.checked)
+                          saveCloudSettings(e.target.checked, printerIp)
+                        }}
+                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                      />
+                      <span style={{ fontSize: '14px', fontWeight: 500 }}>Enable Auto Cloud Printing</span>
+                    </label>
+                  </div>
+                  {autoPrintEnabled && (
+                    <div style={{ marginTop: '16px' }}>
+                      <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Printer IP Address</label>
+                      <input 
+                        type="text" 
+                        value={printerIp}
+                        onChange={e => setPrinterIp(e.target.value)}
+                        onBlur={() => saveCloudSettings(autoPrintEnabled, printerIp)}
+                        placeholder="192.168.1.100"
+                        style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--surface-2)', width: '100%', marginTop: '6px', background: 'var(--surface)' }}
+                      />
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>Port is fixed to 9100</p>
+                    </div>
+                  )}
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.5 }}>
+                    When enabled, the server will automatically push new orders directly to the kitchen thermal printer over the local network via Pusher. Waiters' mobile devices never need local configuration.
                   </p>
                 </div>
               </div>

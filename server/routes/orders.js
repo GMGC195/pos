@@ -3,7 +3,24 @@ const router = express.Router();
 const pool = require('../db');
 const { authenticateToken, isAdmin, isAdminOrCashier } = require('../middleware/auth');
 const { Resend } = require('resend');
+const Pusher = require('pusher');
 
+let pusher = null;
+try {
+  if (process.env.PUSHER_APP_ID && process.env.PUSHER_KEY && process.env.PUSHER_SECRET && process.env.PUSHER_CLUSTER) {
+    pusher = new Pusher({
+      appId: process.env.PUSHER_APP_ID,
+      key: process.env.PUSHER_KEY,
+      secret: process.env.PUSHER_SECRET,
+      cluster: process.env.PUSHER_CLUSTER,
+      useTLS: true
+    });
+  } else {
+    console.warn('⚠️ Pusher credentials missing or incomplete. Auto-printing will be disabled.');
+  }
+} catch (err) {
+  console.error('❌ Failed to initialize Pusher:', err);
+}
 async function checkBranchAccess(req, orderId) {
   const role = req.user.role?.trim().toLowerCase();
   const isAdmin = role === 'admin' || role === 'developer';
@@ -109,6 +126,7 @@ async function returnStock(orderId, client) {
 // POST create order atomically
 router.post('/', authenticateToken, async (req, res) => {
   const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments } = req.body;
+  console.log(`[ORDER DEBUG] Order request received:`, { order_type, table_number, order_taker, itemCount: items?.length });
   const client = await pool.connect();
   try {
     // Idempotency check: If client_order_id exists, return existing order
@@ -181,6 +199,50 @@ router.post('/', authenticateToken, async (req, res) => {
     // Emit real-time event for new order
     if (req.io) {
       req.io.emit('newOrder', order);
+    }
+
+    // Auto-print integration via Pusher
+    try {
+      console.log('[PUSHER DEBUG] Env presence:', {
+        hasAppId: !!process.env.PUSHER_APP_ID,
+        hasKey: !!process.env.PUSHER_KEY,
+        hasSecret: !!process.env.PUSHER_SECRET,
+        hasCluster: !!process.env.PUSHER_CLUSTER,
+      });
+
+      const settingsRes = await pool.query('SELECT auto_print_enabled, printer_ip FROM settings ORDER BY id ASC LIMIT 1');
+      console.log('[ORDER DEBUG] Fetched settings:', settingsRes.rows[0]);
+      
+      const autoPrintEnabled = settingsRes.rows.length > 0 && settingsRes.rows[0].auto_print_enabled === true;
+      console.log('[ORDER DEBUG] auto_print_enabled value:', autoPrintEnabled);
+
+      if (autoPrintEnabled) {
+        const printerIp = settingsRes.rows[0].printer_ip || '127.0.0.1';
+        const payload = {
+          orderId: order.id,
+          tableNo: order.table_number || "Takeaway",
+          waiterName: order.order_taker || "Staff",
+          printerIp: printerIp,
+          items: items.map(item => ({
+            name: item.name,
+            qty: item.qty || 1
+          }))
+        };
+        
+        if (pusher) {
+          try {
+            console.log('[PUSHER DEBUG] Attempting trigger on channel: restaurant-orders, event: new-order');
+            const response = await pusher.trigger('restaurant-orders', 'new-order', payload);
+            console.log('[PUSHER DEBUG] Trigger succeeded! Response:', response.status);
+          } catch (pusherErr) {
+            console.error('[PUSHER ERROR] Failed to dispatch event to Pusher:', pusherErr);
+          }
+        } else {
+          console.error('[PUSHER ERROR] Pusher is not initialized, cannot dispatch auto-print event.');
+        }
+      }
+    } catch (printErr) {
+      console.error('[ORDER ERROR] Auto print logic error:', printErr);
     }
     
     res.status(201).json({ success: true, order });

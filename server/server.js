@@ -532,6 +532,7 @@ app.use('/api/employees', require('./routes/employees'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/tables', require('./routes/tables'));
+app.use('/api/settings', require('./routes/settings'));
 
 // Health check
 app.get('/api/health', (req, res) => {
