@@ -280,67 +280,45 @@ export default function HoldPayments() {
                               <Banknote size={16} /> Pay Cash
                             </button>
                           )}
-                          
-                          <div style={{ position: 'relative' }}>
+                          {role !== 'order taker' && (
                             <button 
                               className="btn btn-secondary btn-sm"
-                              style={{ padding: '6px 8px' }}
-                              onClick={() => setActiveMenu(activeMenu === o.id ? null : o.id)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3b82f6', borderColor: '#3b82f6' }}
+                              onClick={() => handlePay(o.id, 'Card')}
+                              title="Pay Card"
                             >
-                              <MoreVertical size={16} />
+                              <CreditCard size={16} /> Pay Card
                             </button>
-                            
-                            {activeMenu === o.id && (
-                              <div 
-                                ref={menuRef}
-                                style={{ 
-                                  position: 'absolute', 
-                                  right: 0, 
-                                  top: '100%', 
-                                  marginTop: 8, 
-                                  background: 'white', 
-                                  boxShadow: '0 10px 25px rgba(0,0,0,0.15)', 
-                                  borderRadius: 12, 
-                                  zIndex: 1000, 
-                                  width: 160,
-                                  border: '1px solid var(--surface-2)',
-                                  padding: '6px'
-                                }}
-                              >
-                                {role !== 'order taker' && (
-                                  <button onClick={() => handlePay(o.id, 'Card')} className="dropdown-item">
-                                    <CreditCard size={16} color="#3b82f6" /> 
-                                    <span>Pay Card</span>
-                                  </button>
-                                )}
-                                <button onClick={() => handleEdit(o.id)} className="dropdown-item">
-                                  <Pencil size={16} color="var(--text-secondary)" /> 
-                                  <span>Edit Order</span>
-                                </button>
-                                {isAdmin || role === 'cashier' ? (
-                                  <>
-                                    <div style={{ height: 1, background: 'var(--surface-2)', margin: '4px' }} />
-                                    <button onClick={() => handleCancel(o.id)} className="dropdown-item danger" style={{ color: 'var(--red)' }}>
-                                      <Ban size={16} /> 
-                                      <span>Cancel Order</span>
-                                    </button>
-                                  </>
-                                ) : !o.cancel_requested && (
-                                  <>
-                                    <div style={{ height: 1, background: 'var(--surface-2)', margin: '4px' }} />
-                                    <button 
-                                      onClick={() => { setCancelOrderTarget(o.id); setShowCancelModal(true); setActiveMenu(null); }} 
-                                      className="dropdown-item danger" 
-                                      style={{ color: 'var(--orange)' }}
-                                    >
-                                      <Ban size={16} /> 
-                                      <span>Request Cancel</span>
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          )}
+                          
+                          <button 
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '6px 8px' }}
+                            onClick={() => handleEdit(o.id)}
+                            title="Edit Order"
+                          >
+                            <Pencil size={16} color="var(--text-secondary)" />
+                          </button>
+
+                          {isAdmin || role === 'cashier' ? (
+                            <button 
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '6px 8px', borderColor: 'var(--red)' }}
+                              onClick={() => handleCancel(o.id)}
+                              title="Cancel Order"
+                            >
+                              <Ban size={16} color="var(--red)" />
+                            </button>
+                          ) : !o.cancel_requested && (
+                            <button 
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '6px 8px', borderColor: 'var(--orange)' }}
+                              onClick={() => { setCancelOrderTarget(o.id); setShowCancelModal(true); }}
+                              title="Request Cancel"
+                            >
+                              <Ban size={16} color="var(--orange)" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
