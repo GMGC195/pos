@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import { Printer, X, Edit } from 'lucide-react'
+import axios from '../api'
+import toast from 'react-hot-toast'
 import { CURRENCY } from '../config'
 import {
   BRAND_SLIP_LOGO as logo,
@@ -13,6 +16,8 @@ import { useAuth } from '../contexts/AuthContext'
 export default function OrderDetailModal({ order, onClose, onEdit }) {
   const { user } = useAuth();
   const isManagement = user?.role?.trim().toLowerCase() === 'management';
+  const [isPrinting, setIsPrinting] = useState(false);
+  
   if (!order) return null
 
   const now = new Date(order.created_at)
@@ -71,14 +76,17 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
       </div>`).join('');
   }
 
+  const effectiveBranch = order.branch || 'Branch 1';
+  let shortBranch = effectiveBranch;
+  if (effectiveBranch === 'Branch 1') shortBranch = 'B1';
+  else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
+  else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
+
   // Define the raw HTML body (without HTML wrapper for inline rendering)
   const slipBody = `
 <div class="center">
   <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
-    ${orderType}
-  </div>
-  <div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">
-    ${order.branch || 'Branch 1'}
+    ${shortBranch} - ${orderType}
   </div>
   <div style="font-size: 10px; text-align: center; margin: 4px 0; font-weight: normal;">
     Kitchen slip. Please get original slip from counter.<br/>
@@ -176,7 +184,26 @@ ${slipBody}
 </body>
 </html>`;
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    if (isPrinting) return;
+    setIsPrinting(true);
+
+    try {
+      const settingsRes = await axios.get('/api/settings');
+      const isCloudPrint = settingsRes.data?.auto_print_enabled === true || String(settingsRes.data?.auto_print_enabled) === 'true' || settingsRes.data?.auto_print_enabled === 1;
+      
+      if (isCloudPrint) {
+        await axios.post(`/api/orders/${order.id}/reprint`);
+        toast.success('Ticket sent to kitchen printer!', { icon: '🖨️', duration: 4000 });
+        setIsPrinting(false);
+        onClose();
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to check or trigger cloud reprint:', err);
+    }
+
+    // Fallback to traditional local printing
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
     document.body.appendChild(iframe);
@@ -186,7 +213,11 @@ ${slipBody}
     setTimeout(() => {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
-      setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+      setTimeout(() => { 
+        document.body.removeChild(iframe); 
+        setIsPrinting(false);
+        onClose();
+      }, 1000);
     }, 500);
   }
 
@@ -240,8 +271,8 @@ ${slipBody}
               <Edit size={18} /> Edit
             </button>
           )}
-          <button className="btn btn-primary" onClick={handlePrint} style={{ flex: onEdit ? 1 : 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <Printer size={18} /> {onEdit ? 'Print' : 'Print Receipt'}
+          <button className="btn btn-primary" onClick={handlePrint} disabled={isPrinting} style={{ flex: onEdit ? 1 : 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Printer size={18} /> {isPrinting ? 'Printing...' : (onEdit ? 'Print' : 'Print Receipt')}
           </button>
         </div>
       </div>

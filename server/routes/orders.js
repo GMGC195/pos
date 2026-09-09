@@ -218,14 +218,31 @@ router.post('/', authenticateToken, async (req, res) => {
 
       if (autoPrintEnabled) {
         const printerIp = settingsRes.rows[0].printer_ip || '127.0.0.1';
+        const effectiveBranch = finalBranch || 'Branch 1';
+        let shortBranch = effectiveBranch;
+        if (effectiveBranch === 'Branch 1') shortBranch = 'B1';
+        else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
+        else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
+
         const payload = {
           orderId: order.id,
-          tableNo: order.table_number || "Takeaway",
+          slipNumber: slipNumber,
+          editCount: 0,
+          orderType: `${shortBranch} - ${order.order_type || "Takeaway"}`,
+          tableNo: order.table_number || "",
           waiterName: order.order_taker || "Staff",
+          branch: finalBranch,
           printerIp: printerIp,
+          subtotal: subtotal,
+          tax: tax,
+          grandTotal: grand_total,
+          discount: discount || 0,
+          paymentMethod: payment_method || status,
+          date: new Date().toISOString(),
           items: items.map(item => ({
             name: item.name,
-            qty: item.qty || 1
+            qty: item.qty || 1,
+            price: item.price
           }))
         };
         
@@ -933,6 +950,59 @@ router.put('/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// POST /api/orders/:id/reprint - Trigger a reprint to the cloud printer via Pusher
+router.post('/:id/reprint', authenticateToken, async (req, res) => {
+  try {
+    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    if (orderRes.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
+    const order = orderRes.rows[0];
+
+    const itemsRes = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [req.params.id]);
+    const items = itemsRes.rows;
+
+    const settingsRes = await pool.query('SELECT auto_print_enabled, printer_ip FROM settings ORDER BY id ASC LIMIT 1');
+    const autoPrintEnabled = settingsRes.rows.length > 0 && settingsRes.rows[0].auto_print_enabled === true;
+    const printerIp = (settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip) ? settingsRes.rows[0].printer_ip : '127.0.0.1';
+
+    const effectiveBranch = order.branch || 'Branch 1';
+    let shortBranch = effectiveBranch;
+    if (effectiveBranch === 'Branch 1') shortBranch = 'B1';
+    else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
+    else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
+
+    if (pusher) {
+      const payload = {
+        orderId: order.id,
+        slipNumber: order.slip_number,
+        editCount: order.edit_count || 0,
+        orderType: `${shortBranch} - ${order.order_type || "Takeaway"}`,
+        tableNo: order.table_number || "",
+        waiterName: order.order_taker || "Staff",
+        branch: effectiveBranch,
+        printerIp: printerIp,
+        subtotal: order.subtotal,
+        tax: order.tax,
+        grandTotal: order.grand_total,
+        discount: order.discount || 0,
+        paymentMethod: order.payment_method || order.status,
+        date: new Date().toISOString(),
+        items: items.map(item => ({
+          name: item.item_name || item.name,
+          qty: item.qty || 1,
+          price: item.unit_price || item.price
+        }))
+      };
+      await pusher.trigger('restaurant-orders', 'new-order', payload);
+      return res.json({ success: true, message: 'Reprint sent to cloud printer' });
+    } else {
+      return res.status(500).json({ error: 'Cloud printing is not configured on the server.' });
+    }
+  } catch (err) {
+    console.error('Reprint error:', err);
+    res.status(500).json({ error: 'Failed to reprint' });
   }
 });
 

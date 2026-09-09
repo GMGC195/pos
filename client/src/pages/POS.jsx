@@ -548,7 +548,7 @@ export default function POS() {
         }
 
         if (isCloudPrint) {
-          toast.success('Ticket sent to kitchen printer via cloud!', { icon: '🖨️', duration: 4000 });
+          toast.success('Ticket sent to kitchen printer!', { icon: '🖨️', duration: 4000 });
         } else if (shouldPrint) {
           printThermalSlip(method, orderId, slipNumber, editCount, isFullReceipt, diffData)
         }
@@ -619,13 +619,14 @@ export default function POS() {
     const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: normal; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
 
     const effectiveBranch = currentInfo.branch || (user?.role?.trim().toLowerCase() !== 'admin' && user?.role?.trim().toLowerCase() !== 'developer' && user?.branch ? user.branch : selectedBranch) || 'Branch 1';
+    let shortBranch = effectiveBranch;
+    if (effectiveBranch === 'Branch 1') shortBranch = 'B1';
+    else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
+    else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
 
     const headerHtml = isFullReceipt ? `
-    <div style="font-size: 16px; font-weight: normal; margin: 6px 0;">
-      ${currentInfo.orderType}
-    </div>
-    <div style="font-size: 14px; font-weight: normal; margin: 2px 0; text-align: center;">
-      ${effectiveBranch}
+    <div style="font-size: 16px; font-weight: normal; margin: 6px 0; text-align: center;">
+      ${shortBranch} - ${currentInfo.orderType}
     </div>
     <div style="font-size: 10px; text-align: center; margin: 4px 0;">
       Kitchen slip. Please get original slip from counter.<br/>
@@ -637,11 +638,8 @@ export default function POS() {
     </div>
     <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
     ` : `
-    <div style="font-size: 14px; font-weight: normal; margin: 2px 0;">
-      ${currentInfo.orderType}
-    </div>
-    <div style="font-size: 12px; font-weight: normal; margin: 2px 0; text-align: center;">
-      ${effectiveBranch}
+    <div style="font-size: 14px; font-weight: normal; margin: 2px 0; text-align: center;">
+      ${shortBranch} - ${currentInfo.orderType}
     </div>
     <div style="font-size: 10px; text-align: center; margin: 4px 0;">
       Kitchen slip. Please get original slip from counter.<br/>
