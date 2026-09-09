@@ -98,6 +98,7 @@ export default function POS() {
   const [showManageCategories, setShowManageCategories] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState(null)
   const [editingOrderSlip, setEditingOrderSlip] = useState(null)
   const [originalCart, setOriginalCart] = useState(null)
@@ -535,7 +536,22 @@ export default function POS() {
       const isFullReceipt = method !== 'Hold'
       if (isOnline) {
         toast.success(method === 'Hold' ? 'Order updated to Hold status!' : 'Order Placed!', { duration: 3000 })
-        if (shouldPrint) printThermalSlip(method, orderId, slipNumber, editCount, isFullReceipt, diffData)
+        // Fetch auto-print settings dynamically to ensure we always have the latest setting without page refresh
+        let isCloudPrint = false;
+        if (shouldPrint) {
+          try {
+            const settingsRes = await axios.get('/api/settings');
+            isCloudPrint = settingsRes.data?.auto_print_enabled === true || String(settingsRes.data?.auto_print_enabled) === 'true' || settingsRes.data?.auto_print_enabled === 1;
+          } catch (err) {
+            console.error('Failed to fetch print settings at checkout:', err);
+          }
+        }
+
+        if (isCloudPrint) {
+          toast.success('Ticket sent to kitchen printer via cloud!', { icon: '🖨️', duration: 4000 });
+        } else if (shouldPrint) {
+          printThermalSlip(method, orderId, slipNumber, editCount, isFullReceipt, diffData)
+        }
       }
 
       // Cleanup
