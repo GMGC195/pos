@@ -325,20 +325,42 @@ router.get('/', authenticateToken, async (req, res) => {
 // GET past closings
 router.get('/closings', authenticateToken, async (req, res) => {
   try {
-    let { date, cashier_id } = req.query;
-    const branch = req.user.branch || 'Branch 1';
+    let { date, cashier_id, branch: queryBranch } = req.query;
     
-    let query = 'SELECT * FROM shift_closings WHERE branch = $1';
-    const params = [branch];
+    // Determine the branch to filter by
+    const role = req.user?.role?.trim().toLowerCase();
+    const isAdminRole = role === 'admin' || role === 'developer';
+    
+    let branchFilter = null;
+    if (isAdminRole) {
+      if (queryBranch && queryBranch !== 'All') {
+        branchFilter = queryBranch;
+      }
+    } else {
+      branchFilter = req.user.branch && req.user.branch !== 'All' ? req.user.branch : 'Branch 1';
+    }
+    
+    let query = 'SELECT * FROM shift_closings';
+    const params = [];
+    let conditions = [];
+    
+    if (branchFilter) {
+      params.push(branchFilter);
+      conditions.push(`branch = $${params.length}`);
+    }
     
     if (date) {
       params.push(date);
-      query += ` AND created_at::date = $${params.length}::date`;
+      conditions.push(`created_at::date = $${params.length}::date`);
     }
     
     if (cashier_id) {
       params.push(cashier_id);
-      query += ` AND cashier_id = $${params.length}`;
+      conditions.push(`cashier_id = $${params.length}`);
+    }
+    
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
     }
     
     query += ' ORDER BY created_at DESC';
@@ -559,6 +581,8 @@ async function sendClosingEmail(report, closingType) {
     const toEmails = toEmailsStr.split(',').map(e => e.trim()).filter(Boolean);
     
     let itemsHtml = '';
+    let topSellingHtml = '';
+    
     try {
       let items = [];
       if (typeof report.items_summary === 'string') {
@@ -574,29 +598,95 @@ async function sendClosingEmail(report, closingType) {
       } else if (Array.isArray(report.items_summary)) {
         items = report.items_summary;
       } else if (report.items_summary) {
-        // Fallback if it's an object but not an array, wrap it
         items = [report.items_summary];
       }
 
+      // Collect all flat items to calculate top selling
+      let allFlatItems = [];
+
       itemsHtml = items.map(cat => {
-        let catHtml = `<li style="margin-bottom: 12px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px;">
-          <div style="font-weight: bold; font-size: 16px; color: #111; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">
-            ${cat.category} <span style="float: right; color: #E31837;">SAR ${parseFloat(cat.amount).toFixed(2)} (${cat.qty} items)</span>
+        let catHtml = `<div style="margin-bottom: 20px; background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
+          <div style="background: #f8f9fa; font-weight: bold; font-size: 16px; color: #111; padding: 10px 15px; border-bottom: 1px solid #eee;">
+            ${cat.category} <span style="float: right; color: #E31837; font-size: 14px;">SAR ${parseFloat(cat.amount).toFixed(2)} (${cat.qty} items)</span>
           </div>
-          <ul style="list-style: none; padding-left: 0; margin: 0; font-size: 14px; color: #555;">`;
+          <div style="padding: 0 15px;">
+            <table style="width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; color: #555;">
+              <thead>
+                <tr style="border-bottom: 1px solid #eee; text-align: left;">
+                  <th style="padding: 8px 4px;">Item Name</th>
+                  <th style="padding: 8px 4px; text-align: center;">Qty</th>
+                  <th style="padding: 8px 4px; text-align: right;">Price</th>
+                  <th style="padding: 8px 4px; text-align: right;">Total Price</th>
+                </tr>
+              </thead>
+              <tbody>`;
         
         if (cat.items && Array.isArray(cat.items)) {
           cat.items.forEach(item => {
-            catHtml += `<li style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #f0f0f0;">
-              <span>${item.name}</span>
-              <span><strong>${item.qty}</strong> x SAR ${parseFloat(item.amount / item.qty).toFixed(2)} = SAR ${parseFloat(item.amount).toFixed(2)}</span>
-            </li>`;
+            const unitPrice = parseFloat(item.amount / item.qty).toFixed(2);
+            const totalPrice = parseFloat(item.amount).toFixed(2);
+            
+            allFlatItems.push({
+              name: item.name,
+              qty: parseInt(item.qty, 10) || 0,
+              totalPrice: parseFloat(item.amount) || 0
+            });
+
+            catHtml += `<tr style="border-bottom: 1px dashed #f0f0f0;">
+              <td style="padding: 6px 4px;">${item.name}</td>
+              <td style="padding: 6px 4px; text-align: center;"><strong>${item.qty}</strong></td>
+              <td style="padding: 6px 4px; text-align: right;">SAR ${unitPrice}</td>
+              <td style="padding: 6px 4px; text-align: right;">SAR ${totalPrice}</td>
+            </tr>`;
           });
         }
         
-        catHtml += `</ul></li>`;
+        catHtml += `</tbody></table></div></div>`;
         return catHtml;
       }).join('');
+      
+      // Calculate top 5 selling items
+      if (allFlatItems.length > 0) {
+        const groupedItems = {};
+        allFlatItems.forEach(i => {
+          if (!groupedItems[i.name]) groupedItems[i.name] = { name: i.name, qty: 0, totalPrice: 0 };
+          groupedItems[i.name].qty += i.qty;
+          groupedItems[i.name].totalPrice += i.totalPrice;
+        });
+        
+        const sortedTopItems = Object.values(groupedItems).sort((a, b) => b.qty - a.qty).slice(0, 5);
+        
+        if (sortedTopItems.length > 0) {
+          topSellingHtml = `
+            <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top 5 Selling Items</h3>
+            <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #555;">
+                <thead>
+                  <tr style="background: #fff3f4; border-bottom: 1px solid #ffccd0; text-align: left; color: #E31837;">
+                    <th style="padding: 10px 15px;">Rank</th>
+                    <th style="padding: 10px 15px;">Item Name</th>
+                    <th style="padding: 10px 15px; text-align: center;">Qty Sold</th>
+                    <th style="padding: 10px 15px; text-align: right;">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+          `;
+          
+          sortedTopItems.forEach((item, index) => {
+            topSellingHtml += `
+                  <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 8px 15px; font-weight: bold;">#${index + 1}</td>
+                    <td style="padding: 8px 15px;">${item.name}</td>
+                    <td style="padding: 8px 15px; text-align: center;"><strong>${item.qty}</strong></td>
+                    <td style="padding: 8px 15px; text-align: right;">SAR ${item.totalPrice.toFixed(2)}</td>
+                  </tr>
+            `;
+          });
+          
+          topSellingHtml += `</tbody></table></div>`;
+        }
+      }
+      
     } catch(e) {
       console.error('Error parsing items summary for email:', e);
     }
@@ -617,7 +707,9 @@ async function sendClosingEmail(report, closingType) {
           </div>
           
           <h3 style="margin-top: 24px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Items Sold by Category</h3>
-          <ul style="list-style-type: none; padding-left: 0;">${itemsHtml || '<li style="text-align:center; color:#999; padding: 20px;">No items sold</li>'}</ul>
+          <div>${itemsHtml || '<p style="text-align:center; color:#999; padding: 20px;">No items sold</p>'}</div>
+          
+          ${topSellingHtml}
         </div>
       </div>
     `;

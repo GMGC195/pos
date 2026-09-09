@@ -395,7 +395,7 @@ export default function Reports({ isTodaySales = false }) {
   const loadClosingHistory = async (date) => {
     setHistoryLoading(true)
     try {
-      const res = await axios.get('/api/orders/closings', { params: { date: date || historyDate } })
+      const res = await axios.get('/api/orders/closings', { params: { date: date || historyDate, branch } })
       setClosingHistory(res.data)
     } catch (err) {
       toast.error('Failed to load history')
@@ -1050,7 +1050,7 @@ export default function Reports({ isTodaySales = false }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <span style={{ fontSize: 22 }}>{c.closing_type === 'Daily' ? '⚡' : '🔄'}</span>
                           <div>
-                            <div style={{ fontWeight: 700, fontSize: 14 }}>{c.closing_type} Closing — {c.cashier_name}</div>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{c.closing_type} Closing — {c.cashier_name} ({c.branch})</div>
                             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
                               {new Date(c.login_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} → {new Date(c.logout_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} · Active: {c.total_active_time} · {c.total_orders} orders
                             </div>
