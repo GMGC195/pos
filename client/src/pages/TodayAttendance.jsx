@@ -581,6 +581,7 @@ export default function TodayAttendance() {
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '150px' }}>Branch</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-In Time</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-Out Time</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Checked By</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Status</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Hours Worked</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Break Time</th>
@@ -661,6 +662,22 @@ export default function TodayAttendance() {
                                 </div>
                               );
                             })}
+                          </div>
+                        ) : (
+                          '--'
+                        )}
+                      </td>
+                      
+                      {/* Checked By Column */}
+                      <td style={{ padding: '12px 14px', fontSize: 11, fontWeight: 600, textAlign: 'center', color: 'var(--text-muted)' }}>
+                        {sessions.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {sessions.map((s, idx) => (
+                              <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 4 }}>
+                                <span style={{ color: 'var(--text)', whiteSpace: 'nowrap' }}>In: {s.created_by || '--'}</span>
+                                {s.check_out && <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Out: {s.checked_out_by || '--'}</span>}
+                              </div>
+                            ))}
                           </div>
                         ) : (
                           '--'

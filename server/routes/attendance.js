@@ -256,7 +256,7 @@ router.get('/today', authenticateToken, async (req, res) => {
 
     // Fetch all today's attendance sessions
     const sessions = await pool.query(`
-      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, remarks, shift_start_time, shift_end_time
+      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, remarks, shift_start_time, shift_end_time, created_by, checked_out_by
       FROM employee_attendance
       WHERE date = CURRENT_DATE OR check_out IS NULL
       ORDER BY check_in ASC
@@ -336,6 +336,8 @@ router.get('/today', authenticateToken, async (req, res) => {
         attendance_status: lastSession ? lastSession.attendance_status : null,
         on_break: lastSession ? lastSession.on_break : false,
         break_start: lastSession ? lastSession.break_start : null,
+        created_by: lastSession ? lastSession.created_by : null,
+        checked_out_by: lastSession ? lastSession.checked_out_by : null,
         total_hours_today: totalHoursToday,
         total_break_seconds_today: totalBreakSecondsToday,
         calculated_status: calculatedStatus
@@ -592,8 +594,8 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'UPDATE employee_attendance SET check_out = $1, on_break = false, break_start = null, total_break_duration_seconds = $2 WHERE id = $3 RETURNING *',
-      [finalCheckoutTime, totalBreakSecs, session.id]
+      'UPDATE employee_attendance SET check_out = $1, on_break = false, break_start = null, total_break_duration_seconds = $2, checked_out_by = $4 WHERE id = $3 RETURNING *',
+      [finalCheckoutTime, totalBreakSecs, session.id, req.user.username]
     );
 
     // If overtime exceeded 15 mins and reason was provided, log it as an Overtime Request for Admin
@@ -774,7 +776,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch
+      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, ea.created_by, ea.checked_out_by, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE 1=1
@@ -1093,12 +1095,12 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
     }
 
-    const result = await pool.query(
-      'UPDATE employee_attendance SET check_in = $1, check_out = $2 WHERE id = $3 RETURNING *',
-      [check_in, check_out || null, id]
+    const resDB = await pool.query(
+      'UPDATE employee_attendance SET check_in = $1, check_out = $2, checked_out_by = $4 WHERE id = $3 RETURNING *',
+      [check_in, check_out || null, id, req.user.username]
     );
 
-    res.json(result.rows[0]);
+    res.json(resDB.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

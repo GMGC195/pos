@@ -622,7 +622,7 @@ export default function AttendanceTracker() {
                     </div>
                     <span style={{ color: badge.color, background: badge.bg, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{badge.text}</span>
                   </div>
-                  {!isCheckedIn && (
+                  {!isCheckedIn && !emp.check_out && (
                     <div style={{ background: 'var(--surface-1)', padding: '8px 12px', border: '1px dashed var(--surface-3)', borderRadius: 8, fontSize: 12, marginBottom: 14, color: 'var(--text-secondary)' }}>
                       <strong>Shift Details:</strong> {matchedShift ? `${matchedShift.hours} hrs` : `${emp.shift_hours || 12} hrs`}
                     </div>
@@ -630,8 +630,24 @@ export default function AttendanceTracker() {
                   {isCheckedIn && (
                     <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span style={{ color: 'var(--text-muted)' }}>Checked In:</span>
+                        <span style={{ color: 'var(--text-muted)' }}>Check In - {emp.created_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
                         <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Check Out - {emp.checked_out_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
+                        <span style={{ fontWeight: 600 }}>--</span>
+                      </div>
+                    </div>
+                  )}
+                  {emp.check_out && (
+                    <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Check In - {emp.created_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
+                        <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Check Out - {emp.checked_out_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
+                        <span style={{ fontWeight: 600 }}>{new Date(emp.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                       </div>
                     </div>
                   )}
@@ -1268,7 +1284,7 @@ export default function AttendanceTracker() {
                     </div>
                   </div>
  
-                  {!isCheckedIn && (
+                  {!isCheckedIn && !emp.check_out && (
                     <div style={{ background: 'var(--surface-1)', padding: '8px 12px', border: '1px dashed var(--surface-3)', borderRadius: 8, fontSize: 12, marginBottom: 14, color: 'var(--text-secondary)' }}>
                       <strong>Shift Details:</strong> {
                         matchedShift 
@@ -1281,8 +1297,35 @@ export default function AttendanceTracker() {
                   {isCheckedIn && (
                     <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span style={{ color: 'var(--text-muted)' }}>Checked In:</span>
+                        <span style={{ color: 'var(--text-muted)' }}>Check In - {emp.created_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
                         <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Check Out - {emp.checked_out_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
+                        <span style={{ fontWeight: 600 }}>--</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Duty Hours:</span>
+                        <span style={{ fontWeight: 600, color: 'var(--green)' }}>{decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)))}</span>
+                      </div>
+                      {parseFloat(emp.total_hours_today || 0) > (parseFloat(emp.shift_hours) || 12.0) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Overtime:</span>
+                          <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{decimalHoursToText(parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0))}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {emp.check_out && (
+                    <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Check In - {emp.created_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
+                        <span style={{ fontWeight: 600 }}>{new Date(emp.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Check Out - {emp.checked_out_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
+                        <span style={{ fontWeight: 600 }}>{new Date(emp.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: 'var(--text-muted)' }}>Duty Hours:</span>

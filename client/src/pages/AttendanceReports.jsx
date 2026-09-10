@@ -1380,6 +1380,7 @@ export default function AttendanceReports() {
                     <th style={{ padding: 10, fontSize: 12 }}>Date</th>
                     <th style={{ padding: 10, fontSize: 12 }}>Check In</th>
                     <th style={{ padding: 10, fontSize: 12 }}>Check Out</th>
+                    <th style={{ padding: 10, fontSize: 12 }}>Checked By</th>
                     <th style={{ padding: 10, fontSize: 12 }}>Break Duration</th>
                     <th style={{ padding: 10, fontSize: 12 }}>Net Hours</th>
                     <th style={{ padding: 10, fontSize: 12 }}>Status</th>
@@ -1400,7 +1401,7 @@ export default function AttendanceReports() {
                       return (
                         <tr key={dateStr} style={{ borderBottom: '1px solid var(--surface-2)', opacity: isPast ? 1 : 0.45 }}>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>{day.toLocaleDateString([], { month: 'short', day: 'numeric' })}</td>
-                          <td colSpan={4} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
+                          <td colSpan={5} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
                             {isPast ? 'Absent / Unmarked' : 'Future Day'}
                           </td>
                           <td style={{ padding: 10 }}>
@@ -1456,8 +1457,26 @@ export default function AttendanceReports() {
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>
                             {sIdx === 0 ? day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}
                           </td>
-                          <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : new Date(session.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</td>
-                          <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : checkOut}</td>
+                          <td style={{ padding: 10, fontSize: 12 }}>
+                            {session.status === 'Holiday' ? '--' : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <span>{new Date(session.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                                {session.remarks === 'Edited' && <span style={{color: '#3B82F6', fontSize: 10, fontWeight: 700}}>(Edited)</span>}
+                                {session.remarks === 'Manual' && <span style={{color: '#8B5CF6', fontSize: 10, fontWeight: 700}}>(Manual)</span>}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: 10, fontSize: 12, color: session.check_out ? 'var(--text)' : 'var(--text-muted)' }}>
+                            {session.status === 'Holiday' ? '--' : checkOut}
+                          </td>
+                          <td style={{ padding: 10, fontSize: 11, color: 'var(--text-muted)' }}>
+                            {session.status === 'Holiday' ? '--' : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <span>In: {session.created_by || '--'}</span>
+                                {session.check_out && <span>Out: {session.checked_out_by || '--'}</span>}
+                              </div>
+                            )}
+                          </td>
                           <td style={{ padding: 10, fontSize: 12 }}>{session.status === 'Holiday' ? '--' : `${breakMins} mins`}</td>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>
                             {session.status === 'Holiday' ? '0 min' : formatHoursToText(Math.min(selectedEmployeeLogs.shift_hours || 12.0, session.hours_worked))}
