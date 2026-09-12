@@ -938,6 +938,8 @@ export default function TodayAttendance() {
                           <EditSessionRow
                             key={s.id}
                             session={s}
+                            previousSession={idx > 0 ? editSessions[idx - 1] : null}
+                            nextSession={idx < editSessions.length - 1 ? editSessions[idx + 1] : null}
                             index={idx}
                             saving={savingSessionId === s.id}
                             onSave={handleUpdateExistingSession}
@@ -973,7 +975,7 @@ export default function TodayAttendance() {
 }
 
 // ── Inline Session Edit Row ───────────────────────────────────────────────────
-function EditSessionRow({ session, index, saving, onSave, onDelete }) {
+function EditSessionRow({ session, previousSession, nextSession, index, saving, onSave, onDelete }) {
   const toLocalTime = (iso) => {
     if (!iso) return ''
     const d = new Date(iso)
@@ -985,9 +987,21 @@ function EditSessionRow({ session, index, saving, onSave, onDelete }) {
   const [reason, setReason] = useState('')
 
   const handleSave = () => {
+    if (session.check_out && !outVal) {
+      toast.error('Check-out time is required because this session was already checked out.');
+      return;
+    }
+
     const baseDateIn = session.check_in ? new Date(session.check_in) : (session.date ? new Date(session.date) : new Date())
     const yIn = baseDateIn.getFullYear(), moIn = String(baseDateIn.getMonth()+1).padStart(2,'0'), dyIn = String(baseDateIn.getDate()).padStart(2,'0')
     const fullInStr = `${yIn}-${moIn}-${dyIn}T${inVal}`
+
+    if (previousSession && previousSession.check_out) {
+      if (new Date(fullInStr) <= new Date(previousSession.check_out)) {
+        toast.error('Check-in time must be after previous session\'s check-out time.');
+        return;
+      }
+    }
 
     let fullOutStr = '';
     if (outVal) {
@@ -1002,6 +1016,13 @@ function EditSessionRow({ session, index, saving, onSave, onDelete }) {
         moOut = String(baseDateOut.getMonth()+1).padStart(2,'0');
         dyOut = String(baseDateOut.getDate()).padStart(2,'0');
         fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
+      }
+      
+      if (nextSession && nextSession.check_in) {
+        if (new Date(fullOutStr) >= new Date(nextSession.check_in)) {
+          toast.error('Check-out time must be before next session\'s check-in time.');
+          return;
+        }
       }
     }
 

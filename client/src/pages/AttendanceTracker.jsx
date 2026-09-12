@@ -1424,9 +1424,23 @@ export default function AttendanceTracker() {
           <div onClick={e => e.stopPropagation()} className="card" style={{ width: '90%', maxWidth: 400, padding: 24, borderRadius: 16 }}>
             <h4 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16, color: 'var(--primary)' }}>Process Request</h4>
             <div style={{ marginBottom: 20, fontSize: 14 }}>
+               <p style={{ marginBottom: 8 }}><strong>Requested By (Operator):</strong> {activeRequestModal.requested_by_username || 'Unknown'}</p>
                <p style={{ marginBottom: 8 }}><strong>Employee:</strong> {activeRequestModal.employee_name}</p>
                <p style={{ marginBottom: 8 }}><strong>Date:</strong> {new Date(activeRequestModal.attendance_date || activeRequestModal.created_at).toLocaleDateString()}</p>
-               <p style={{ marginBottom: 8 }}><strong>Requested Time:</strong> {activeRequestModal.requested_check_in ? new Date(activeRequestModal.requested_check_in).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false}) : activeRequestModal.requested_check_out ? new Date(activeRequestModal.requested_check_out).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false}) : '--'}</p>
+               <p style={{ marginBottom: 8 }}><strong>Working Hours:</strong> {(() => {
+                 if (!activeRequestModal.original_check_in || !activeRequestModal.original_check_out) return '--';
+                 const diff = new Date(activeRequestModal.original_check_out) - new Date(activeRequestModal.original_check_in);
+                 if (diff < 0) return '--';
+                 return `${Math.floor(diff / 3600000)}h ${Math.floor((diff % 3600000) / 60000)}m`;
+               })()}</p>
+               {activeRequestModal.request_type === 'Overtime' && (
+                 <p style={{ marginBottom: 8 }}><strong>Overtime Requested:</strong> {(() => {
+                   if (!activeRequestModal.original_check_out || !activeRequestModal.requested_check_out) return '--';
+                   const diff = new Date(activeRequestModal.requested_check_out) - new Date(activeRequestModal.original_check_out);
+                   if (diff < 0) return '0h 0m';
+                   return `${Math.floor(diff / 3600000)}h ${Math.floor((diff % 3600000) / 60000)}m`;
+                 })()}</p>
+               )}
                <div style={{ fontStyle: 'italic', color: 'var(--text-muted)', marginTop: 12, background: 'var(--surface-1)', padding: 10, borderRadius: 8 }}>
                  "{activeRequestModal.reason}"
                </div>
@@ -1445,7 +1459,34 @@ export default function AttendanceTracker() {
                  </>
                ) : (
                  <div style={{ background: 'var(--surface-1)', padding: 16, borderRadius: 12, marginTop: 12 }}>
-                   <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Edit Requested Time</label>
+                   {activeRequestModal.request_type === 'Overtime' && (
+                     <div style={{ marginBottom: 12 }}>
+                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Edit Overtime (Minutes)</label>
+                       <input 
+                         type="number" 
+                         value={(() => {
+                           if (!editingRequestTimeValue || !activeRequestModal.original_check_out) return '';
+                           const d = new Date(activeRequestModal.original_check_out);
+                           const newOut = new Date(`${d.toISOString().split('T')[0]}T${editingRequestTimeValue}:00`);
+                           const diff = newOut - d;
+                           return Math.max(0, Math.floor(diff / 60000)).toString();
+                         })()}
+                         onChange={e => {
+                           const mins = parseInt(e.target.value);
+                           if (!isNaN(mins) && activeRequestModal.original_check_out) {
+                             const d = new Date(activeRequestModal.original_check_out);
+                             const newOut = new Date(d.getTime() + mins * 60000);
+                             setEditingRequestTimeValue(newOut.toTimeString().slice(0,5));
+                           } else if (e.target.value === '') {
+                             setEditingRequestTimeValue('');
+                           }
+                         }}
+                         placeholder="E.g. 60"
+                         style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }} 
+                       />
+                     </div>
+                   )}
+                   <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Edit Requested Time (Check-Out)</label>
                    <input 
                      type="time" 
                      value={editingRequestTimeValue}
@@ -1456,8 +1497,22 @@ export default function AttendanceTracker() {
                      <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
                        let overrideTime = null;
                        if (editingRequestTimeValue) {
-                         const d = new Date(activeRequestModal.attendance_date || activeRequestModal.created_at);
-                         overrideTime = new Date(`${d.toISOString().split('T')[0]}T${editingRequestTimeValue}:00`).toISOString();
+                         const baseDateIn = new Date(activeRequestModal.original_check_in || activeRequestModal.attendance_date || activeRequestModal.created_at);
+                         const y = baseDateIn.getFullYear();
+                         const mo = String(baseDateIn.getMonth() + 1).padStart(2, '0');
+                         const dy = String(baseDateIn.getDate()).padStart(2, '0');
+                         let fullTimeStr = `${y}-${mo}-${dy}T${editingRequestTimeValue}:00`;
+                         
+                         const isCheckOutOrOvertime = activeRequestModal.request_type === 'Check-Out' || activeRequestModal.request_type === 'Overtime';
+                         if (isCheckOutOrOvertime) {
+                           if (new Date(fullTimeStr) < baseDateIn) {
+                             const nextDay = new Date(baseDateIn);
+                             nextDay.setDate(nextDay.getDate() + 1);
+                             const nY = nextDay.getFullYear(), nMo = String(nextDay.getMonth()+1).padStart(2,'0'), nDy = String(nextDay.getDate()).padStart(2,'0');
+                             fullTimeStr = `${nY}-${nMo}-${nDy}T${editingRequestTimeValue}:00`;
+                           }
+                         }
+                         overrideTime = new Date(fullTimeStr).toISOString();
                        }
                        const isCheckIn = activeRequestModal.request_type === 'Check-In';
                        const isCheckOutOrOvertime = activeRequestModal.request_type === 'Check-Out' || activeRequestModal.request_type === 'Overtime';

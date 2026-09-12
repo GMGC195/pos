@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from '../api'
-import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2 } from 'lucide-react'
+import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2, ArrowRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -106,6 +106,18 @@ export default function AttendanceReports() {
   const [holidayEmployeeId, setHolidayEmployeeId] = useState('Global')
   const [holidayShift, setHolidayShift] = useState('All')
   const [submittingHoliday, setSubmittingHoliday] = useState(null)
+
+  const [pendingRequests, setPendingRequests] = useState([])
+
+  const loadPendingRequests = () => {
+    axios.get('/api/attendance/edit-requests')
+      .then(res => setPendingRequests(res.data || []))
+      .catch(() => {})
+  }
+
+  useEffect(() => {
+    loadPendingRequests()
+  }, [])
 
   // Edit Attendance State (multi-step)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -1346,7 +1358,23 @@ export default function AttendanceReports() {
             </button>
             
             <div style={{ marginBottom: 18 }}>
-              <h3 style={{ margin: '0 0 4px 0', fontSize: 18, fontWeight: 800 }}>{selectedEmployeeLogs.name}</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{selectedEmployeeLogs.name}</h3>
+                {pendingRequests.some(r => r.employee_id === selectedEmployeeLogs.employee_id && r.request_type === 'Overtime' && r.status === 'Pending') && (
+                  <button 
+                    onClick={() => { window.location.href = '/edited-logs?tab=overtime'; }}
+                    style={{ 
+                      display: 'inline-flex', alignItems: 'center', gap: 4, 
+                      background: 'rgba(234, 88, 12, 0.1)', color: '#EA580C', 
+                      border: '1px solid rgba(234, 88, 12, 0.3)', padding: '2px 8px', 
+                      borderRadius: 12, fontSize: 11, fontWeight: 700, cursor: 'pointer' 
+                    }}
+                    title="View Overtime Request"
+                  >
+                    Overtime Request <ArrowRight size={12} />
+                  </button>
+                )}
+              </div>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 ID: {selectedEmployeeLogs.employee_code} • {selectedEmployeeLogs.role} • Shift: {selectedEmployeeLogs.shift} ({selectedEmployeeLogs.shift_hours} hrs standard)
               </span>
@@ -1699,6 +1727,8 @@ export default function AttendanceReports() {
                             <SessionRow
                               key={session.id}
                               session={session}
+                              previousSession={index > 0 ? editSessions[index - 1] : null}
+                              nextSession={index < editSessions.length - 1 ? editSessions[index + 1] : null}
                               index={index}
                               onSave={handleUpdateSession}
                               onDelete={handleDeleteSession}
@@ -1732,7 +1762,7 @@ export default function AttendanceReports() {
   )
 }
 
-function SessionRow({ session, index, onSave, onDelete, saving }) {
+function SessionRow({ session, previousSession, nextSession, index, onSave, onDelete, saving }) {
   const toLocalTime = (iso) => {
     if (!iso) return ''
     const d = new Date(iso)
@@ -1744,9 +1774,21 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
   const [reason, setReason] = useState('')
 
   const handleSave = () => {
+    if (session.check_out && !outVal) {
+      toast.error('Check-out time is required because this session was already checked out.');
+      return;
+    }
+
     const baseDateIn = session.check_in ? new Date(session.check_in) : (session.date ? new Date(session.date) : new Date())
     const yIn = baseDateIn.getFullYear(), moIn = String(baseDateIn.getMonth()+1).padStart(2,'0'), dyIn = String(baseDateIn.getDate()).padStart(2,'0')
     const fullInStr = `${yIn}-${moIn}-${dyIn}T${inVal}`
+
+    if (previousSession && previousSession.check_out) {
+      if (new Date(fullInStr) <= new Date(previousSession.check_out)) {
+        toast.error('Check-in time must be after previous session\'s check-out time.');
+        return;
+      }
+    }
 
     let fullOutStr = '';
     if (outVal) {
@@ -1761,6 +1803,13 @@ function SessionRow({ session, index, onSave, onDelete, saving }) {
         moOut = String(baseDateOut.getMonth()+1).padStart(2,'0');
         dyOut = String(baseDateOut.getDate()).padStart(2,'0');
         fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
+      }
+      
+      if (nextSession && nextSession.check_in) {
+        if (new Date(fullOutStr) >= new Date(nextSession.check_in)) {
+          toast.error('Check-out time must be before next session\'s check-in time.');
+          return;
+        }
       }
     }
 
