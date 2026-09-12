@@ -47,8 +47,12 @@ export default function EditAttendanceLogs() {
       .finally(() => setLoading(false))
   }
 
-  const handleRequestAction = (requestId, action) => {
-    axios.post(`/api/attendance/edit-requests/${requestId}/action`, { action })
+  const [activeRequestModal, setActiveRequestModal] = useState(null)
+  const [isEditingRequestTime, setIsEditingRequestTime] = useState(false)
+  const [editingRequestTimeValue, setEditingRequestTimeValue] = useState('')
+
+  const handleRequestAction = (requestId, action, editedCheckIn = null, editedCheckOut = null) => {
+    axios.post(`/api/attendance/edit-requests/${requestId}/action`, { action, edited_check_in: editedCheckIn, edited_check_out: editedCheckOut })
       .then(res => {
         toast.success(res.data.message || `Request ${action}ed successfully`)
         loadRequests()
@@ -388,13 +392,27 @@ export default function EditAttendanceLogs() {
                                   Forward
                                 </button>
                               ) : (
-                                <button 
-                                  className="btn btn-primary" 
-                                  onClick={() => handleRequestAction(req.id, 'Approve')}
-                                  style={{ padding: '4px 8px', fontSize: 11, background: 'var(--green)', borderColor: 'var(--green)' }}
-                                >
-                                  Approve
-                                </button>
+                                <>
+                                  <button 
+                                    className="btn btn-primary" 
+                                    onClick={() => handleRequestAction(req.id, 'Approve')}
+                                    style={{ padding: '4px 8px', fontSize: 11, background: 'var(--green)', borderColor: 'var(--green)' }}
+                                  >
+                                    Approve
+                                  </button>
+                                  <button 
+                                    className="btn btn-secondary" 
+                                    onClick={() => {
+                                      setActiveRequestModal(req)
+                                      setIsEditingRequestTime(true)
+                                      const initialTime = req.requested_check_in ? new Date(req.requested_check_in).toTimeString().slice(0,5) : req.requested_check_out ? new Date(req.requested_check_out).toTimeString().slice(0,5) : ""
+                                      setEditingRequestTimeValue(initialTime)
+                                    }}
+                                    style={{ padding: '4px 8px', fontSize: 11, background: '#3B82F6', borderColor: '#3B82F6', color: '#fff' }}
+                                  >
+                                    Edit
+                                  </button>
+                                </>
                               )}
                               <button 
                                 className="btn btn-secondary" 
@@ -456,6 +474,53 @@ export default function EditAttendanceLogs() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Request Edit Modal */}
+      {activeRequestModal && (
+        <div 
+          onClick={() => { setActiveRequestModal(null); setIsEditingRequestTime(false); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}
+        >
+          <div onClick={e => e.stopPropagation()} className="card" style={{ width: '90%', maxWidth: 400, padding: 24, borderRadius: 16 }}>
+            <h4 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16, color: 'var(--primary)' }}>Edit Request Time</h4>
+            <div style={{ marginBottom: 20, fontSize: 14 }}>
+               <p style={{ marginBottom: 8 }}><strong>Employee:</strong> {activeRequestModal.employee_name}</p>
+               <p style={{ marginBottom: 8 }}><strong>Date:</strong> {new Date(activeRequestModal.attendance_date || activeRequestModal.created_at).toLocaleDateString()}</p>
+            </div>
+            <div style={{ background: 'var(--surface-1)', padding: 16, borderRadius: 12, marginTop: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Edit Requested Time</label>
+              <input 
+                type="time" 
+                value={editingRequestTimeValue}
+                onChange={e => setEditingRequestTimeValue(e.target.value)}
+                style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text)', outline: 'none', marginBottom: 12 }} 
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                  let overrideTime = null;
+                  if (editingRequestTimeValue) {
+                    const d = new Date(activeRequestModal.attendance_date || activeRequestModal.created_at);
+                    overrideTime = new Date(`${d.toISOString().split('T')[0]}T${editingRequestTimeValue}:00`).toISOString();
+                  }
+                  
+                  const isCheckIn = activeRequestModal.request_type === 'Check-In';
+                  const isCheckOutOrOvertime = activeRequestModal.request_type === 'Check-Out' || activeRequestModal.request_type === 'Overtime';
+                  
+                  handleRequestAction(
+                    activeRequestModal.request_id || activeRequestModal.id, 
+                    'Approve', 
+                    isCheckIn ? overrideTime : undefined, 
+                    isCheckOutOrOvertime ? overrideTime : undefined
+                  );
+                  setActiveRequestModal(null);
+                  setIsEditingRequestTime(false);
+                }}>Save & Approve</button>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => { setActiveRequestModal(null); setIsEditingRequestTime(false); }}>Cancel</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

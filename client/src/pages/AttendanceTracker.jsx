@@ -185,6 +185,9 @@ export default function AttendanceTracker() {
   const [confirmModal, setConfirmModal] = useState(null)
   const [overtimeModal, setOvertimeModal] = useState(null)
   const [overtimeReason, setOvertimeReason] = useState('')
+  const [overtimeWithSameTime, setOvertimeWithSameTime] = useState(true)
+  const [overtimeManualHours, setOvertimeManualHours] = useState(0)
+  const [overtimeManualMins, setOvertimeManualMins] = useState(0)
   // Shift Edit State
   const [activeDropdownId, setActiveDropdownId] = useState(null)
   const [showShiftModal, setShowShiftModal] = useState(false)
@@ -412,28 +415,35 @@ export default function AttendanceTracker() {
     if (overtimeMins > 15) {
       setOvertimeModal({ empId, name, overtimeMins });
       setOvertimeReason('');
+      setOvertimeWithSameTime(true);
+      setOvertimeManualHours(Math.floor(overtimeMins / 60));
+      setOvertimeManualMins(overtimeMins % 60);
       return;
     }
 
     proceedWithCheckout(empId, name, '');
   }
 
-  const proceedWithCheckout = async (empId, name, reason = '', ignore_overtime = false) => {
+  const proceedWithCheckout = async (empId, name, reason = '', ignore_overtime = false, requested_overtime_minutes = null) => {
     const actionKey = `check-out-${empId}`;
     if (pendingActions[actionKey]) return;
 
     const doCheckOut = async () => {
       setPendingActions(prev => ({ ...prev, [actionKey]: true }));
       try {
-        await axios.post('/api/attendance/check-out', { employee_id: empId, overtime_reason: reason, ignore_overtime })
+        await axios.post('/api/attendance/check-out', { employee_id: empId, overtime_reason: reason, ignore_overtime, requested_overtime_minutes })
         await loadAttendance()
         toast.dismiss()
         toast.success(`${name} Successfully Checked Out!`, { duration: 2000 })
       } catch (err) {
         toast.dismiss()
         if (err?.response?.status === 400 && err?.response?.data?.overtime_minutes !== undefined) {
-          setOvertimeModal({ empId, name, overtimeMins: err.response.data.overtime_minutes });
+          const otMins = err.response.data.overtime_minutes;
+          setOvertimeModal({ empId, name, overtimeMins: otMins });
           setOvertimeReason('');
+          setOvertimeWithSameTime(true);
+          setOvertimeManualHours(Math.floor(otMins / 60));
+          setOvertimeManualMins(otMins % 60);
           return;
         }
         if (!navigator.onLine || err.message === 'Network Error') {
@@ -1449,7 +1459,9 @@ export default function AttendanceTracker() {
                          const d = new Date(activeRequestModal.attendance_date || activeRequestModal.created_at);
                          overrideTime = new Date(`${d.toISOString().split('T')[0]}T${editingRequestTimeValue}:00`).toISOString();
                        }
-                       handleRequestAction(activeRequestModal.request_id || activeRequestModal.id, 'Approve', activeRequestModal.request_type==='Check-In'?overrideTime:undefined, activeRequestModal.request_type==='Check-Out'?overrideTime:undefined);
+                       const isCheckIn = activeRequestModal.request_type === 'Check-In';
+                       const isCheckOutOrOvertime = activeRequestModal.request_type === 'Check-Out' || activeRequestModal.request_type === 'Overtime';
+                       handleRequestAction(activeRequestModal.request_id || activeRequestModal.id, 'Approve', isCheckIn ? overrideTime : undefined, isCheckOutOrOvertime ? overrideTime : undefined);
                        setActiveRequestModal(null);
                        setIsEditingRequestTime(false);
                      }}>Save & Approve</button>
@@ -1793,9 +1805,56 @@ export default function AttendanceTracker() {
                   fontSize: 14,
                   resize: 'none',
                   outline: 'none',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  marginBottom: 16
                 }}
               />
+
+              <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input 
+                  type="checkbox" 
+                  id="otSameTime" 
+                  checked={overtimeWithSameTime}
+                  onChange={(e) => setOvertimeWithSameTime(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
+                <label htmlFor="otSameTime" style={{ fontSize: 14, color: 'var(--text)', cursor: 'pointer', fontWeight: 600 }}>
+                  With same time ({(() => {
+                    const m = overtimeModal.overtimeMins;
+                    const h = Math.floor(m / 60);
+                    const rm = m % 60;
+                    if (h > 0 && rm > 0) return `${h} hr ${rm} min`;
+                    if (h > 0) return `${h} hr`;
+                    return `${m} minutes`;
+                  })()})
+                </label>
+              </div>
+
+              {!overtimeWithSameTime && (
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Hours</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      value={overtimeManualHours}
+                      onChange={(e) => setOvertimeManualHours(parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-3)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Minutes</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      max="59"
+                      value={overtimeManualMins}
+                      onChange={(e) => setOvertimeManualMins(parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-3)', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
@@ -1823,7 +1882,8 @@ export default function AttendanceTracker() {
                     toast.error('Overtime reason is required.');
                     return;
                   }
-                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, overtimeReason, false);
+                  const reqMins = overtimeWithSameTime ? null : (overtimeManualHours * 60) + overtimeManualMins;
+                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, overtimeReason, false, reqMins);
                   setOvertimeModal(null);
                 }}
                 disabled={!overtimeReason.trim()}

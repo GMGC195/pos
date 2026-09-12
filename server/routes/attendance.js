@@ -528,7 +528,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
 
 // Check-out endpoint
 router.post('/check-out', authenticateToken, async (req, res) => {
-  const { employee_id, overtime_reason, ignore_overtime } = req.body;
+  const { employee_id, overtime_reason, ignore_overtime, requested_overtime_minutes } = req.body;
   try {
     // Find active session
     const activeSession = await pool.query(
@@ -600,12 +600,20 @@ router.post('/check-out', authenticateToken, async (req, res) => {
 
     // If overtime exceeded 15 mins and reason was provided, log it as an Overtime Request for Admin
     if (overtimeMins > 15 && overtime_reason && !ignore_overtime) {
-      const actualCheckoutDate = new Date(actualCheckoutTime);
+      let requestedCheckoutDate;
+      let finalOvertimeMins = overtimeMins;
+      if (requested_overtime_minutes !== undefined && requested_overtime_minutes !== null) {
+        finalOvertimeMins = parseInt(requested_overtime_minutes, 10);
+        requestedCheckoutDate = new Date(expectedCheckoutTime + finalOvertimeMins * 60000);
+      } else {
+        requestedCheckoutDate = new Date(actualCheckoutTime);
+      }
+
       await pool.query(
         `INSERT INTO attendance_edit_requests 
          (attendance_id, employee_id, requested_by_user_id, target_role, request_type, reason, status, requested_check_out) 
          VALUES ($1, $2, $3, 'Admin', 'Overtime', $4, 'Pending', $5)`,
-        [session.id, employee_id, req.user.id || null, `Overtime (${overtimeMins} min): ${overtime_reason}`, actualCheckoutDate]
+        [session.id, employee_id, req.user.id || null, `Overtime (${finalOvertimeMins} min): ${overtime_reason}`, requestedCheckoutDate]
       );
     }
 
