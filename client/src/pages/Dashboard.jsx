@@ -129,7 +129,7 @@ export default function Dashboard() {
       axios.get('/api/stats', { params: statsParams })
         .then(r => setStats(r.data))
         .catch(() => setStats({
-          totalSale: 0, dailyRevenue: 0, totalProductCost: 0, totalOrders: 0, guestsToday: 0,
+          totalSale: 0, cashSale: 0, cardSale: 0, dailyRevenue: 0, totalProductCost: 0, totalOrders: 0, guestsToday: 0,
           last7Days: Array.from({ length: 7 }, (_, i) => ({ label: `Day ${i + 1}`, total: 0 })),
           topItems: [],
         }))
@@ -188,6 +188,8 @@ export default function Dashboard() {
     const XLSX = await import('xlsx')
     const data = [
       { Metric: "Today Total Sale", Value: stats?.totalSale || 0 },
+      { Metric: "Cash Sale", Value: stats?.cashSale || 0 },
+      { Metric: "Card Sale", Value: stats?.cardSale || 0 },
       { Metric: "Today Total Order Delivered", Value: stats?.totalOrders || 0 },
       { Metric: "Today Total Product Cost", Value: stats?.totalProductCost || 0 },
       { Metric: "Targeted Revenue", Value: TARGET_REVENUE },
@@ -221,7 +223,9 @@ export default function Dashboard() {
           <h1>${BRAND_NAME} — Dashboard Summary</h1>
           <p>Generated on ${new Date().toLocaleString()}</p>
           <div class="grid">
-            <div class="card"><div class="label">Today Total Sale</div><div class="value">${CURRENCY}${stats?.totalSale?.toLocaleString()}</div></div>
+            <div class="card"><div class="label">Today Total Sale</div><div class="value">${CURRENCY}${stats?.totalSale?.toLocaleString()}</div>
+              <div style="font-size: 11px; margin-top: 6px; color: #555;">Cash: ${CURRENCY}${stats?.cashSale?.toLocaleString()} | Card: ${CURRENCY}${stats?.cardSale?.toLocaleString()}</div>
+            </div>
             <div class="card"><div class="label">Total Orders Delivered</div><div class="value">${stats?.totalOrders}</div></div>
             <div class="card"><div class="label">Total Product Cost</div><div class="value">${CURRENCY}${stats?.totalProductCost?.toLocaleString()}</div></div>
             <div class="card"><div class="label">Targeted Revenue</div><div class="value">${CURRENCY}${TARGET_REVENUE.toLocaleString()}</div></div>
@@ -428,7 +432,17 @@ export default function Dashboard() {
 
           <div className="summary-grid" style={{ marginTop: 10 }}>
             {[
-              { label: 'Today Total Sale', val: stats ? `${CURRENCY}${stats.totalSale.toLocaleString()}` : '0', color: 'var(--red)' },
+              { 
+                label: 'Today Total Sale', 
+                val: stats ? `${CURRENCY}${stats.totalSale.toLocaleString()}` : '0', 
+                color: 'var(--red)',
+                subtext: stats ? (
+                  <div style={{ marginTop: 8, fontSize: 13, display: 'flex', gap: 12, fontWeight: 500 }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Cash: {CURRENCY}{(stats.cashSale || 0).toLocaleString()}</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>Card: {CURRENCY}{(stats.cardSale || 0).toLocaleString()}</span>
+                  </div>
+                ) : null
+              },
               { label: 'Today Total Order Delivered', val: stats ? stats.totalOrders.toString() : '0', color: '#3b82f6' },
               { label: 'Today Total Product Cost', val: stats ? `${CURRENCY}${stats.totalProductCost.toLocaleString()}` : '0', color: '#f59e0b' },
               { label: 'Targeted Revenue', val: `${CURRENCY}${TARGET_REVENUE.toLocaleString()}`, color: 'var(--text-muted)' },
@@ -438,6 +452,7 @@ export default function Dashboard() {
               <div key={item.label} style={{ background: 'var(--surface)', borderRadius: 12, padding: '24px', border: '1px solid var(--surface-2)' }}>
                 <div style={{ fontSize: 28, fontWeight: 800, color: item.color }}>{loading ? '...' : item.val}</div>
                 <div style={{ fontWeight: 600, marginTop: 6, color: 'var(--text-secondary)' }}>{item.label}</div>
+                {item.subtext}
               </div>
             ))}
           </div>

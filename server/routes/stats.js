@@ -46,6 +46,8 @@ router.get('/', authenticateToken, async (req, res) => {
         // but we can return the exact sales and orders.
         return res.json({
           totalSale: parseFloat(closing.total_sales || 0),
+          cashSale: parseFloat(closing.cash_sales || 0),
+          cardSale: parseFloat(closing.card_sales || 0),
           dailyRevenue: parseFloat(closing.total_sales || 0), // approximation or we can leave it
           totalProductCost: 0, // Not saved in shift_closings yet
           totalOrders: parseInt(closing.total_orders || 0),
@@ -61,11 +63,14 @@ router.get('/', authenticateToken, async (req, res) => {
     const shiftCond = isCashier ? 'AND is_shift_closed = FALSE' : '';
     const shiftCondO = isCashier ? 'AND o.is_shift_closed = FALSE' : '';
 
-    // Total Saleh (Today's completed orders grand total)
     const totalSaleResult = await pool.query(`
-      SELECT COALESCE(SUM(grand_total), 0) as total_sale
-      FROM orders
-      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond} ${shiftCond}
+      SELECT 
+        COALESCE(SUM(o.grand_total), 0) as total_sale,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN o.grand_total ELSE 0 END), 0) as cash_sale,
+        COALESCE(SUM(CASE WHEN t.payment_method != 'Cash' THEN o.grand_total ELSE 0 END), 0) as card_sale
+      FROM orders o
+      LEFT JOIN transactions t ON o.id = t.order_id
+      WHERE DATE(o.created_at) = CURRENT_DATE AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
     `, params);
 
     // Daily Revenue (Today's Sales - Produce Cost)
@@ -145,6 +150,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     res.json({
       totalSale: parseFloat(totalSaleResult.rows[0].total_sale),
+      cashSale: parseFloat(totalSaleResult.rows[0].cash_sale),
+      cardSale: parseFloat(totalSaleResult.rows[0].card_sale),
       dailyRevenue: parseFloat(dailyRevenueResult.rows[0].revenue),
       totalProductCost: parseFloat(dailyRevenueResult.rows[0].product_cost),
       totalOrders: parseInt(totalOrdersResult.rows[0].count),

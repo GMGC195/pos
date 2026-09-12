@@ -56,6 +56,7 @@ export default function EditAttendanceLogs() {
   const [activeRequestModal, setActiveRequestModal] = useState(null)
   const [isEditingRequestTime, setIsEditingRequestTime] = useState(false)
   const [editingRequestTimeValue, setEditingRequestTimeValue] = useState('')
+  const [editingOvertimeMinutes, setEditingOvertimeMinutes] = useState('')
 
   const handleRequestAction = (requestId, action, editedCheckIn = null, editedCheckOut = null) => {
     axios.post(`/api/attendance/edit-requests/${requestId}/action`, { action, edited_check_in: editedCheckIn, edited_check_out: editedCheckOut })
@@ -413,6 +414,12 @@ export default function EditAttendanceLogs() {
                                       setIsEditingRequestTime(true)
                                       const initialTime = req.requested_check_in ? new Date(req.requested_check_in).toTimeString().slice(0,5) : req.requested_check_out ? new Date(req.requested_check_out).toTimeString().slice(0,5) : ""
                                       setEditingRequestTimeValue(initialTime)
+                                      if (req.request_type === 'Overtime' && req.original_check_out && req.requested_check_out) {
+                                        const diffMins = Math.max(0, Math.floor((new Date(req.requested_check_out) - new Date(req.original_check_out)) / 60000));
+                                        setEditingOvertimeMinutes(diffMins.toString());
+                                      } else {
+                                        setEditingOvertimeMinutes('');
+                                      }
                                     }}
                                     style={{ padding: '4px 8px', fontSize: 11, background: '#3B82F6', borderColor: '#3B82F6', color: '#fff' }}
                                   >
@@ -517,20 +524,16 @@ export default function EditAttendanceLogs() {
                   <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Edit Overtime (Minutes)</label>
                   <input 
                     type="number" 
-                    value={(() => {
-                      if (!editingRequestTimeValue || !activeRequestModal.original_check_out) return '';
-                      const d = new Date(activeRequestModal.original_check_out);
-                      const newOut = new Date(`${d.toISOString().split('T')[0]}T${editingRequestTimeValue}:00`);
-                      const diff = newOut - d;
-                      return Math.max(0, Math.floor(diff / 60000)).toString();
-                    })()}
+                    value={editingOvertimeMinutes}
                     onChange={e => {
                       const mins = parseInt(e.target.value);
                       if (!isNaN(mins) && activeRequestModal.original_check_out) {
+                        setEditingOvertimeMinutes(mins.toString());
                         const d = new Date(activeRequestModal.original_check_out);
                         const newOut = new Date(d.getTime() + mins * 60000);
                         setEditingRequestTimeValue(newOut.toTimeString().slice(0,5));
                       } else if (e.target.value === '') {
+                        setEditingOvertimeMinutes('');
                         setEditingRequestTimeValue('');
                       }
                     }}
@@ -543,7 +546,23 @@ export default function EditAttendanceLogs() {
               <input 
                 type="time" 
                 value={editingRequestTimeValue}
-                onChange={e => setEditingRequestTimeValue(e.target.value)}
+                onChange={e => {
+                  const newTime = e.target.value;
+                  setEditingRequestTimeValue(newTime);
+                  if (activeRequestModal.request_type === 'Overtime' && activeRequestModal.original_check_out && newTime) {
+                    const d = new Date(activeRequestModal.original_check_out);
+                    const [hh, mm] = newTime.split(':');
+                    const newOut = new Date(d);
+                    newOut.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+                    if (newOut < d) {
+                      newOut.setDate(newOut.getDate() + 1);
+                    }
+                    const diff = newOut - d;
+                    setEditingOvertimeMinutes(Math.max(0, Math.floor(diff / 60000)).toString());
+                  } else if (!newTime) {
+                    setEditingOvertimeMinutes('');
+                  }
+                }}
                 style={{ width: '100%', padding: 10, borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text)', outline: 'none', marginBottom: 12 }} 
               />
               <div style={{ display: 'flex', gap: 8 }}>

@@ -598,8 +598,8 @@ router.post('/check-out', authenticateToken, async (req, res) => {
       [finalCheckoutTime, totalBreakSecs, session.id, req.user.username]
     );
 
-    // If overtime exceeded 15 mins and reason was provided, log it as an Overtime Request for Admin
-    if (overtimeMins > 15 && overtime_reason && !ignore_overtime) {
+    // If overtime exceeded 15 mins (or explicit overtime was requested) and reason was provided, log it as an Overtime Request for Admin
+    if ((overtimeMins > 15 || (requested_overtime_minutes !== undefined && requested_overtime_minutes !== null)) && overtime_reason && !ignore_overtime) {
       let requestedCheckoutDate;
       let finalOvertimeMins = overtimeMins;
       if (requested_overtime_minutes !== undefined && requested_overtime_minutes !== null) {

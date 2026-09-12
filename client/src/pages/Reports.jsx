@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
@@ -68,6 +68,12 @@ export default function Reports({ isTodaySales = false }) {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyDate, setHistoryDate] = useState(today())
   const [selectedHistoryReport, setSelectedHistoryReport] = useState(null)
+  
+  // History Filters
+  const [historyFilterBranch, setHistoryFilterBranch] = useState('All')
+  const [historyFilterType, setHistoryFilterType] = useState('All')
+  const [historyFilterUser, setHistoryFilterUser] = useState('All')
+  const [showHistoryFilters, setShowHistoryFilters] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -344,8 +350,11 @@ export default function Reports({ isTodaySales = false }) {
       <div class="row"><span class="label">Logout Time:</span><span>${fmtTime(report.logout_time)}</span></div>
       <div class="row"><span class="label">Active Time:</span><span class="bold">${report.total_active_time}</span></div>
       <div class="divider"></div>
+      <div class="divider"></div>
       <div class="row"><span class="label">Total Orders:</span><span class="bold">${report.total_orders}</span></div>
       <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
+      <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Cash Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.cash_sales || 0).toFixed(2)}</span></div>
+      <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Card Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
       <div class="divider"></div>
       <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
       <table>
@@ -966,7 +975,7 @@ export default function Reports({ isTodaySales = false }) {
               <button className="modal-close" onClick={() => { setShowHistoryModal(false); setSelectedHistoryReport(null); }}>✕</button>
             </div>
 
-            {/* Date filter */}
+            {/* Date filter & Toggle */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
               <input
                 type="date"
@@ -975,8 +984,41 @@ export default function Reports({ isTodaySales = false }) {
                 className="filter-input"
                 style={{ flex: 1 }}
               />
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowHistoryFilters(!showHistoryFilters)}>
+                {showHistoryFilters ? 'Hide Filters' : 'Show Filters'}
+              </button>
               <button className="btn btn-primary btn-sm" onClick={() => loadClosingHistory(historyDate)}>Search</button>
             </div>
+
+            {/* Expandable Filters */}
+            {showHistoryFilters && (
+              <div style={{ display: 'flex', gap: 10, marginBottom: 16, background: '#f8f9fa', padding: 12, borderRadius: 8, border: '1px solid var(--surface-2)', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Branch</label>
+                  <select className="filter-input" style={{ width: '100%' }} value={historyFilterBranch} onChange={e => setHistoryFilterBranch(e.target.value)}>
+                    {['All', ...new Set(closingHistory.map(c => c.branch))].map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Closing Type</label>
+                  <select className="filter-input" style={{ width: '100%' }} value={historyFilterType} onChange={e => setHistoryFilterType(e.target.value)}>
+                    <option value="All">All Types</option>
+                    <option value="Shift">Shift</option>
+                    <option value="Daily">Daily</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Cashier</label>
+                  <select className="filter-input" style={{ width: '100%' }} value={historyFilterUser} onChange={e => setHistoryFilterUser(e.target.value)}>
+                    {['All', ...new Set(closingHistory.map(c => c.cashier_name))].map(u => (
+                      <option key={u} value={u}>{u}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {historyLoading ? (
               <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading...</div>
@@ -992,55 +1034,142 @@ export default function Reports({ isTodaySales = false }) {
                     </div>
                     <button className="btn btn-primary btn-sm" onClick={() => printClosingReport(selectedHistoryReport)}>🖨️ Reprint</button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}>
-                    {[
-                      { l: 'Cashier', v: selectedHistoryReport.cashier_name },
-                      { l: 'Branch', v: selectedHistoryReport.branch },
-                      { l: 'Login', v: new Date(selectedHistoryReport.login_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) },
-                      { l: 'Logout', v: new Date(selectedHistoryReport.logout_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) },
-                      { l: 'Active Time', v: selectedHistoryReport.total_active_time },
-                      { l: 'Total Orders', v: selectedHistoryReport.total_orders },
-                    ].map(({ l, v }) => (
-                      <div key={l} style={{ background: 'white', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--surface-2)' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{l}</div>
-                        <div style={{ fontWeight: 700, fontSize: 14 }}>{v}</div>
-                      </div>
-                    ))}
-                    <div style={{ background: '#fff1f2', padding: '10px 14px', borderRadius: 8, border: '1px solid #fca5a5' }}>
-                      <div style={{ fontSize: 11, color: 'var(--primary)', marginBottom: 4 }}>Total Sales</div>
-                      <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--primary)' }}>{CURRENCY}{parseFloat(selectedHistoryReport.total_sales || 0).toFixed(2)}</div>
-                    </div>
+                  <div style={{ background: 'white', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)', marginBottom: 20 }}>
+                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Cashier:</strong> {selectedHistoryReport.cashier_name}</p>
+                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Orders:</strong> {selectedHistoryReport.total_orders}</p>
+                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Sales:</strong> {CURRENCY} {parseFloat(selectedHistoryReport.total_sales || 0).toFixed(2)}</p>
+                    <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Cash Sales: {CURRENCY} {parseFloat(selectedHistoryReport.cash_sales || 0).toFixed(2)}</p>
+                    <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Card Sales: {CURRENCY} {parseFloat(selectedHistoryReport.card_sales || 0).toFixed(2)}</p>
+                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Active Time:</strong> {selectedHistoryReport.total_active_time}</p>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--text-muted)' }}>{new Date(selectedHistoryReport.login_time).toLocaleString()} - {new Date(selectedHistoryReport.logout_time).toLocaleString()}</p>
                   </div>
-                  <h4 style={{ fontSize: 13, marginBottom: 8 }}>Sales by Category</h4>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+
+                  <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Items Sold by Category</h3>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
                     <thead>
-                      <tr style={{ background: 'white', borderBottom: '2px solid var(--surface-2)' }}>
+                      <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
                         <th style={{ padding: '8px 10px', textAlign: 'left' }}>Category</th>
                         <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
                         <th style={{ padding: '8px 10px', textAlign: 'right' }}>Amount</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(Array.isArray(selectedHistoryReport.items_summary) ? selectedHistoryReport.items_summary : JSON.parse(selectedHistoryReport.items_summary || '[]')).map((item, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                          <td style={{ padding: '8px 10px' }}>{item.category}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'center' }}>{item.qty}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{CURRENCY}{parseFloat(item.amount || 0).toFixed(2)}</td>
-                        </tr>
+                      {(Array.isArray(selectedHistoryReport.items_summary) ? selectedHistoryReport.items_summary : JSON.parse(selectedHistoryReport.items_summary || '[]')).map((cat, i) => (
+                        <React.Fragment key={i}>
+                          <tr style={{ background: 'var(--surface-1)' }}>
+                            <td style={{ padding: '8px 10px', fontWeight: 700 }}>{cat.category}</td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700 }}>{cat.qty}</td>
+                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{CURRENCY} {parseFloat(cat.amount || 0).toFixed(2)}</td>
+                          </tr>
+                          {cat.items && cat.items.map((sub, j) => (
+                            <tr key={`${i}-${j}`} style={{ borderBottom: j === cat.items.length - 1 ? '1px solid var(--surface-2)' : 'none' }}>
+                              <td style={{ padding: '4px 10px 4px 25px', color: 'var(--text-secondary)' }}>- {sub.name}</td>
+                              <td style={{ padding: '4px 10px', textAlign: 'center', color: 'var(--text-secondary)' }}>{sub.qty}</td>
+                              <td style={{ padding: '4px 10px', textAlign: 'right', color: 'var(--text-secondary)' }}>{CURRENCY} {parseFloat(sub.amount || 0).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>
+
+                  {(() => {
+                    let topItems = [];
+                    try {
+                      topItems = typeof selectedHistoryReport.top_selling_items === 'string' 
+                        ? JSON.parse(selectedHistoryReport.top_selling_items || '[]') 
+                        : (selectedHistoryReport.top_selling_items || []);
+                    } catch (e) {}
+
+                    if (topItems && topItems.length > 0) {
+                      return (
+                        <>
+                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top Selling Items</h3>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
+                            <thead>
+                              <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
+                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item Name</th>
+                                <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty Sold</th>
+                                <th style={{ padding: '8px 10px', textAlign: 'right' }}>Revenue</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {topItems.map((item, i) => (
+                                <tr key={i} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                                  <td style={{ padding: '8px 10px' }}>{item.name}</td>
+                                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>{item.qty}</td>
+                                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{CURRENCY} {parseFloat(item.amount || 0).toFixed(2)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  {(() => {
+                    let intervals = [];
+                    try {
+                      intervals = typeof selectedHistoryReport.interval_items === 'string' 
+                        ? JSON.parse(selectedHistoryReport.interval_items || '[]') 
+                        : (selectedHistoryReport.interval_items || []);
+                    } catch (e) {}
+
+                    if (intervals && intervals.length > 0) {
+                      return (
+                        <>
+                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top 3 Items by 2-Hour Intervals</h3>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
+                            <thead>
+                              <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
+                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Time Interval</th>
+                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item Name</th>
+                                <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intervals.map((interval, idx) => (
+                                interval.items.map((it, i) => (
+                                  <tr key={`${idx}-${i}`} style={{ borderBottom: i === interval.items.length - 1 ? '2px solid var(--surface-2)' : '1px solid var(--surface-1)' }}>
+                                    {i === 0 && (
+                                      <td rowSpan={interval.items.length} style={{ padding: '8px 10px', verticalAlign: 'top', fontWeight: 600, borderRight: '1px solid var(--surface-2)' }}>
+                                        {interval.time_window}
+                                      </td>
+                                    )}
+                                    <td style={{ padding: '8px 10px' }}>{it.name}</td>
+                                    <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600 }}>{it.qty}</td>
+                                  </tr>
+                                ))
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               </div>
             ) : (
               /* ── List View ── */
               <div>
-                {closingHistory.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No closing reports found for this date.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {closingHistory.map(c => (
-                      <div
+                {(() => {
+                  const filteredHistory = closingHistory.filter(c => {
+                    if (historyFilterBranch !== 'All' && c.branch !== historyFilterBranch) return false;
+                    if (historyFilterType !== 'All' && c.closing_type !== historyFilterType) return false;
+                    if (historyFilterUser !== 'All' && c.cashier_name !== historyFilterUser) return false;
+                    return true;
+                  });
+
+                  return filteredHistory.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No closing reports found matching filters.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {filteredHistory.map(c => (
+                        <div
+
                         key={c.id}
                         onClick={() => setSelectedHistoryReport(c)}
                         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', background: '#f8f9fa', borderRadius: 10, border: '1px solid var(--surface-2)', cursor: 'pointer', transition: 'background 0.15s' }}
@@ -1063,7 +1192,8 @@ export default function Reports({ isTodaySales = false }) {
                       </div>
                     ))}
                   </div>
-                )}
+                )
+                })()}
               </div>
             )}
           </div>
