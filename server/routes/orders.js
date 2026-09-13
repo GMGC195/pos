@@ -583,6 +583,7 @@ async function sendClosingEmail(report, closingType) {
     
     let itemsHtml = '';
     let topSellingHtml = '';
+    let twoHourlyHtml = '';
     
     try {
       let items = [];
@@ -688,7 +689,7 @@ async function sendClosingEmail(report, closingType) {
         }
       }
       
-      let twoHourlyHtml = '';
+      twoHourlyHtml = '';
       if (report.interval_items && Object.keys(report.interval_items).length > 0) {
         twoHourlyHtml = `
           <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top Items by 2-Hour Intervals</h3>
