@@ -71,10 +71,10 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
-      \`SELECT i.*, 
+      `SELECT i.*, 
         (SELECT json_agg(c.name) FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = i.id) as category_names,
         (SELECT json_agg(ic.category_id) FROM item_categories ic WHERE ic.item_id = i.id) as category_ids
-       FROM items i WHERE i.id = $1\`,
+       FROM items i WHERE i.id = $1`,
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item not found' });

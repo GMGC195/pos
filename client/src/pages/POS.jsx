@@ -238,6 +238,7 @@ export default function POS() {
   const loadOrderForEdit = async (editId) => {
     try {
       setShowCart(true)
+      setMobilePane('cart')
       
       let order = activeOrders.find(o => o.id === parseInt(editId));
       
