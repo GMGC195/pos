@@ -216,9 +216,13 @@ router.post('/', authenticateToken, async (req, res) => {
       const autoPrintEnabled = settingsRes.rows.length > 0 && settingsRes.rows[0].auto_print_enabled === true;
       console.log('[ORDER DEBUG] auto_print_enabled value:', autoPrintEnabled);
 
-      if (autoPrintEnabled) {
-        const printerIp = settingsRes.rows[0].printer_ip || '127.0.0.1';
-        const effectiveBranch = finalBranch || 'Branch 1';
+      const effectiveBranch = finalBranch || 'Branch 1';
+      const branchNumber = String(req.body.branchId || effectiveBranch).replace(/\D/g, '') || '1';
+      const channelName = `branch-${branchNumber}-orders`;
+      
+      const printerIp = req.body.printerIp || (settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip ? settingsRes.rows[0].printer_ip : '127.0.0.1');
+
+      if (autoPrintEnabled || req.body.printerIp) {
         let shortBranch = effectiveBranch;
         if (effectiveBranch === 'Branch 1') shortBranch = 'B1';
         else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
@@ -226,30 +230,27 @@ router.post('/', authenticateToken, async (req, res) => {
 
         const payload = {
           orderId: order.id,
-          slipNumber: slipNumber,
-          editCount: 0,
-          orderType: `${shortBranch} - ${order.order_type || "Takeaway"}`,
-          tableNo: order.table_number || "",
+          orderNumber: slipNumber,
+          branchId: parseInt(branchNumber),
           waiterName: order.order_taker || "Staff",
-          branch: finalBranch,
+          tableName: order.table_number || "",
+          orderType: order.order_type || "Takeaway",
           printerIp: printerIp,
           subtotal: subtotal,
-          tax: tax,
-          grandTotal: grand_total,
-          discount: discount || 0,
-          paymentMethod: payment_method || status,
-          date: new Date().toISOString(),
+          total: grand_total,
+          currency: "SAR",
+          createdAt: new Date().toISOString(),
           items: items.map(item => ({
             name: item.name,
             qty: item.qty || 1,
-            price: item.price
+            amount: item.price
           }))
         };
         
         if (pusher) {
           try {
-            console.log('[PUSHER DEBUG] Attempting trigger on channel: restaurant-orders, event: new-order');
-            const response = await pusher.trigger('restaurant-orders', 'new-order', payload);
+            console.log(`[PUSHER DEBUG] Attempting trigger on channel: ${channelName}, event: print-kitchen-ticket`);
+            const response = await pusher.trigger(channelName, 'print-kitchen-ticket', payload);
             console.log('[PUSHER DEBUG] Trigger succeeded! Response:', response.status);
           } catch (pusherErr) {
             console.error('[PUSHER ERROR] Failed to dispatch event to Pusher:', pusherErr);
@@ -1157,38 +1158,31 @@ router.post('/:id/reprint', authenticateToken, async (req, res) => {
     const items = itemsRes.rows;
 
     const settingsRes = await pool.query('SELECT auto_print_enabled, printer_ip FROM settings ORDER BY id ASC LIMIT 1');
-    const autoPrintEnabled = settingsRes.rows.length > 0 && settingsRes.rows[0].auto_print_enabled === true;
-    const printerIp = (settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip) ? settingsRes.rows[0].printer_ip : '127.0.0.1';
-
     const effectiveBranch = order.branch || 'Branch 1';
-    let shortBranch = effectiveBranch;
-    if (effectiveBranch === 'Branch 1') shortBranch = 'B1';
-    else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
-    else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
+    const branchNumber = String(req.body.branchId || effectiveBranch).replace(/\D/g, '') || '1';
+    const channelName = `branch-${branchNumber}-orders`;
+    const printerIp = req.body.printerIp || (settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip ? settingsRes.rows[0].printer_ip : '127.0.0.1');
 
     if (pusher) {
       const payload = {
         orderId: order.id,
-        slipNumber: order.slip_number,
-        editCount: order.edit_count || 0,
-        orderType: `${shortBranch} - ${order.order_type || "Takeaway"}`,
-        tableNo: order.table_number || "",
+        orderNumber: order.slip_number,
+        branchId: parseInt(branchNumber),
         waiterName: order.order_taker || "Staff",
-        branch: effectiveBranch,
+        tableName: order.table_number || "",
+        orderType: order.order_type || "Takeaway",
         printerIp: printerIp,
         subtotal: order.subtotal,
-        tax: order.tax,
-        grandTotal: order.grand_total,
-        discount: order.discount || 0,
-        paymentMethod: order.payment_method || order.status,
-        date: new Date().toISOString(),
+        total: order.grand_total,
+        currency: "SAR",
+        createdAt: new Date().toISOString(),
         items: items.map(item => ({
           name: item.item_name || item.name,
           qty: item.qty || 1,
-          price: item.unit_price || item.price
+          amount: item.unit_price || item.price
         }))
       };
-      await pusher.trigger('restaurant-orders', 'new-order', payload);
+      await pusher.trigger(channelName, 'print-kitchen-ticket', payload);
       return res.json({ success: true, message: 'Reprint sent to cloud printer' });
     } else {
       return res.status(500).json({ error: 'Cloud printing is not configured on the server.' });

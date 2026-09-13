@@ -471,7 +471,8 @@ export default function POS() {
         table_number: customerInfo.tableNumber,
         order_taker: user?.username || 'Guest',
         comments: customerInfo.comments,
-        branch: ['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) ? selectedBranch : undefined
+        branch: ['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) ? selectedBranch : undefined,
+        printerIp: localStorage.getItem('printMode') === 'cloud' ? (localStorage.getItem('printerIp') || '127.0.0.1') : undefined
       }
 
       let res;
@@ -539,12 +540,8 @@ export default function POS() {
         // Fetch auto-print settings dynamically to ensure we always have the latest setting without page refresh
         let isCloudPrint = false;
         if (shouldPrint) {
-          try {
-            const settingsRes = await axios.get('/api/settings');
-            isCloudPrint = settingsRes.data?.auto_print_enabled === true || String(settingsRes.data?.auto_print_enabled) === 'true' || settingsRes.data?.auto_print_enabled === 1;
-          } catch (err) {
-            console.error('Failed to fetch print settings at checkout:', err);
-          }
+          const printMode = localStorage.getItem('printMode') || 'standard';
+          isCloudPrint = printMode === 'cloud';
         }
 
         if (isCloudPrint) {

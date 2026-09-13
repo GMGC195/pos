@@ -189,11 +189,12 @@ ${slipBody}
     setIsPrinting(true);
 
     try {
-      const settingsRes = await axios.get('/api/settings');
-      const isCloudPrint = settingsRes.data?.auto_print_enabled === true || String(settingsRes.data?.auto_print_enabled) === 'true' || settingsRes.data?.auto_print_enabled === 1;
+      const printMode = localStorage.getItem('printMode') || 'standard';
+      const isCloudPrint = printMode === 'cloud';
       
       if (isCloudPrint) {
-        await axios.post(`/api/orders/${order.id}/reprint`);
+        const printerIp = localStorage.getItem('printerIp') || '127.0.0.1';
+        await axios.post(`/api/orders/${order.id}/reprint`, { printerIp });
         toast.success('Ticket sent to kitchen printer!', { icon: '🖨️', duration: 4000 });
         setIsPrinting(false);
         onClose();
