@@ -17,7 +17,15 @@ export function POSProvider({ children }) {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [cart, setCart] = useState([])
-  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', address: '', discount: '', orderType: 'Dine-In', tableNumber: '' })
+  const defaultOrderType = user?.role?.toLowerCase() === 'cashier' ? 'Takeaway' : 'Dine-In'
+  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', address: '', discount: '', orderType: defaultOrderType, tableNumber: '' })
+
+  useEffect(() => {
+    setCustomerInfo(prev => ({
+      ...prev,
+      orderType: user?.role?.toLowerCase() === 'cashier' ? 'Takeaway' : 'Dine-In'
+    }))
+  }, [user?.role])
   const [loading, setLoading] = useState(false)
   const [isDataLoaded, setIsDataLoaded] = useState(false)
   const [activeCategory, setActiveCategory] = useState('All')
@@ -87,7 +95,7 @@ export function POSProvider({ children }) {
   const updateCart = (newCart) => setCart(newCart)
   const clearCart = () => {
     setCart([])
-    setCustomerInfo({ name: '', phone: '', address: '', discount: '', orderType: 'Dine-In', tableNumber: '' })
+    setCustomerInfo({ name: '', phone: '', address: '', discount: '', orderType: user?.role?.toLowerCase() === 'cashier' ? 'Takeaway' : 'Dine-In', tableNumber: '' })
   }
 
   const value = {
