@@ -1355,7 +1355,7 @@ export default function POS() {
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                 <input type="radio" name="cartPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
-                <span style={{ fontSize: 14, fontWeight: 600 }}>Online</span>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Card</span>
               </label>
             </div>
           </div>
@@ -1384,7 +1384,7 @@ export default function POS() {
               <button
                 className="btn btn-secondary btn-lg"
                 onClick={() => { if (!isManagement) setConfirmModal(true); }}
-                title="Cancel/Clear Cart"
+                title="Confirm Order"
                 style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
                 disabled={processing || isManagement}
               >
@@ -1710,7 +1710,7 @@ export default function POS() {
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
                     <input type="radio" name="quickPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
-                    <span style={{ fontSize: 15, fontWeight: 500 }}>Online</span>
+                    <span style={{ fontSize: 15, fontWeight: 500 }}>Card</span>
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
                     <input type="radio" name="quickPayment" value="Payment Pending" checked={paymentMethod === 'Payment Pending' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Payment Pending')} />

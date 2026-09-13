@@ -305,8 +305,10 @@ export default function Settings() {
           {activeTab === 'hardware' && (
             <div className="settings-card fade-in">
               <div className="card-header">
-                <h2>Hardware & Printers</h2>
-                <p>Configure device-specific hardware settings (These settings apply only to this device)</p>
+                <div>
+                  <h2>Hardware & Printers</h2>
+                  <p>Configure device-specific hardware settings (These settings apply only to this device)</p>
+                </div>
               </div>
               <div className="settings-form">
                 <div className="form-group" style={{ maxWidth: 400 }}>
@@ -359,8 +361,10 @@ export default function Settings() {
           {activeTab === 'account' && (
             <div className="settings-card fade-in">
               <div className="card-header">
-                <h2>Account Information</h2>
-                <p>Update your profile details and password</p>
+                <div>
+                  <h2>Account Information</h2>
+                  <p>Update your profile details and password</p>
+                </div>
               </div>
               <form onSubmit={handleUpdateProfile} className="settings-form">
                 <div className="form-grid">
@@ -400,8 +404,10 @@ export default function Settings() {
                 <div className="divider" />
 
                 <div className="card-header" style={{ padding: '0 0 16px' }}>
-                  <h2>Change Password</h2>
-                  <p>Leave blank to keep current password</p>
+                  <div>
+                    <h2>Change Password</h2>
+                    <p>Leave blank to keep current password</p>
+                  </div>
                 </div>
 
                 <div className="form-grid">
@@ -451,8 +457,10 @@ export default function Settings() {
               {isAddingUser ? (
                 <div className="settings-card">
                   <div className="card-header">
-                    <h2>{editingUser ? 'Edit User' : 'Add New User'}</h2>
-                    <p>{editingUser ? `Updating details for ${editingUser.username}` : 'Create a new account for your team'}</p>
+                    <div>
+                      <h2>{editingUser ? 'Edit User' : 'Add New User'}</h2>
+                      <p>{editingUser ? `Updating details for ${editingUser.username}` : 'Create a new account for your team'}</p>
+                    </div>
                   </div>
                   <form onSubmit={editingUser ? handleUpdateUser : handleCreateUser} className="settings-form">
                     <div className="form-grid">
@@ -781,7 +789,7 @@ export default function Settings() {
                   </div>
                   
                   {/* System vs Employee Tabs */}
-                  <div style={{ display: 'flex', gap: '8px', padding: '16px 24px 0 24px', background: 'var(--surface-1)' }}>
+                  <div style={{ display: 'flex', gap: '8px', padding: '16px 24px 0 24px', background: 'var(--surface-1)', overflowX: 'auto', whiteSpace: 'nowrap' }}>
                     <button 
                       onClick={() => { setUserTypeTab('system'); setUserRoleFilter('Admin'); setUserBranchFilter('All'); }}
                       style={{
@@ -791,7 +799,8 @@ export default function Settings() {
                         color: userTypeTab === 'system' ? 'white' : 'var(--text-muted)',
                         borderRadius: '8px 8px 0 0',
                         fontWeight: 600,
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        flexShrink: 0
                       }}
                     >
                       System Users
@@ -805,7 +814,8 @@ export default function Settings() {
                         color: userTypeTab === 'employee' ? 'white' : 'var(--text-muted)',
                         borderRadius: '8px 8px 0 0',
                         fontWeight: 600,
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        flexShrink: 0
                       }}
                     >
                       Employees
@@ -909,8 +919,8 @@ export default function Settings() {
                   </div>
 
                   {/* Desktop Table View */}
-                  <div className="users-table-wrap desktop-table-view">
-                    <div style={{ minWidth: '600px' }}>
+                  <div className="users-table-wrap desktop-table-view" style={{ overflowX: 'auto', width: '100%' }}>
+                    <div style={{ minWidth: '800px' }}>
                       <table className="users-table" style={{ width: '100%' }}>
                         <thead>
                           <tr>
@@ -1377,8 +1387,16 @@ export default function Settings() {
           
           .settings-nav {
             flex-direction: row;
+            flex-wrap: nowrap;
             overflow-x: auto;
             padding-bottom: 8px;
+            width: 100%;
+            -webkit-overflow-scrolling: touch;
+          }
+          
+          .settings-nav-item {
+            flex-shrink: 0;
+            white-space: nowrap;
           }
           
           .form-grid {
@@ -1404,6 +1422,15 @@ export default function Settings() {
           }
           .settings-team-actions button {
             flex: 1 !important;
+          }
+          .settings-content, .settings-card, .settings-form {
+            max-width: 100%;
+            overflow-x: hidden;
+            box-sizing: border-box;
+          }
+          .settings-container {
+            overflow-x: hidden;
+            width: 100%;
           }
         }
       `}</style>

@@ -437,7 +437,7 @@ export default function Dashboard() {
                 val: stats ? `${CURRENCY}${stats.totalSale.toLocaleString()}` : '0', 
                 color: 'var(--red)',
                 subtext: stats ? (
-                  <div style={{ marginTop: 8, fontSize: 13, display: 'flex', gap: 12, fontWeight: 500 }}>
+                  <div style={{ marginTop: 4, fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 500 }}>
                     <span style={{ color: 'var(--text-secondary)' }}>Cash: {CURRENCY}{(stats.cashSale || 0).toLocaleString()}</span>
                     <span style={{ color: 'var(--text-secondary)' }}>Card: {CURRENCY}{(stats.cardSale || 0).toLocaleString()}</span>
                   </div>
@@ -449,9 +449,9 @@ export default function Dashboard() {
               { label: 'Today Earned Revenue', val: stats ? `${CURRENCY}${stats.dailyRevenue.toLocaleString()}` : '0', color: '#10b981' },
               { label: 'Completion Revenue %', val: stats ? `${((stats.dailyRevenue / TARGET_REVENUE) * 100).toFixed(1)}%` : '0%', color: '#8b5cf6' },
             ].map(item => (
-              <div key={item.label} style={{ background: 'var(--surface)', borderRadius: 12, padding: '24px', border: '1px solid var(--surface-2)' }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: item.color }}>{loading ? '...' : item.val}</div>
-                <div style={{ fontWeight: 600, marginTop: 6, color: 'var(--text-secondary)' }}>{item.label}</div>
+              <div key={item.label} style={{ background: 'var(--surface)', borderRadius: 8, padding: '12px 16px', border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: item.color }}>{loading ? '...' : item.val}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginTop: 2, color: 'var(--text-secondary)', lineHeight: 1.2 }}>{item.label}</div>
                 {item.subtext}
               </div>
             ))}

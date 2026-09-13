@@ -1040,8 +1040,8 @@ body {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
 }
 
 /* ===== CARDS & PANELS ===== */
@@ -1976,15 +1976,15 @@ tbody tr:hover td {
 
 .summary-tiles {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
   margin-bottom: 24px;
 }
 
 .summary-tile {
   background: white;
   border-radius: var(--radius);
-  padding: 22px;
+  padding: 12px 16px;
   box-shadow: var(--shadow);
   display: flex;
   align-items: center;
@@ -2436,7 +2436,7 @@ tbody tr:hover td {
   }
 
   .summary-tiles {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 
   .charts-grid {

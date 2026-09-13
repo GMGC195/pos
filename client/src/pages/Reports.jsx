@@ -515,40 +515,12 @@ export default function Reports({ isTodaySales = false }) {
           </div>
 
           <div className="filter-group">
-            <button 
-              className="btn btn-secondary" 
-              onClick={load}
-              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-              title="Manual Refresh"
-            >
-              <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
-            </button>
             <button className="btn btn-primary" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Search size={16} /> Filter</button>
           </div>
-
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn-secondary" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={16} /> Export PDF</button>
-            <button className="btn btn-secondary" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><BarChart3 size={16} /> Export Excel</button>
-          </div>
         </div>
       )}
 
-      {isTodaySales && (
-        <div className="date-filter-bar" style={{ justifyContent: 'flex-end' }}>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button 
-              className="btn btn-secondary" 
-              onClick={load}
-              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-              title="Manual Refresh"
-            >
-              <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
-            </button>
-            <button className="btn btn-secondary" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={16} /> Export PDF</button>
-            <button className="btn btn-secondary" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><BarChart3 size={16} /> Export Excel</button>
-          </div>
-        </div>
-      )}
+
 
       
       <div className="summary-tiles">
@@ -558,9 +530,9 @@ export default function Reports({ isTodaySales = false }) {
               {t.icon}
             </div>
             <div className="tile-info">
-              <h4 style={{ color: t.color }}>{loading ? '...' : t.val}</h4>
-              <p>{t.label}</p>
-              {t.sub && <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{t.sub}</p>}
+              <h4 style={{ color: t.color, fontSize: 18, margin: '0 0 2px 0' }}>{loading ? '...' : t.val}</h4>
+              <p style={{ fontSize: 12, margin: 0, fontWeight: 600 }}>{t.label}</p>
+              {t.sub && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 0 0', lineHeight: 1.1 }}>{t.sub}</p>}
             </div>
           </div>
         ))}
@@ -592,6 +564,24 @@ export default function Reports({ isTodaySales = false }) {
               <option value="Cancelled">Cancelled</option>
               <option value="Returned">Returned</option>
             </select>
+
+            {/* Action Buttons moved here as requested */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button 
+                className="btn btn-secondary btn-sm" 
+                onClick={load}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 13 }}
+                title="Refresh Data"
+              >
+                <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 13 }}>
+                <Printer size={14} /> PDF
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 13 }}>
+                <BarChart3 size={14} /> Excel
+              </button>
+            </div>
           </div>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
 
