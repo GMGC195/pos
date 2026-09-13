@@ -20,9 +20,11 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     let query = `
-      SELECT i.*, c.name as category_name, COALESCE(s.sold_qty, 0) as sold_qty
+      SELECT i.*, 
+        (SELECT json_agg(c.name) FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = i.id) as category_names,
+        (SELECT json_agg(ic.category_id) FROM item_categories ic WHERE ic.item_id = i.id) as category_ids,
+        COALESCE(s.sold_qty, 0) as sold_qty
       FROM items i
-      LEFT JOIN categories c ON i.category_id = c.id
       LEFT JOIN (
         SELECT oi.item_id, SUM(oi.qty) as sold_qty
         FROM order_items oi
@@ -49,7 +51,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     if (category && category !== 'All') {
       params.push(category);
-      query += ` AND c.name = $${params.length}`;
+      query += ` AND EXISTS (SELECT 1 FROM item_categories ic JOIN categories cat ON cat.id = ic.category_id WHERE ic.item_id = i.id AND cat.name = $${params.length})`;
     }
 
     if (search) {
@@ -69,7 +71,10 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id WHERE i.id = $1',
+      \`SELECT i.*, 
+        (SELECT json_agg(c.name) FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = i.id) as category_names,
+        (SELECT json_agg(ic.category_id) FROM item_categories ic WHERE ic.item_id = i.id) as category_ids
+       FROM items i WHERE i.id = $1\`,
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item not found' });
@@ -81,28 +86,45 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
 // POST create item
 router.post('/', authenticateToken, async (req, res) => {
-  const { category_id, name, price, image_url, size_options, status, short_code } = req.body;
+  let { category_id, category_ids, name, price, image_url, size_options, status, short_code } = req.body;
+  if (!category_ids && category_id) category_ids = [category_id];
+  if (!category_ids) category_ids = [];
+  
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     let available_branches = ['Branch 1', 'Branch 2', 'Branch 3'];
     const userRole = req.user.role?.trim().toLowerCase();
     if (['order taker', 'operator', 'cashier'].includes(userRole) && req.user.branch) {
       available_branches = [req.user.branch];
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO items (category_id, name, price, image_url, size_options, status, available_branches, short_code)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [category_id, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify(available_branches), short_code || '']
+      [category_id || null, name, price, image_url || '', size_options || [], status || 'Active', JSON.stringify(available_branches), short_code || '']
     );
-    res.status(201).json(result.rows[0]);
+    const newItem = result.rows[0];
+
+    for (const catId of category_ids) {
+      await client.query('INSERT INTO item_categories (item_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [newItem.id, catId]);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(newItem);
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
 // PUT update item
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { category_id, name, price, image_url, size_options, status, short_code } = req.body;
+  let { category_id, category_ids, name, price, image_url, size_options, status, short_code } = req.body;
+  if (!category_ids && category_id) category_ids = [category_id];
+  if (!category_ids) category_ids = [];
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -143,6 +165,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
         );
       }
 
+      // Add item categories for the new item
+      for (const catId of category_ids) {
+        await client.query('INSERT INTO item_categories (item_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [newItem.id, catId]);
+      }
+
       await client.query('COMMIT');
       return res.json(newItem);
     } else {
@@ -150,8 +177,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
       const result = await client.query(
         `UPDATE items SET category_id=$1, name=$2, price=$3, image_url=$4, size_options=$5, status=$6, short_code=$7
          WHERE id=$8 RETURNING *`,
-        [category_id, name, price, image_url || '', size_options || [], status || 'Active', short_code || '', req.params.id]
+        [category_id || null, name, price, image_url || '', size_options || [], status || 'Active', short_code || '', req.params.id]
       );
+      
+      // Update item_categories
+      await client.query('DELETE FROM item_categories WHERE item_id = $1', [req.params.id]);
+      for (const catId of category_ids) {
+        await client.query('INSERT INTO item_categories (item_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.params.id, catId]);
+      }
+
       await client.query('COMMIT');
       res.json(result.rows[0]);
     }

@@ -379,9 +379,13 @@ export default function POS() {
 
   // Filter items locally based on activeCategory, search, and branch
   const filteredItems = items.filter(item => {
-    const matchesCategory = activeCategory === 'All' || item.category_name === activeCategory || item.category === activeCategory;
+    const matchesCategory = activeCategory === 'All' || 
+      (item.category_names && item.category_names.includes(activeCategory)) || 
+      item.category_name === activeCategory || 
+      item.category === activeCategory;
     const matchesSearch = !search ||
       item.name.toLowerCase().includes(search.toLowerCase()) ||
+      (item.category_names && item.category_names.some(c => c.toLowerCase().includes(search.toLowerCase()))) ||
       (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase()));
     const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.trim().toLowerCase());
     const matchesBranch = !isAdminOrDev || (item.available_branches || []).includes(selectedBranch);

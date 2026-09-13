@@ -413,6 +413,22 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       )
     `);
 
+    // Create item_categories schema and migrate existing data
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS item_categories (
+        item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
+        category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+        PRIMARY KEY (item_id, category_id)
+      )
+    `);
+
+    // Migrate existing data if category_id exists in items
+    await pool.query(`
+      INSERT INTO item_categories (item_id, category_id)
+      SELECT id, category_id FROM items WHERE category_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+
     // Create tables schema
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tables (

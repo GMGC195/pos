@@ -4,6 +4,8 @@ import toast from 'react-hot-toast'
 import { CURRENCY } from '../config'
 import ManageCategoriesModal from '../components/ManageCategoriesModal'
 import AddCategoryModal from '../components/AddCategoryModal'
+import Cropper from 'react-easy-crop'
+import { getCroppedImg } from '../utils/cropImage'
 import { 
   Search, 
   Plus, 
@@ -18,7 +20,7 @@ import { usePOS } from '../contexts/POSContext'
 const SIZES = ['S', 'M', 'L', 'XL', 'XXL', 'REGULAR', 'HALF', 'FULL', 'HALF KG', '1 KG']
 
 const emptyForm = {
-  name: '', category_id: '', price: '', image_url: '',
+  name: '', category_ids: [], price: '', image_url: '',
   size_options: [], status: 'Active', short_code: ''
 }
 
@@ -58,12 +60,21 @@ export default function Inventory() {
   const [branchFilter, setBranchFilter] = useState('All') // New branch filter
   const [uploadingImage, setUploadingImage] = useState(false)
   const [newCustomSize, setNewCustomSize] = useState('')
+  const [imageToCrop, setImageToCrop] = useState(null)
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
 
   // Filter items locally for the table
   const filteredItems = items.filter(item => {
-    const matchesCategory = inventoryCategory === 'All' || item.category_name === inventoryCategory || item.category === inventoryCategory;
+    const matchesCategory = inventoryCategory === 'All' || 
+      (item.category_names && item.category_names.includes(inventoryCategory)) ||
+      item.category_name === inventoryCategory || 
+      item.category === inventoryCategory;
     const matchesSearch = !search || 
       item.name.toLowerCase().includes(search.toLowerCase()) || 
+      (item.category_names && item.category_names.some(c => c.toLowerCase().includes(search.toLowerCase()))) ||
       (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase())) ||
       (item.short_code && item.short_code.toLowerCase().includes(search.toLowerCase()));
     const matchesBranch = branchFilter === 'All' || (item.available_branches || []).includes(branchFilter);
@@ -79,7 +90,7 @@ export default function Inventory() {
   const openEdit = item => {
     setForm({
       name: item.name,
-      category_id: item.category_id,
+      category_ids: item.category_ids || (item.category_id ? [item.category_id] : []),
       price: item.price,
       image_url: item.image_url,
       size_options: item.size_options || [],
@@ -91,7 +102,7 @@ export default function Inventory() {
     setModal('edit')
   }
 
-  const closeModal = () => { setModal(null); setForm(emptyForm); setImgPreview(''); setNewCustomSize('') }
+  const closeModal = () => { setModal(null); setForm(emptyForm); setImgPreview(''); setNewCustomSize(''); setImageToCrop(null); setShowCategoryDropdown(false); }
 
   const toggleSize = s => {
     setForm(f => {
@@ -120,7 +131,7 @@ export default function Inventory() {
     try {
       const payload = {
         name: form.name,
-        category_id: form.category_id || null,
+        category_ids: form.category_ids,
         price: parseFloat(form.price) || 0,
         image_url: form.image_url || '',
         size_options: form.size_options,
@@ -146,29 +157,44 @@ export default function Inventory() {
     }
   }
 
-  const handleImageUpload = async (e) => {
+  const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    setUploadingImage(true);
-    const formData = new FormData();
-    formData.append('image', file);
+    const reader = new FileReader()
+    reader.addEventListener('load', () => {
+      setImageToCrop(reader.result)
+    })
+    reader.readAsDataURL(file)
+    e.target.value = null; // reset input
+  };
 
+  const onCropComplete = (croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels)
+  }
+
+  const uploadCroppedImage = async () => {
     try {
+      setUploadingImage(true)
+      const croppedImageBlob = await getCroppedImg(imageToCrop, croppedAreaPixels)
+      const formData = new FormData()
+      formData.append('image', croppedImageBlob, 'cropped.jpg')
+
       const res = await axios.post('/api/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      })
       if (res.data && res.data.secure_url) {
-        setForm(f => ({ ...f, image_url: res.data.secure_url }));
-        setImgPreview(res.data.secure_url);
+        setForm(f => ({ ...f, image_url: res.data.secure_url }))
+        setImgPreview(res.data.secure_url)
       }
+      setImageToCrop(null)
     } catch (err) {
-      console.error('Upload failed:', err);
-      alert('Failed to upload image. Make sure Cloudinary keys are set in the backend.');
+      console.error('Upload failed:', err)
+      alert('Failed to upload image. Make sure Cloudinary keys are set in the backend.')
     } finally {
-      setUploadingImage(false);
+      setUploadingImage(false)
     }
-  };
+  }
 
   const handleDelete = id => {
     toast((t) => (
@@ -308,7 +334,15 @@ export default function Inventory() {
                       </td>
                       <td style={{ fontWeight: 600 }}>{item.name}</td>
                       <td>
-                        <span className="badge badge-info">{item.category_name || '—'}</span>
+                        {item.category_names && item.category_names.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {item.category_names.map(cName => (
+                              <span key={cName} className="badge badge-info">{cName}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="badge badge-info">{item.category_name || '—'}</span>
+                        )}
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -461,10 +495,49 @@ export default function Inventory() {
                     </button>
                   </div>
                 </label>
-                <select className="form-control" value={form.category_id} onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))}>
-                  <option value="">Select category</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <div style={{ position: 'relative' }}>
+                  <div 
+                    className="form-control" 
+                    style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                  >
+                    <span>
+                      {form.category_ids.length > 0 
+                        ? `${form.category_ids.length} categories selected` 
+                        : 'Select categories'}
+                    </span>
+                    <span style={{ fontSize: 10 }}>▼</span>
+                  </div>
+                  {showCategoryDropdown && (
+                    <div style={{ 
+                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, 
+                      maxHeight: '200px', overflowY: 'auto', 
+                      background: 'var(--surface)', border: '1px solid var(--border)', 
+                      borderRadius: '6px', padding: '8px', marginTop: '4px',
+                      boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                    }}>
+                      {categories.map(c => (
+                        <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', cursor: 'pointer', fontWeight: 400 }}>
+                          <input 
+                            type="checkbox" 
+                            checked={form.category_ids.includes(c.id)}
+                            onChange={(e) => {
+                              const isChecked = e.target.checked;
+                              setForm(f => ({
+                                ...f,
+                                category_ids: isChecked 
+                                  ? [...f.category_ids, c.id] 
+                                  : f.category_ids.filter(id => id !== c.id)
+                              }))
+                            }}
+                          />
+                          {c.name}
+                        </label>
+                      ))}
+                      {categories.length === 0 && <span style={{ color: 'var(--text-muted)' }}>No categories found</span>}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="form-group">
                 <label>Status</label>
@@ -500,12 +573,22 @@ export default function Inventory() {
                 </label>
               </div>
               {imgPreview && (
-                <img
-                  src={imgPreview}
-                  alt="Preview"
-                  style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 8, marginTop: 8 }}
-                  onError={e => { e.target.style.display = 'none' }}
-                />
+                <div style={{ position: 'relative', marginTop: 8 }}>
+                  <img
+                    src={imgPreview}
+                    alt="Preview"
+                    style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }}
+                    onError={e => { e.target.style.display = 'none' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,0.6)', color: 'white', border: 'none' }}
+                    onClick={() => setImageToCrop(imgPreview)}
+                  >
+                    Adjust Crop
+                  </button>
+                </div>
               )}
             </div>
 
@@ -620,6 +703,46 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      {/* Image Crop Modal */}
+      {imageToCrop && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal" style={{ width: 500, maxWidth: '90%', padding: '20px', display: 'flex', flexDirection: 'column' }}>
+            <h3>Adjust Image</h3>
+            <div style={{ position: 'relative', width: '100%', height: 300, background: '#333', marginTop: 16, borderRadius: 8, overflow: 'hidden' }}>
+              <Cropper
+                image={imageToCrop}
+                crop={crop}
+                zoom={zoom}
+                aspect={1}
+                onCropChange={setCrop}
+                onCropComplete={onCropComplete}
+                onZoomChange={setZoom}
+              />
+            </div>
+            <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
+              <span style={{ fontSize: 14 }}>Zoom</span>
+              <input
+                type="range"
+                value={zoom}
+                min={1}
+                max={3}
+                step={0.1}
+                aria-labelledby="Zoom"
+                onChange={(e) => setZoom(e.target.value)}
+                style={{ flex: 1, accentColor: 'var(--primary)' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24 }}>
+              <button className="btn btn-secondary" onClick={() => setImageToCrop(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={uploadCroppedImage} disabled={uploadingImage}>
+                {uploadingImage ? 'Uploading...' : 'Save & Upload'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showManageCategories && (
         <ManageCategoriesModal 
           categories={categories} 
