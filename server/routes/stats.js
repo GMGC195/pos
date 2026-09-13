@@ -60,8 +60,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Cashier should only see the current unclosed shift
     const isCashier = role === 'cashier';
-    const shiftCond = isCashier ? 'AND is_shift_closed = FALSE' : '';
-    const shiftCondO = isCashier ? 'AND o.is_shift_closed = FALSE' : '';
+    const shiftCond = isCashier ? `AND is_shift_closed = FALSE AND completed_by = '${req.user.username}'` : '';
+    const shiftCondO = isCashier ? `AND o.is_shift_closed = FALSE AND o.completed_by = '${req.user.username}'` : '';
 
     const totalSaleResult = await pool.query(`
       SELECT 

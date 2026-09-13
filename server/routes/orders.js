@@ -798,7 +798,8 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       WHERE o.is_shift_closed = FALSE 
         AND o.status IN ('Completed', 'Returned') 
         AND o.branch = $1
-    `, [branch]);
+        AND o.completed_by = $2
+    `, [branch, req.user.username]);
 
     const itemsResult = await client.query(`
       SELECT 
@@ -817,15 +818,15 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
         FROM order_items oi
         JOIN items i ON oi.item_id = i.id
         JOIN orders o ON oi.order_id = o.id
-        WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+        WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 AND o.completed_by = $2
         GROUP BY i.category_id, i.name
       ) grouped_items
       JOIN categories c ON grouped_items.category_id = c.id
       GROUP BY c.name
       ORDER BY amount DESC
-    `, [branch]);
+    `, [branch, req.user.username]);
 
-    const lastClosingRes = await client.query(`SELECT logout_time FROM shift_closings WHERE branch = $1 AND closing_type = 'Shift' ORDER BY logout_time DESC LIMIT 1`, [branch]);
+    const lastClosingRes = await client.query(`SELECT logout_time FROM shift_closings WHERE branch = $1 AND closing_type = 'Shift' AND cashier_id = $2 ORDER BY logout_time DESC LIMIT 1`, [branch, req.user.id]);
     let loginTime = new Date();
     loginTime.setHours(0,0,0,0);
     if (lastClosingRes.rows.length > 0 && lastClosingRes.rows[0].logout_time) {
@@ -845,10 +846,10 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       FROM order_items oi
       JOIN items i ON oi.item_id = i.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
+      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 AND o.completed_by = $2
       GROUP BY hour_block, i.name
       ORDER BY hour_block, qty DESC
-    `, [branch]);
+    `, [branch, req.user.username]);
     
     const intervals = {};
     intervalItemsRes.rows.forEach(r => {
@@ -879,8 +880,8 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     await client.query(`
       UPDATE orders 
       SET is_shift_closed = TRUE 
-      WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1
-    `, [branch]);
+      WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1 AND completed_by = $2
+    `, [branch, req.user.username]);
     
     // Send email report asynchronously
     sendClosingEmail(insertRes.rows[0], 'Shift');

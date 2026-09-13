@@ -39,6 +39,10 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     if (req.query.unclosed_only === 'true') {
       query += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
+      if (role === 'cashier') {
+        params.push(req.user.username);
+        query += ` AND o.completed_by = $${params.length}`;
+      }
     }
 
     query += ' ORDER BY t.created_at DESC';
@@ -79,6 +83,10 @@ router.get('/summary', authenticateToken, async (req, res) => {
     }
     if (req.query.unclosed_only === 'true') {
       whereClause += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
+      if (role === 'cashier') {
+        params.push(req.user.username);
+        whereClause += ` AND o.completed_by = $${params.length}`;
+      }
     }
 
     const result = await pool.query(
