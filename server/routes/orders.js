@@ -326,7 +326,7 @@ router.get('/', authenticateToken, async (req, res) => {
 // GET past closings
 router.get('/closings', authenticateToken, async (req, res) => {
   try {
-    let { date, cashier_id, branch: queryBranch } = req.query;
+    let { from, to, cashier_id, branch: queryBranch } = req.query;
     
     // Determine the branch to filter by
     const role = req.user?.role?.trim().toLowerCase();
@@ -350,9 +350,14 @@ router.get('/closings', authenticateToken, async (req, res) => {
       conditions.push(`branch = $${params.length}`);
     }
     
-    if (date) {
-      params.push(date);
-      conditions.push(`created_at::date = $${params.length}::date`);
+    if (from) {
+      params.push(from);
+      conditions.push(`created_at >= $${params.length}::date`);
+    }
+
+    if (to) {
+      params.push(to);
+      conditions.push(`created_at < ($${params.length}::date + INTERVAL '1 day')`);
     }
     
     if (cashier_id) {

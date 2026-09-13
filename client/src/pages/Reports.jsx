@@ -9,6 +9,7 @@ import {
   Clock, 
   Ban, 
   Undo2, 
+  Globe,
   Search, 
   Printer, 
   BarChart3, 
@@ -66,7 +67,8 @@ export default function Reports({ isTodaySales = false }) {
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [closingHistory, setClosingHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
-  const [historyDate, setHistoryDate] = useState(today())
+  const [historyFrom, setHistoryFrom] = useState(today())
+  const [historyTo, setHistoryTo] = useState(today())
   const [selectedHistoryReport, setSelectedHistoryReport] = useState(null)
   
   // History Filters
@@ -84,6 +86,10 @@ export default function Reports({ isTodaySales = false }) {
       .then(([txRes, sumRes]) => {
         setTransactions(txRes.data)
         setSummary(sumRes.data)
+      })
+      .catch(err => {
+        console.error("Error loading reports:", err);
+        toast.error("Failed to load reports. Check console.");
       })
       .finally(() => setLoading(false))
   }
@@ -110,6 +116,7 @@ export default function Reports({ isTodaySales = false }) {
 
   const cashRow = summary.find(r => r.payment_method === 'Cash')
   const cardRow = summary.find(r => r.payment_method === 'Card')
+  const onlineRow = summary.find(r => r.payment_method === 'Online')
   const holdRow = summary.find(r => r.payment_method === 'Hold')
   const cancelledRow = summary.find(r => r.payment_method === 'Cancelled')
   const returnedRow = summary.find(r => r.payment_method === 'Returned')
@@ -120,10 +127,13 @@ export default function Reports({ isTodaySales = false }) {
     
   const totalCount = summary.reduce((s, r) => s + parseInt(r.count || 0), 0)
 
+  const cardTotal = parseFloat(cardRow?.total || 0) + parseFloat(onlineRow?.total || 0)
+  const cardCount = parseInt(cardRow?.count || 0) + parseInt(onlineRow?.count || 0)
+
   const tiles = [
-    { label: 'Total Revenue', val: `${CURRENCY}${totalSales.toFixed(2)}`, icon: <CircleDollarSign size={20} />, color: '#E31837', bg: '#fff1f2' },
+    { label: 'Total Revenue', val: `${CURRENCY}${totalSales.toFixed(2)}`, icon: <CircleDollarSign size={20} />, color: '#E31837', bg: '#fff1f2', sub: `${totalCount} total transactions` },
     { label: 'Cash Sales', val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#10b981', bg: '#ecfdf5', sub: `${cashRow?.count || 0} orders` },
-    { label: 'Card Sales', val: `${CURRENCY}${parseFloat(cardRow?.total || 0).toFixed(2)}`, icon: <CreditCard size={20} />, color: '#3b82f6', bg: '#eff6ff', sub: `${cardRow?.count || 0} orders` },
+    { label: 'Card Sales', val: `${CURRENCY}${cardTotal.toFixed(2)}`, icon: <CreditCard size={20} />, color: '#3b82f6', bg: '#eff6ff', sub: `${cardCount} orders` },
   ]
   
   if (holdRow && parseInt(holdRow.count || 0) > 0) {
@@ -401,10 +411,10 @@ export default function Reports({ isTodaySales = false }) {
     }
   }
 
-  const loadClosingHistory = async (date) => {
+  const loadClosingHistory = async (fDate, tDate) => {
     setHistoryLoading(true)
     try {
-      const res = await axios.get('/api/orders/closings', { params: { date: date || historyDate, branch } })
+      const res = await axios.get('/api/orders/closings', { params: { from: fDate || historyFrom, to: tDate || historyTo, branch: historyFilterBranch, type: historyFilterType, user: historyFilterUser } })
       setClosingHistory(res.data)
     } catch (err) {
       toast.error('Failed to load history')
@@ -412,6 +422,12 @@ export default function Reports({ isTodaySales = false }) {
       setHistoryLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (showHistoryModal) {
+      loadClosingHistory(historyFrom, historyTo);
+    }
+  }, [historyFrom, historyTo, historyFilterBranch, historyFilterType, historyFilterUser]);
 
   const handleDirectVoidWithReason = async () => {
     if (!cancelReason.trim()) return toast.error('Please provide a reason')
@@ -475,11 +491,11 @@ export default function Reports({ isTodaySales = false }) {
           <div className="filter-group">
             <div className="filter-item">
               <label>From:</label>
-              <input type="date" className="date-input" value={from} max={to} onChange={e => setFrom(e.target.value)} />
+              <input type="date" className="date-input" value={from} onChange={e => setFrom(e.target.value)} />
             </div>
             <div className="filter-item">
               <label>To:</label>
-              <input type="date" className="date-input" value={to} min={from} onChange={e => setTo(e.target.value)} />
+              <input type="date" className="date-input" value={to} onChange={e => setTo(e.target.value)} />
             </div>
             <button 
               className="btn btn-secondary" 
@@ -731,7 +747,7 @@ export default function Reports({ isTodaySales = false }) {
       <div style={{ position: 'fixed', bottom: 32, right: 32, zIndex: 50, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <button
           className="btn btn-secondary btn-lg"
-          onClick={() => { setShowHistoryModal(true); loadClosingHistory(historyDate); }}
+          onClick={() => { setShowHistoryModal(true); loadClosingHistory(historyFrom, historyTo); }}
           style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.15)', gap: 8, display: 'flex', alignItems: 'center', fontSize: 14 }}
           title="View Past Closing Reports"
         >
@@ -976,18 +992,36 @@ export default function Reports({ isTodaySales = false }) {
             </div>
 
             {/* Date filter & Toggle */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
-              <input
-                type="date"
-                value={historyDate}
-                onChange={e => setHistoryDate(e.target.value)}
-                className="filter-input"
-                style={{ flex: 1 }}
-              />
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button 
+                className="btn btn-primary btn-sm" 
+                onClick={() => { setHistoryFrom(today()); setHistoryTo(today()); }}
+              >
+                Today
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>From:</span>
+                <input
+                  type="date"
+                  value={historyFrom}
+                  onChange={e => setHistoryFrom(e.target.value)}
+                  className="filter-input"
+                  style={{ flex: 1 }}
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>To:</span>
+                <input
+                  type="date"
+                  value={historyTo}
+                  onChange={e => setHistoryTo(e.target.value)}
+                  className="filter-input"
+                  style={{ flex: 1 }}
+                />
+              </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowHistoryFilters(!showHistoryFilters)}>
                 {showHistoryFilters ? 'Hide Filters' : 'Show Filters'}
               </button>
-              <button className="btn btn-primary btn-sm" onClick={() => loadClosingHistory(historyDate)}>Search</button>
             </div>
 
             {/* Expandable Filters */}
