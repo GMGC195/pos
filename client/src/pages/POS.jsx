@@ -550,7 +550,16 @@ export default function POS() {
         }
 
         if (isCloudPrint) {
-          toast.success('Ticket sent to kitchen printer!', { icon: '🖨️', duration: 4000 });
+          toast.success('Slip sent to kitchen!', { 
+            duration: 1000,
+            style: {
+              padding: '24px 32px',
+              fontSize: '20px',
+              fontWeight: '700',
+              borderRadius: '12px',
+              boxShadow: '0 15px 35px rgba(0,0,0,0.2)'
+            }
+          });
         } else if (shouldPrint) {
           printThermalSlip(method, orderId, slipNumber, editCount, isFullReceipt, diffData)
         }

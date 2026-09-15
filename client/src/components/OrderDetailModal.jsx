@@ -88,10 +88,10 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
     ${shortBranch} - ${orderType}
   </div>
-  <div style="font-size: 10px; text-align: center; margin: 4px 0; font-weight: normal;">
-    Kitchen slip. Please get original slip from counter.<br/>
-    إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
-  </div>
+    <div style="font-size: 10px; text-align: center; margin: 4px 0;">
+      Kitchen slip. Please get original slip from counter.<br/>
+      إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+    </div>
   ${metaRow}
   <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
     Order #${order.id} - ${order.edit_count > 0 ? `Edit ${(order.slip_number || '-')}${String.fromCharCode(64 + order.edit_count)}` : (order.slip_number || '-')}
