@@ -17,6 +17,7 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   const { user } = useAuth();
   const isManagement = user?.role?.trim().toLowerCase() === 'management';
   const [isPrinting, setIsPrinting] = useState(false);
+  const [showKitchenModal, setShowKitchenModal] = useState(false);
   
   if (!order) return null
 
@@ -195,9 +196,12 @@ ${slipBody}
       if (isCloudPrint) {
         const printerIp = localStorage.getItem('printerIp') || '127.0.0.1';
         await axios.post(`/api/orders/${order.id}/reprint`, { printerIp });
-        toast.success('Ticket sent to kitchen printer!', { icon: '🖨️', duration: 4000 });
-        setIsPrinting(false);
-        onClose();
+        setShowKitchenModal(true);
+        setTimeout(() => {
+          setShowKitchenModal(false);
+          setIsPrinting(false);
+          onClose();
+        }, 1500);
         return;
       }
     } catch (err) {
@@ -277,6 +281,17 @@ ${slipBody}
           </button>
         </div>
       </div>
+      {showKitchenModal && (
+        <div className="modal-overlay" style={{ zIndex: 999999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal" style={{ maxWidth: 350, textAlign: 'center', padding: '40px 20px', borderRadius: '16px' }}>
+            <div style={{ width: 80, height: 80, background: '#10b981', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40, margin: '0 auto 20px auto' }}>
+              ✓
+            </div>
+            <h2 style={{ margin: '0 0 10px 0', fontSize: 22, color: '#333' }}>Successfully sent</h2>
+            <p style={{ margin: 0, fontSize: 15, color: '#666' }}>Slip sent to kitchen</p>
+          </div>
+        </div>
+      )}
     </div >
   )
 }

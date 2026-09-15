@@ -129,6 +129,7 @@ export default function POS() {
   const [cancelReason, setCancelReason] = useState('')
   const [processingCancel, setProcessingCancel] = useState(false)
   const [confirmCancelAction, setConfirmCancelAction] = useState(null)
+  const [showKitchenModal, setShowKitchenModal] = useState(false)
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
@@ -550,16 +551,8 @@ export default function POS() {
         }
 
         if (isCloudPrint) {
-          toast.success('Slip sent to kitchen!', { 
-            duration: 1000,
-            style: {
-              padding: '24px 32px',
-              fontSize: '20px',
-              fontWeight: '700',
-              borderRadius: '12px',
-              boxShadow: '0 15px 35px rgba(0,0,0,0.2)'
-            }
-          });
+          setShowKitchenModal(true);
+          setTimeout(() => setShowKitchenModal(false), 1500);
         } else if (shouldPrint) {
           printThermalSlip(method, orderId, slipNumber, editCount, isFullReceipt, diffData)
         }
@@ -1886,6 +1879,15 @@ export default function POS() {
                 </button>
               </div>
             </div>
+      {/* Kitchen Slip Sent Modal */}
+      {showKitchenModal && (
+        <div className="modal-overlay" style={{ zIndex: 999999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal" style={{ maxWidth: 350, textAlign: 'center', padding: '40px 20px', borderRadius: '16px' }}>
+            <div style={{ width: 80, height: 80, background: '#10b981', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40, margin: '0 auto 20px auto' }}>
+              ✓
+            </div>
+            <h2 style={{ margin: '0 0 10px 0', fontSize: 22, color: '#333' }}>Successfully sent</h2>
+            <p style={{ margin: 0, fontSize: 15, color: '#666' }}>Slip sent to kitchen</p>
           </div>
         </div>
       )}
