@@ -310,7 +310,7 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                       <button 
                         className="btn btn-secondary btn-sm" 
                         title="Download"
-                        onClick={() => downloadFile(doc.file_url, doc.original_filename)}
+                        onClick={() => downloadFile(doc.file_path, doc.original_filename)}
                         style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px' }}
                       >
                         <Download size={16} />
@@ -349,15 +349,15 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                     <div><strong>Uploaded:</strong> {new Date(viewingDoc.uploaded_at).toLocaleString()}</div>
                     <div><strong>Size:</strong> {(viewingDoc.file_size / 1024).toFixed(1)} KB</div>
                   </div>
-                  <button className="btn btn-primary" onClick={() => downloadFile(viewingDoc.file_url, viewingDoc.original_filename)} style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button className="btn btn-primary" onClick={() => downloadFile(viewingDoc.file_path, viewingDoc.original_filename)} style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Download size={16} /> Download File
                   </button>
                 </div>
                 <div style={{ background: 'white', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)', minHeight: 400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {viewingDoc.mime_type?.startsWith('image/') ? (
-                    <img src={getFileUrl(viewingDoc.file_url)} alt="Document" style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }} />
+                    <img src={getFileUrl(viewingDoc.file_path)} alt="Document" style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }} />
                   ) : (
-                    <iframe src={getFileUrl(viewingDoc.file_url)} title="Document Viewer" style={{ width: '100%', height: '60vh', border: 'none' }} />
+                    <iframe src={getFileUrl(viewingDoc.file_path)} title="Document Viewer" style={{ width: '100%', height: '60vh', border: 'none' }} />
                   )}
                 </div>
               </div>
@@ -379,12 +379,12 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                 <div style={{ background: 'white', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
                   <h4 style={{ margin: '0 0 12px 0', fontSize: 14, alignSelf: 'flex-start' }}>Current File Preview</h4>
                   {editingDoc.mime_type?.startsWith('image/') ? (
-                    <img src={getFileUrl(editingDoc.file_url)} alt="Preview" style={{ maxWidth: '100%', maxHeight: 300, objectFit: 'contain' }} />
+                    <img src={getFileUrl(editingDoc.file_path)} alt="Preview" style={{ maxWidth: '100%', maxHeight: 300, objectFit: 'contain' }} />
                   ) : (
                     <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                       <FileText size={48} style={{ margin: '0 auto 12px' }} />
                       <div>PDF Document</div>
-                      <a href={getFileUrl(editingDoc.file_url)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--primary)', marginTop: 8, display: 'inline-block' }}>Open in new tab</a>
+                      <a href={getFileUrl(editingDoc.file_path)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--primary)', marginTop: 8, display: 'inline-block' }}>Open in new tab</a>
                     </div>
                   )}
                 </div>
