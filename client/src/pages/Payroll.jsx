@@ -68,18 +68,98 @@ export default function Payroll() {
 
   // Salary Breakdown Modal State
   const [selectedBreakdown, setSelectedBreakdown] = useState(null)
+  const [breakdownBaseSalary, setBreakdownBaseSalary] = useState(0)
+  const [breakdownScheduled, setBreakdownScheduled] = useState(0)
+  const [isEditingScheduled, setIsEditingScheduled] = useState(false)
   const [breakdownOthers, setBreakdownOthers] = useState(0)
   const [breakdownPaidAmount, setBreakdownPaidAmount] = useState(0)
   const [breakdownStatus, setBreakdownStatus] = useState('Pending')
   const [breakdownNotes, setBreakdownNotes] = useState('')
   const [savingRecord, setSavingRecord] = useState(false)
+  const [breakdownRecurringDetails, setBreakdownRecurringDetails] = useState([])
+  const [fetchingRecurringDetails, setFetchingRecurringDetails] = useState(false)
+  const [editingAdjustmentId, setEditingAdjustmentId] = useState(null)
+  const [editingAdjustmentAmount, setEditingAdjustmentAmount] = useState('')
 
-  const openBreakdownModal = (item) => {
+  const openBreakdownModal = async (item) => {
     setSelectedBreakdown(item)
+    setBreakdownBaseSalary(item.base_salary || 0)
+    
+    // Calculate the original scheduled amount (might have been split if it was negative previously)
+    const recAdj = parseFloat(item.recurring_adjustments || 0)
+    const advDed = parseFloat(item.advance_deduction || 0)
+    setBreakdownScheduled(recAdj - advDed) // Negative value means deduction
+    setIsEditingScheduled(false)
+
     setBreakdownOthers(item.other_adjustments || 0)
     setBreakdownPaidAmount(item.paid_amount || item.net_salary)
     setBreakdownStatus(item.status || 'Pending')
     setBreakdownNotes(item.notes || '')
+
+    setFetchingRecurringDetails(true)
+    try {
+      const [recRes, adjRes] = await Promise.all([
+        axios.get(`/api/payroll/recurring/${item.id}`),
+        axios.get(`/api/payroll/adjustments/${item.id}`)
+      ]);
+      
+      const recurring = recRes.data;
+      const onetime = adjRes.data.filter(a => a.date && a.date.startsWith(selectedMonth));
+      
+      const combined = [
+        ...recurring.map(r => ({ ...r, uid: `rec_${r.id}`, is_recurring: true, original_amount: r.amount })),
+        ...onetime.map(o => ({ ...o, uid: `one_${o.id}`, is_recurring: false, original_amount: o.amount }))
+      ];
+      
+      setBreakdownRecurringDetails(combined);
+
+      let totalFetched = 0;
+      combined.forEach(adj => {
+        let val = 0;
+        if (adj.amount_type === 'Percentage') {
+          val = parseFloat(item.base_salary || 0) * (parseFloat(adj.amount) / 100);
+        } else {
+          val = parseFloat(adj.amount);
+        }
+        if (adj.action_type === 'Give') totalFetched += val;
+        if (adj.action_type === 'Deduct') totalFetched -= val;
+      });
+
+      setBreakdownScheduled(totalFetched);
+      
+      const newNet = Math.max(0, parseFloat(item.base_salary || 0) - item.deductions + item.overtime_pay + totalFetched + parseFloat(item.other_adjustments || 0));
+      setBreakdownPaidAmount(newNet.toFixed(2));
+
+    } catch (err) {
+      console.error('Failed to fetch details', err)
+    } finally {
+      setFetchingRecurringDetails(false)
+    }
+  }
+  const handleUpdateAdjustmentAmount = (uid, newAmount) => {
+    const amountVal = parseFloat(newAmount) || 0;
+    const updated = breakdownRecurringDetails.map(adj => 
+      adj.uid === uid ? { ...adj, amount: amountVal } : adj
+    );
+    setBreakdownRecurringDetails(updated);
+
+    let totalFetched = 0;
+    updated.forEach(adj => {
+      let val = 0;
+      if (adj.amount_type === 'Percentage') {
+        val = parseFloat(breakdownBaseSalary || 0) * (parseFloat(adj.amount) / 100);
+      } else {
+        val = parseFloat(adj.amount);
+      }
+      if (adj.action_type === 'Give') totalFetched += val;
+      if (adj.action_type === 'Deduct') totalFetched -= val;
+    });
+
+    setBreakdownScheduled(totalFetched);
+    
+    const newNet = Math.max(0, parseFloat(breakdownBaseSalary || 0) - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + totalFetched + parseFloat(breakdownOthers || 0));
+    setBreakdownPaidAmount(newNet.toFixed(2));
+    setEditingAdjustmentId(null);
   }
 
   // Load calculations
@@ -197,12 +277,19 @@ export default function Payroll() {
     if (!selectedBreakdown) return
     setSavingRecord(true)
     try {
-      const calculatedNet = selectedBreakdown.base_salary - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + parseFloat(breakdownOthers || 0)
+      const scheduledVal = parseFloat(breakdownScheduled || 0)
+      const manualOthers = parseFloat(breakdownOthers || 0)
+      
+      const isDeduction = scheduledVal < 0
+      const advanceDeduction = isDeduction ? Math.abs(scheduledVal) : 0
+      const recurringAdjToSave = isDeduction ? 0 : scheduledVal
+
+      const calculatedNet = parseFloat(breakdownBaseSalary) - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + scheduledVal + manualOthers
       
       await axios.post('/api/payroll/record', {
         employee_id: selectedBreakdown.id,
         month: selectedMonth,
-        base_salary: selectedBreakdown.base_salary,
+        base_salary: parseFloat(breakdownBaseSalary),
         presents: selectedBreakdown.presents,
         absents: selectedBreakdown.absents,
         leaves: selectedBreakdown.leaves,
@@ -210,7 +297,9 @@ export default function Payroll() {
         overtime_hours: selectedBreakdown.overtime_hours,
         overtime_pay: selectedBreakdown.overtime_pay,
         deductions: selectedBreakdown.deductions,
-        other_adjustments: parseFloat(breakdownOthers || 0),
+        other_adjustments: manualOthers,
+        advance_deduction: advanceDeduction,
+        recurring_adjustments: recurringAdjToSave,
         net_salary: calculatedNet,
         paid_amount: parseFloat(breakdownPaidAmount || 0),
         status: breakdownStatus,
@@ -868,28 +957,163 @@ export default function Payroll() {
 
       {/* Salary Breakdown Modal */}
       {selectedBreakdown && (() => {
-        const calculatedNet = Math.max(0, selectedBreakdown.base_salary - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + parseFloat(breakdownOthers || 0))
+        const calculatedNet = Math.max(0, parseFloat(breakdownBaseSalary) - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + parseFloat(breakdownScheduled || 0) + parseFloat(breakdownOthers || 0))
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-            <div style={{ background: 'var(--white)', borderRadius: '16px', width: '100%', maxWidth: '460px', margin: '0 16px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: 'var(--white)', borderRadius: '16px', width: '100%', maxWidth: '850px', margin: '0 16px', padding: '24px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1.5px solid var(--surface-2)', paddingBottom: '12px', flexShrink: 0 }}>
-                <div>
-                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--secondary)' }}>Salary Breakdown</h3>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{selectedBreakdown.name} ({selectedBreakdown.employee_id})</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--secondary)', margin: 0 }}>Salary Breakdown</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderLeft: '2px solid var(--surface-2)', paddingLeft: '16px' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 600 }}>{selectedBreakdown.name} ({selectedBreakdown.employee_id})</span>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', background: 'rgba(244,180,0,0.1)', padding: '4px 10px', borderRadius: '6px' }}>
+                      Advance Balance: {CURRENCY} {parseFloat(selectedBreakdown.advance_balance || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
                 <button onClick={() => setSelectedBreakdown(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
-                {/* Step 1: Base Salary */}
+              <div style={{ display: 'flex', gap: '24px', overflowY: 'hidden', flex: 1 }}>
+                {/* Left Column (Formerly Right): Adjustments Breakdown */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', paddingRight: '24px', borderRight: '1px solid var(--surface-2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Adjustments Breakdown</h4>
+                    <button 
+                      onClick={() => {
+                        setAdjustmentsEmployee(selectedBreakdown)
+                        setShowAdjustmentsModal(true)
+                      }}
+                      style={{ fontSize: '11px', fontWeight: 700, color: 'var(--primary)', background: 'rgba(59, 130, 246, 0.1)', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      Manage
+                    </button>
+                  </div>
+                  
+                  {fetchingRecurringDetails ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+                      <div style={{ animation: 'spin 1s linear infinite', border: '3px solid var(--surface-2)', borderTopColor: 'var(--primary)', borderRadius: '50%', width: '24px', height: '24px' }} />
+                    </div>
+                  ) : breakdownRecurringDetails.length === 0 ? (
+                    <div style={{ padding: '16px', background: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--surface-2)', fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                      No active adjustments or advances for this employee this month.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {(() => {
+                        const onetimes = breakdownRecurringDetails.filter(a => !a.is_recurring);
+                        const repeated = breakdownRecurringDetails.filter(a => a.is_recurring);
+                        
+                        const renderItem = (adj) => {
+                          const isGive = adj.action_type === 'Give';
+                          return (
+                            <div key={adj.uid} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderRadius: '8px', border: `1px solid ${isGive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`, background: isGive ? 'rgba(16, 185, 129, 0.02)' : 'rgba(239, 68, 68, 0.02)' }}>
+                              <div>
+                                <div style={{ fontSize: '13px', fontWeight: 750, color: 'var(--text-primary)' }}>
+                                  {adj.type === 'Other' ? adj.label || adj.custom_label : adj.type}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                  {adj.amount_type === 'Percentage' ? `${adj.amount}% of Base Salary` : 'Fixed Amount'}
+                                </div>
+                                {parseFloat(adj.amount) !== parseFloat(adj.original_amount) && (
+                                  <div style={{ marginTop: '6px' }}>
+                                    <span style={{ background: 'var(--primary)', color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: 700, letterSpacing: '0.3px', display: 'inline-block' }}>
+                                      EDITED FOR THIS MONTH
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {editingAdjustmentId === adj.uid ? (
+                                  <input 
+                                    type="number"
+                                    value={editingAdjustmentAmount}
+                                    onChange={e => setEditingAdjustmentAmount(e.target.value)}
+                                    onBlur={() => handleUpdateAdjustmentAmount(adj.uid, editingAdjustmentAmount)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleUpdateAdjustmentAmount(adj.uid, editingAdjustmentAmount)
+                                      if (e.key === 'Escape') setEditingAdjustmentId(null)
+                                    }}
+                                    autoFocus
+                                    style={{ width: '80px', padding: '4px 8px', border: `1px solid ${isGive ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`, borderRadius: '4px', fontSize: '13px', textAlign: 'right', fontWeight: 700, color: isGive ? 'var(--green)' : '#EF4444', outline: 'none' }}
+                                  />
+                                ) : (
+                                  <>
+                                    <span style={{ fontSize: '14px', fontWeight: 800, color: isGive ? 'var(--green)' : '#EF4444' }}>
+                                      {isGive ? '+' : '-'}{CURRENCY} {parseFloat(adj.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    </span>
+                                    <button type="button" onClick={() => {
+                                      setEditingAdjustmentId(adj.uid);
+                                      setEditingAdjustmentAmount(adj.amount);
+                                    }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', padding: '4px', borderRadius: '4px' }} title="Edit amount for this month">
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        };
+
+                        return (
+                          <>
+                            {repeated.length > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>For Every Month</div>
+                                {repeated.map(renderItem)}
+                              </div>
+                            )}
+                            {onetimes.length > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: repeated.length > 0 ? '8px' : '0' }}>
+                                <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>One-time</div>
+                                {onetimes.map(renderItem)}
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
+                      
+                      {/* Total Row */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderRadius: '8px', background: 'var(--surface)', border: '1px solid var(--surface-2)', marginTop: '4px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)' }}>Total Adjustments</div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: breakdownScheduled < 0 ? '#EF4444' : (breakdownScheduled > 0 ? 'var(--green)' : 'var(--text-primary)') }}>
+                          {breakdownScheduled < 0 ? '-' : (breakdownScheduled > 0 ? '+' : '')}{CURRENCY} {Math.abs(breakdownScheduled).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+                    <div style={{ background: 'rgba(59, 130, 246, 0.05)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0 }}>
+                        These active adjustments are automatically calculated into the total. Use <b>Manage</b> to add or edit them.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column (Formerly Left): Calculation Breakdown */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', paddingLeft: '4px' }}>
+                  {/* Step 1: Base Salary */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--surface-2)' }}>
                   <div>
                     <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>1. Base Monthly Salary</div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Configured default base salary</div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Edit base salary for this record</div>
                   </div>
-                  <span style={{ fontSize: '14px', fontWeight: 750, color: 'var(--text-primary)' }}>
-                    {CURRENCY} {selectedBreakdown.base_salary.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '12px', fontWeight: 700 }}>{CURRENCY}</span>
+                    <input 
+                      type="number"
+                      value={breakdownBaseSalary}
+                      onChange={e => {
+                        const val = parseFloat(e.target.value) || 0
+                        setBreakdownBaseSalary(e.target.value)
+                        const newNet = Math.max(0, val - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + parseFloat(breakdownScheduled || 0) + parseFloat(breakdownOthers || 0))
+                        setBreakdownPaidAmount(newNet.toFixed(2))
+                      }}
+                      style={{ width: '120px', padding: '6px 10px 6px 40px', border: '1px solid var(--surface-2)', borderRadius: '6px', fontSize: '14px', textAlign: 'right', fontWeight: 750, color: 'var(--text-primary)' }}
+                    />
+                  </div>
                 </div>
 
                 {/* Step 2: Deductions */}
@@ -918,10 +1142,46 @@ export default function Payroll() {
                   </span>
                 </div>
 
-                {/* Step 4: Other Adjustments (Manual Add/Deduct) */}
+                {/* Step 4: Scheduled Adjustments */}
+                  {/* Step 4: Auto Additions & Deductions */}
+                  {(() => {
+                    let adds = 0;
+                    let deds = 0;
+                    breakdownRecurringDetails.forEach(adj => {
+                      let val = adj.amount_type === 'Percentage' ? parseFloat(breakdownBaseSalary || 0) * (parseFloat(adj.amount) / 100) : parseFloat(adj.amount);
+                      if (adj.action_type === 'Give') adds += val;
+                      if (adj.action_type === 'Deduct') deds += val;
+                    });
+                    
+                    return (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16, 185, 129, 0.04)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--green)' }}>4a. Auto-Additions (Plus)</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Calculated from adjustments</div>
+                          </div>
+                          <span style={{ fontSize: '14px', fontWeight: 750, color: 'var(--green)' }}>
+                            + {CURRENCY} {adds.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239, 68, 68, 0.04)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#EF4444' }}>4b. Auto-Deductions (Minus)</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Calculated from adjustments</div>
+                          </div>
+                          <span style={{ fontSize: '14px', fontWeight: 750, color: '#EF4444' }}>
+                            - {CURRENCY} {deds.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </>
+                    )
+                  })()}
+
+                {/* Step 5: Other Adjustments (Manual Add/Deduct) */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--surface-2)' }}>
                   <div>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>4. Others (Add/Deduct)</div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>5. Others (Manual Add/Deduct)</div>
                     <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Manual additions (+) or deductions (-)</div>
                   </div>
                   <input 
@@ -931,7 +1191,7 @@ export default function Payroll() {
                     onChange={e => {
                       const val = parseFloat(e.target.value) || 0
                       setBreakdownOthers(e.target.value)
-                      const newNet = Math.max(0, selectedBreakdown.base_salary - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + val)
+                      const newNet = Math.max(0, parseFloat(breakdownBaseSalary) - selectedBreakdown.deductions + selectedBreakdown.overtime_pay + parseFloat(breakdownScheduled || 0) + val)
                       setBreakdownPaidAmount(newNet.toFixed(2))
                     }}
                     style={{ width: '120px', padding: '6px 10px', border: '1px solid var(--surface-2)', borderRadius: '6px', fontSize: '13px', textAlign: 'right', fontWeight: 600 }}
@@ -999,8 +1259,10 @@ export default function Payroll() {
 
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', flexShrink: 0 }}>
-                <button 
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', flexShrink: 0, marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--surface-2)' }}>
+              <button 
                   type="button" 
                   onClick={() => setSelectedBreakdown(null)}
                   style={{ flex: 1, padding: '10px 16px', borderRadius: '8px', border: '1.5px solid var(--surface-2)', background: 'transparent', cursor: 'pointer', fontWeight: 600 }}

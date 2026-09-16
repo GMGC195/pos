@@ -56,6 +56,9 @@ router.post('/overrides/:employee_id', authenticateToken, isAdmin, async (req, r
   const employee_id = req.params.employee_id;
   const { overtime_rate, base_salary, allowed_leaves } = req.body;
   try {
+    if (base_salary !== undefined && base_salary !== '') {
+      await pool.query('UPDATE employees SET salary = $1 WHERE id = $2', [parseFloat(base_salary), employee_id]);
+    }
     const result = await pool.query(
       `INSERT INTO employee_payroll_settings (employee_id, overtime_rate, base_salary, allowed_leaves)
        VALUES ($1, $2, $3, $4)
@@ -161,6 +164,14 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       savedRecordsMap[r.employee_id] = r;
     });
 
+    // Get recurring adjustments
+    const recurringRes = await pool.query('SELECT * FROM employee_recurring_adjustments');
+    const recurringMap = {};
+    recurringRes.rows.forEach(r => {
+      if (!recurringMap[r.employee_id]) recurringMap[r.employee_id] = [];
+      recurringMap[r.employee_id].push(r);
+    });
+
     // Get attendance/leave logs for the selected month
     const logsRes = await pool.query(
       `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, ea.shift_hours, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
@@ -184,12 +195,42 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       const overtimeRate = override.overtime_rate !== undefined && override.overtime_rate !== null ? parseFloat(override.overtime_rate) : globalOvertimeRate;
       const allowedLeaves = override.allowed_leaves !== undefined && override.allowed_leaves !== null ? parseInt(override.allowed_leaves) : globalAllowedLeaves;
 
+      // Calculate recurring adjustments dynamically
+      let recurringAdjustmentsTotal = 0;
+      const recurringList = recurringMap[emp.id] || [];
+      recurringList.forEach(adj => {
+        let adjValue = 0;
+        if (adj.amount_type === 'Percentage') {
+          adjValue = baseSalary * (parseFloat(adj.amount) / 100);
+        } else {
+          adjValue = parseFloat(adj.amount);
+        }
+        
+        if (adj.action_type === 'Give') {
+          recurringAdjustmentsTotal += adjValue;
+        } else if (adj.action_type === 'Deduct') {
+          recurringAdjustmentsTotal -= adjValue;
+        }
+      });
+
       // Get saved details if they exist
-      const savedRecord = savedRecordsMap[emp.id] || {};
-      const otherAdjustments = savedRecord.other_adjustments !== undefined && savedRecord.other_adjustments !== null ? parseFloat(savedRecord.other_adjustments) : 0.0;
-      const savedPaidAmount = savedRecord.paid_amount !== undefined && savedRecord.paid_amount !== null ? parseFloat(savedRecord.paid_amount) : null;
-      const paymentStatus = savedRecord.status || 'Pending';
-      const notes = savedRecord.notes || '';
+      const savedRecord = savedRecordsMap[emp.id];
+      
+      let manualAdjustments = 0;
+      let finalRecurringAdjustments = recurringAdjustmentsTotal;
+      let paymentStatus = 'Pending';
+      let savedPaidAmount = null;
+      let notes = '';
+
+      if (savedRecord) {
+        manualAdjustments = savedRecord.other_adjustments !== undefined && savedRecord.other_adjustments !== null ? parseFloat(savedRecord.other_adjustments) : 0.0;
+        finalRecurringAdjustments = savedRecord.recurring_adjustments !== undefined && savedRecord.recurring_adjustments !== null ? parseFloat(savedRecord.recurring_adjustments) : 0.0;
+        savedPaidAmount = savedRecord.paid_amount !== undefined && savedRecord.paid_amount !== null ? parseFloat(savedRecord.paid_amount) : null;
+        paymentStatus = savedRecord.status || 'Pending';
+        notes = savedRecord.notes || '';
+      }
+
+      const otherAdjustments = manualAdjustments + finalRecurringAdjustments;
 
       let presents = 0;
       let absents = 0;
@@ -260,7 +301,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       const paidAmount = savedPaidAmount !== null ? savedPaidAmount : netSalary;
 
       const advanceBalance = emp.advance_balance ? parseFloat(emp.advance_balance) : 0;
-      const advanceDeduction = savedRecord.advance_deduction ? parseFloat(savedRecord.advance_deduction) : 0;
+      const advanceDeduction = (savedRecord && savedRecord.advance_deduction) ? parseFloat(savedRecord.advance_deduction) : 0;
 
       return {
         id: emp.id,
@@ -282,7 +323,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         overtime_hours: parseFloat(totalOvertimeHours.toFixed(2)),
         overtime_pay: parseFloat(overtimePay.toFixed(2)),
         deductions: parseFloat(deductions.toFixed(2)),
-        other_adjustments: otherAdjustments,
+        other_adjustments: manualAdjustments,
+        recurring_adjustments: finalRecurringAdjustments,
         advance_balance: advanceBalance,
         advance_deduction: advanceDeduction,
         net_salary: parseFloat((netSalary - advanceDeduction).toFixed(2)),
@@ -318,7 +360,8 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
     paid_amount,
     status,
     notes,
-    zero_out_advance
+    zero_out_advance,
+    recurring_adjustments
   } = req.body;
 
   if (!employee_id || !month) {
@@ -331,9 +374,9 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
 
     const result = await client.query(
       `INSERT INTO employee_payroll_records 
-        (employee_id, month, base_salary, presents, absents, leaves, holidays, overtime_hours, overtime_pay, deductions, other_adjustments, advance_deduction, net_salary, paid_amount, status, notes, paid_date)
+        (employee_id, month, base_salary, presents, absents, leaves, holidays, overtime_hours, overtime_pay, deductions, other_adjustments, advance_deduction, recurring_adjustments, net_salary, paid_amount, status, notes, paid_date)
        VALUES 
-        ($1, $2::text, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::text, $16::text, CASE WHEN $15::text = 'Paid' THEN NOW() ELSE NULL END)
+        ($1, $2::text, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::text, $17::text, CASE WHEN $16::text = 'Paid' THEN NOW() ELSE NULL END)
        ON CONFLICT (employee_id, month) 
        DO UPDATE SET 
         base_salary = $3, 
@@ -346,11 +389,12 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         deductions = $10, 
         other_adjustments = $11,
         advance_deduction = $12,
-        net_salary = $13, 
-        paid_amount = $14, 
-        status = $15::text, 
-        notes = $16::text, 
-        paid_date = CASE WHEN $15::text = 'Paid' AND employee_payroll_records.status != 'Paid' THEN NOW() ELSE employee_payroll_records.paid_date END
+        recurring_adjustments = $13,
+        net_salary = $14, 
+        paid_amount = $15, 
+        status = $16::text, 
+        notes = $17::text, 
+        paid_date = CASE WHEN $16::text = 'Paid' AND employee_payroll_records.status != 'Paid' THEN NOW() ELSE employee_payroll_records.paid_date END
        RETURNING *`,
       [
         employee_id,
@@ -365,6 +409,7 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         parseFloat(deductions || 0),
         parseFloat(other_adjustments || 0),
         parseFloat(advance_deduction || 0),
+        parseFloat(recurring_adjustments || 0),
         parseFloat(net_salary || 0),
         parseFloat(paid_amount || 0),
         status || 'Pending',
@@ -512,6 +557,103 @@ router.delete('/adjustments/:id', authenticateToken, isAdmin, async (req, res) =
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// PUT financial adjustment (Edit)
+router.put('/adjustments/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { type, custom_label, action_type, amount, date, notes } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const check = await client.query('SELECT * FROM employee_financial_adjustments WHERE id = $1', [req.params.id]);
+    if (check.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Adjustment not found' });
+    }
+    const oldAdj = check.rows[0];
+    const employee_id = oldAdj.employee_id;
+
+    // 1. Revert old impact
+    if (oldAdj.type === 'Advance Salary / Loan') {
+      if (oldAdj.action_type === 'Give') {
+        await client.query('UPDATE employees SET advance_balance = GREATEST(COALESCE(advance_balance, 0) - $1, 0) WHERE id = $2', [oldAdj.amount, employee_id]);
+      } else if (oldAdj.action_type === 'Deduct') {
+        await client.query('UPDATE employees SET advance_balance = COALESCE(advance_balance, 0) + $1 WHERE id = $2', [oldAdj.amount, employee_id]);
+      }
+    }
+
+    // 2. Update record
+    const result = await client.query(
+      'UPDATE employee_financial_adjustments SET type=$1, custom_label=$2, action_type=$3, amount=$4, date=$5, notes=$6 WHERE id=$7 RETURNING *',
+      [type, custom_label || null, action_type, parseFloat(amount), date, notes || null, req.params.id]
+    );
+
+    // 3. Apply new impact
+    if (type === 'Advance Salary / Loan') {
+      if (action_type === 'Give') {
+        await client.query('UPDATE employees SET advance_balance = COALESCE(advance_balance, 0) + $1 WHERE id = $2', [parseFloat(amount), employee_id]);
+      } else if (action_type === 'Deduct') {
+        await client.query('UPDATE employees SET advance_balance = GREATEST(COALESCE(advance_balance, 0) - $1, 0) WHERE id = $2', [parseFloat(amount), employee_id]);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// GET recurring adjustments for an employee
+router.get('/recurring/:employee_id', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM employee_recurring_adjustments WHERE employee_id = $1 ORDER BY created_at DESC', [req.params.employee_id]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST recurring adjustment
+router.post('/recurring', authenticateToken, isAdmin, async (req, res) => {
+  const { employee_id, type, label, action_type, amount_type, amount } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO employee_recurring_adjustments (employee_id, type, label, action_type, amount_type, amount) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [employee_id, type, label || null, action_type, amount_type, parseFloat(amount)]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT recurring adjustment
+router.put('/recurring/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { type, label, action_type, amount_type, amount } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE employee_recurring_adjustments SET type=$1, label=$2, action_type=$3, amount_type=$4, amount=$5 WHERE id=$6 RETURNING *',
+      [type, label || null, action_type, amount_type, parseFloat(amount), req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE recurring adjustment
+router.delete('/recurring/:id', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM employee_recurring_adjustments WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
