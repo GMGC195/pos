@@ -131,6 +131,24 @@ export default function POS() {
   const [confirmCancelAction, setConfirmCancelAction] = useState(null)
   const [showKitchenModal, setShowKitchenModal] = useState(false)
 
+  // Credit states
+  const [creditCustomers, setCreditCustomers] = useState([])
+  const [selectedCreditCustomer, setSelectedCreditCustomer] = useState('')
+  const [creditPaymentAmount, setCreditPaymentAmount] = useState('')
+
+  const fetchCreditCustomers = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/credit')
+      setCreditCustomers(res.data)
+    } catch (err) {
+      console.error('Failed to fetch credit customers:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchCreditCustomers()
+  }, [fetchCreditCustomers])
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
     return () => clearInterval(timer);
@@ -477,6 +495,8 @@ export default function POS() {
         table_number: customerInfo.tableNumber,
         order_taker: user?.username || 'Guest',
         comments: customerInfo.comments,
+        credit_customer_id: method === 'Credit' ? selectedCreditCustomer : undefined,
+        credit_payment_amount: method === 'Credit' ? creditPaymentAmount : undefined,
         branch: ['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) ? selectedBranch : undefined,
         printerIp: localStorage.getItem('printMode') === 'cloud' ? (localStorage.getItem('printerIp') || '127.0.0.1') : undefined
       }
@@ -1636,8 +1656,8 @@ export default function POS() {
                   {paymentMethod !== 'Hold' && (
                     <div className="form-group" style={{ marginBottom: 1, marginTop: 'auto' }}>
                       <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Payment Method</label>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {['Cash', 'Online', 'Payment Pending'].map(pm => (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {['Cash', 'Online', 'Payment Pending', 'Credit'].map(pm => (
                           <button 
                             key={pm}
                             type="button"
@@ -1658,6 +1678,51 @@ export default function POS() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* CREDIT DETAILS SECTION */}
+                  {paymentMethod === 'Credit' && (
+                    <div style={{ padding: 12, background: 'rgba(59,130,246,0.05)', borderRadius: 8, border: '1px solid rgba(59,130,246,0.2)', marginTop: 8 }}>
+                      <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Select Credit Customer *</label>
+                      <select 
+                        value={selectedCreditCustomer} 
+                        onChange={(e) => {
+                          setSelectedCreditCustomer(e.target.value);
+                          const cust = creditCustomers.find(c => c.id.toString() === e.target.value);
+                          if (cust) {
+                            setCustomerInfo(prev => ({ ...prev, name: cust.name, phone: cust.phone || '' }));
+                          }
+                        }}
+                        style={{ width: '100%', padding: '8px', fontSize: 13, borderRadius: 6, border: '1px solid var(--surface-2)', marginBottom: 8 }}
+                      >
+                        <option value="">-- Select Customer --</option>
+                        {creditCustomers.map(c => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.phone || 'N/A'}) - Bal: {CURRENCY} {Math.abs(c.balance).toFixed(2)}</option>
+                        ))}
+                      </select>
+                      
+                      {selectedCreditCustomer && (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Prev Balance:</span>
+                            <span style={{ fontWeight: 600 }}>{CURRENCY} {Math.abs(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)?.balance || 0).toFixed(2)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Today&apos;s Bill:</span>
+                            <span style={{ fontWeight: 600 }}>{CURRENCY} {(total - parseFloat(customerInfo.discount || 0)).toFixed(2)}</span>
+                          </div>
+                          
+                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Clear Dues (Amount Paid Now)</label>
+                          <input 
+                            type="number" step="0.01" 
+                            placeholder="0.00"
+                            value={creditPaymentAmount}
+                            onChange={(e) => setCreditPaymentAmount(e.target.value)}
+                            style={{ width: '100%', padding: '8px', fontSize: 13, borderRadius: 6, border: '1px solid var(--surface-2)' }}
+                          />
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -1879,6 +1944,10 @@ export default function POS() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
       {/* Kitchen Slip Sent Modal */}
       {showKitchenModal && (
         <div className="modal-overlay" style={{ zIndex: 999999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

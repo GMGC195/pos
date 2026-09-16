@@ -125,7 +125,7 @@ async function returnStock(orderId, client) {
 
 // POST create order atomically
 router.post('/', authenticateToken, async (req, res) => {
-  const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments } = req.body;
+  const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments, credit_customer_id, credit_payment_amount } = req.body;
   console.log(`[ORDER DEBUG] Order request received:`, { order_type, table_number, order_taker, itemCount: items?.length });
   const client = await pool.connect();
   try {
@@ -167,9 +167,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Insert order
     const orderResult = await client.query(
-      `INSERT INTO orders (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
-      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt]
+      `INSERT INTO orders (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at, credit_customer_id) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
+      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt, credit_customer_id || null]
     );
     const order = orderResult.rows[0];
 
@@ -188,6 +188,33 @@ router.post('/', authenticateToken, async (req, res) => {
        VALUES ($1, $2, $3)`,
       [order.id, payment_method || 'Cash', grand_total]
     );
+
+    // Handle Credit order logic
+    if (payment_method === 'Credit' && credit_customer_id) {
+      // Add the order to their ledger (increases debt)
+      await client.query(
+        `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+        [credit_customer_id, order.id, 'CREDIT_ORDER', grand_total]
+      );
+      
+      let balanceChange = parseFloat(grand_total);
+      
+      // If they made an inline payment right now
+      if (credit_payment_amount && parseFloat(credit_payment_amount) > 0) {
+        const paymentAmt = parseFloat(credit_payment_amount);
+        await client.query(
+          `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+          [credit_customer_id, order.id, 'PAYMENT', paymentAmt]
+        );
+        balanceChange -= paymentAmt;
+      }
+      
+      // Update overall customer balance
+      await client.query(
+        `UPDATE credit_customers SET balance = balance + $1 WHERE id = $2`,
+        [balanceChange, credit_customer_id]
+      );
+    }
 
     // Deduct stock if order is Completed
     if (status === 'Completed') {

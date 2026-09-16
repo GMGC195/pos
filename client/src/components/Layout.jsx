@@ -34,7 +34,8 @@ import {
   PlusCircle,
   Users,
   Fingerprint,
-  CalendarRange
+  CalendarRange,
+  BookOpen
 } from 'lucide-react'
 
 const navGroups = [
@@ -45,6 +46,7 @@ const navGroups = [
       { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Order Taker', 'Cashier'] },
       { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Order Taker', 'Cashier'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin', 'Cashier'] },
+      { to: '/credit', icon: <BookOpen size={18} strokeWidth={2.2} />, label: 'Credit (Khata)', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin', 'Cashier'] },
     ]
   },

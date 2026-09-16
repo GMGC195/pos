@@ -18,6 +18,7 @@ const Settings             = lazy(() => import('./pages/Settings'))
 const SalesItem            = lazy(() => import('./pages/SalesItem'))
 const CancelRequests       = lazy(() => import('./pages/CancelRequests'))
 const StockManagement      = lazy(() => import('./pages/StockManagement'))
+const Credit               = lazy(() => import('./pages/Credit'))
 const ProductCostManagement = lazy(() => import('./pages/ProductCostManagement'))
 const HelpSupport          = lazy(() => import('./pages/HelpSupport'))
 const Employees            = lazy(() => import('./pages/Employees'))
@@ -82,6 +83,7 @@ export default function App() {
                 <Route path="/sales-item"      element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management']}><SalesItem /></ProtectedRoute>} />
                 <Route path="/reports"         element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management']}><Reports isTodaySales={false} /></ProtectedRoute>} />
                 <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Cashier']}><CancelRequests /></ProtectedRoute>} />
+                <Route path="/credit"          element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier']}><Credit /></ProtectedRoute>} />
                 <Route path="/stock-management" element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><StockManagement /></ProtectedRoute>} />
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><ProductCostManagement /></ProtectedRoute>} />
 
