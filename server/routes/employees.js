@@ -452,25 +452,79 @@ router.get('/:id/documents', authenticateToken, async (req, res) => {
 });
 
 // POST upload document for an employee
-router.post('/:id/documents', authenticateToken, upload.single('document'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+router.post('/:id/documents', authenticateToken, upload.array('documents', 5), async (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded' });
   }
-  const document_name = req.body.document_name || req.file.originalname;
-  const file_path = `/uploads/documents/${req.file.filename}`;
+
+  const { documentName, documentType, documentNumber, note } = req.body;
   const employee_id = req.params.id;
 
   try {
-    const result = await pool.query(
-      'INSERT INTO employee_documents (employee_id, document_name, file_path) VALUES ($1, $2, $3) RETURNING *',
-      [employee_id, document_name, file_path]
-    );
-    res.status(201).json(result.rows[0]);
+    const uploadedDocs = [];
+    for (const file of req.files) {
+      const doc_name = documentName || file.originalname;
+      const file_path = `/uploads/documents/${file.filename}`;
+      
+      const result = await pool.query(
+        `INSERT INTO employee_documents 
+          (employee_id, document_name, file_path, document_type, document_number, note) 
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [employee_id, doc_name, file_path, documentType || 'Other', documentNumber || null, note || null]
+      );
+      uploadedDocs.push(result.rows[0]);
+    }
+    res.status(201).json(uploadedDocs);
   } catch (err) {
-    // If DB insert fails, remove the uploaded file
+    // If DB insert fails, remove the uploaded files
     try {
-      fs.unlinkSync(req.file.path);
+      req.files.forEach(f => fs.unlinkSync(f.path));
     } catch (e) {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT update a document
+router.put('/documents/:doc_id', authenticateToken, upload.single('documents'), async (req, res) => {
+  const { documentName, documentType, documentNumber, note } = req.body;
+  const doc_id = req.params.doc_id;
+
+  try {
+    const docRes = await pool.query('SELECT * FROM employee_documents WHERE id = $1', [doc_id]);
+    if (docRes.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    const existingDoc = docRes.rows[0];
+
+    let newFilePath = existingDoc.file_path;
+    let newDocName = documentName || existingDoc.document_name;
+
+    if (req.file) {
+      newFilePath = `/uploads/documents/${req.file.filename}`;
+      newDocName = documentName || req.file.originalname;
+      // Delete old file
+      const oldFilePath = path.join(__dirname, '../', existingDoc.file_path);
+      try {
+        if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+      } catch (e) {}
+    }
+
+    const result = await pool.query(
+      `UPDATE employee_documents 
+       SET document_name = $1, file_path = $2, document_type = $3, document_number = $4, note = $5
+       WHERE id = $6 RETURNING *`,
+      [
+        newDocName, 
+        newFilePath, 
+        documentType || existingDoc.document_type, 
+        documentNumber || existingDoc.document_number, 
+        note || existingDoc.note, 
+        doc_id
+      ]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (req.file) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
     res.status(500).json({ error: err.message });
   }
 });

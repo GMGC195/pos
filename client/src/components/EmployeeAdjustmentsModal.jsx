@@ -9,6 +9,15 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
   const [recurringAdjustments, setRecurringAdjustments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+  const [notification, setNotification] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const showNotification = (msg, type = 'success') => {
+    setNotification({ text: msg, type });
+    setTimeout(() => {
+      setNotification((current) => current?.text === msg ? null : current);
+    }, 3000);
+  };
 
   // View state
   const [tab, setTab] = useState('one-time'); // 'one-time' or 'recurring'
@@ -33,7 +42,7 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
       setAdjustments(adjRes.data);
       setRecurringAdjustments(recRes.data);
     } catch (err) {
-      toast.error('Failed to fetch data');
+      showNotification('Failed to fetch data', 'error');
     } finally {
       setFetching(false);
     }
@@ -87,10 +96,12 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
-      return toast.error('Please enter a valid amount');
+      showNotification('Please enter a valid amount', 'error');
+      return;
     }
     if (type === 'Other' && !customLabel.trim()) {
-      return toast.error('Please enter a custom label');
+      showNotification('Please enter a custom label', 'error');
+      return;
     }
 
     try {
@@ -109,10 +120,10 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
 
         if (editingId) {
           await axios.put(`/api/payroll/adjustments/${editingId}`, payload);
-          toast.success('Adjustment updated successfully');
+          showNotification('Adjustment updated successfully', 'success');
         } else {
           await axios.post('/api/payroll/adjustments', payload);
-          toast.success('Adjustment saved successfully');
+          showNotification('Adjustment saved successfully', 'success');
         }
 
         // We fetch again to get the updated advance_balance safely from DB instead of complex local calculation
@@ -135,39 +146,45 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
 
         if (editingId) {
           await axios.put(`/api/payroll/recurring/${editingId}`, payload);
-          toast.success('Repeated adjustment updated');
+          showNotification('Repeated adjustment updated', 'success');
         } else {
           await axios.post('/api/payroll/recurring', payload);
-          toast.success('Repeated adjustment saved');
+          showNotification('Repeated adjustment saved', 'success');
         }
       }
 
       fetchData();
       resetForm();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to save');
+      showNotification(err.response?.data?.error || 'Failed to save', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async (id, isRecurring) => {
-    if (!window.confirm('Are you sure you want to delete this record?')) return;
+  const handleDelete = (id, isRecurring) => {
+    setConfirmDelete({ id, isRecurring });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const { id, isRecurring } = confirmDelete;
+    setConfirmDelete(null);
     try {
       setLoading(true);
       if (isRecurring) {
         await axios.delete(`/api/payroll/recurring/${id}`);
-        toast.success('Record deleted');
+        showNotification('Record deleted', 'success');
       } else {
         await axios.delete(`/api/payroll/adjustments/${id}`);
-        toast.success('Record deleted');
+        showNotification('Record deleted', 'success');
         const empRes = await axios.get('/api/employees');
         const updatedEmp = empRes.data.find(e => e.id === employee.id);
         if (updatedEmp) onUpdate(updatedEmp);
       }
       fetchData();
     } catch (err) {
-      toast.error('Failed to delete');
+      showNotification('Failed to delete', 'error');
     } finally {
       setLoading(false);
     }
@@ -189,8 +206,25 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
           .adj-history-section { width: 100%; overflow: visible; }
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes modalPop { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
       `}</style>
       <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', zIndex: 1000 }}>
+        
+        {/* Delete Confirmation Modal */}
+        {confirmDelete && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1010, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}>
+            <div style={{ background: 'var(--white)', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '400px', boxShadow: 'var(--shadow-lg)', animation: 'modalPop 0.2s ease-out' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>Confirm Deletion</h3>
+              <p style={{ margin: '0 0 24px 0', fontSize: '14px', color: 'var(--text-secondary)' }}>Are you sure you want to delete this record? This action cannot be undone.</p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setConfirmDelete(null)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'transparent', cursor: 'pointer', fontWeight: 600 }}>Cancel</button>
+                <button onClick={executeDelete} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#ef4444', color: 'white', cursor: 'pointer', fontWeight: 700 }}>Yes, Delete</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ backgroundColor: 'var(--white)', borderRadius: '12px', width: '100%', maxWidth: '950px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column', maxHeight: '90vh', overflow: 'hidden' }}>
           
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderBottom: '1px solid var(--surface-2)' }}>
@@ -202,6 +236,26 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
             </div>
             <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={24} /></button>
           </div>
+
+          {notification && (
+            <div style={{
+              margin: '0 20px',
+              padding: '12px 16px',
+              borderRadius: '8px',
+              backgroundColor: notification.type === 'success' ? '#ecfdf5' : '#fef2f2',
+              color: notification.type === 'success' ? '#065f46' : '#991b1b',
+              border: `1px solid ${notification.type === 'success' ? '#a7f3d0' : '#fecaca'}`,
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              animation: 'fadeIn 0.3s ease-out'
+            }}>
+              {notification.text}
+              <button onClick={() => setNotification(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', display: 'flex' }}><X size={16} /></button>
+            </div>
+          )}
 
           <div className="adj-modal-body">
             {/* Form Section */}
