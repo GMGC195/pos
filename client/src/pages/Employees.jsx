@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings, Filter } from 'lucide-react'
+import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings, Filter, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
 import { useAuth } from '../contexts/AuthContext'
+import EmployeeDocumentsModal from '../components/EmployeeDocumentsModal'
 
 
 
@@ -117,6 +118,7 @@ export default function Employees() {
   const [showModal, setShowModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [editingEmployee, setEditingEmployee] = useState(null)
+  const [docsEmployee, setDocsEmployee] = useState(null)
   
   // Form state
   const [formData, setFormData] = useState({
@@ -708,6 +710,9 @@ export default function Employees() {
                       <div style={{ display: 'flex', gap: 8 }}>
                         {user?.role?.toLowerCase() !== 'management' ? (
                           <>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setDocsEmployee(emp)} title="Documents" style={{ padding: '6px 8px' }}>
+                              <FileText size={14} />
+                            </button>
                             <button className="btn btn-secondary btn-sm" onClick={() => handleOpenEdit(emp)} style={{ padding: '6px 8px' }}>
                               <Edit2 size={14} />
                             </button>
@@ -1238,6 +1243,14 @@ export default function Employees() {
         onClose={() => setShowImportModal(false)} 
         onImportSuccess={loadEmployees} 
       />
+
+      {/* Employee Documents Modal */}
+      {docsEmployee && (
+        <EmployeeDocumentsModal 
+          employee={docsEmployee} 
+          onClose={() => setDocsEmployee(null)} 
+        />
+      )}
     </div>
   )
 }

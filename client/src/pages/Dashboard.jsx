@@ -53,6 +53,11 @@ const statCards = [
   { key: 'guestsToday', label: 'Guest Today', icon: <Users size={24} strokeWidth={2.5} />, color: '#8b5cf6', prefix: '', format: v => v },
 ]
 
+const payrollStatCards = [
+  { key: 'total_salary_paid', label: 'Salary Paid (This Month)', icon: <CircleDollarSign size={24} strokeWidth={2.5} />, color: '#ef4444', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'total_advance_given', label: 'Advances Given', icon: <CircleDollarSign size={24} strokeWidth={2.5} />, color: '#f59e0b', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+]
+
 function StatCard({ stat, value, loading }) {
   return (
     <div className="stat-card" style={{ '--card-color': stat.color }}>
@@ -359,6 +364,9 @@ export default function Dashboard() {
         <div className="stat-cards">
           {statCards.map(s => (
             <StatCard key={s.key} stat={s} value={stats?.[s.key]} loading={loading} />
+          ))}
+          {isAdminOrDev && payrollStatCards.map(s => (
+            <StatCard key={s.key} stat={s} value={stats?.payrollStats?.[s.key]} loading={loading} />
           ))}
         </div>
 

@@ -148,6 +148,26 @@ router.get('/', authenticateToken, async (req, res) => {
       LIMIT 6
     `, params);
 
+    // Payroll Stats
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    let payrollStats = { total_salary_paid: 0, total_advance_given: 0 };
+    
+    if (isAdmin) {
+      const payrollRes = await pool.query(`
+        SELECT SUM(paid_amount) as total_salary_paid 
+        FROM employee_payroll_records 
+        WHERE month = $1 AND status = 'Paid'
+      `, [currentMonth]);
+      
+      const advanceRes = await pool.query(`
+        SELECT SUM(advance_balance) as total_advance_given 
+        FROM employees
+      `);
+      
+      payrollStats.total_salary_paid = parseFloat(payrollRes.rows[0]?.total_salary_paid || 0);
+      payrollStats.total_advance_given = parseFloat(advanceRes.rows[0]?.total_advance_given || 0);
+    }
+
     res.json({
       totalSale: parseFloat(totalSaleResult.rows[0].total_sale),
       cashSale: parseFloat(totalSaleResult.rows[0].cash_sale),
@@ -161,6 +181,7 @@ router.get('/', authenticateToken, async (req, res) => {
         name: r.item_name,
         value: parseInt(r.total_qty),
       })),
+      payrollStats
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

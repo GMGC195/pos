@@ -497,6 +497,10 @@ app.options('*', cors());
 
 app.use(express.json({ limit: '10mb' }));
 
+// Serve uploads directory statically
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Disable caching for all API responses
 app.use((req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

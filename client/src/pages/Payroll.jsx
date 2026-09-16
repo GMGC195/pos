@@ -7,7 +7,7 @@ import {
   Clock, 
   CalendarDays, 
   Plus, 
-  DollarSign, 
+  Banknote, 
   Users, 
   TrendingUp, 
   Search, 
@@ -22,6 +22,7 @@ import {
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
+import EmployeeAdjustmentsModal from '../components/EmployeeAdjustmentsModal'
 
 export default function Payroll() {
   const { user } = useAuth()
@@ -61,11 +62,16 @@ export default function Payroll() {
   const [leaveIsPaid, setLeaveIsPaid] = useState(true)
   const [savingLeave, setSavingLeave] = useState(false)
 
+  // Adjustments Modal State
+  const [showAdjustmentsModal, setShowAdjustmentsModal] = useState(false)
+  const [adjustmentsEmployee, setAdjustmentsEmployee] = useState(null)
+
   // Salary Breakdown Modal State
   const [selectedBreakdown, setSelectedBreakdown] = useState(null)
   const [breakdownOthers, setBreakdownOthers] = useState(0)
   const [breakdownPaidAmount, setBreakdownPaidAmount] = useState(0)
   const [breakdownStatus, setBreakdownStatus] = useState('Pending')
+  const [breakdownNotes, setBreakdownNotes] = useState('')
   const [savingRecord, setSavingRecord] = useState(false)
 
   const openBreakdownModal = (item) => {
@@ -73,6 +79,7 @@ export default function Payroll() {
     setBreakdownOthers(item.other_adjustments || 0)
     setBreakdownPaidAmount(item.paid_amount || item.net_salary)
     setBreakdownStatus(item.status || 'Pending')
+    setBreakdownNotes(item.notes || '')
   }
 
   // Load calculations
@@ -207,7 +214,7 @@ export default function Payroll() {
         net_salary: calculatedNet,
         paid_amount: parseFloat(breakdownPaidAmount || 0),
         status: breakdownStatus,
-        notes: ''
+        notes: breakdownNotes
       })
       toast.success('Payroll record updated successfully!')
       setSelectedBreakdown(null)
@@ -270,10 +277,10 @@ export default function Payroll() {
     : 0
 
   return (
-    <div className="page-container" style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
+    <div className="page-container" style={{ padding: '12px 24px', maxWidth: '1400px', margin: '0 auto' }}>
       
       {/* Header section */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
             <Calculator style={{ color: 'var(--primary)', marginTop: '2px', flexShrink: 0 }} size={26} /> <span>Employee Payroll & Slips</span>
@@ -298,182 +305,145 @@ export default function Payroll() {
       `}</style>
 
       {/* KPI Cards Grid */}
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px', marginBottom: '30px' }}>
-        <div style={{ background: 'var(--white)', padding: '20px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>Total Net Payroll</span>
-            <div style={{ background: 'rgba(244, 180, 0, 0.1)', color: 'var(--primary)', padding: '8px', borderRadius: '8px' }}>
-              <DollarSign size={20} />
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+        <div style={{ background: 'var(--white)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 600 }}>Total Net Payroll</span>
+            <div style={{ background: 'rgba(244, 180, 0, 0.1)', color: 'var(--primary)', padding: '6px', borderRadius: '6px' }}>
+              <Banknote size={16} />
             </div>
           </div>
-          <h3 style={{ fontSize: '24px', fontWeight: 800 }}>{CURRENCY} {totalPayroll.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '6px' }}>For the month of {selectedMonth}</p>
+          <h3 style={{ fontSize: '18px', fontWeight: 800 }}>{CURRENCY} {totalPayroll.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>For the month of {selectedMonth}</p>
         </div>
 
-        <div style={{ background: 'var(--white)', padding: '20px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>Total Overtime Paid</span>
-            <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--green)', padding: '8px', borderRadius: '8px' }}>
-              <TrendingUp size={20} />
+        <div style={{ background: 'var(--white)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 600 }}>Total Overtime Paid</span>
+            <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--green)', padding: '6px', borderRadius: '6px' }}>
+              <TrendingUp size={16} />
             </div>
           </div>
-          <h3 style={{ fontSize: '24px', fontWeight: 800 }}>{CURRENCY} {totalOvertimePay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '6px' }}>Total earned extra hours by staff</p>
+          <h3 style={{ fontSize: '18px', fontWeight: 800 }}>{CURRENCY} {totalOvertimePay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>Total earned extra hours by staff</p>
         </div>
 
-        <div style={{ background: 'var(--white)', padding: '20px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>Total Deductions</span>
-            <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '8px', borderRadius: '8px' }}>
-              <AlertTriangle size={20} />
+        <div style={{ background: 'var(--white)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 600 }}>Total Deductions</span>
+            <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '6px', borderRadius: '6px' }}>
+              <AlertTriangle size={16} />
             </div>
           </div>
-          <h3 style={{ fontSize: '24px', fontWeight: 800 }}>{CURRENCY} {totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '6px' }}>From unpaid leaves & absents</p>
+          <h3 style={{ fontSize: '18px', fontWeight: 800 }}>{CURRENCY} {totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>From unpaid leaves & absents</p>
         </div>
 
-        <div style={{ background: 'var(--white)', padding: '20px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>Avg Overtime / Employee</span>
-            <div style={{ background: 'rgba(16, 60, 67, 0.1)', color: 'var(--secondary)', padding: '8px', borderRadius: '8px' }}>
-              <Clock size={20} />
+        <div style={{ background: 'var(--white)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 600 }}>Avg Overtime / Employee</span>
+            <div style={{ background: 'rgba(16, 60, 67, 0.1)', color: 'var(--secondary)', padding: '6px', borderRadius: '6px' }}>
+              <Clock size={16} />
             </div>
           </div>
-          <h3 style={{ fontSize: '24px', fontWeight: 800 }}>{avgOvertimeHours.toFixed(1)} Hrs</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '6px' }}>Average extra hours worked</p>
+          <h3 style={{ fontSize: '18px', fontWeight: 800 }}>{avgOvertimeHours.toFixed(1)} Hrs</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>Average extra hours worked</p>
         </div>
       </section>
 
       {/* Filters and Controls */}
-      <section style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px', background: 'var(--white)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Select Payroll Month</label>
-              <input 
-                type="month" 
-                value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
-                style={{ padding: '8px 12px', border: '1px solid var(--surface-2)', borderRadius: '6px', fontSize: '14px', background: 'var(--surface)', fontWeight: 600, color: 'var(--text-primary)' }}
-              />
-            </div>
-
-            {isAdmin && (
-              <button 
-                onClick={() => setShowSettingsModal(true)}
-                className="btn btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '40px', width: '40px', padding: '0', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
-                title="Global Settings"
-              >
-                <Settings size={15} />
-              </button>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
-            {isAdmin && (
-              <>
-                <button 
-                  onClick={() => setShowLeaveModal(true)}
-                  className="btn btn-secondary payroll-header-btn-inline" 
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: 'var(--secondary)', color: 'white', border: 'none', padding: '10px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', height: '40px', flex: 1 }}
-                >
-                  <CalendarDays size={15} /> <span className="btn-text">Special Leave</span>
-                </button>
-                
-                <button 
-                  onClick={() => setShowOverridesModal(true)}
-                  className="btn btn-secondary payroll-header-btn-inline"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: '1px solid var(--surface-2)', padding: '10px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', height: '40px', flex: 1 }}
-                >
-                  <DollarSign size={15} /> <span className="btn-text">Manage Salary</span>
-                </button>
-              </>
-            )}
-          </div>
+      <section style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', marginBottom: '16px', background: 'var(--white)', padding: '12px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
+        
+        {/* Search */}
+        <div style={{ position: 'relative', flex: '1 1 200px', minWidth: '150px' }}>
+          <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={16} />
+          <input 
+            type="text"
+            placeholder="Search active staff..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{ width: '100%', padding: '10px 12px 10px 36px', border: '1px solid var(--surface-2)', borderRadius: '8px', fontSize: '13px', outline: 'none', height: '40px' }}
+          />
         </div>
 
-        {/* Divider line between month/buttons and search input */}
-        <div style={{ height: '1.5px', background: 'var(--surface-2)', width: '100%' }} />
+        {/* Restaurant Filter */}
+        <select 
+          value={selectedBranch}
+          onChange={e => setSelectedBranch(e.target.value)}
+          style={{ padding: '0 12px', background: 'var(--white)', border: '1px solid var(--surface-2)', borderRadius: '8px', outline: 'none', fontSize: '13px', cursor: 'pointer', height: '40px' }}
+        >
+          {['All', ...new Set(payrollData.map(record => record.branch).filter(Boolean))].map(br => (
+            <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
+          ))}
+        </select>
 
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
-          <div style={{ position: 'relative', width: '100%', maxWidth: '300px' }}>
-            <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={16} />
-            <input 
-              type="text"
-              placeholder="Search active staff..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              style={{ width: '100%', padding: '10px 12px 10px 36px', border: '1px solid var(--surface-2)', borderRadius: '8px', fontSize: '13px', outline: 'none' }}
-            />
-          </div>
+        {/* Shift Filter */}
+        <select 
+          value={selectedDayNight}
+          onChange={e => setSelectedDayNight(e.target.value)}
+          style={{ padding: '0 12px', background: 'var(--white)', border: '1px solid var(--surface-2)', borderRadius: '8px', outline: 'none', fontSize: '13px', cursor: 'pointer', height: '40px' }}
+        >
+          <option value="All">All Shifts</option>
+          <option value="Day">Day Shift</option>
+          <option value="Night">Night Shift</option>
+        </select>
 
-          <select 
-            value={selectedBranch}
-            onChange={e => setSelectedBranch(e.target.value)}
-            style={{
-              padding: '10px 12px',
-              background: 'var(--white)',
-              border: '1px solid var(--surface-2)',
-              borderRadius: '8px',
-              outline: 'none',
-              fontSize: '13px',
-              minWidth: '150px',
-              cursor: 'pointer',
-              height: '40px'
-            }}
+        {/* Month Filter */}
+        <input 
+          type="month" 
+          value={selectedMonth}
+          onChange={e => setSelectedMonth(e.target.value)}
+          style={{ padding: '0 12px', border: '1px solid var(--surface-2)', borderRadius: '8px', fontSize: '13px', background: 'var(--surface)', fontWeight: 600, color: 'var(--text-primary)', height: '40px' }}
+        />
+
+        {/* Setting Button */}
+        {isAdmin && (
+          <button 
+            onClick={() => setShowSettingsModal(true)}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '40px', width: '40px', padding: '0', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+            title="Global Settings"
           >
-            {['All', ...new Set(payrollData.map(record => record.branch).filter(Boolean))].map(br => (
-              <option key={br} value={br}>{br === 'All' ? 'All Restaurants' : br}</option>
-            ))}
-          </select>
+            <Settings size={15} />
+          </button>
+        )}
 
-          <select 
-            value={selectedDayNight}
-            onChange={e => setSelectedDayNight(e.target.value)}
-            style={{
-              padding: '10px 12px',
-              background: 'var(--white)',
-              border: '1px solid var(--surface-2)',
-              borderRadius: '8px',
-              outline: 'none',
-              fontSize: '13px',
-              minWidth: '150px',
-              cursor: 'pointer',
-              height: '40px'
-            }}
+        {/* Special Leave */}
+        {isAdmin && (
+          <button 
+            onClick={() => setShowLeaveModal(true)}
+            className="btn btn-secondary" 
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', background: 'var(--secondary)', color: 'white', border: 'none', padding: '0 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', height: '40px' }}
           >
-            <option value="All">All Shifts (Day/Night)</option>
-            <option value="Day">Day Shift</option>
-            <option value="Night">Night Shift</option>
-          </select>
+            <CalendarDays size={15} /> <span className="btn-text">Special Leave</span>
+          </button>
+        )}
 
-          {(searchQuery !== '' || selectedBranch !== 'All' || selectedDayNight !== 'All') && (
-            <button 
-              className="btn btn-secondary"
-              onClick={() => {
-                setSearchQuery('');
-                setSelectedBranch('All');
-                setSelectedDayNight('All');
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '0 14px',
-                borderRadius: '8px',
-                height: '40px',
-                fontSize: '13px',
-                borderColor: 'var(--surface-2)',
-                background: 'var(--white)',
-                color: 'var(--text-primary)',
-                cursor: 'pointer'
-              }}
-            >
-              Clear Filters
-            </button>
-          )}
-        </div>
+        {/* Manage Salary */}
+        {isAdmin && (
+          <button 
+            onClick={() => setShowOverridesModal(true)}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: '1px solid var(--surface-2)', padding: '0 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', height: '40px' }}
+          >
+            <Banknote size={15} /> <span className="btn-text">Manage Salary</span>
+          </button>
+        )}
+
+        {/* Clear Filters (if active) */}
+        {(searchQuery !== '' || selectedBranch !== 'All' || selectedDayNight !== 'All') && (
+          <button 
+            className="btn btn-secondary"
+            onClick={() => {
+              setSearchQuery('');
+              setSelectedBranch('All');
+              setSelectedDayNight('All');
+            }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 14px', borderRadius: '8px', height: '40px', fontSize: '13px', borderColor: 'var(--surface-2)', background: 'var(--white)', color: 'var(--text-primary)', cursor: 'pointer' }}
+          >
+            Clear
+          </button>
+        )}
       </section>
 
       {/* Main Payroll Table */}
@@ -483,102 +453,217 @@ export default function Payroll() {
             <thead>
               <tr style={{ background: 'var(--secondary)', color: 'white', borderBottom: '2px solid var(--surface-2)' }}>
                 <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700 }}>Code</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700 }}>Employee Name</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700 }}>Position</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right' }}>Base Salary</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>P</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>A</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>L (Paid/Unpaid)</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>H</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>OT Hours</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right' }}>OT Pay</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right', color: '#F87171' }}>Deductions</th>
-                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right', color: 'var(--primary)' }}>Net Salary</th>
+                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700 }}>Employee Details</th>
+                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>Status</th>
+                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'right' }}>Net Salary</th>
                 {showActions && <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, textAlign: 'center' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={showActions ? 13 : 12} style={{ padding: '60px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={showActions ? 5 : 4} style={{ padding: '60px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
                     <RefreshCw className="spin" style={{ margin: '0 auto 10px' }} size={24} />
                     Calculating payroll summaries...
                   </td>
                 </tr>
               ) : filteredPayroll.length === 0 ? (
                 <tr>
-                  <td colSpan={showActions ? 13 : 12} style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={showActions ? 5 : 4} style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No payroll calculations found for the selected criteria.
                   </td>
                 </tr>
               ) : (
                 filteredPayroll.map((item, idx) => {
-                  const rowBg = item.status === 'Paid' ? 'rgba(16, 185, 129, 0.08)' : (idx % 2 === 0 ? 'var(--white)' : 'var(--surface)')
+                  const isPaid = item.status === 'Paid'
+                  const rowBg = isPaid ? 'rgba(16, 185, 129, 0.08)' : (idx % 2 === 0 ? 'var(--white)' : 'var(--surface)')
                   return (
                     <React.Fragment key={item.id}>
                       <tr 
                         style={{ 
                           background: rowBg, 
-                          borderBottom: '1px solid var(--surface-2)',
+                          borderBottom: 'none',
                           transition: 'background 0.2s' 
                         }}
-                        onMouseOver={e => e.currentTarget.style.background = item.status === 'Paid' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 180, 0, 0.08)'}
-                        onMouseOut={e => e.currentTarget.style.background = rowBg}
                       >
                         <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 700 }}>{item.employee_id}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600 }}>{item.name}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{item.position || 'Staff'}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, textAlign: 'right' }}>
-                          <button 
-                            onClick={() => openBreakdownModal(item)}
-                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', font: 'inherit', fontWeight: 'inherit', color: 'inherit', padding: 0, textDecoration: 'underline', textDecorationStyle: 'dashed', outline: 'none' }}
-                            title="Click to view breakdown"
-                          >
-                            {CURRENCY} {item.base_salary.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </button>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{item.name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{item.position || 'Staff'}</div>
                         </td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 700, color: 'var(--green)', textAlign: 'center' }}>{item.presents}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 700, color: '#EF4444', textAlign: 'center' }}>{item.absents}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', textAlign: 'center' }}>
-                          <span style={{ fontWeight: 700, color: '#F97316' }}>{item.leaves}</span>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '4px' }}>
-                            ({item.paid_leaves}P / {item.unpaid_leaves}U)
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          <span style={{ 
+                            padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700,
+                            background: isPaid ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 180, 0, 0.15)',
+                            color: isPaid ? 'var(--green)' : '#d97706'
+                          }}>
+                            {item.status || 'Pending'}
                           </span>
                         </td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 750, color: 'var(--primary)', textAlign: 'center' }}>{item.holidays}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, textAlign: 'center' }}>{item.overtime_hours}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--green)', textAlign: 'right' }}>
-                          +{item.overtime_pay.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: '#EF4444', textAlign: 'right' }}>
-                          -{item.deductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ padding: '12px 16px', fontSize: '14px', fontWeight: 800, color: 'var(--secondary)', textAlign: 'right' }}>
-                          <button 
-                            onClick={() => openBreakdownModal(item)}
-                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', font: 'inherit', fontWeight: 'inherit', color: 'inherit', padding: 0, textDecoration: 'underline', textDecorationStyle: 'dashed', outline: 'none' }}
-                            title="Click to view breakdown"
-                          >
-                            {CURRENCY} {item.net_salary.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </button>
+                        <td style={{ padding: '12px 16px', fontSize: '15px', fontWeight: 800, color: 'var(--primary)', textAlign: 'right' }}>
+                          {CURRENCY} {item.net_salary.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         {showActions && (
-                          <td style={{ padding: '12px 16px', textAlign: 'center', display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
-                            <button 
-                              onClick={() => openBreakdownModal(item)}
-                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '4px', color: 'var(--secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
-                              onMouseOver={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                              onMouseOut={e => e.currentTarget.style.background = 'transparent'}
-                              title="View Salary Breakdown"
-                            >
-                              <Settings size={16} />
-                            </button>
+                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                              <button 
+                                onClick={() => openBreakdownModal(item)}
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                              >
+                                <Settings size={14} /> Manage
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setAdjustmentsEmployee(item);
+                                  setShowAdjustmentsModal(true);
+                                }}
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-2)' }}
+                              >
+                                <Banknote size={14} /> Adjustments
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  // Simple Print action
+                                  const printWindow = window.open('', '_blank');
+                                  printWindow.document.write(`
+                                    <html>
+                                      <head>
+                                        <title>Salary Slip - ${item.name}</title>
+                                        <style>
+                                          body { font-family: sans-serif; padding: 40px; color: #333; }
+                                          .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #ddd; padding-bottom: 20px; }
+                                          .title { font-size: 24px; font-weight: bold; margin: 0 0 10px 0; }
+                                          .subtitle { font-size: 16px; color: #666; margin: 0; }
+                                          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+                                          .box { border: 1px solid #eee; padding: 15px; border-radius: 8px; }
+                                          .label { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
+                                          .value { font-size: 16px; font-weight: bold; }
+                                          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                                          th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+                                          th { background: #f9f9f9; color: #666; font-size: 13px; }
+                                          .right { text-align: right; }
+                                          .total-row { font-weight: bold; background: #f0fdf4; }
+                                        </style>
+                                      </head>
+                                      <body>
+                                        <div class="header">
+                                          <h1 class="title">Salary Slip</h1>
+                                          <p class="subtitle">For the month of ${selectedMonth}</p>
+                                        </div>
+                                        
+                                        <div class="grid">
+                                          <div class="box">
+                                            <div class="label">Employee Details</div>
+                                            <div class="value">${item.name} (${item.employee_id})</div>
+                                            <div style="margin-top: 5px; font-size: 14px;">${item.position || 'Staff'} - ${item.branch}</div>
+                                          </div>
+                                          <div class="box">
+                                            <div class="label">Attendance Summary</div>
+                                            <div style="font-size: 14px; margin-top: 5px;">
+                                              Present: ${item.presents} | Absent: ${item.absents} <br/>
+                                              Leaves: ${item.leaves} | Holidays: ${item.holidays}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <table>
+                                          <thead>
+                                            <tr>
+                                              <th>Earnings / Deductions</th>
+                                              <th class="right">Amount</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            <tr>
+                                              <td>Base Salary</td>
+                                              <td class="right">${CURRENCY} ${item.base_salary.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            </tr>
+                                            <tr>
+                                              <td>Overtime Pay (${item.overtime_hours} hrs)</td>
+                                              <td class="right" style="color: green;">+ ${CURRENCY} ${item.overtime_pay.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            </tr>
+                                            <tr>
+                                              <td>Deductions (Absents/Unpaid Leaves)</td>
+                                              <td class="right" style="color: red;">- ${CURRENCY} ${item.deductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            </tr>
+                                            <tr>
+                                              <td>Other Adjustments</td>
+                                              <td class="right">${item.other_adjustments >= 0 ? '+' : ''} ${CURRENCY} ${(item.other_adjustments || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            </tr>
+                                            <tr class="total-row">
+                                              <td>Net Salary</td>
+                                              <td class="right" style="font-size: 18px;">${CURRENCY} ${item.net_salary.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            </tr>
+                                          </tbody>
+                                        </table>
+                                        
+                                        <div style="margin-top: 50px; font-size: 12px; color: #999; text-align: center;">
+                                          ${item.notes ? 'Remarks: ' + item.notes + '<br/><br/>' : ''}
+                                          This is a computer generated document.
+                                        </div>
+                                      </body>
+                                    </html>
+                                  `);
+                                  printWindow.document.close();
+                                  setTimeout(() => {
+                                    printWindow.print();
+                                  }, 500);
+                                }}
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                              >
+                                <FileText size={14} /> Print Slip
+                              </button>
+                            </div>
                           </td>
                         )}
                       </tr>
-                      {item.status === 'Paid' && (
+                      {/* Details Row */}
+                      <tr style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
+                        <td colSpan={showActions ? 5 : 4} style={{ padding: '0 16px 16px 16px' }}>
+                          <div style={{ 
+                            display: 'flex', flexWrap: 'wrap', gap: '16px', background: 'rgba(0,0,0,0.02)', 
+                            padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--surface-2)',
+                            fontSize: '12px'
+                          }}>
+                            <div style={{ flex: 1, minWidth: '150px' }}>
+                              <div style={{ color: 'var(--text-secondary)', marginBottom: '4px' }}>Base Salary</div>
+                              <div style={{ fontWeight: 600 }}>{CURRENCY} {item.base_salary.toLocaleString()}</div>
+                            </div>
+                            <div style={{ flex: 1, minWidth: '150px' }}>
+                              <div style={{ color: 'var(--text-secondary)', marginBottom: '4px' }}>Attendance</div>
+                              <div style={{ fontWeight: 600, display: 'flex', gap: '8px' }}>
+                                <span style={{ color: 'var(--green)' }}>P: {item.presents}</span>
+                                <span style={{ color: '#EF4444' }}>A: {item.absents}</span>
+                                <span style={{ color: '#F97316' }}>L: {item.leaves}</span>
+                                <span style={{ color: 'var(--primary)' }}>H: {item.holidays}</span>
+                              </div>
+                            </div>
+                            <div style={{ flex: 1, minWidth: '150px' }}>
+                              <div style={{ color: 'var(--text-secondary)', marginBottom: '4px' }}>Overtime</div>
+                              <div style={{ fontWeight: 600, color: 'var(--green)' }}>
+                                {item.overtime_hours}h (+{CURRENCY} {item.overtime_pay.toLocaleString()})
+                              </div>
+                            </div>
+                            <div style={{ flex: 1, minWidth: '150px' }}>
+                              <div style={{ color: 'var(--text-secondary)', marginBottom: '4px' }}>Deductions</div>
+                              <div style={{ fontWeight: 600, color: '#EF4444' }}>
+                                -{CURRENCY} {item.deductions.toLocaleString()}
+                              </div>
+                            </div>
+                            {item.notes && (
+                              <div style={{ flex: '1 1 100%', minWidth: '200px', borderTop: '1px solid var(--surface-2)', paddingTop: '8px', marginTop: '4px' }}>
+                                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Remarks:</span> <span style={{ fontStyle: 'italic', color: 'var(--text-primary)' }}>{item.notes}</span>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {isPaid && (
                         <tr style={{ background: 'rgba(16, 185, 129, 0.04)', borderBottom: '1px solid var(--surface-2)' }}>
-                          <td colSpan={showActions ? 13 : 12} style={{ padding: '8px 16px', textAlign: 'center', fontSize: '12px', fontWeight: 600, color: 'var(--secondary)' }}>
+                          <td colSpan={showActions ? 5 : 4} style={{ padding: '8px 16px', textAlign: 'center', fontSize: '12px', fontWeight: 600, color: 'var(--secondary)' }}>
                             🎉 <strong style={{ color: 'var(--text-primary)' }}>{item.name}</strong> • Salary Paid: <strong style={{ color: 'var(--green)' }}>{CURRENCY} {item.paid_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
                           </td>
                         </tr>
@@ -897,6 +982,21 @@ export default function Payroll() {
                   </select>
                 </div>
 
+                {/* Remarks Input */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--surface)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--surface-2)' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>Remarks / Notes</div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Optional notes for this payroll record</div>
+                  </div>
+                  <textarea 
+                    value={breakdownNotes}
+                    onChange={e => setBreakdownNotes(e.target.value)}
+                    placeholder="Enter remarks here..."
+                    rows={2}
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--surface-2)', borderRadius: '6px', fontSize: '13px', resize: 'vertical' }}
+                  />
+                </div>
+
               </div>
 
               <div style={{ display: 'flex', gap: '10px', flexShrink: 0 }}>
@@ -920,6 +1020,25 @@ export default function Payroll() {
           </div>
         )
       })()}
+
+      {/* Financial Adjustments Modal */}
+      {showAdjustmentsModal && adjustmentsEmployee && (
+        <EmployeeAdjustmentsModal
+          isOpen={showAdjustmentsModal}
+          employee={adjustmentsEmployee}
+          onClose={() => setShowAdjustmentsModal(false)}
+          onUpdate={(updatedEmp) => {
+            // Update the payroll data in state with the new advance balance
+            setPayrollData(prev => prev.map(p => {
+              if (p.employee_id === updatedEmp.employee_id || p.id === updatedEmp.id) {
+                return { ...p, advance_balance: updatedEmp.advance_balance };
+              }
+              return p;
+            }));
+            loadPayroll(); // Refresh payroll fully to get recalculated values if they impact salary
+          }}
+        />
+      )}
 
     </div>
   )

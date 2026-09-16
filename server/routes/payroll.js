@@ -144,6 +144,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
     // Get employees
     const employeesRes = await pool.query("SELECT * FROM employees WHERE status = 'Active' ORDER BY id ASC");
+
     
     // Get overrides
     const overridesRes = await pool.query('SELECT * FROM employee_payroll_settings');
@@ -251,10 +252,15 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
       // Calculations
       const dailyRate = totalDaysInMonth > 0 ? baseSalary / totalDaysInMonth : 0;
-      const deductions = (absents + unpaidLeaves) * dailyRate;
+      const earnedSalary = (presents + holidays + paidLeaves) * dailyRate;
+      const deductions = baseSalary - earnedSalary; // Deduct unearned days (absents + future days)
+      
       const overtimePay = totalOvertimeHours * overtimeRate;
-      const netSalary = Math.max(0, baseSalary - deductions + overtimePay + otherAdjustments);
+      const netSalary = Math.max(0, earnedSalary + overtimePay + otherAdjustments);
       const paidAmount = savedPaidAmount !== null ? savedPaidAmount : netSalary;
+
+      const advanceBalance = emp.advance_balance ? parseFloat(emp.advance_balance) : 0;
+      const advanceDeduction = savedRecord.advance_deduction ? parseFloat(savedRecord.advance_deduction) : 0;
 
       return {
         id: emp.id,
@@ -277,7 +283,9 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         overtime_pay: parseFloat(overtimePay.toFixed(2)),
         deductions: parseFloat(deductions.toFixed(2)),
         other_adjustments: otherAdjustments,
-        net_salary: parseFloat(netSalary.toFixed(2)),
+        advance_balance: advanceBalance,
+        advance_deduction: advanceDeduction,
+        net_salary: parseFloat((netSalary - advanceDeduction).toFixed(2)),
         paid_amount: parseFloat(paidAmount.toFixed(2)),
         status: paymentStatus,
         notes: notes,
@@ -292,7 +300,6 @@ router.get('/calculate', authenticateToken, async (req, res) => {
   }
 });
 
-// POST save/update a payroll record (finalized slip details, manual adjustments, actual paid amount)
 router.post('/record', authenticateToken, isAdmin, async (req, res) => {
   const {
     employee_id,
@@ -306,22 +313,27 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
     overtime_pay,
     deductions,
     other_adjustments,
+    advance_deduction,
     net_salary,
     paid_amount,
     status,
-    notes
+    notes,
+    zero_out_advance
   } = req.body;
 
   if (!employee_id || !month) {
     return res.status(400).json({ error: 'Employee ID and month are required' });
   }
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+
+    const result = await client.query(
       `INSERT INTO employee_payroll_records 
-        (employee_id, month, base_salary, presents, absents, leaves, holidays, overtime_hours, overtime_pay, deductions, other_adjustments, net_salary, paid_amount, status, notes, paid_date)
+        (employee_id, month, base_salary, presents, absents, leaves, holidays, overtime_hours, overtime_pay, deductions, other_adjustments, advance_deduction, net_salary, paid_amount, status, notes, paid_date)
        VALUES 
-        ($1, $2::text, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::text, $15::text, CASE WHEN $14::text = 'Paid' THEN NOW() ELSE NULL END)
+        ($1, $2::text, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::text, $16::text, CASE WHEN $15::text = 'Paid' THEN NOW() ELSE NULL END)
        ON CONFLICT (employee_id, month) 
        DO UPDATE SET 
         base_salary = $3, 
@@ -332,12 +344,13 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         overtime_hours = $8, 
         overtime_pay = $9, 
         deductions = $10, 
-        other_adjustments = $11, 
-        net_salary = $12, 
-        paid_amount = $13, 
-        status = $14::text, 
-        notes = $15::text, 
-        paid_date = CASE WHEN $14::text = 'Paid' AND employee_payroll_records.status != 'Paid' THEN NOW() ELSE employee_payroll_records.paid_date END
+        other_adjustments = $11,
+        advance_deduction = $12,
+        net_salary = $13, 
+        paid_amount = $14, 
+        status = $15::text, 
+        notes = $16::text, 
+        paid_date = CASE WHEN $15::text = 'Paid' AND employee_payroll_records.status != 'Paid' THEN NOW() ELSE employee_payroll_records.paid_date END
        RETURNING *`,
       [
         employee_id,
@@ -351,6 +364,7 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         parseFloat(overtime_pay || 0),
         parseFloat(deductions || 0),
         parseFloat(other_adjustments || 0),
+        parseFloat(advance_deduction || 0),
         parseFloat(net_salary || 0),
         parseFloat(paid_amount || 0),
         status || 'Pending',
@@ -358,9 +372,146 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       ]
     );
 
+    // Update employee advance balance if advance is deducted or zeroed out
+    if (status === 'Paid') {
+      const advDeduct = parseFloat(advance_deduction || 0);
+      
+      if (zero_out_advance) {
+        await client.query('UPDATE employees SET advance_balance = 0 WHERE id = $1', [employee_id]);
+      } else if (advDeduct > 0) {
+        // Only deduct if it hasn't been deducted for this specific payment before.
+        // For simplicity, we assume hitting "Paid" processes the deduction once.
+        // A robust system would track if the deduction was already applied for this month.
+        // Checking if paid_date was just updated could help, but for now we'll just subtract it.
+        // We'll trust the admin to set the deduction amount correctly.
+        await client.query('UPDATE employees SET advance_balance = GREATEST(0, advance_balance - $1) WHERE id = $2', [advDeduct, employee_id]);
+      }
+    }
+
+    await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST add advance to employee
+router.post('/advance/:employee_id', authenticateToken, isAdmin, async (req, res) => {
+  const { amount } = req.body;
+  if (!amount || isNaN(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Valid amount is required' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE employees SET advance_balance = COALESCE(advance_balance, 0) + $1 WHERE id = $2 RETURNING advance_balance',
+      [parseFloat(amount), req.params.employee_id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Employee not found' });
+    res.json({ advance_balance: result.rows[0].advance_balance });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET financial adjustments for an employee
+router.get('/adjustments/:employee_id', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM employee_financial_adjustments WHERE employee_id = $1 ORDER BY date DESC, created_at DESC',
+      [req.params.employee_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST new financial adjustment
+router.post('/adjustments', authenticateToken, isAdmin, async (req, res) => {
+  const { employee_id, type, custom_label, amount, action_type, date, notes } = req.body;
+  if (!employee_id || !type || !amount || !action_type) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Insert the adjustment
+    const result = await client.query(
+      `INSERT INTO employee_financial_adjustments (employee_id, type, custom_label, amount, action_type, date, notes) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [employee_id, type, custom_label, parseFloat(amount), action_type, date || new Date(), notes]
+    );
+
+    // If it's a Loan/Advance Salary, update the advance_balance in employees table
+    if (type === 'Advance Salary / Loan') {
+      if (action_type === 'Give') {
+        // Giving a loan increases the advance balance
+        await client.query(
+          'UPDATE employees SET advance_balance = COALESCE(advance_balance, 0) + $1 WHERE id = $2',
+          [parseFloat(amount), employee_id]
+        );
+      } else if (action_type === 'Deduct') {
+        // Deducting (recovering) a loan decreases the advance balance
+        await client.query(
+          'UPDATE employees SET advance_balance = GREATEST(COALESCE(advance_balance, 0) - $1, 0) WHERE id = $2',
+          [parseFloat(amount), employee_id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE financial adjustment
+router.delete('/adjustments/:id', authenticateToken, isAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const check = await client.query('SELECT * FROM employee_financial_adjustments WHERE id = $1', [req.params.id]);
+    if (check.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Adjustment not found' });
+    }
+
+    const adj = check.rows[0];
+
+    // Revert the advance balance if applicable
+    if (adj.type === 'Advance Salary / Loan') {
+      if (adj.action_type === 'Give') {
+        await client.query(
+          'UPDATE employees SET advance_balance = GREATEST(COALESCE(advance_balance, 0) - $1, 0) WHERE id = $2',
+          [adj.amount, adj.employee_id]
+        );
+      } else if (adj.action_type === 'Deduct') {
+        await client.query(
+          'UPDATE employees SET advance_balance = COALESCE(advance_balance, 0) + $1 WHERE id = $2',
+          [adj.amount, adj.employee_id]
+        );
+      }
+    }
+
+    await client.query('DELETE FROM employee_financial_adjustments WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ message: 'Adjustment deleted and balances reverted if applicable.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

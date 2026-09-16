@@ -3,6 +3,30 @@ const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 const bcrypt = require('bcrypt');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Ensure upload directory exists
+const uploadDir = path.join(__dirname, '../uploads/documents');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 const autoCreateUserForEmployee = async (employee) => {
   try {
@@ -409,6 +433,68 @@ router.delete('/working-hours/list/:id', authenticateToken, async (req, res) => 
     const result = await pool.query('DELETE FROM employee_working_hours WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Working hours config not found' });
     res.json({ message: 'Working hours configuration deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET documents for an employee
+router.get('/:id/documents', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM employee_documents WHERE employee_id = $1 ORDER BY uploaded_at DESC',
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST upload document for an employee
+router.post('/:id/documents', authenticateToken, upload.single('document'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  const document_name = req.body.document_name || req.file.originalname;
+  const file_path = `/uploads/documents/${req.file.filename}`;
+  const employee_id = req.params.id;
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO employee_documents (employee_id, document_name, file_path) VALUES ($1, $2, $3) RETURNING *',
+      [employee_id, document_name, file_path]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    // If DB insert fails, remove the uploaded file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (e) {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE a document
+router.delete('/documents/:doc_id', authenticateToken, async (req, res) => {
+  try {
+    const docRes = await pool.query('SELECT * FROM employee_documents WHERE id = $1', [req.params.doc_id]);
+    if (docRes.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    
+    const doc = docRes.rows[0];
+    
+    // Delete file from disk
+    const filePath = path.join(__dirname, '../', doc.file_path);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (err) {
+      console.error('Failed to delete file from disk:', err);
+    }
+
+    await pool.query('DELETE FROM employee_documents WHERE id = $1', [req.params.doc_id]);
+    res.json({ message: 'Document deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
