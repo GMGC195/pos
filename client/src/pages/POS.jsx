@@ -70,6 +70,113 @@ const getTimeElapsed = (dateString) => {
   const m = diffMinutes % 60;
   return `${h}h ${m}m ago`;
 };
+const CreditCustomerDropdown = ({ 
+  creditCustomers, 
+  selectedCreditCustomer, 
+  setSelectedCreditCustomer, 
+  setCustomerInfo, 
+  total, 
+  discount, 
+  creditPaymentAmount, 
+  setCreditPaymentAmount 
+}) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+
+  const filteredCustomers = creditCustomers.filter(c => 
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (c.phone && c.phone.includes(searchTerm)) ||
+    (c.id.toString().includes(searchTerm))
+  );
+
+  const selectedCust = creditCustomers.find(c => c.id.toString() === selectedCreditCustomer);
+  
+  const effectiveLimit = selectedCust ? (Number(selectedCust.credit_limit) > 0 ? Number(selectedCust.credit_limit) : 100) : 0;
+  const limitExceeded = selectedCust && Number(selectedCust.balance) > effectiveLimit;
+  const newBalanceExceeded = selectedCust && (Number(selectedCust.balance) + (total - parseFloat(discount || 0)) - parseFloat(creditPaymentAmount || 0)) > effectiveLimit;
+  const isExceeded = limitExceeded || newBalanceExceeded;
+
+  return (
+    <div style={{ padding: 12, background: isExceeded ? 'rgba(255,0,0,0.05)' : 'rgba(59,130,246,0.05)', borderRadius: 8, border: isExceeded ? '1px solid rgba(255,0,0,0.3)' : '1px solid rgba(59,130,246,0.2)', marginTop: 8 }}>
+      <label style={{ fontSize: 11, color: isExceeded ? 'var(--red)' : 'var(--text-secondary)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Select Credit Customer *</label>
+      
+      <div style={{ position: 'relative' }}>
+        <div 
+          onClick={() => setIsOpen(!isOpen)}
+          style={{ width: '100%', padding: '8px', fontSize: 13, borderRadius: 6, border: isExceeded ? '1px solid rgba(255,0,0,0.5)' : '1px solid var(--surface-2)', background: 'white', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          <span>{selectedCust ? `${selectedCust.name} (${selectedCust.phone || 'N/A'}) - Bal: ${CURRENCY} ${Math.abs(selectedCust.balance).toFixed(2)}` : '-- Select Customer --'}</span>
+          <ChevronDown size={14} />
+        </div>
+        
+        {isOpen && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 6, marginTop: 4, zIndex: 100, maxHeight: 200, display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+            <div style={{ padding: 8, borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Search size={14} color="var(--text-muted)" />
+              <input 
+                autoFocus
+                type="text" 
+                placeholder="Search name, phone, code..." 
+                value={searchTerm} 
+                onChange={e => setSearchTerm(e.target.value)} 
+                style={{ border: 'none', outline: 'none', width: '100%', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {filteredCustomers.length === 0 ? (
+                <div style={{ padding: 8, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>No results found</div>
+              ) : (
+                filteredCustomers.map(c => {
+                  const effLim = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 100;
+                  const isLimitExceeded = Number(c.balance) > effLim;
+                  return (
+                    <div 
+                      key={c.id} 
+                      onClick={() => {
+                        setSelectedCreditCustomer(c.id.toString());
+                        if (setCustomerInfo) {
+                          setCustomerInfo(prev => ({ ...prev, name: c.name, phone: c.phone || '' }));
+                        }
+                        setIsOpen(false);
+                        setSearchTerm('');
+                      }}
+                      style={{ padding: '8px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', background: isLimitExceeded ? 'rgba(255,0,0,0.05)' : 'transparent', color: isLimitExceeded ? 'var(--red)' : 'inherit' }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{c.name} {isLimitExceeded && <span style={{fontSize: 10, background: 'var(--red)', color: 'white', padding: '2px 4px', borderRadius: 4, marginLeft: 4}}>Limit Exceeded</span>}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.phone || 'N/A'} • Bal: {CURRENCY} {Math.abs(c.balance).toFixed(2)} • Limit: {Number(c.credit_limit) > 0 ? `${CURRENCY} ${Number(c.credit_limit).toFixed(2)}` : 'None'}</div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {selectedCust && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8, marginTop: 8 }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Prev Balance:</span>
+            <span style={{ fontWeight: 600 }}>{CURRENCY} {Math.abs(selectedCust.balance).toFixed(2)} {selectedCust.balance > 0 ? '(Due)' : ''}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Bill Amount:</span>
+            <span style={{ fontWeight: 600 }}>{CURRENCY} {(total - parseFloat(discount || 0)).toFixed(2)}</span>
+          </div>
+          
+          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Clear Dues (Amount Paid Now)</label>
+          <input 
+            type="number" step="0.01" 
+            placeholder="0.00"
+            value={creditPaymentAmount}
+            onChange={(e) => setCreditPaymentAmount(e.target.value)}
+            style={{ width: '100%', padding: '8px', fontSize: 13, borderRadius: 6, border: '1px solid var(--surface-2)' }}
+          />
+        </>
+      )}
+    </div>
+  )
+};
 
 export default function POS() {
   const { user } = useAuth();
@@ -135,6 +242,17 @@ export default function POS() {
   const [creditCustomers, setCreditCustomers] = useState([])
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState('')
   const [creditPaymentAmount, setCreditPaymentAmount] = useState('')
+  const [selectedCustomerHistory, setSelectedCustomerHistory] = useState([])
+
+  useEffect(() => {
+    if (paymentMethod === 'Credit' && selectedCreditCustomer && quickCompleteModal) {
+      axios.get(`/api/credit/${selectedCreditCustomer}/history`)
+        .then(res => setSelectedCustomerHistory(res.data))
+        .catch(console.error)
+    } else {
+      setSelectedCustomerHistory([])
+    }
+  }, [paymentMethod, selectedCreditCustomer, quickCompleteModal])
 
   const fetchCreditCustomers = useCallback(async () => {
     try {
@@ -1408,15 +1526,17 @@ export default function POS() {
                   <ClipboardList size={18} /> {processing === 'paying' ? 'Paying...' : 'Pay & Settled'}
                 </button>
               )}
-              <button
-                className="btn btn-secondary btn-lg"
-                onClick={() => { if (!isManagement) setConfirmModal(true); }}
-                title="Confirm Order"
-                style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
-                disabled={processing || isManagement}
-              >
-                C
-              </button>
+              {user?.role?.trim().toLowerCase() !== 'order taker' && (
+                <button
+                  className="btn btn-secondary btn-lg"
+                  onClick={() => { if (!isManagement) setConfirmModal(true); }}
+                  title="Confirm Order"
+                  style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                  disabled={processing || isManagement}
+                >
+                  C
+                </button>
+              )}
             </div>
           </div>
           </div>        </div>
@@ -1528,7 +1648,7 @@ export default function POS() {
       {
         confirmModal && (
           <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setConfirmModal(false) }}>
-            <div className="modal" style={{ maxWidth: 700, width: "90%", padding: window.innerWidth <= 900 ? 12 : 20, maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal" style={{ maxWidth: 700, width: "90%", padding: window.innerWidth <= 900 ? 12 : 20, maxHeight: '90vh', overflowY: 'auto', minHeight: paymentMethod === 'Credit' ? (window.innerWidth <= 900 ? 500 : 550) : 'auto' }}>
               <div className="modal-header" style={{ paddingBottom: window.innerWidth <= 900 ? 0 : 16, marginBottom: window.innerWidth <= 900 ? 4 : 16, borderBottom: window.innerWidth <= 900 ? 'none' : '1px solid var(--surface-2)' }}>
                 <h3 style={{ fontSize: window.innerWidth <= 900 ? 13 : 24, margin: 0 }}>Confirm Order</h3>
                 <button className="modal-close" onClick={() => setConfirmModal(false)}>✕</button>
@@ -1674,7 +1794,7 @@ export default function POS() {
                               cursor: 'pointer'
                             }}
                           >
-                            {pm === 'Payment Pending' ? 'Pending' : pm}
+                            {pm === 'Payment Pending' ? 'Pending' : (pm === 'Online' ? 'Card' : pm)}
                           </button>
                         ))}
                       </div>
@@ -1683,47 +1803,16 @@ export default function POS() {
 
                   {/* CREDIT DETAILS SECTION */}
                   {paymentMethod === 'Credit' && (
-                    <div style={{ padding: 12, background: 'rgba(59,130,246,0.05)', borderRadius: 8, border: '1px solid rgba(59,130,246,0.2)', marginTop: 8 }}>
-                      <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Select Credit Customer *</label>
-                      <select 
-                        value={selectedCreditCustomer} 
-                        onChange={(e) => {
-                          setSelectedCreditCustomer(e.target.value);
-                          const cust = creditCustomers.find(c => c.id.toString() === e.target.value);
-                          if (cust) {
-                            setCustomerInfo(prev => ({ ...prev, name: cust.name, phone: cust.phone || '' }));
-                          }
-                        }}
-                        style={{ width: '100%', padding: '8px', fontSize: 13, borderRadius: 6, border: '1px solid var(--surface-2)', marginBottom: 8 }}
-                      >
-                        <option value="">-- Select Customer --</option>
-                        {creditCustomers.map(c => (
-                          <option key={c.id} value={c.id}>{c.name} ({c.phone || 'N/A'}) - Bal: {CURRENCY} {Math.abs(c.balance).toFixed(2)}</option>
-                        ))}
-                      </select>
-                      
-                      {selectedCreditCustomer && (
-                        <>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
-                            <span style={{ color: 'var(--text-secondary)' }}>Prev Balance:</span>
-                            <span style={{ fontWeight: 600 }}>{CURRENCY} {Math.abs(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)?.balance || 0).toFixed(2)}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
-                            <span style={{ color: 'var(--text-secondary)' }}>Today&apos;s Bill:</span>
-                            <span style={{ fontWeight: 600 }}>{CURRENCY} {(total - parseFloat(customerInfo.discount || 0)).toFixed(2)}</span>
-                          </div>
-                          
-                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Clear Dues (Amount Paid Now)</label>
-                          <input 
-                            type="number" step="0.01" 
-                            placeholder="0.00"
-                            value={creditPaymentAmount}
-                            onChange={(e) => setCreditPaymentAmount(e.target.value)}
-                            style={{ width: '100%', padding: '8px', fontSize: 13, borderRadius: 6, border: '1px solid var(--surface-2)' }}
-                          />
-                        </>
-                      )}
-                    </div>
+                    <CreditCustomerDropdown 
+                      creditCustomers={creditCustomers}
+                      selectedCreditCustomer={selectedCreditCustomer}
+                      setSelectedCreditCustomer={setSelectedCreditCustomer}
+                      setCustomerInfo={setCustomerInfo}
+                      total={total}
+                      discount={customerInfo.discount}
+                      creditPaymentAmount={creditPaymentAmount}
+                      setCreditPaymentAmount={setCreditPaymentAmount}
+                    />
                   )}
 
                   <div style={{ paddingTop: window.innerWidth <= 900 ? 12 : 4, paddingBottom: window.innerWidth <= 900 ? 12 : 0, display: 'flex', gap: window.innerWidth <= 900 ? 6 : 10, position: window.innerWidth <= 900 ? 'sticky' : 'static', bottom: window.innerWidth <= 900 ? -12 : 'auto', background: 'white', zIndex: 10, borderTop: window.innerWidth <= 900 ? '1px solid #eee' : 'none', marginTop: window.innerWidth <= 900 ? 12 : 0 }}>
@@ -1743,7 +1832,7 @@ export default function POS() {
       {/* Quick Complete Modal */}
       {quickCompleteModal && (
         <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal" style={{ maxWidth: 360, padding: 24, textAlign: 'center' }}>
+          <div className="modal" style={{ maxWidth: paymentMethod === 'Credit' ? 800 : 360, padding: 24, textAlign: 'center', transition: 'max-width 0.3s' }}>
             <h3 style={{ marginBottom: 16 }}>Complete Order #{quickCompleteModal.id} (Slip #{quickCompleteModal.slip_number})</h3>
             
             {user?.role?.trim().toLowerCase() === 'order taker' ? (
@@ -1775,19 +1864,88 @@ export default function POS() {
               </>
             ) : (
               <>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left', marginBottom: 24 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
-                    <input type="radio" name="quickPayment" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
-                    <span style={{ fontSize: 15, fontWeight: 500 }}>Cash</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
-                    <input type="radio" name="quickPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
-                    <span style={{ fontSize: 15, fontWeight: 500 }}>Card</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
-                    <input type="radio" name="quickPayment" value="Payment Pending" checked={paymentMethod === 'Payment Pending' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Payment Pending')} />
-                    <span style={{ fontSize: 15, fontWeight: 500 }}>Pending</span>
-                  </label>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 16, justifyContent: 'center' }}>
+                  {['Cash', 'Online', 'Payment Pending', 'Credit'].map(pm => {
+                    const isSelected = paymentMethod === pm || (pm === 'Payment Pending' && paymentMethod === 'Hold');
+                    return (
+                      <button 
+                        key={pm}
+                        onClick={() => setPaymentMethod(pm === 'Payment Pending' ? 'Hold' : pm)}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          border: isSelected ? '2px solid var(--primary)' : '1px solid var(--surface-2)',
+                          background: isSelected ? 'rgba(255,184,0,0.1)' : 'white',
+                          color: isSelected ? 'var(--primary)' : 'var(--text-secondary)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {pm === 'Payment Pending' ? 'Pending' : (pm === 'Online' ? 'Card' : pm)}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div style={{ display: 'flex', gap: 16, textAlign: 'left', marginBottom: 24, flexDirection: paymentMethod === 'Credit' ? 'row' : 'column' }}>
+                  <div style={{ flex: 1, minWidth: 300 }}>
+                    {paymentMethod === 'Credit' && (
+                      <CreditCustomerDropdown 
+                        creditCustomers={creditCustomers}
+                        selectedCreditCustomer={selectedCreditCustomer}
+                        setSelectedCreditCustomer={setSelectedCreditCustomer}
+                        setCustomerInfo={null}
+                        total={quickCompleteModal.grand_total || quickCompleteModal.total}
+                        discount={quickCompleteModal.discount}
+                        creditPaymentAmount={creditPaymentAmount}
+                        setCreditPaymentAmount={setCreditPaymentAmount}
+                      />
+                    )}
+                  </div>
+
+                  {paymentMethod === 'Credit' && (
+                    <div style={{ flex: 1, minWidth: 350, borderLeft: '1px solid var(--surface-2)', paddingLeft: 16 }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: 16 }}>Customer History</h4>
+                      {selectedCreditCustomer ? (
+                        (() => {
+                           const c = creditCustomers.find(x => x.id.toString() === selectedCreditCustomer);
+                           return c ? (
+                             <div>
+                               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                                 <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Current Balance:</span>
+                                 <span style={{ fontSize: 15, fontWeight: 'bold', color: c.balance > 0 ? 'var(--red)' : 'var(--green)' }}>{CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? 'DR' : 'CR'}</span>
+                               </div>
+                               
+                               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 600 }}>Recent Orders:</div>
+                               <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--surface-2)', borderRadius: 6, padding: '4px 8px' }}>
+                                  {selectedCustomerHistory.length === 0 ? (
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>No recent orders found</div>
+                                  ) : (
+                                    selectedCustomerHistory.map(hist => (
+                                      <div key={hist.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--surface-2)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                          <span style={{ fontSize: 12, fontWeight: 600 }}>#{hist.id} (Slip {hist.slip_number})</span>
+                                          <span style={{ fontSize: 12, fontWeight: 600 }}>{CURRENCY} {parseFloat(hist.grand_total).toFixed(2)}</span>
+                                        </div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                                          {new Date(hist.created_at).toLocaleDateString()}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                          {hist.items?.map(i => `${i.qty}x ${i.name}`).join(', ')}
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                               </div>
+                             </div>
+                           ) : <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Customer details not found.</div>
+                        })()
+                      ) : (
+                        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Select a customer to view history.</div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -1802,7 +1960,11 @@ export default function POS() {
                       if (method === 'Payment Pending') {
                         await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
                       } else {
-                        await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
+                        await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { 
+                          payment_method: method,
+                          credit_customer_id: method === 'Credit' ? selectedCreditCustomer : null,
+                          credit_payment_amount: method === 'Credit' ? creditPaymentAmount : null
+                        })
                       }
                       toast.success('Order completed!')
                       setQuickCompleteModal(null)
@@ -1821,7 +1983,12 @@ export default function POS() {
                       if (method === 'Payment Pending') {
                         await axios.patch(`/api/orders/${quickCompleteModal.id}/status`, { status: method })
                       } else {
-                        await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { payment_method: method })
+                        await axios.patch(`/api/orders/${quickCompleteModal.id}/pay`, { 
+                          payment_method: method,
+                          credit_customer_id: method === 'Credit' ? selectedCreditCustomer : null,
+                          credit_payment_amount: method === 'Credit' ? creditPaymentAmount : null,
+                          trigger_cloud_print: true
+                        })
                       }
                       toast.success('Order completed & printing!')
                       

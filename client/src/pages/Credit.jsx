@@ -3,8 +3,14 @@ import axios from '../api';
 import toast from 'react-hot-toast';
 import { Plus, Edit, Trash2, FileText, X } from 'lucide-react';
 import { CURRENCY } from '../config';
+import { useAuth } from '../contexts/AuthContext';
+
+const AVAILABLE_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3'];
 
 export default function Credit() {
+  const { user } = useAuth();
+  const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || user?.role?.trim().toLowerCase() === 'developer';
+  
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -18,16 +24,24 @@ export default function Credit() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [creditLimit, setCreditLimit] = useState(0);
+  const [selectedBranches, setSelectedBranches] = useState([]);
+
+  // Filter state
+  const [branchFilter, setBranchFilter] = useState('All');
 
   const [paymentAmount, setPaymentAmount] = useState('');
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [branchFilter]); // refetch when filter changes
 
   const fetchCustomers = async () => {
+    setLoading(true);
     try {
-      const res = await axios.get('/api/credit');
+      const url = isAdmin && branchFilter !== 'All' 
+        ? `/api/credit?branch=${encodeURIComponent(branchFilter)}` 
+        : '/api/credit';
+      const res = await axios.get(url);
       setCustomers(res.data);
     } catch (err) {
       toast.error('Failed to fetch credit customers');
@@ -40,12 +54,19 @@ export default function Credit() {
     e.preventDefault();
     if (!name) return toast.error('Name is required');
 
+    const payload = {
+      name,
+      phone,
+      credit_limit: creditLimit,
+      available_branches: isAdmin ? selectedBranches : [user?.branch?.split(',')[0]?.trim() || '']
+    };
+
     try {
       if (editingCustomer) {
-        await axios.put(`/api/credit/${editingCustomer.id}`, { name, phone, credit_limit: creditLimit });
+        await axios.put(`/api/credit/${editingCustomer.id}`, payload);
         toast.success('Customer updated');
       } else {
-        await axios.post('/api/credit', { name, phone, credit_limit: creditLimit });
+        await axios.post('/api/credit', payload);
         toast.success('Customer added');
       }
       setShowModal(false);
@@ -71,6 +92,7 @@ export default function Credit() {
     setName('');
     setPhone('');
     setCreditLimit(0);
+    setSelectedBranches(AVAILABLE_BRANCHES); // Default select all
     setShowModal(true);
   };
 
@@ -79,6 +101,7 @@ export default function Credit() {
     setName(customer.name);
     setPhone(customer.phone || '');
     setCreditLimit(customer.credit_limit || 0);
+    setSelectedBranches(customer.available_branches || []);
     setShowModal(true);
   };
 
@@ -105,33 +128,53 @@ export default function Credit() {
       toast.success('Payment added');
       setPaymentAmount('');
       
-      // Refresh ledger and customer balance
       const ledgerRes = await axios.get(`/api/credit/${activeCustomer.id}/ledger`);
       setLedger(ledgerRes.data);
       
-      // Update local customer balance for display
       setActiveCustomer(prev => ({ ...prev, balance: prev.balance - Number(paymentAmount) }));
-      fetchCustomers(); // refresh main list
+      fetchCustomers(); 
     } catch (err) {
       toast.error('Failed to add payment');
     }
   };
 
-  if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
+  const toggleBranch = (br) => {
+    if (selectedBranches.includes(br)) {
+      setSelectedBranches(selectedBranches.filter(b => b !== br));
+    } else {
+      setSelectedBranches([...selectedBranches, br]);
+    }
+  };
 
   return (
     <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: 'var(--text)' }}>Credit Customers</h2>
-        <button
-          onClick={openAddModal}
-          style={{
-            background: 'var(--primary)', color: '#fff', border: 'none', padding: '10px 16px',
-            borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600
-          }}
-        >
-          <Plus size={18} /> Add Customer
-        </button>
+        
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          {isAdmin && (
+            <select 
+              value={branchFilter}
+              onChange={e => setBranchFilter(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--surface-2)', outline: 'none' }}
+            >
+              <option value="All">All Branches</option>
+              {AVAILABLE_BRANCHES.map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          )}
+
+          <button
+            onClick={openAddModal}
+            style={{
+              background: 'var(--primary)', color: '#fff', border: 'none', padding: '10px 16px',
+              borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600
+            }}
+          >
+            <Plus size={18} /> Add Customer
+          </button>
+        </div>
       </div>
 
       <div style={{ background: 'var(--surface)', borderRadius: 12, border: '1.5px solid var(--surface-2)', overflow: 'hidden' }}>
@@ -142,37 +185,49 @@ export default function Credit() {
               <th style={{ padding: '16px', fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Phone</th>
               <th style={{ padding: '16px', fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Balance</th>
               <th style={{ padding: '16px', fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Limit</th>
+              {isAdmin && <th style={{ padding: '16px', fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Branches</th>}
               <th style={{ padding: '16px', fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {customers.map((c) => (
-              <tr key={c.id} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                <td style={{ padding: '16px', fontWeight: 500 }}>{c.name}</td>
-                <td style={{ padding: '16px', color: 'var(--text-secondary)' }}>{c.phone || '-'}</td>
-                <td style={{ padding: '16px', fontWeight: 600, color: c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
-                  {CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? '(Due)' : (c.balance < 0 ? '(Adv)' : '')}
-                </td>
-                <td style={{ padding: '16px', color: 'var(--text-secondary)' }}>
-                  {Number(c.credit_limit) > 0 ? `${CURRENCY} ${Number(c.credit_limit).toFixed(2)}` : 'No Limit'}
-                </td>
-                <td style={{ padding: '16px', textAlign: 'right' }}>
-                  <button onClick={() => openLedger(c)} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 6 }} title="Ledger">
-                    <FileText size={18} />
-                  </button>
-                  <button onClick={() => openEditModal(c)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6 }} title="Edit">
-                    <Edit size={18} />
-                  </button>
-                  <button onClick={() => handleDelete(c.id)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: 6 }} title="Delete">
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {customers.length === 0 && (
-              <tr>
-                <td colSpan={5} style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>No credit customers found.</td>
-              </tr>
+            {loading ? (
+              <tr><td colSpan={isAdmin ? 6 : 5} style={{ padding: 32, textAlign: 'center' }}>Loading...</td></tr>
+            ) : customers.length === 0 ? (
+              <tr><td colSpan={isAdmin ? 6 : 5} style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>No credit customers found.</td></tr>
+            ) : (
+              customers.map((c) => {
+                const effLim = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 100;
+                const limitExceeded = Number(c.balance) > effLim;
+                
+                return (
+                  <tr key={c.id} style={{ borderBottom: '1px solid var(--surface-2)', background: limitExceeded ? 'rgba(255, 0, 0, 0.05)' : 'transparent' }}>
+                    <td style={{ padding: '16px', fontWeight: 500 }}>{c.name}</td>
+                    <td style={{ padding: '16px', color: 'var(--text-secondary)' }}>{c.phone || '-'}</td>
+                    <td style={{ padding: '16px', fontWeight: 600, color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) }}>
+                      {CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? '(Due)' : (c.balance < 0 ? '(Adv)' : '')}
+                    </td>
+                    <td style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                      {Number(c.credit_limit) > 0 ? `${CURRENCY} ${Number(c.credit_limit).toFixed(2)}` : 'No Limit'}
+                    </td>
+                    {isAdmin && (
+                      <td style={{ padding: '16px', color: 'var(--text-secondary)', fontSize: 12 }}>
+                        {c.available_branches ? c.available_branches.join(', ') : '-'}
+                      </td>
+                    )}
+                    <td style={{ padding: '16px', textAlign: 'right' }}>
+                      <button onClick={() => openLedger(c)} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 6 }} title="Ledger">
+                        <FileText size={18} />
+                      </button>
+                      <button onClick={() => openEditModal(c)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6 }} title="Edit">
+                        <Edit size={18} />
+                      </button>
+                      <button onClick={() => handleDelete(c.id)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: 6 }} title="Delete">
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -194,9 +249,28 @@ export default function Credit() {
                 <input value={phone} onChange={e => setPhone(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--bg)', outline: 'none', color: 'var(--text)', boxSizing: 'border-box' }} />
               </div>
               <div>
-                <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600 }}>Credit Limit (Optional)</label>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600 }}>Credit Limit (Optional, 0 = No Limit)</label>
                 <input type="number" step="0.01" value={creditLimit} onChange={e => setCreditLimit(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--bg)', outline: 'none', color: 'var(--text)', boxSizing: 'border-box' }} />
               </div>
+              
+              {isAdmin && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600 }}>Assign Branches</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {AVAILABLE_BRANCHES.map(br => (
+                      <label key={br} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 14 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedBranches.includes(br)}
+                          onChange={() => toggleBranch(br)}
+                        />
+                        {br}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <button type="submit" style={{ background: 'var(--primary)', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', marginTop: 8 }}>
                 Save
               </button>

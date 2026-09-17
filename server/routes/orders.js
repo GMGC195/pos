@@ -452,8 +452,8 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
 
 // PATCH pay held order
 router.patch('/:id/pay', authenticateToken, async (req, res) => {
-  const { payment_method } = req.body;
-  if (!['Cash', 'Card', 'Online'].includes(payment_method)) {
+  const { payment_method, credit_customer_id, credit_payment_amount, trigger_cloud_print } = req.body;
+  if (!['Cash', 'Card', 'Online', 'Credit'].includes(payment_method)) {
     return res.status(400).json({ error: 'Invalid payment method' });
   }
   const client = await pool.connect();
@@ -474,11 +474,46 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Order not found' });
     }
     
-    // Update transaction to Cash/Card
+    // Update transaction to Cash/Card/Credit
     await client.query(
       `UPDATE transactions SET payment_method = $1 WHERE order_id = $2`,
       [payment_method, req.params.id]
     );
+
+    // Handle Credit order logic
+    if (payment_method === 'Credit' && credit_customer_id) {
+      const order = orderResult.rows[0];
+      
+      // Also update the order table with the credit_customer_id
+      await client.query(
+        `UPDATE orders SET credit_customer_id = $1 WHERE id = $2`,
+        [credit_customer_id, req.params.id]
+      );
+      
+      // Add the order to their ledger (increases debt)
+      await client.query(
+        `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+        [credit_customer_id, order.id, 'CREDIT_ORDER', order.grand_total]
+      );
+      
+      let balanceChange = parseFloat(order.grand_total);
+      
+      // If they made an inline payment right now
+      if (credit_payment_amount && parseFloat(credit_payment_amount) > 0) {
+        const paymentAmt = parseFloat(credit_payment_amount);
+        await client.query(
+          `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+          [credit_customer_id, order.id, 'PAYMENT', paymentAmt]
+        );
+        balanceChange -= paymentAmt;
+      }
+      
+      // Update overall customer balance
+      await client.query(
+        `UPDATE credit_customers SET balance = balance + $1 WHERE id = $2`,
+        [balanceChange, credit_customer_id]
+      );
+    }
     
     // Deduct stock now that it's paid/completed
     await deductStock(req.params.id, client);
@@ -486,6 +521,54 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     await client.query('COMMIT');
     const updatedOrder = orderResult.rows[0];
     if (req.io) req.io.emit('orderUpdated', updatedOrder);
+    
+    // Trigger Cloud Print if requested
+    if (trigger_cloud_print) {
+      try {
+        const settingsRes = await pool.query('SELECT auto_print_enabled, printer_ip FROM settings ORDER BY id ASC LIMIT 1');
+        const autoPrintEnabled = settingsRes.rows.length > 0 && settingsRes.rows[0].auto_print_enabled === true;
+        const printerIp = req.body.printerIp || (settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip ? settingsRes.rows[0].printer_ip : '127.0.0.1');
+
+        if (autoPrintEnabled || req.body.printerIp) {
+          const itemsResult = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [updatedOrder.id]);
+          const items = itemsResult.rows;
+          
+          const effectiveBranch = updatedOrder.branch || 'Branch 1';
+          const branchNumber = String(req.body.branchId || effectiveBranch).replace(/\D/g, '') || '1';
+          const channelName = `branch-${branchNumber}-orders`;
+
+          const payload = {
+            orderId: updatedOrder.id,
+            orderNumber: updatedOrder.slip_number,
+            branchId: parseInt(branchNumber),
+            waiterName: (updatedOrder.order_taker || "Staff").replace(/[^\x00-\x7F]/g, "").trim(),
+            tableName: (updatedOrder.table_number || "").replace(/[^\x00-\x7F]/g, "").trim(),
+            orderType: updatedOrder.order_type || "Takeaway",
+            printerIp: printerIp,
+            subtotal: updatedOrder.subtotal,
+            discount: updatedOrder.discount || 0,
+            total: updatedOrder.grand_total,
+            currency: "SAR",
+            customerName: (updatedOrder.customer_name || req.body.customer_name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+            customerPhone: updatedOrder.customer_phone || req.body.customer_phone || "",
+            paymentStatus: updatedOrder.status || "Completed",
+            createdAt: new Date().toISOString(),
+            items: items.map(item => ({
+              name: (item.name || item.item_name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+              qty: item.qty || 1,
+              amount: item.price || item.unit_price
+            }))
+          };
+          
+          if (pusher) {
+            await pusher.trigger(channelName, 'print-kitchen-ticket', payload);
+          }
+        }
+      } catch (printErr) {
+        console.error('[ORDER ERROR] Quick Complete Cloud Print error:', printErr);
+      }
+    }
+
     res.json({ success: true, order: updatedOrder });
   } catch (err) {
     await client.query('ROLLBACK');
