@@ -43,6 +43,15 @@ router.get('/', async (req, res) => {
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
+    if (error.code === '42703' && error.message.includes('available_branches')) {
+      try {
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
+        const result = await pool.query(query, params); // retry
+        return res.json(result.rows);
+      } catch (retryErr) {
+        console.error('Auto-migration failed:', retryErr);
+      }
+    }
     console.error('Error fetching credit customers:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -69,6 +78,18 @@ router.post('/', async (req, res) => {
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
+    if (error.code === '42703' && error.message.includes('available_branches')) {
+      try {
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
+        const result = await pool.query(
+          'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches) VALUES ($1, $2, $3, 0, $4) RETURNING *',
+          [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches)]
+        );
+        return res.status(201).json(result.rows[0]);
+      } catch (retryErr) {
+        console.error('Auto-migration failed on POST:', retryErr);
+      }
+    }
     console.error('Error adding credit customer:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -98,9 +119,19 @@ router.put('/:id', async (req, res) => {
     query += ` WHERE id = $${params.length} RETURNING *`;
 
     const result = await pool.query(query, params);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Customer not found' });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Credit customer not found' });
     res.json(result.rows[0]);
   } catch (error) {
+    if (error.code === '42703' && error.message.includes('available_branches')) {
+      try {
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
+        const result = await pool.query(query, params); // retry
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Credit customer not found' });
+        return res.json(result.rows[0]);
+      } catch (retryErr) {
+        console.error('Auto-migration failed on PUT:', retryErr);
+      }
+    }
     console.error('Error updating credit customer:', error);
     res.status(500).json({ error: 'Internal server error' });
   }

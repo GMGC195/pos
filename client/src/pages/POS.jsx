@@ -1492,18 +1492,20 @@ export default function POS() {
           </div>
 
           {/* Payment method */}
-          <div style={{ padding: "0 24px 16px" }}>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <input type="radio" name="cartPayment" value="Cash" checked={paymentMethod === 'Cash' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Cash')} />
-                <span style={{ fontSize: 14, fontWeight: 600 }}>Cash</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <input type="radio" name="cartPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
-                <span style={{ fontSize: 14, fontWeight: 600 }}>Card</span>
-              </label>
+          {user?.role?.trim().toLowerCase() !== 'order taker' && (
+            <div style={{ padding: "0 24px 16px" }}>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="radio" name="cartPayment" value="Cash" checked={paymentMethod === 'Cash' || paymentMethod === 'Hold'} onChange={() => setPaymentMethod('Cash')} />
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>Cash</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="radio" name="cartPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>Card</span>
+                </label>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Actions */}
           <div className="cart-actions">
