@@ -140,7 +140,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     await client.query('BEGIN');
 
-    const status = (payment_method === 'Hold' || payment_method === 'Payment Pending') ? payment_method : 'Completed';
+    const status = (payment_method === 'Hold' || payment_method === 'Payment Pending' || payment_method === 'Payment Requested') ? payment_method : 'Completed';
 
     const role = req.user.role?.trim().toLowerCase();
     const isAdmin = role === 'admin' || role === 'developer';

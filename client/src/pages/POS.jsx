@@ -526,7 +526,19 @@ export default function POS() {
       (item.category_names && item.category_names.some(c => c.toLowerCase().includes(search.toLowerCase()))) ||
       (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase()));
     const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.trim().toLowerCase());
-    const matchesBranch = !isAdminOrDev || (item.available_branches || []).includes(selectedBranch);
+    
+    let branches = [];
+    if (Array.isArray(item.available_branches)) {
+      branches = item.available_branches;
+    } else if (typeof item.available_branches === 'string') {
+      try {
+        branches = JSON.parse(item.available_branches);
+      } catch (e) {
+        branches = item.available_branches.replace(/^{|}$/g, '').split(',').map(b => b.replace(/(^"|"$)/g, '').trim());
+      }
+    }
+    
+    const matchesBranch = !isAdminOrDev || branches.includes(selectedBranch);
     return matchesCategory && matchesSearch && matchesBranch;
   });
 

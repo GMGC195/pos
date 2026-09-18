@@ -77,7 +77,19 @@ export default function Inventory() {
       (item.category_names && item.category_names.some(c => c.toLowerCase().includes(search.toLowerCase()))) ||
       (item.category_name && item.category_name.toLowerCase().includes(search.toLowerCase())) ||
       (item.short_code && item.short_code.toLowerCase().includes(search.toLowerCase()));
-    const matchesBranch = branchFilter === 'All' || (item.available_branches || []).includes(branchFilter);
+
+    let branches = [];
+    if (Array.isArray(item.available_branches)) {
+      branches = item.available_branches;
+    } else if (typeof item.available_branches === 'string') {
+      try {
+        branches = JSON.parse(item.available_branches);
+      } catch (e) {
+        branches = item.available_branches.replace(/^{|}$/g, '').split(',').map(b => b.replace(/(^"|"$)/g, '').trim());
+      }
+    }
+    
+    const matchesBranch = branchFilter === 'All' || branches.includes(branchFilter);
     return matchesCategory && matchesSearch && matchesBranch;
   });
 
@@ -238,7 +250,17 @@ export default function Inventory() {
 
   const toggleBranch = async (item, branchName) => {
     try {
-      const branches = item.available_branches || [];
+      let branches = [];
+      if (Array.isArray(item.available_branches)) {
+        branches = item.available_branches;
+      } else if (typeof item.available_branches === 'string') {
+        try {
+          branches = JSON.parse(item.available_branches);
+        } catch (e) {
+          branches = item.available_branches.replace(/^{|}$/g, '').split(',').map(b => b.replace(/(^"|"$)/g, '').trim());
+        }
+      }
+
       const newBranches = branches.includes(branchName)
         ? branches.filter(b => b !== branchName)
         : [...branches, branchName];
@@ -385,7 +407,7 @@ export default function Inventory() {
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <input 
                               type="checkbox" 
-                              checked={(item.available_branches || []).includes('Branch 2')}
+                              checked={Array.isArray(item.available_branches) ? item.available_branches.includes('Branch 2') : (typeof item.available_branches === 'string' ? item.available_branches.includes('Branch 2') : false)}
                               onChange={() => toggleBranch(item, 'Branch 2')}
                               style={{ cursor: 'pointer', width: 20, height: 20, accentColor: 'var(--primary)' }}
                               title="Toggle Branch 2"
