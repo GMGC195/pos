@@ -43,9 +43,13 @@ router.get('/', async (req, res) => {
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
-    if (error.code === '42703' && error.message.includes('available_branches')) {
+    if (error.code === '42703') { // undefined_column
       try {
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS reference VARCHAR(255)");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS notes TEXT");
+        await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100)");
+        
         const result = await pool.query(query, params); // retry
         return res.json(result.rows);
       } catch (retryErr) {
@@ -59,7 +63,7 @@ router.get('/', async (req, res) => {
 
 // Add a new credit customer
 router.post('/', async (req, res) => {
-  const { name, phone, credit_limit, available_branches } = req.body;
+  const { name, phone, credit_limit, available_branches, reference, notes } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
 
   const userRole = req.user?.role?.trim().toLowerCase();
@@ -72,18 +76,35 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    const checkQuery = `SELECT * FROM credit_customers WHERE LOWER(name) = LOWER($1) ${phone ? 'OR phone = $2' : ''}`;
+    const checkParams = phone ? [name, phone] : [name];
+    const existing = await pool.query(checkQuery, checkParams);
+    
+    if (existing.rows.length > 0) {
+      const match = existing.rows[0];
+      if (match.name.toLowerCase() === name.toLowerCase()) {
+        return res.status(400).json({ error: 'A customer with this name already exists' });
+      } else {
+        return res.status(400).json({ error: 'A customer with this phone number already exists' });
+      }
+    }
+
     const result = await pool.query(
-      'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches) VALUES ($1, $2, $3, 0, $4) RETURNING *',
-      [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches)]
+      'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches, reference, notes) VALUES ($1, $2, $3, 0, $4, $5, $6) RETURNING *',
+      [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches), reference || null, notes || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    if (error.code === '42703' && error.message.includes('available_branches')) {
+    if (error.code === '42703') {
       try {
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS reference VARCHAR(255)");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS notes TEXT");
+        await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100)");
+
         const result = await pool.query(
-          'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches) VALUES ($1, $2, $3, 0, $4) RETURNING *',
-          [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches)]
+          'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches, reference, notes) VALUES ($1, $2, $3, 0, $4, $5, $6) RETURNING *',
+          [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches), reference || null, notes || null]
         );
         return res.status(201).json(result.rows[0]);
       } catch (retryErr) {
@@ -98,20 +119,33 @@ router.post('/', async (req, res) => {
 // Update a credit customer
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, phone, credit_limit, available_branches } = req.body;
+  const { name, phone, credit_limit, available_branches, reference, notes } = req.body;
 
   const userRole = req.user?.role?.trim().toLowerCase();
   const userBranch = req.user?.branch;
 
   try {
+    const checkQuery = `SELECT * FROM credit_customers WHERE id != $1 AND (LOWER(name) = LOWER($2) ${phone ? 'OR phone = $3' : ''})`;
+    const checkParams = phone ? [id, name, phone] : [id, name];
+    const existing = await pool.query(checkQuery, checkParams);
+    
+    if (existing.rows.length > 0) {
+      const match = existing.rows[0];
+      if (match.name.toLowerCase() === name.toLowerCase()) {
+        return res.status(400).json({ error: 'A customer with this name already exists' });
+      } else {
+        return res.status(400).json({ error: 'A customer with this phone number already exists' });
+      }
+    }
+
     // If not admin, we shouldn't change the branches, or we just keep what's there
-    let query = 'UPDATE credit_customers SET name = $1, phone = $2, credit_limit = $3';
-    let params = [name, phone || null, credit_limit || 0];
+    let query = 'UPDATE credit_customers SET name = $1, phone = $2, credit_limit = $3, reference = $4, notes = $5';
+    let params = [name, phone || null, credit_limit || 0, reference || null, notes || null];
     
     if (userRole === 'admin' || userRole === 'developer') {
        if (available_branches) {
-         query += ', available_branches = $4';
          params.push(JSON.stringify(available_branches));
+         query += `, available_branches = $${params.length}`;
        }
     }
     
@@ -122,9 +156,13 @@ router.put('/:id', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Credit customer not found' });
     res.json(result.rows[0]);
   } catch (error) {
-    if (error.code === '42703' && error.message.includes('available_branches')) {
+    if (error.code === '42703') {
       try {
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS reference VARCHAR(255)");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS notes TEXT");
+        await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100)");
+
         const result = await pool.query(query, params); // retry
         if (result.rows.length === 0) return res.status(404).json({ error: 'Credit customer not found' });
         return res.json(result.rows[0]);
@@ -188,7 +226,7 @@ router.get('/:id/history', async (req, res) => {
 // Add a payment (clear dues or add advance)
 router.post('/:id/payment', async (req, res) => {
   const { id } = req.params;
-  const { amount } = req.body; 
+  const { amount, action, cashier_name } = req.body; 
   
   if (!amount || isNaN(amount) || amount <= 0) {
     return res.status(400).json({ error: 'Valid positive amount is required' });
@@ -197,14 +235,18 @@ router.post('/:id/payment', async (req, res) => {
   try {
     await pool.query('BEGIN');
 
+    const transactionType = action === 'CHARGE' ? 'CHARGE' : 'PAYMENT';
+    // CHARGE adds to the balance (debt increases), PAYMENT subtracts from balance (debt decreases).
+    const balanceChange = transactionType === 'CHARGE' ? amount : -amount;
+
     await pool.query(
-      'INSERT INTO credit_transactions (credit_customer_id, type, amount) VALUES ($1, $2, $3)',
-      [id, 'PAYMENT', amount]
+      'INSERT INTO credit_transactions (credit_customer_id, type, amount, cashier_name) VALUES ($1, $2, $3, $4)',
+      [id, transactionType, amount, cashier_name || req.user?.username || 'Unknown']
     );
 
     const updateResult = await pool.query(
-      'UPDATE credit_customers SET balance = balance - $1 WHERE id = $2 RETURNING *',
-      [amount, id]
+      'UPDATE credit_customers SET balance = balance + $1 WHERE id = $2 RETURNING *',
+      [balanceChange, id]
     );
 
     if (updateResult.rows.length === 0) {

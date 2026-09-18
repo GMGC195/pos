@@ -26,7 +26,10 @@ import {
   Check,
   UserCheck,
   Search,
-  Filter
+  Filter,
+  CreditCard,
+  Banknote,
+  ClipboardList
 } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler)
@@ -47,10 +50,13 @@ const decimalHoursToText = (hoursDec) => {
 };
 
 const statCards = [
-  { key: 'totalSale', label: 'Total Sale', icon: <CircleDollarSign size={24} strokeWidth={2.5} />, color: BRAND_SECONDARY, prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
-  { key: 'dailyRevenue', label: 'Daily Revenue', icon: <TrendingUp size={24} strokeWidth={2.5} />, color: '#10b981', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
-  { key: 'totalOrders', label: 'Total Orders', icon: <Receipt size={24} strokeWidth={2.5} />, color: BRAND_PRIMARY, prefix: '', format: v => v },
-  { key: 'guestsToday', label: 'Guest Today', icon: <Users size={24} strokeWidth={2.5} />, color: '#8b5cf6', prefix: '', format: v => v },
+  { key: 'totalSale', label: 'Total Sale', icon: <CircleDollarSign size={20} strokeWidth={2.5} />, color: BRAND_SECONDARY, prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'cashSale', label: 'Cash Sales', icon: <Banknote size={20} strokeWidth={2.5} />, color: '#10b981', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'cardSale', label: 'Card Sales', icon: <CreditCard size={20} strokeWidth={2.5} />, color: '#3b82f6', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'creditSale', label: "Today's Credit", icon: <ClipboardList size={20} strokeWidth={2.5} />, color: '#8b5cf6', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'majorPayment', label: 'Major Payment', icon: <Banknote size={20} strokeWidth={2.5} />, color: '#14b8a6', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'totalOrders', label: 'Total Orders', icon: <Receipt size={20} strokeWidth={2.5} />, color: BRAND_PRIMARY, prefix: '', format: v => v },
+  { key: 'guestsToday', label: 'Guest Today', icon: <Users size={20} strokeWidth={2.5} />, color: '#f59e0b', prefix: '', format: v => v },
 ]
 
 const payrollStatCards = [
@@ -59,20 +65,25 @@ const payrollStatCards = [
 ]
 
 function StatCard({ stat, value, loading }) {
+  const isSAR = stat.prefix === CURRENCY;
+  const valString = stat.format(value ?? 0);
+
   return (
     <div className="stat-card" style={{ '--card-color': stat.color }}>
-      <div className="stat-icon" style={{ '--card-color': stat.color }}>
-        {stat.icon}
-      </div>
-      <div className="stat-info">
-        {loading
-          ? <div className="skeleton" style={{ height: 32, width: 80 }} />
-          : <h3>{stat.prefix}{stat.format(value ?? 0)}</h3>
-        }
-        <p>{stat.label}</p>
-        <div className="trend" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <TrendingUp size={14} color="#10b981" /> vs yesterday
+      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start', gap: 4 }}>
+        <p style={{ fontSize: 11, margin: 0, fontWeight: 700, color: 'var(--text-secondary)', lineHeight: 1.2 }}>{stat.label}</p>
+        <div className="stat-icon" style={{ '--card-color': stat.color, color: stat.color }}>
+          {stat.icon}
         </div>
+      </div>
+      <div className="stat-info" style={{ marginTop: 2 }}>
+        {loading
+          ? <div className="skeleton" style={{ height: 20, width: 60 }} />
+          : <h3 style={{ fontSize: 15, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+              {isSAR && <span style={{ fontSize: 10, marginRight: 2, fontWeight: 600 }}>{CURRENCY}</span>}
+              {valString}
+            </h3>
+        }
       </div>
     </div>
   )
@@ -134,7 +145,7 @@ export default function Dashboard() {
       axios.get('/api/stats', { params: statsParams })
         .then(r => setStats(r.data))
         .catch(() => setStats({
-          totalSale: 0, cashSale: 0, cardSale: 0, dailyRevenue: 0, totalProductCost: 0, totalOrders: 0, guestsToday: 0,
+          totalSale: 0, cashSale: 0, cardSale: 0, creditSale: 0, majorPayment: 0, dailyRevenue: 0, totalProductCost: 0, totalOrders: 0, guestsToday: 0,
           last7Days: Array.from({ length: 7 }, (_, i) => ({ label: `Day ${i + 1}`, total: 0 })),
           topItems: [],
         }))
@@ -394,31 +405,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Staff Attendance Summary */}
-        {attendanceStats && (
-          <div className="card" style={{ marginBottom: 24, marginTop: 24 }}>
-            <div className="card-header">
-              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                <Fingerprint size={20} style={{ color: 'var(--primary)' }} /> Staff Presence Today
-              </h3>
-            </div>
-            <div className="summary-grid" style={{ marginTop: 10 }}>
-              {[
-                { label: 'Active Staff Now', val: attendanceStats.present_now, color: 'var(--green)' },
-                { label: 'On Break', val: attendanceStats.on_break, color: 'var(--primary)' },
-                { label: 'Late Arrivals Today', val: attendanceStats.late_today, color: '#F97316' },
-                { label: 'Checked Out', val: attendanceStats.checked_out, color: 'var(--text-muted)' },
-                { label: 'Absent Staff', val: attendanceStats.absent, color: 'var(--red)' },
-                { label: 'Total Registered Staff', val: attendanceStats.total_employees, color: 'var(--text-secondary)' },
-              ].map(item => (
-                <div key={item.label} style={{ background: 'var(--surface)', borderRadius: 12, padding: '20px 24px', border: '1px solid var(--surface-2)' }}>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: item.color }}>{loading ? '...' : item.val}</div>
-                  <div style={{ fontWeight: 600, marginTop: 4, color: 'var(--text-secondary)', fontSize: 13 }}>{item.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+
 
         {/* Today's Summary */}
         <div className="card">

@@ -808,35 +808,48 @@ async function sendClosingEmail(report, closingType) {
         }
       }
       
+      let intervalItemsObj = report.interval_items || {};
+      if (typeof intervalItemsObj === 'string') {
+        try { intervalItemsObj = JSON.parse(intervalItemsObj); } catch(e) { intervalItemsObj = {}; }
+      }
+
       twoHourlyHtml = '';
-      if (report.interval_items && Object.keys(report.interval_items).length > 0) {
+      if (closingType === 'Daily' && intervalItemsObj && Object.keys(intervalItemsObj).length > 0) {
         twoHourlyHtml = `
           <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top Items by 2-Hour Intervals</h3>
           <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
             <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #555;">
               <thead>
                 <tr style="background: #f8f9fa; border-bottom: 1px solid #eee; text-align: left; color: #111;">
-                  <th style="padding: 10px 15px; width: 120px;">Time</th>
+                  <th style="padding: 10px 15px; width: 140px;">Time</th>
                   <th style="padding: 10px 15px;">Top 3 Items (Qty)</th>
                 </tr>
               </thead>
               <tbody>
         `;
         
-        // Output exactly 12 rows for the 24 hours
-        for (let i = 0; i < 24; i += 2) {
-          const startTime = String(i).padStart(2, '0') + ':00';
-          const endTime = String(i+2).padStart(2, '0') + ':00';
-          const itemsInBlock = report.interval_items[i] || [];
+        const loginDate = new Date(report.login_time);
+        let maxIndex = 0;
+        for (const key of Object.keys(intervalItemsObj)) {
+          if (parseInt(key) > maxIndex) maxIndex = parseInt(key);
+        }
+        
+        for (let i = 0; i <= maxIndex; i++) {
+          const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000);
+          const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000);
+          
+          const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const itemsInBlock = intervalItemsObj[i] || [];
           
           let itemsList = '-';
           if (itemsInBlock.length > 0) {
-            itemsList = itemsInBlock.map(item => `${item.name} (${item.qty})`).join(', ');
+            itemsList = itemsInBlock.map(item => `<div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px dashed #f0f0f0;">${item.name} <strong>(${item.qty})</strong></div>`).join('');
           }
           
           twoHourlyHtml += `
             <tr style="border-bottom: 1px solid #eee;">
-              <td style="padding: 8px 15px; font-weight: bold; border-right: 1px solid #eee;">${startTime} - ${endTime}</td>
+              <td style="padding: 8px 15px; font-weight: bold; border-right: 1px solid #eee;">${startTimeStr} - ${endTimeStr}</td>
               <td style="padding: 8px 15px;">${itemsList}</td>
             </tr>
           `;
@@ -863,6 +876,8 @@ async function sendClosingEmail(report, closingType) {
             <p style="margin: 4px 0;"><strong>Total Sales:</strong> SAR ${parseFloat(report.total_sales).toFixed(2)}</p>
             <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Cash Sales: SAR ${parseFloat(report.cash_sales || 0).toFixed(2)}</p>
             <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Card Sales: SAR ${parseFloat(report.card_sales || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Credit Sales: SAR ${parseFloat(report.credit_sales || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0;"><strong>Major Payments Received:</strong> SAR ${parseFloat(report.major_payments || 0).toFixed(2)}</p>
             <p style="margin: 4px 0;"><strong>Active Time:</strong> ${report.total_active_time}</p>
             <p style="margin: 4px 0; font-size: 12px; color: #777;">${new Date(report.login_time).toLocaleString()} - ${new Date(report.logout_time).toLocaleString()}</p>
           </div>
@@ -870,8 +885,8 @@ async function sendClosingEmail(report, closingType) {
           <h3 style="margin-top: 24px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Items Sold by Category</h3>
           <div>${itemsHtml || '<p style="text-align:center; color:#999; padding: 20px;">No items sold</p>'}</div>
           
-          ${topSellingHtml}
           ${twoHourlyHtml}
+          ${topSellingHtml}
         </div>
       </div>
     `;
@@ -903,10 +918,11 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     
     const totals = await client.query(`
       SELECT 
-        COUNT(o.id) as total_orders, 
-        COALESCE(SUM(o.grand_total), 0) as total_sales,
-        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN o.grand_total ELSE 0 END), 0) as cash_sales,
-        COALESCE(SUM(CASE WHEN t.payment_method != 'Cash' THEN o.grand_total ELSE 0 END), 0) as card_sales
+        COUNT(DISTINCT o.id) as total_orders, 
+        COALESCE(SUM(t.amount), 0) as total_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
       FROM orders o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE o.is_shift_closed = FALSE 
@@ -940,17 +956,25 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       ORDER BY amount DESC
     `, [branch, req.user.username]);
 
-    const lastClosingRes = await client.query(`SELECT logout_time FROM shift_closings WHERE branch = $1 AND closing_type = 'Shift' AND cashier_id = $2 ORDER BY logout_time DESC LIMIT 1`, [branch, req.user.id]);
+    const firstOrderRes = await client.query(`SELECT MIN(created_at) as first_order_time FROM orders WHERE is_shift_closed = FALSE AND branch = $1 AND completed_by = $2`, [branch, req.user.username]);
     let loginTime = new Date();
-    loginTime.setHours(0,0,0,0);
-    if (lastClosingRes.rows.length > 0 && lastClosingRes.rows[0].logout_time) {
-      loginTime = new Date(lastClosingRes.rows[0].logout_time);
+    if (firstOrderRes.rows.length > 0 && firstOrderRes.rows[0].first_order_time) {
+      loginTime = new Date(firstOrderRes.rows[0].first_order_time);
+    } else {
+      loginTime.setHours(0,0,0,0);
     }
     const logoutTime = new Date();
     const diffMs = Math.max(0, logoutTime - loginTime);
     const diffHrs = Math.floor(diffMs / 3600000);
     const diffMins = Math.floor((diffMs % 3600000) / 60000);
     const totalActiveTime = `${diffHrs}h ${diffMins}m`;
+    
+    const majorPaymentsRes = await client.query(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM credit_transactions
+      WHERE type = 'PAYMENT' AND cashier_name = $1 AND created_at >= $2 AND created_at <= $3
+    `, [req.user.username, loginTime, logoutTime]);
+    const majorPayments = parseFloat(majorPaymentsRes.rows[0].total) || 0;
 
     const intervalItemsRes = await client.query(`
       SELECT 
@@ -973,8 +997,8 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     });
 
     const insertRes = await client.query(`
-      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, total_orders, items_summary, closing_type)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Shift')
+      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Shift')
       RETURNING *
     `, [
       req.user.id,
@@ -986,6 +1010,8 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       totals.rows[0].total_sales,
       totals.rows[0].cash_sales,
       totals.rows[0].card_sales,
+      totals.rows[0].credit_sales,
+      majorPayments,
       totals.rows[0].total_orders,
       JSON.stringify(itemsResult.rows)
     ]);
@@ -1025,10 +1051,11 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     
     const totals = await client.query(`
       SELECT 
-        COUNT(o.id) as total_orders, 
-        COALESCE(SUM(o.grand_total), 0) as total_sales,
-        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN o.grand_total ELSE 0 END), 0) as cash_sales,
-        COALESCE(SUM(CASE WHEN t.payment_method != 'Cash' THEN o.grand_total ELSE 0 END), 0) as card_sales
+        COUNT(DISTINCT o.id) as total_orders, 
+        COALESCE(SUM(t.amount), 0) as total_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
       FROM orders o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE o.is_daily_closed = FALSE 
@@ -1073,29 +1100,36 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     const diffMins = Math.floor((diffMs % 3600000) / 60000);
     const totalActiveTime = `${diffHrs}h ${diffMins}m`;
 
+    const majorPaymentsRes = await client.query(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM credit_transactions
+      WHERE type = 'PAYMENT' AND created_at >= $1 AND created_at <= $2
+    `, [loginTime, logoutTime]);
+    const majorPayments = parseFloat(majorPaymentsRes.rows[0].total) || 0;
+
     const intervalItemsRes = await client.query(`
       SELECT 
-        FLOOR(EXTRACT(HOUR FROM o.created_at) / 2) * 2 AS hour_block,
+        FLOOR(EXTRACT(EPOCH FROM (o.created_at - $2)) / 7200) AS block_idx,
         i.name,
         SUM(oi.qty) as qty
       FROM order_items oi
       JOIN items i ON oi.item_id = i.id
       JOIN orders o ON oi.order_id = o.id
       WHERE o.is_daily_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1
-      GROUP BY hour_block, i.name
-      ORDER BY hour_block, qty DESC
-    `, [branch]);
+      GROUP BY block_idx, i.name
+      ORDER BY block_idx, qty DESC
+    `, [branch, loginTime]);
     
     const intervals = {};
     intervalItemsRes.rows.forEach(r => {
-      const hb = parseInt(r.hour_block);
-      if (!intervals[hb]) intervals[hb] = [];
-      if (intervals[hb].length < 3) intervals[hb].push(r);
+      const idx = parseInt(r.block_idx);
+      if (!intervals[idx]) intervals[idx] = [];
+      if (intervals[idx].length < 3) intervals[idx].push(r);
     });
 
     const insertRes = await client.query(`
-      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, total_orders, items_summary, closing_type)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Daily')
+      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Daily')
       RETURNING *
     `, [
       req.user.id,
@@ -1107,6 +1141,8 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       totals.rows[0].total_sales,
       totals.rows[0].cash_sales,
       totals.rows[0].card_sales,
+      totals.rows[0].credit_sales,
+      majorPayments,
       totals.rows[0].total_orders,
       JSON.stringify(itemsResult.rows)
     ]);

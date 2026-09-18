@@ -67,11 +67,30 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT 
         COALESCE(SUM(o.grand_total), 0) as total_sale,
         COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN o.grand_total ELSE 0 END), 0) as cash_sale,
-        COALESCE(SUM(CASE WHEN t.payment_method != 'Cash' THEN o.grand_total ELSE 0 END), 0) as card_sale
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Card' OR t.payment_method = 'Online' THEN o.grand_total ELSE 0 END), 0) as card_sale,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN o.grand_total ELSE 0 END), 0) as credit_sale
       FROM orders o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE DATE(o.created_at) = CURRENT_DATE AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
     `, params);
+
+    let mpQuery = `
+      SELECT COALESCE(SUM(ct.amount), 0) as major_payment
+      FROM credit_transactions ct
+      JOIN credit_customers cc ON ct.credit_customer_id = cc.id
+      WHERE ct.type = 'PAYMENT' AND DATE(ct.created_at) = CURRENT_DATE
+    `;
+    let mpParams = [];
+    if (branch && branch !== 'All') {
+      mpParams.push(JSON.stringify([branch]));
+      mpQuery += ` AND cc.available_branches @> $${mpParams.length}::jsonb`;
+    }
+    if (isCashier) {
+      mpParams.push(req.user.username);
+      mpQuery += ` AND ct.cashier_name = $${mpParams.length}`;
+    }
+    const majorPaymentResult = await pool.query(mpQuery, mpParams);
+
 
     // Daily Revenue (Today's Sales - Produce Cost)
     const dailyRevenueResult = await pool.query(`
@@ -172,6 +191,8 @@ router.get('/', authenticateToken, async (req, res) => {
       totalSale: parseFloat(totalSaleResult.rows[0].total_sale),
       cashSale: parseFloat(totalSaleResult.rows[0].cash_sale),
       cardSale: parseFloat(totalSaleResult.rows[0].card_sale),
+      creditSale: parseFloat(totalSaleResult.rows[0].credit_sale),
+      majorPayment: parseFloat(majorPaymentResult.rows[0].major_payment),
       dailyRevenue: parseFloat(dailyRevenueResult.rows[0].revenue),
       totalProductCost: parseFloat(dailyRevenueResult.rows[0].product_cost),
       totalOrders: parseInt(totalOrdersResult.rows[0].count),

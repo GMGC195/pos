@@ -39,6 +39,7 @@ export default function Reports({ isTodaySales = false }) {
   const [to, setTo] = useState(today())
   const [transactions, setTransactions] = useState([])
   const [summary, setSummary] = useState([])
+  const [creditSummary, setCreditSummary] = useState({ totalCredit: 0, majorPaymentsTotal: 0, majorPayments: [] })
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [branch, setBranch] = useState((isAdminOrDev || isManagement) ? 'All' : (user?.branch || 'All'))
@@ -82,10 +83,12 @@ export default function Reports({ isTodaySales = false }) {
     Promise.all([
       axios.get('/api/transactions', { params: { from, to, branch, unclosed_only: isTodaySales } }),
       axios.get('/api/transactions/summary', { params: { from, to, branch, unclosed_only: isTodaySales } }),
+      axios.get('/api/transactions/credit-summary', { params: { from, to, branch } })
     ])
-      .then(([txRes, sumRes]) => {
+      .then(([txRes, sumRes, credRes]) => {
         setTransactions(txRes.data)
         setSummary(sumRes.data)
+        setCreditSummary(credRes.data || { totalCredit: 0, majorPaymentsTotal: 0, majorPayments: [] })
       })
       .catch(err => {
         console.error("Error loading reports:", err);
@@ -120,6 +123,7 @@ export default function Reports({ isTodaySales = false }) {
   const holdRow = summary.find(r => r.payment_method === 'Hold')
   const cancelledRow = summary.find(r => r.payment_method === 'Cancelled')
   const returnedRow = summary.find(r => r.payment_method === 'Returned')
+  const creditRow = summary.find(r => r.payment_method === 'Credit')
   
   const totalSales = summary
     .filter(r => r.payment_method !== 'Hold' && r.payment_method !== 'Cancelled' && r.payment_method !== 'Returned')
@@ -134,6 +138,9 @@ export default function Reports({ isTodaySales = false }) {
     { label: 'Total Revenue', val: `${CURRENCY}${totalSales.toFixed(2)}`, icon: <CircleDollarSign size={20} />, color: '#E31837', bg: '#fff1f2', sub: `${totalCount} total transactions` },
     { label: 'Cash Sales', val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#10b981', bg: '#ecfdf5', sub: `${cashRow?.count || 0} orders` },
     { label: 'Card Sales', val: `${CURRENCY}${cardTotal.toFixed(2)}`, icon: <CreditCard size={20} />, color: '#3b82f6', bg: '#eff6ff', sub: `${cardCount} orders` },
+    { label: "Today's Credit", val: `${CURRENCY}${parseFloat(creditRow?.total || 0).toFixed(2)}`, icon: <ClipboardList size={20} />, color: '#8b5cf6', bg: '#f3e8ff', sub: `${creditRow?.count || 0} orders` },
+    { label: 'Total Credit', val: `${CURRENCY}${(creditSummary.totalCredit || 0).toFixed(2)}`, icon: <Globe size={20} />, color: '#f59e0b', bg: '#fef3c7', sub: 'Total Khata Balance' },
+    { label: 'Major Payment', val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#14b8a6', bg: '#ccfbf1', sub: 'Received Today' },
   ]
   
   if (holdRow && parseInt(holdRow.count || 0) > 0) {
@@ -524,19 +531,68 @@ export default function Reports({ isTodaySales = false }) {
 
       
       <div className="summary-tiles">
-        {tiles.map(t => (
-          <div key={t.label} className="summary-tile">
-            <div className="tile-icon" style={{ background: t.bg }}>
-              {t.icon}
+        {tiles.map(t => {
+          const valString = String(t.val);
+          const hasCurrency = valString.includes(CURRENCY);
+          const amount = hasCurrency ? valString.replace(CURRENCY, '') : valString;
+
+          return (
+            <div key={t.label} className="summary-tile">
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start', gap: 4 }}>
+                <p style={{ fontSize: 13, margin: 0, fontWeight: 700, color: 'var(--text-secondary)' }}>{t.label}</p>
+                <div className="tile-icon" style={{ background: t.bg, color: t.color }}>
+                  {t.icon}
+                </div>
+              </div>
+              <div style={{ marginTop: 2 }}>
+                <h4 style={{ color: t.color, fontSize: 18, margin: 0, fontWeight: 800 }}>
+                  {loading ? '...' : (
+                    <>
+                      {hasCurrency && <span style={{ fontSize: 11, marginRight: 4, fontWeight: 600 }}>{CURRENCY}</span>}
+                      {amount}
+                    </>
+                  )}
+                </h4>
+                {t.sub && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '4px 0 0 0', lineHeight: 1.2 }}>{t.sub}</p>}
+              </div>
             </div>
-            <div className="tile-info">
-              <h4 style={{ color: t.color, fontSize: 18, margin: '0 0 2px 0' }}>{loading ? '...' : t.val}</h4>
-              <p style={{ fontSize: 12, margin: 0, fontWeight: 600 }}>{t.label}</p>
-              {t.sub && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 0 0', lineHeight: 1.1 }}>{t.sub}</p>}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {creditSummary.majorPayments && creditSummary.majorPayments.length > 0 && (
+        <div className="card" style={{ padding: 0, marginBottom: 24, background: '#f8fafc' }}>
+          <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--surface-2)' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--green)' }}>
+              <Banknote size={20} /> Major Payments Received Today
+            </h3>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Customer Name</th>
+                  <th>Cashier</th>
+                  <th>Date & Time</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {creditSummary.majorPayments.map((p, index) => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 800 }}>{index + 1}</td>
+                    <td style={{ fontWeight: 600 }}>{p.customer_name}</td>
+                    <td>{p.cashier_name || '-'}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{new Date(p.created_at).toLocaleString()}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--green)' }}>{CURRENCY}{parseFloat(p.amount).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Transactions Table */}
       <div className="card" style={{ padding: 0, marginBottom: 160, background: '#f8fafc' }}>
@@ -1064,6 +1120,8 @@ export default function Reports({ isTodaySales = false }) {
                     <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Sales:</strong> {CURRENCY} {parseFloat(selectedHistoryReport.total_sales || 0).toFixed(2)}</p>
                     <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Cash Sales: {CURRENCY} {parseFloat(selectedHistoryReport.cash_sales || 0).toFixed(2)}</p>
                     <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Card Sales: {CURRENCY} {parseFloat(selectedHistoryReport.card_sales || 0).toFixed(2)}</p>
+                    <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Credit Sales: {CURRENCY} {parseFloat(selectedHistoryReport.credit_sales || 0).toFixed(2)}</p>
+                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Major Payments Received:</strong> {CURRENCY} {parseFloat(selectedHistoryReport.major_payments || 0).toFixed(2)}</p>
                     <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Active Time:</strong> {selectedHistoryReport.total_active_time}</p>
                     <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--text-muted)' }}>{new Date(selectedHistoryReport.login_time).toLocaleString()} - {new Date(selectedHistoryReport.logout_time).toLocaleString()}</p>
                   </div>
@@ -1098,53 +1156,41 @@ export default function Reports({ isTodaySales = false }) {
                   </table>
 
                   {(() => {
-                    let topItems = [];
+                    let intervalsObj = {};
                     try {
-                      topItems = typeof selectedHistoryReport.top_selling_items === 'string' 
-                        ? JSON.parse(selectedHistoryReport.top_selling_items || '[]') 
-                        : (selectedHistoryReport.top_selling_items || []);
+                      intervalsObj = typeof selectedHistoryReport.interval_items === 'string' 
+                        ? JSON.parse(selectedHistoryReport.interval_items || '{}') 
+                        : (selectedHistoryReport.interval_items || {});
                     } catch (e) {}
 
-                    if (topItems && topItems.length > 0) {
+                    const keys = Object.keys(intervalsObj);
+                    if (selectedHistoryReport.closing_type === 'Daily' && keys.length > 0) {
+                      const loginDate = new Date(selectedHistoryReport.login_time);
+                      let maxIndex = 0;
+                      for (const key of keys) {
+                        if (parseInt(key) > maxIndex) maxIndex = parseInt(key);
+                      }
+                      
+                      const rows = [];
+                      for (let i = 0; i <= maxIndex; i++) {
+                        const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000);
+                        const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000);
+                        
+                        const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const timeWindow = `${startTimeStr} - ${endTimeStr}`;
+                        
+                        const items = intervalsObj[i] || [];
+                        if (items.length > 0) {
+                          rows.push({ time_window: timeWindow, items });
+                        } else {
+                          rows.push({ time_window: timeWindow, items: [{ name: '-', qty: '-' }] });
+                        }
+                      }
+
                       return (
                         <>
-                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top Selling Items</h3>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
-                            <thead>
-                              <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
-                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item Name</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty Sold</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'right' }}>Revenue</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {topItems.map((item, i) => (
-                                <tr key={i} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                                  <td style={{ padding: '8px 10px' }}>{item.name}</td>
-                                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>{item.qty}</td>
-                                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{CURRENCY} {parseFloat(item.amount || 0).toFixed(2)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {(() => {
-                    let intervals = [];
-                    try {
-                      intervals = typeof selectedHistoryReport.interval_items === 'string' 
-                        ? JSON.parse(selectedHistoryReport.interval_items || '[]') 
-                        : (selectedHistoryReport.interval_items || []);
-                    } catch (e) {}
-
-                    if (intervals && intervals.length > 0) {
-                      return (
-                        <>
-                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top 3 Items by 2-Hour Intervals</h3>
+                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top Items by 2-Hour Intervals</h3>
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
                             <thead>
                               <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
@@ -1154,7 +1200,7 @@ export default function Reports({ isTodaySales = false }) {
                               </tr>
                             </thead>
                             <tbody>
-                              {intervals.map((interval, idx) => (
+                              {rows.map((interval, idx) => (
                                 interval.items.map((it, i) => (
                                   <tr key={`${idx}-${i}`} style={{ borderBottom: i === interval.items.length - 1 ? '2px solid var(--surface-2)' : '1px solid var(--surface-1)' }}>
                                     {i === 0 && (
@@ -1174,6 +1220,45 @@ export default function Reports({ isTodaySales = false }) {
                     }
                     return null;
                   })()}
+
+                  {(() => {
+                    let topItems = [];
+                    try {
+                      topItems = typeof selectedHistoryReport.top_selling_items === 'string' 
+                        ? JSON.parse(selectedHistoryReport.top_selling_items || '[]') 
+                        : (selectedHistoryReport.top_selling_items || []);
+                    } catch (e) {}
+
+                    if (topItems && topItems.length > 0) {
+                      const top5 = topItems.slice(0, 5);
+                      return (
+                        <>
+                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top 5 Selling Items</h3>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
+                            <thead>
+                              <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
+                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item Name</th>
+                                <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty Sold</th>
+                                <th style={{ padding: '8px 10px', textAlign: 'right' }}>Revenue</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {top5.map((item, i) => (
+                                <tr key={i} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                                  <td style={{ padding: '8px 10px' }}>{item.name}</td>
+                                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>{item.qty}</td>
+                                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{CURRENCY} {parseFloat(item.amount || 0).toFixed(2)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      );
+                    }
+                    return null;
+                  })()}
+
+
                 </div>
               </div>
             ) : (
