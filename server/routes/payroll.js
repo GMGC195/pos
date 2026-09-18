@@ -268,15 +268,43 @@ router.get('/calculate', authenticateToken, async (req, res) => {
             presents++;
             // Calculate overtime for this day
             let dailyHours = 0;
+            let dailyOvertime = 0;
             daySessions.forEach(s => {
               if (s.check_in && s.check_out) {
                 const inTime = new Date(s.check_in).getTime();
                 const outTime = new Date(s.check_out).getTime();
-                dailyHours += Math.max(0, (outTime - inTime) / (1000 * 60 * 60));
+                const breakTime = (s.total_break_duration_seconds || 0) * 1000;
+                
+                // Compute expected shift end time
+                const endStr = s.shift_end_time || '23:59';
+                const startStr = s.shift_start_time || '00:00';
+                const endMatch = endStr.match(/^(\d+):(\d+)/);
+                const startMatch = startStr.match(/^(\d+):(\d+)/);
+                
+                let expectedEndMs = outTime; // fallback
+                if (endMatch) {
+                  const endH = parseInt(endMatch[1], 10);
+                  const endM = parseInt(endMatch[2], 10);
+                  const startH = startMatch ? parseInt(startMatch[1], 10) : 0;
+                  
+                  const inDate = new Date(s.check_in);
+                  const endDate = new Date(inDate.getFullYear(), inDate.getMonth(), inDate.getDate(), endH, endM, 0);
+                  if (endH < startH) {
+                    endDate.setDate(endDate.getDate() + 1);
+                  }
+                  expectedEndMs = endDate.getTime();
+                }
+
+                // Any time worked after expected shift end time is overtime
+                if (outTime > expectedEndMs) {
+                  dailyOvertime += (outTime - expectedEndMs) / (1000 * 60 * 60);
+                  dailyHours += Math.max(0, (expectedEndMs - inTime - breakTime)) / (1000 * 60 * 60);
+                } else {
+                  dailyHours += Math.max(0, (outTime - inTime - breakTime)) / (1000 * 60 * 60);
+                }
               }
             });
-            const shiftHours = parseFloat(daySessions[0].shift_hours || emp.shift_hours || 12.0);
-            totalOvertimeHours += Math.max(0, dailyHours - shiftHours);
+            totalOvertimeHours += dailyOvertime;
           }
         } else {
           // No record means absent for past days

@@ -473,8 +473,8 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       let timeDiff = currentTotalMins - startTotalMins;
       if (timeDiff < -12 * 60) timeDiff += 24 * 60; // handle wrap around midnight
       
-      // Early check-in restriction for employees self-checking-in
-      if ((req.user.role === 'Employee' || req.user.role === 'employee') && timeDiff < -5) {
+      // Early check-in restriction for employees and operators
+      if ((req.user.role?.toLowerCase() === 'employee' || req.user.role?.toLowerCase() === 'operator') && timeDiff < -5) {
         return res.status(403).json({ error: 'Your duty hours haven\'t started yet, you can just request check-in 5 minutes before.' });
       }
 
@@ -579,8 +579,8 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     const overtimeMins = Math.floor(overtimeMs / (1000 * 60));
 
     if (overtimeMins > 0) {
-      // Always trim attendance sheet checkout to the exact duty hour completion time
-      finalCheckoutTime = new Date(expectedCheckoutTime);
+      // Keep actual check_out time in DB, do not trim to expected time.
+      // finalCheckoutTime remains new Date()
       
       if (overtimeMins > 15 && !ignore_overtime) {
         // Overtime > 15 mins, require reason to generate a pending request
