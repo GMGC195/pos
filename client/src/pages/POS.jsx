@@ -1010,17 +1010,17 @@ export default function POS() {
             </div>
           )}
           {customerInfo.orderType === 'Dine-In' && !customerInfo.tableNumber ? (
-            <div className="table-selection-view" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+            <div className="table-selection-view" style={{ padding: '4px 10px 10px 10px', height: '100%', maxHeight: 'calc(100dvh - 100px)', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginBottom: 6 }}>
                 {['Dine-In', 'Takeaway', 'Delivery'].map(type => (
                   <button 
                     key={type}
                     onClick={() => setCustomerInfo(prev => ({ ...prev, orderType: type }))}
                     style={{
-                      padding: '8px 12px',
-                      fontSize: '14px',
+                      padding: '4px 8px',
+                      fontSize: '12px',
                       whiteSpace: 'nowrap',
-                      borderRadius: 8,
+                      borderRadius: 6,
                       border: customerInfo.orderType === type ? '2px solid var(--primary)' : '1px solid var(--surface-2)',
                       background: customerInfo.orderType === type ? 'rgba(255,184,0,0.1)' : 'white',
                       color: customerInfo.orderType === type ? 'var(--primary)' : 'var(--text-secondary)',
@@ -1036,9 +1036,9 @@ export default function POS() {
                   <div style={{ position: 'relative' }}>
                     <button 
                       onClick={() => setShowTableDotsMenu(!showTableDotsMenu)}
-                      style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--surface-2)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      style={{ padding: '4px', borderRadius: 6, border: '1px solid var(--surface-2)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
-                      <MoreVertical size={20} color="var(--text-secondary)" />
+                      <MoreVertical size={18} color="var(--text-secondary)" />
                     </button>
                     {showTableDotsMenu && (
                       <>
@@ -1056,8 +1056,8 @@ export default function POS() {
                   </div>
                 )}
               </div>
-              <h3 style={{ marginBottom: 16, textAlign: 'center' }}>Select a Table</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 200px)', paddingRight: 4, paddingBottom: 60 }}>
+              <h4 style={{ margin: '0 0 6px 0', textAlign: 'center', fontSize: '13px' }}>Select a Table</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12, overflowY: 'auto', flex: 1, paddingRight: 4, paddingBottom: 60, WebkitOverflowScrolling: 'touch' }}>
                 {tablesList.map(t => {
                   const tableStr = String(t.table_number);
                   const activeOrder = activeOrders.find(o => (o.order_type === 'Dine-In' || (!o.order_type && o.customer_address?.startsWith('Table '))) && String(o.table_number || o.customer_address?.replace('Table ', '')) === tableStr && o.status === 'Hold');
