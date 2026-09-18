@@ -112,7 +112,7 @@ ${itemRows}
 <div class="total-row"><span>Subtotal</span><span>${CURRENCY}${parseFloat(order.subtotal).toFixed(2)}</span></div>
 ${parseFloat(order.discount || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${CURRENCY}${parseFloat(order.discount).toFixed(2)}</span></div>` : ''}
 <div class="total-row grand"><span>TOTAL</span><span>${CURRENCY}${parseFloat(order.grand_total).toFixed(2)}</span></div>
-<div class="total-row"><span>Payment</span><span>${order.status === 'Hold' ? 'Hold (Pending)' : order.payment_method || order.status}</span></div>
+<div class="total-row"><span>Payment</span><span>${order.status === 'Hold' ? 'Hold (Pending)' : (order.payment_method ? order.payment_method + ' - ' + order.status : order.status)}</span></div>
   `;
 
   const htmlWrapper = `<!DOCTYPE html>

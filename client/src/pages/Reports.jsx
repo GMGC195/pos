@@ -472,7 +472,12 @@ export default function Reports({ isTodaySales = false }) {
 
   const filteredTransactions = transactions.filter(t => {
     const matchesSearch = search ? t.order_id.toString().includes(search.trim()) : true;
-    const matchesStatus = statusFilter === 'All' ? true : t.order_status === statusFilter;
+    let matchesStatus = true;
+    if (statusFilter === 'Credit') {
+      matchesStatus = t.payment_method === 'Credit';
+    } else if (statusFilter !== 'All') {
+      matchesStatus = t.order_status === statusFilter;
+    }
     return matchesSearch && matchesStatus;
   })
 
@@ -619,6 +624,7 @@ export default function Reports({ isTodaySales = false }) {
               <option value="Hold">Hold / Pending</option>
               <option value="Cancelled">Cancelled</option>
               <option value="Returned">Returned</option>
+              <option value="Credit">Credit</option>
             </select>
 
             {/* Action Buttons moved here as requested */}
@@ -1164,7 +1170,7 @@ export default function Reports({ isTodaySales = false }) {
                     } catch (e) {}
 
                     const keys = Object.keys(intervalsObj);
-                    if (selectedHistoryReport.closing_type === 'Daily' && keys.length > 0) {
+                    if (keys.length > 0) {
                       const loginDate = new Date(selectedHistoryReport.login_time);
                       let maxIndex = 0;
                       for (const key of keys) {

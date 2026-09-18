@@ -415,7 +415,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (!(await checkBranchAccess(req, req.params.id))) {
       return res.status(403).json({ error: 'Access denied: Order belongs to another branch' });
     }
-    const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    const orderResult = await pool.query(`
+      SELECT o.*, t.payment_method 
+      FROM orders o
+      LEFT JOIN transactions t ON o.id = t.order_id
+      WHERE o.id = $1
+    `, [req.params.id]);
     if (orderResult.rows.length === 0) {
       return res.status(404).json({ error: 'Order not found' });
     }
@@ -814,7 +819,7 @@ async function sendClosingEmail(report, closingType) {
       }
 
       twoHourlyHtml = '';
-      if (closingType === 'Daily' && intervalItemsObj && Object.keys(intervalItemsObj).length > 0) {
+      if (intervalItemsObj && Object.keys(intervalItemsObj).length > 0) {
         twoHourlyHtml = `
           <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top Items by 2-Hour Intervals</h3>
           <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
@@ -978,20 +983,20 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
 
     const intervalItemsRes = await client.query(`
       SELECT 
-        FLOOR(EXTRACT(HOUR FROM o.created_at) / 2) * 2 AS hour_block,
+        FLOOR(EXTRACT(EPOCH FROM (o.created_at - $2)) / 7200) AS block_idx,
         i.name,
         SUM(oi.qty) as qty
       FROM order_items oi
       JOIN items i ON oi.item_id = i.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 AND o.completed_by = $2
-      GROUP BY hour_block, i.name
-      ORDER BY hour_block, qty DESC
-    `, [branch, req.user.username]);
+      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 AND o.completed_by = $3
+      GROUP BY block_idx, i.name
+      ORDER BY block_idx, qty DESC
+    `, [branch, loginTime, req.user.username]);
     
     const intervals = {};
     intervalItemsRes.rows.forEach(r => {
-      const hb = parseInt(r.hour_block);
+      const hb = parseInt(r.block_idx);
       if (!intervals[hb]) intervals[hb] = [];
       if (intervals[hb].length < 3) intervals[hb].push(r);
     });
