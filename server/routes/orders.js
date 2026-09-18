@@ -735,14 +735,14 @@ async function sendClosingEmail(report, closingType) {
           <div style="background: #f8f9fa; font-weight: bold; font-size: 16px; color: #111; padding: 10px 15px; border-bottom: 1px solid #eee;">
             ${cat.category} <span style="float: right; color: #E31837; font-size: 14px;">SAR ${parseFloat(cat.amount).toFixed(2)} (${cat.qty} items)</span>
           </div>
-          <div style="padding: 0 15px;">
-            <table style="width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; color: #555;">
+          <div style="padding: 0 10px; overflow-x: auto;">
+            <table style="width: 100%; min-width: 250px; border-collapse: collapse; margin: 10px 0; font-size: 13px; color: #555; table-layout: fixed; word-wrap: break-word;">
               <thead>
                 <tr style="border-bottom: 1px solid #eee; text-align: left;">
-                  <th style="padding: 8px 4px;">Item Name</th>
-                  <th style="padding: 8px 4px; text-align: center;">Qty</th>
-                  <th style="padding: 8px 4px; text-align: right;">Price</th>
-                  <th style="padding: 8px 4px; text-align: right;">Total Price</th>
+                  <th style="padding: 8px 4px; width: 40%;">Item</th>
+                  <th style="padding: 8px 4px; text-align: center; width: 15%;">Qty</th>
+                  <th style="padding: 8px 4px; text-align: right; width: 22%;">Price</th>
+                  <th style="padding: 8px 4px; text-align: right; width: 23%;">Total</th>
                 </tr>
               </thead>
               <tbody>`;
@@ -785,14 +785,14 @@ async function sendClosingEmail(report, closingType) {
         if (sortedTopItems.length > 0) {
           topSellingHtml = `
             <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top 5 Selling Items</h3>
-            <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
-              <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #555;">
+            <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow-x: auto;">
+              <table style="width: 100%; min-width: 250px; border-collapse: collapse; font-size: 13px; color: #555; table-layout: fixed; word-wrap: break-word;">
                 <thead>
                   <tr style="background: #fff3f4; border-bottom: 1px solid #ffccd0; text-align: left; color: #E31837;">
-                    <th style="padding: 10px 15px;">Rank</th>
-                    <th style="padding: 10px 15px;">Item Name</th>
-                    <th style="padding: 10px 15px; text-align: center;">Qty Sold</th>
-                    <th style="padding: 10px 15px; text-align: right;">Revenue</th>
+                    <th style="padding: 10px 8px; width: 15%;">#</th>
+                    <th style="padding: 10px 8px; width: 45%;">Item</th>
+                    <th style="padding: 10px 8px; text-align: center; width: 15%;">Qty</th>
+                    <th style="padding: 10px 8px; text-align: right; width: 25%;">Rev</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -822,12 +822,12 @@ async function sendClosingEmail(report, closingType) {
       if (intervalItemsObj && Object.keys(intervalItemsObj).length > 0) {
         twoHourlyHtml = `
           <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top Items by 2-Hour Intervals</h3>
-          <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #555;">
+          <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow-x: auto;">
+            <table style="width: 100%; min-width: 250px; border-collapse: collapse; font-size: 13px; color: #555; table-layout: fixed; word-wrap: break-word;">
               <thead>
                 <tr style="background: #f8f9fa; border-bottom: 1px solid #eee; text-align: left; color: #111;">
-                  <th style="padding: 10px 15px; width: 140px;">Time</th>
-                  <th style="padding: 10px 15px;">Top 3 Items (Qty)</th>
+                  <th style="padding: 10px 8px; width: 35%;">Time</th>
+                  <th style="padding: 10px 8px; width: 65%;">Top Items (Qty)</th>
                 </tr>
               </thead>
               <tbody>
@@ -869,7 +869,7 @@ async function sendClosingEmail(report, closingType) {
     }
 
     const htmlContent = `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden; background: #fafafa;">
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; width: 100%; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden; background: #fafafa; box-sizing: border-box;">
         <div style="background-color: #E31837; padding: 20px; border-bottom: 1px solid #eaeaea; text-align: center; color: white;">
           <h2 style="margin: 0; font-size: 22px;">${closingType} Closing Report</h2>
           <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">${report.branch}</p>
@@ -962,11 +962,10 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     `, [branch, req.user.username]);
 
     const firstOrderRes = await client.query(`SELECT MIN(created_at) as first_order_time FROM orders WHERE is_shift_closed = FALSE AND branch = $1 AND completed_by = $2`, [branch, req.user.username]);
+    
     let loginTime = new Date();
     if (firstOrderRes.rows.length > 0 && firstOrderRes.rows[0].first_order_time) {
       loginTime = new Date(firstOrderRes.rows[0].first_order_time);
-    } else {
-      loginTime.setHours(0,0,0,0);
     }
     const logoutTime = new Date();
     const diffMs = Math.max(0, logoutTime - loginTime);
