@@ -48,7 +48,10 @@ router.get('/', async (req, res) => {
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS reference VARCHAR(255)");
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS notes TEXT");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS discount_rules JSONB DEFAULT '[]'::jsonb");
         await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100)");
+        await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'Cash'");
+        await pool.query("CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, message TEXT, type VARCHAR(50), target_roles JSONB, is_read BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
         
         const result = await pool.query(query, params); // retry
         return res.json(result.rows);
@@ -63,7 +66,7 @@ router.get('/', async (req, res) => {
 
 // Add a new credit customer
 router.post('/', async (req, res) => {
-  const { name, phone, credit_limit, available_branches, reference, notes } = req.body;
+  const { name, phone, credit_limit, available_branches, reference, notes, discount_rules } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
 
   const userRole = req.user?.role?.trim().toLowerCase();
@@ -90,21 +93,35 @@ router.post('/', async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches, reference, notes) VALUES ($1, $2, $3, 0, $4, $5, $6) RETURNING *',
-      [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches), reference || null, notes || null]
+      'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches, reference, notes, discount_rules) VALUES ($1, $2, $3, 0, $4, $5, $6, $7) RETURNING *',
+      [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches), reference || null, notes || null, JSON.stringify(discount_rules || [])]
     );
+
+    // Generate notification for new credit customer
+    try {
+      await pool.query(
+        "INSERT INTO notifications (message, type, target_roles) VALUES ($1, 'CREDIT_CUSTOMER', '[\"admin\", \"developer\"]'::jsonb)",
+        [`New Credit Customer added: ${name}`]
+      );
+    } catch (notifErr) {
+      console.error('Failed to create notification:', notifErr);
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    if (error.code === '42703') {
+    if (error.code === '42703' || error.code === '42P01') {
       try {
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS reference VARCHAR(255)");
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS notes TEXT");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS discount_rules JSONB DEFAULT '[]'::jsonb");
         await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100)");
+        await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'Cash'");
+        await pool.query("CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, message TEXT, type VARCHAR(50), target_roles JSONB, is_read BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
 
         const result = await pool.query(
-          'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches, reference, notes) VALUES ($1, $2, $3, 0, $4, $5, $6) RETURNING *',
-          [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches), reference || null, notes || null]
+          'INSERT INTO credit_customers (name, phone, credit_limit, balance, available_branches, reference, notes, discount_rules) VALUES ($1, $2, $3, 0, $4, $5, $6, $7) RETURNING *',
+          [name, phone || null, credit_limit || 0, JSON.stringify(finalBranches), reference || null, notes || null, JSON.stringify(discount_rules || [])]
         );
         return res.status(201).json(result.rows[0]);
       } catch (retryErr) {
@@ -119,7 +136,7 @@ router.post('/', async (req, res) => {
 // Update a credit customer
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, phone, credit_limit, available_branches, reference, notes } = req.body;
+  const { name, phone, credit_limit, available_branches, reference, notes, discount_rules } = req.body;
 
   const userRole = req.user?.role?.trim().toLowerCase();
   const userBranch = req.user?.branch;
@@ -147,6 +164,10 @@ router.put('/:id', async (req, res) => {
          params.push(JSON.stringify(available_branches));
          query += `, available_branches = $${params.length}`;
        }
+       if (discount_rules !== undefined) {
+         params.push(JSON.stringify(discount_rules));
+         query += `, discount_rules = $${params.length}`;
+       }
     }
     
     params.push(id);
@@ -156,12 +177,15 @@ router.put('/:id', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Credit customer not found' });
     res.json(result.rows[0]);
   } catch (error) {
-    if (error.code === '42703') {
+    if (error.code === '42703' || error.code === '42P01') {
       try {
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS available_branches JSONB DEFAULT '[]'::jsonb");
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS reference VARCHAR(255)");
         await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS notes TEXT");
+        await pool.query("ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS discount_rules JSONB DEFAULT '[]'::jsonb");
         await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100)");
+        await pool.query("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'Cash'");
+        await pool.query("CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, message TEXT, type VARCHAR(50), target_roles JSONB, is_read BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
 
         const result = await pool.query(query, params); // retry
         if (result.rows.length === 0) return res.status(404).json({ error: 'Credit customer not found' });
@@ -226,7 +250,7 @@ router.get('/:id/history', async (req, res) => {
 // Add a payment (clear dues or add advance)
 router.post('/:id/payment', async (req, res) => {
   const { id } = req.params;
-  const { amount, action, cashier_name } = req.body; 
+  const { amount, action, cashier_name, payment_method } = req.body; 
   
   if (!amount || isNaN(amount) || amount <= 0) {
     return res.status(400).json({ error: 'Valid positive amount is required' });
@@ -240,8 +264,8 @@ router.post('/:id/payment', async (req, res) => {
     const balanceChange = transactionType === 'CHARGE' ? amount : -amount;
 
     await pool.query(
-      'INSERT INTO credit_transactions (credit_customer_id, type, amount, cashier_name) VALUES ($1, $2, $3, $4)',
-      [id, transactionType, amount, cashier_name || req.user?.username || 'Unknown']
+      'INSERT INTO credit_transactions (credit_customer_id, type, amount, cashier_name, payment_method) VALUES ($1, $2, $3, $4, $5)',
+      [id, transactionType, amount, cashier_name || req.user?.username || 'Unknown', payment_method || 'Cash']
     );
 
     const updateResult = await pool.query(
@@ -252,6 +276,17 @@ router.post('/:id/payment', async (req, res) => {
     if (updateResult.rows.length === 0) {
       await pool.query('ROLLBACK');
       return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    if (transactionType === 'PAYMENT') { // Notify on any payment added
+      try {
+        await pool.query(
+          "INSERT INTO notifications (message, type, target_roles) VALUES ($1, 'CREDIT_PAYMENT', '[\"admin\"]'::jsonb)",
+          [`Major Payment of ${amount} (${payment_method || 'Cash'}) received from ${updateResult.rows[0].name}`]
+        );
+      } catch (notifErr) {
+        console.error('Failed to create payment notification:', notifErr);
+      }
     }
 
     await pool.query('COMMIT');

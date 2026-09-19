@@ -1,4 +1,5 @@
 require('dotenv').config();
+process.env.TZ = 'Asia/Riyadh'; // Set timezone to Saudi Arabia
 
 const express = require('express');
 const cors = require('cors');

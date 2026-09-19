@@ -267,6 +267,53 @@ export default function POS() {
     fetchCreditCustomers()
   }, [fetchCreditCustomers])
 
+  // Auto-calculate discount for credit customer
+  useEffect(() => {
+    if (paymentMethod === 'Credit' && selectedCreditCustomer) {
+      const cust = creditCustomers.find(c => c.id.toString() === selectedCreditCustomer);
+      if (cust && cust.discount_rules && cust.discount_rules.length > 0) {
+        let totalDiscount = 0;
+        cart.forEach(item => {
+          let applicableRule = null;
+          
+          // Check item level first
+          const itemRule = cust.discount_rules.find(r => r.targetType === 'item' && r.targetId.toString() === item.id.toString());
+          if (itemRule) {
+            applicableRule = itemRule;
+          } else {
+            // Check category level
+            const catRule = cust.discount_rules.find(r => r.targetType === 'category' && 
+              ((item.category_names && item.category_names.includes(r.targetName)) || 
+               item.category_name === r.targetName || item.category === r.targetName ||
+               (item.category_id && item.category_id.toString() === r.targetId.toString())
+              )
+            );
+            if (catRule) {
+              applicableRule = catRule;
+            } else {
+              // Check all level
+              const allRule = cust.discount_rules.find(r => r.targetType === 'all');
+              if (allRule) applicableRule = allRule;
+            }
+          }
+
+          if (applicableRule) {
+            let itemTotal = item.price * item.qty;
+            if (applicableRule.discountType === 'percentage') {
+              totalDiscount += itemTotal * (applicableRule.discountValue / 100);
+            } else if (applicableRule.discountType === 'fixed') {
+              totalDiscount += applicableRule.discountValue * item.qty;
+            }
+          }
+        });
+
+        if (parseFloat(customerInfo.discount || 0).toFixed(2) !== totalDiscount.toFixed(2)) {
+          setCustomerInfo(prev => ({ ...prev, discount: totalDiscount.toFixed(2) }));
+        }
+      }
+    }
+  }, [paymentMethod, selectedCreditCustomer, cart, creditCustomers, setCustomerInfo]);
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
     return () => clearInterval(timer);

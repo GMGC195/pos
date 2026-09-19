@@ -195,8 +195,23 @@ router.get('/notifications', authenticateToken, async (req, res) => {
         }
       }
     }
+    let systemNotifs = [];
+    try {
+      const sysNotifRes = await pool.query(
+        `SELECT * FROM notifications WHERE target_roles @> $1::jsonb ORDER BY created_at DESC LIMIT 20`,
+        [JSON.stringify([userRole])]
+      );
+      systemNotifs = sysNotifRes.rows.map(n => ({
+        id: `sys-${n.id}`,
+        type: n.type,
+        created_at: n.created_at,
+        message: n.message
+      }));
+    } catch(e) {
+      // table might not exist yet, ignore
+    }
 
-    res.json([...notifications, ...requestNotifs]);
+    res.json([...notifications, ...requestNotifs, ...systemNotifs]);
   } catch (err) {
     console.error('Error fetching attendance warnings:', err.message);
     res.status(500).json({ error: err.message });

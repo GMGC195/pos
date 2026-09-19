@@ -35,6 +35,25 @@ export default function Credit() {
 
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentAction, setPaymentAction] = useState('PAYMENT');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+
+  const [discountRules, setDiscountRules] = useState([]);
+  const [ruleTargetType, setRuleTargetType] = useState('all');
+  const [ruleTargetId, setRuleTargetId] = useState('');
+  const [ruleDiscountType, setRuleDiscountType] = useState('percentage');
+  const [ruleDiscountValue, setRuleDiscountValue] = useState('');
+  const [showLedgerDiscounts, setShowLedgerDiscounts] = useState(false);
+
+  // Items/Cats for dropdowns
+  const [categories, setCategories] = useState([]);
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      axios.get('/api/categories').then(r => setCategories(r.data)).catch(console.error);
+      axios.get('/api/items').then(r => setItems(r.data)).catch(console.error);
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchCustomers();
@@ -66,7 +85,8 @@ export default function Credit() {
       credit_limit: creditLimit,
       reference,
       notes,
-      available_branches: isAdmin ? selectedBranches : [user?.branch?.split(',')[0]?.trim() || '']
+      available_branches: isAdmin ? selectedBranches : [user?.branch?.split(',')[0]?.trim() || ''],
+      discount_rules: discountRules
     };
 
     setSaving(true);
@@ -126,6 +146,7 @@ export default function Credit() {
     setNotes('');
     setCreditLimit(0);
     setSelectedBranches(AVAILABLE_BRANCHES); // Default select all
+    setDiscountRules([]);
     setShowModal(true);
   };
 
@@ -137,6 +158,7 @@ export default function Credit() {
     setNotes(customer.notes || '');
     setCreditLimit(customer.credit_limit || 0);
     setSelectedBranches(customer.available_branches || []);
+    setDiscountRules(customer.discount_rules || []);
     setShowModal(true);
   };
 
@@ -144,6 +166,9 @@ export default function Credit() {
     setActiveCustomer(customer);
     setPaymentAmount('');
     setPaymentAction('PAYMENT');
+    setPaymentMethod('Cash');
+    setDiscountRules(customer.discount_rules || []);
+    setShowLedgerDiscounts(false);
     try {
       const res = await axios.get(`/api/credit/${customer.id}/ledger`);
       setLedger(res.data);
@@ -175,7 +200,8 @@ export default function Credit() {
       await axios.post(`/api/credit/${activeCustomer.id}/payment`, { 
         amount: finalAmount,
         action: paymentAction,
-        cashier_name: user?.username || 'Unknown'
+        cashier_name: user?.username || 'Unknown',
+        payment_method: paymentAction === 'PAYMENT' ? paymentMethod : null
       });
       toast.success(paymentAction === 'PAYMENT' ? 'Major Payment added' : 'Credit added');
       setPaymentAmount('');
@@ -196,6 +222,50 @@ export default function Credit() {
       setSelectedBranches(selectedBranches.filter(b => b !== br));
     } else {
       setSelectedBranches([...selectedBranches, br]);
+    }
+  };
+
+  const handleAddDiscountRule = () => {
+    if (ruleTargetType !== 'all' && !ruleTargetId) return toast.error('Please specify target');
+    if (!ruleDiscountValue || Number(ruleDiscountValue) <= 0) return toast.error('Enter valid discount value');
+
+    let targetName = 'All';
+    if (ruleTargetType === 'category') {
+      const cat = categories.find(c => c.id.toString() === ruleTargetId);
+      targetName = cat ? cat.name : ruleTargetId;
+    } else if (ruleTargetType === 'item') {
+      const it = items.find(i => i.id.toString() === ruleTargetId);
+      targetName = it ? it.name : ruleTargetId;
+    }
+
+    const newRule = {
+      targetType: ruleTargetType,
+      targetId: ruleTargetType === 'all' ? 'all' : ruleTargetId,
+      targetName,
+      discountType: ruleDiscountType,
+      discountValue: Number(ruleDiscountValue)
+    };
+    
+    setDiscountRules([...discountRules, newRule]);
+    setRuleTargetId('');
+    setRuleDiscountValue('');
+  };
+
+  const handleSaveLedgerDiscounts = async () => {
+    setSaving(true);
+    try {
+      await axios.put(`/api/credit/${activeCustomer.id}`, {
+        ...activeCustomer,
+        discount_rules: discountRules
+      });
+      toast.success('Discount Rules updated');
+      // Update local active customer to reflect changes
+      setActiveCustomer({ ...activeCustomer, discount_rules: discountRules });
+      fetchCustomers();
+    } catch (err) {
+      toast.error('Failed to save discount rules');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -336,6 +406,52 @@ export default function Credit() {
                 </div>
               )}
 
+              {isAdmin && (
+                <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 8 }}>
+                  <h4 style={{ margin: '0 0 12px', fontSize: 14 }}>Discount Rules</h4>
+                  {discountRules.length > 0 && (
+                    <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {discountRules.map((rule, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, background: 'var(--bg)', padding: '6px 12px', borderRadius: 6 }}>
+                          <span>
+                            {rule.targetType === 'all' ? 'All Items' : rule.targetName}: {rule.discountValue}{rule.discountType === 'percentage' ? '%' : ` ${CURRENCY}`}
+                          </span>
+                          <button type="button" onClick={() => setDiscountRules(discountRules.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer' }}><X size={14}/></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select value={ruleTargetType} onChange={e => { setRuleTargetType(e.target.value); setRuleTargetId(''); }} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
+                      <option value="all">Apply For All</option>
+                      <option value="category">Specific Category</option>
+                      <option value="item">Specific Item</option>
+                    </select>
+                    
+                    {ruleTargetType === 'category' && (
+                      <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
+                        <option value="">Select Category...</option>
+                        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    )}
+                    {ruleTargetType === 'item' && (
+                      <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
+                        <option value="">Select Item...</option>
+                        {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                    <select value={ruleDiscountType} onChange={e => setRuleDiscountType(e.target.value)} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
+                      <option value="percentage">%</option>
+                      <option value="fixed">{CURRENCY}</option>
+                    </select>
+                    <input type="number" step="0.01" value={ruleDiscountValue} onChange={e => setRuleDiscountValue(e.target.value)} placeholder="Amount" style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1, minWidth: 60 }} />
+                    <button type="button" onClick={handleAddDiscountRule} style={{ background: 'var(--text)', color: 'var(--bg)', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>Add</button>
+                  </div>
+                </div>
+              )}
+
               <button type="submit" disabled={saving} style={{ background: 'var(--primary)', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', marginTop: 8, opacity: saving ? 0.7 : 1 }}>
                 {saving ? 'Saving...' : 'Save'}
               </button>
@@ -349,38 +465,114 @@ export default function Credit() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 600, height: '80vh', borderRadius: 16, padding: 24, position: 'relative', display: 'flex', flexDirection: 'column' }}>
             <button onClick={() => setShowLedger(false)} style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20}/></button>
-            <h3 style={{ margin: '0 0 4px', fontSize: 20 }}>{activeCustomer.name}'s Ledger</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <h3 style={{ margin: 0, fontSize: 20 }}>{activeCustomer.name}'s Ledger</h3>
+              {isAdmin && (
+                <button 
+                  onClick={() => setShowLedgerDiscounts(!showLedgerDiscounts)} 
+                  style={{ background: showLedgerDiscounts ? 'var(--primary)' : 'var(--surface-2)', color: showLedgerDiscounts ? '#fff' : 'var(--text)', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, marginRight: 24 }}
+                >
+                  Manage Discounts
+                </button>
+              )}
+            </div>
             <p style={{ margin: '0 0 20px', color: 'var(--text-secondary)', fontSize: 14 }}>
               Current Balance: <span style={{ fontWeight: 700, color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>{CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(Due)' : (activeCustomer.balance < 0 ? '(Adv)' : '')}</span>
             </p>
 
-            <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20, padding: 16, background: 'var(--surface-2)', borderRadius: 8 }}>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}>
-                  <input type="radio" name="actionType" value="PAYMENT" checked={paymentAction === 'PAYMENT'} onChange={() => setPaymentAction('PAYMENT')} />
-                  Receive Major Payment
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}>
-                  <input type="radio" name="actionType" value="CHARGE" checked={paymentAction === 'CHARGE'} onChange={() => setPaymentAction('CHARGE')} />
-                  Add Credit
-                </label>
-              </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--red)' }}>
-                    {paymentAction === 'PAYMENT' ? '-' : '+'}
-                  </span>
-                  <input 
-                    type="number" step="0.01" required placeholder="Enter Amount"
-                    value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} 
-                    style={{ width: '100%', padding: '10px 12px 10px 28px', borderRadius: 8, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box' }} 
-                  />
+            {showLedgerDiscounts && isAdmin ? (
+              <div style={{ background: 'var(--surface-2)', padding: 16, borderRadius: 8, marginBottom: 20 }}>
+                <h4 style={{ margin: '0 0 12px', fontSize: 15 }}>Manage Special Discounts for {activeCustomer.name}</h4>
+                {discountRules.length > 0 && (
+                  <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {discountRules.map((rule, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, background: 'var(--bg)', padding: '8px 12px', borderRadius: 6 }}>
+                        <span>
+                          {rule.targetType === 'all' ? 'All Items' : rule.targetName}: <strong style={{color: 'var(--green)'}}>{rule.discountValue}{rule.discountType === 'percentage' ? '%' : ` ${CURRENCY}`}</strong>
+                        </span>
+                        <button type="button" onClick={() => setDiscountRules(discountRules.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer' }}><Trash2 size={16}/></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                  <select value={ruleTargetType} onChange={e => { setRuleTargetType(e.target.value); setRuleTargetId(''); }} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
+                    <option value="all">Apply For All Items</option>
+                    <option value="category">Specific Category</option>
+                    <option value="item">Specific Item</option>
+                  </select>
+                  
+                  {ruleTargetType === 'category' && (
+                    <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
+                      <option value="">Select Category...</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                  {ruleTargetType === 'item' && (
+                    <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
+                      <option value="">Select Item...</option>
+                      {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                    </select>
+                  )}
                 </div>
-                <button type="submit" style={{ background: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--red)', color: '#fff', border: 'none', padding: '0 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>
-                  {paymentAction === 'PAYMENT' ? 'Receive Payment' : 'Add Credit'}
-                </button>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <select value={ruleDiscountType} onChange={e => setRuleDiscountType(e.target.value)} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed ({CURRENCY})</option>
+                  </select>
+                  <input type="number" step="0.01" value={ruleDiscountValue} onChange={e => setRuleDiscountValue(e.target.value)} placeholder="Amount" style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }} />
+                  <button type="button" onClick={handleAddDiscountRule} style={{ background: 'var(--text)', color: 'var(--bg)', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>Add Rule</button>
+                </div>
+                <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={handleSaveLedgerDiscounts} disabled={saving} style={{ background: 'var(--primary)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 6, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                    {saving ? 'Saving...' : 'Save Discount Rules'}
+                  </button>
+                </div>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20, padding: 16, background: 'var(--surface-2)', borderRadius: 8 }}>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}>
+                    <input type="radio" name="actionType" value="PAYMENT" checked={paymentAction === 'PAYMENT'} onChange={() => setPaymentAction('PAYMENT')} />
+                    Receive Major Payment
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}>
+                    <input type="radio" name="actionType" value="CHARGE" checked={paymentAction === 'CHARGE'} onChange={() => setPaymentAction('CHARGE')} />
+                    Add Credit
+                  </label>
+                </div>
+
+                {paymentAction === 'PAYMENT' && (
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 4, padding: '8px 12px', background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--surface-3)' }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Payment Method:</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 14 }}>
+                      <input type="radio" name="paymentMethod" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
+                      Cash
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 14 }}>
+                      <input type="radio" name="paymentMethod" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
+                      Card
+                    </label>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--red)' }}>
+                      {paymentAction === 'PAYMENT' ? '-' : '+'}
+                    </span>
+                    <input 
+                      type="number" step="0.01" required placeholder="Enter Amount"
+                      value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} 
+                      style={{ width: '100%', padding: '10px 12px 10px 28px', borderRadius: 8, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box' }} 
+                    />
+                  </div>
+                  <button type="submit" style={{ background: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--red)', color: '#fff', border: 'none', padding: '0 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>
+                    {paymentAction === 'PAYMENT' ? 'Receive Payment' : 'Add Credit'}
+                  </button>
+                </div>
+              </form>
+            )}
 
             <div style={{ flex: 1, overflowY: 'auto', border: '1.5px solid var(--surface-2)', borderRadius: 8 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -401,7 +593,10 @@ export default function Credit() {
                         ) : t.type === 'CHARGE' ? (
                           <span style={{ color: 'var(--red)', fontWeight: 500 }}>Credit Added {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
                         ) : (
-                          <span style={{ color: 'var(--green)', fontWeight: 500 }}>Major Payment {t.cashier_name ? `(to ${t.cashier_name})` : ''}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ color: 'var(--green)', fontWeight: 500 }}>Major Payment {t.cashier_name ? `(to ${t.cashier_name})` : ''}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>via {t.payment_method || 'Cash'}</span>
+                          </div>
                         )}
                       </td>
                       <td style={{ padding: '12px 16px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: (t.type === 'CREDIT_ORDER') ? 'var(--red)' : 'var(--green)' }}>
