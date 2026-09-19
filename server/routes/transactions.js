@@ -45,6 +45,11 @@ router.get('/', authenticateToken, async (req, res) => {
       }
     }
 
+    if (!isAdminRole) {
+      params.push(req.user.username);
+      query += ` AND (t.payment_method != 'Credit' OR (o.completed_by = $${params.length} AND t.created_at >= CURRENT_DATE))`;
+    }
+
     query += ' ORDER BY t.created_at DESC';
 
     const result = await pool.query(query, params);
@@ -87,6 +92,11 @@ router.get('/summary', authenticateToken, async (req, res) => {
         params.push(req.user.username);
         whereClause += ` AND o.completed_by = $${params.length}`;
       }
+    }
+
+    if (!isAdminRole) {
+      params.push(req.user.username);
+      whereClause += ` AND (t.payment_method != 'Credit' OR (o.completed_by = $${params.length} AND t.created_at >= CURRENT_DATE))`;
     }
 
     const result = await pool.query(
@@ -146,6 +156,8 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     if (!isAdminRole && req.user?.branch) {
       paymentsParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
       paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
+      paymentsParams.push(req.user.username);
+      paymentsQuery += ` AND ct.cashier_name = $${paymentsParams.length} AND ct.created_at >= CURRENT_DATE`;
     } else if (branch && branch !== 'All') {
       paymentsParams.push(JSON.stringify([branch]));
       paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
@@ -173,6 +185,8 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     if (!isAdminRole && req.user?.branch) {
       listParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
       paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
+      listParams.push(req.user.username);
+      paymentsListQuery += ` AND ct.cashier_name = $${listParams.length} AND ct.created_at >= CURRENT_DATE`;
     } else if (branch && branch !== 'All') {
       listParams.push(JSON.stringify([branch]));
       paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;

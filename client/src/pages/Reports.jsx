@@ -126,8 +126,8 @@ export default function Reports({ isTodaySales = false }) {
   const creditRow = summary.find(r => r.payment_method === 'Credit')
   
   const totalSales = summary
-    .filter(r => r.payment_method !== 'Hold' && r.payment_method !== 'Cancelled' && r.payment_method !== 'Returned')
-    .reduce((s, r) => s + parseFloat(r.total || 0), 0)
+    .filter(r => r.payment_method !== 'Hold' && r.payment_method !== 'Cancelled' && r.payment_method !== 'Returned' && r.payment_method !== 'Credit')
+    .reduce((s, r) => s + parseFloat(r.total || 0), 0) + parseFloat(creditSummary?.majorPaymentsTotal || 0)
     
   const totalCount = summary.reduce((s, r) => s + parseInt(r.count || 0), 0)
 
@@ -139,9 +139,12 @@ export default function Reports({ isTodaySales = false }) {
     { label: 'Cash Sales', val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#10b981', bg: '#ecfdf5', sub: `${cashRow?.count || 0} orders` },
     { label: 'Card Sales', val: `${CURRENCY}${cardTotal.toFixed(2)}`, icon: <CreditCard size={20} />, color: '#3b82f6', bg: '#eff6ff', sub: `${cardCount} orders` },
     { label: "Today's Credit", val: `${CURRENCY}${parseFloat(creditRow?.total || 0).toFixed(2)}`, icon: <ClipboardList size={20} />, color: '#8b5cf6', bg: '#f3e8ff', sub: `${creditRow?.count || 0} orders` },
-    { label: 'Total Credit', val: `${CURRENCY}${(creditSummary.totalCredit || 0).toFixed(2)}`, icon: <Globe size={20} />, color: '#f59e0b', bg: '#fef3c7', sub: 'Total Khata Balance' },
-    { label: 'Major Payment', val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#14b8a6', bg: '#ccfbf1', sub: 'Received Today' },
+    { label: 'Major Payment', val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#14b8a6', bg: '#ccfbf1', sub: 'Received Today' }
   ]
+
+  if (isAdminOrDev || isManagement) {
+    tiles.splice(4, 0, { label: 'Total Credit', val: `${CURRENCY}${(creditSummary.totalCredit || 0).toFixed(2)}`, icon: <Globe size={20} />, color: '#f59e0b', bg: '#fef3c7', sub: 'Total Khata Balance' })
+  }
   
   if (holdRow && parseInt(holdRow.count || 0) > 0) {
     tiles.push({
