@@ -473,8 +473,9 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       let timeDiff = currentTotalMins - startTotalMins;
       if (timeDiff < -12 * 60) timeDiff += 24 * 60; // handle wrap around midnight
       
-      // Early check-in restriction for employees and operators
-      if ((req.user.role?.toLowerCase() === 'employee' || req.user.role?.toLowerCase() === 'operator') && timeDiff < -5) {
+      // Early check-in restriction for employees, operators, cashiers, and order takers
+      const ur = req.user.role?.toLowerCase();
+      if ((ur === 'employee' || ur === 'operator' || ur === 'cashier' || ur === 'order taker') && timeDiff < -5) {
         return res.status(403).json({ error: 'Your duty hours haven\'t started yet, you can just request check-in 5 minutes before.' });
       }
 
