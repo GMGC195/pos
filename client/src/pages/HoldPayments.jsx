@@ -119,8 +119,14 @@ export default function HoldPayments() {
     if (!cancelReason.trim()) return toast.error('Please provide a reason')
     setProcessingCancel(true)
     try {
-      await axios.patch(`/api/orders/${cancelOrderTarget}/request-cancel`, { reason: cancelReason })
-      toast.success('Cancellation request sent to Admin')
+      if (role !== 'order taker') {
+        const formattedReason = `[CANCELLED] ${cancelReason}`;
+        await axios.patch(`/api/orders/${cancelOrderTarget}/void`, { type: 'Cancelled', reason: formattedReason });
+        toast.success('Order Cancelled');
+      } else {
+        await axios.patch(`/api/orders/${cancelOrderTarget}/request-cancel`, { reason: cancelReason });
+        toast.success('Cancellation request sent to Admin');
+      }
       setShowCancelModal(false)
       setCancelReason('')
       setCancelOrderTarget(null)

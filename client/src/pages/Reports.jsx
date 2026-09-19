@@ -444,8 +444,28 @@ export default function Reports({ isTodaySales = false }) {
     setProcessingCancel(true)
     try {
       const formattedReason = `[${cancelOrderTarget.type.toUpperCase()}] ${cancelReason}`
-      await axios.patch(`/api/orders/${cancelOrderTarget.id}/void`, { type: cancelOrderTarget.type, reason: formattedReason })
-      toast.success(`Order marked as ${cancelOrderTarget.type}.`)
+      const isOrderTaker = user?.role?.trim().toLowerCase() === 'order taker'
+      const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || user?.role?.trim().toLowerCase() === 'developer'
+      
+      let shouldDirectVoid = false;
+      if (isAdmin) {
+        shouldDirectVoid = true;
+      } else if (!isOrderTaker) {
+        // Cashier
+        if (cancelOrderTarget.orderStatus === 'Completed') {
+          shouldDirectVoid = false; // Cashiers cannot directly void completed orders
+        } else {
+          shouldDirectVoid = true;
+        }
+      }
+
+      if (shouldDirectVoid) {
+        await axios.patch(`/api/orders/${cancelOrderTarget.id}/void`, { type: cancelOrderTarget.type, reason: formattedReason })
+        toast.success(`Order marked as ${cancelOrderTarget.type}.`)
+      } else {
+        await axios.patch(`/api/orders/${cancelOrderTarget.id}/request-cancel`, { reason: formattedReason })
+        toast.success('Cancel request sent to Admin')
+      }
       setShowCancelModal(false)
       setCancelReason('')
       setCancelOrderTarget(null)
@@ -457,8 +477,8 @@ export default function Reports({ isTodaySales = false }) {
     }
   }
 
-  const onVoidButtonClick = (orderId, type) => {
-    setCancelOrderTarget({ id: orderId, type })
+  const onVoidButtonClick = (orderId, type, orderStatus) => {
+    setCancelOrderTarget({ id: orderId, type, orderStatus })
     setShowCancelModal(true)
   }
 
@@ -739,7 +759,7 @@ export default function Reports({ isTodaySales = false }) {
                             <button 
                               className="btn btn-sm" 
                               style={{ padding: '4px 8px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: 4, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
-                              onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Cancelled') }}
+                              onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Cancelled', t.order_status) }}
                               disabled={isManagement}
                               title="Cancel Order"
                             >
@@ -748,7 +768,7 @@ export default function Reports({ isTodaySales = false }) {
                             <button 
                               className="btn btn-sm" 
                               style={{ padding: '4px 8px', background: 'rgba(217, 119, 6, 0.1)', color: '#d97706', border: '1px solid rgba(217, 119, 6, 0.2)', display: 'flex', alignItems: 'center', gap: 4, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
-                              onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Returned') }}
+                              onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Returned', t.order_status) }}
                               disabled={isManagement}
                               title="Return Order"
                             >

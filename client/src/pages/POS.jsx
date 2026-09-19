@@ -368,8 +368,14 @@ export default function POS() {
     setProcessingCancel(true)
     try {
       const formattedReason = `[CANCELLED] ${cancelReason}`
-      await axios.patch(`/api/orders/${cancelRequestModal.id}/request-cancel`, { reason: formattedReason })
-      toast.success('Cancel request sent to Cashier/Admin')
+      const isOrderTaker = user?.role?.trim().toLowerCase() === 'order taker'
+      if (!isOrderTaker) {
+        await axios.patch(`/api/orders/${cancelRequestModal.id}/void`, { type: 'Cancelled', reason: formattedReason })
+        toast.success('Order Cancelled')
+      } else {
+        await axios.patch(`/api/orders/${cancelRequestModal.id}/request-cancel`, { reason: formattedReason })
+        toast.success('Cancel request sent to Cashier/Admin')
+      }
       setCancelRequestModal(null)
       setCancelReason('')
       fetchActiveOrders()
