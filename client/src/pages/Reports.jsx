@@ -139,7 +139,7 @@ export default function Reports({ isTodaySales = false }) {
     { label: 'Cash Sales', val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#10b981', bg: '#ecfdf5', sub: `${cashRow?.count || 0} orders` },
     { label: 'Card Sales', val: `${CURRENCY}${cardTotal.toFixed(2)}`, icon: <CreditCard size={20} />, color: '#3b82f6', bg: '#eff6ff', sub: `${cardCount} orders` },
     { label: "Today's Credit", val: `${CURRENCY}${parseFloat(creditRow?.total || 0).toFixed(2)}`, icon: <ClipboardList size={20} />, color: '#8b5cf6', bg: '#f3e8ff', sub: `${creditRow?.count || 0} orders` },
-    { label: 'Major Payment', val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#14b8a6', bg: '#ccfbf1', sub: 'Received Today' }
+    { label: 'Major Payment', val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#14b8a6', bg: '#ccfbf1', sub: `Cash: ${CURRENCY}${(creditSummary.majorPaymentsCash || 0).toFixed(2)} | Card: ${CURRENCY}${(creditSummary.majorPaymentsCard || 0).toFixed(2)}` }
   ]
 
   if (isAdminOrDev || isManagement) {
@@ -582,6 +582,7 @@ export default function Reports({ isTodaySales = false }) {
                   <th>#</th>
                   <th>Customer Name</th>
                   <th>Cashier</th>
+                  <th>Payment Method</th>
                   <th>Date & Time</th>
                   <th>Amount</th>
                 </tr>
@@ -592,6 +593,7 @@ export default function Reports({ isTodaySales = false }) {
                     <td style={{ fontWeight: 800 }}>{index + 1}</td>
                     <td style={{ fontWeight: 600 }}>{p.customer_name}</td>
                     <td>{p.cashier_name || '-'}</td>
+                    <td>{p.payment_method || 'Cash'}</td>
                     <td style={{ color: 'var(--text-secondary)' }}>{new Date(p.created_at).toLocaleString()}</td>
                     <td style={{ fontWeight: 700, color: 'var(--green)' }}>{CURRENCY}{parseFloat(p.amount).toFixed(2)}</td>
                   </tr>

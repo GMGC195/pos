@@ -235,6 +235,14 @@ ${slipBody}
         </div>
 
         <div style={{ padding: 20, overflowY: 'auto', background: '#fcfcfc', flex: 1 }}>
+          {order.status === 'Cancelled' && order.cancel_reason && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '12px', borderRadius: '8px', marginBottom: '16px', color: '#991b1b', fontSize: '14px' }}>
+              <div style={{ fontWeight: 800, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '16px' }}>⚠️</span> Order Cancelled
+              </div>
+              <div><strong>Reason:</strong> {order.cancel_reason}</div>
+            </div>
+          )}
           {/* Thermal Style Receipt Content */}
           <div 
             style={{ 

@@ -595,8 +595,8 @@ router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) 
     
     // Update order status and clear cancellation request if any
     const orderResult = await client.query(
-      `UPDATE orders SET status = $1, cancel_requested = FALSE, cancel_reason = $3 WHERE id = $2 RETURNING *`,
-      [updateTo, req.params.id, finalReason]
+      `UPDATE orders SET status = $1, cancel_requested = FALSE, cancel_reason = $3, completed_by = $4 WHERE id = $2 RETURNING *`,
+      [updateTo, req.params.id, finalReason, req.user.username]
     );
     
     if (orderResult.rows.length === 0) {
@@ -656,8 +656,8 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
     if (action === 'approve') {
        // Similar to void but specifically for requests
        const orderResult = await client.query(
-         `UPDATE orders SET status = 'Cancelled', cancel_requested = FALSE, cancel_reason = NULL WHERE id = $1 RETURNING *`,
-         [req.params.id]
+         `UPDATE orders SET status = 'Cancelled', cancel_requested = FALSE, completed_by = $2 WHERE id = $1 RETURNING *`,
+         [req.params.id, req.user.username]
        );
        if (orderResult.rows.length === 0) {
          await client.query('ROLLBACK');

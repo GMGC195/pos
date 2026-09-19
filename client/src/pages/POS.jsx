@@ -1561,7 +1561,7 @@ export default function POS() {
                   <span style={{ fontSize: 14, fontWeight: 600 }}>Cash</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="radio" name="cartPayment" value="Online" checked={paymentMethod === 'Online'} onChange={() => setPaymentMethod('Online')} />
+                  <input type="radio" name="cartPayment" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
                   <span style={{ fontSize: 14, fontWeight: 600 }}>Card</span>
                 </label>
               </div>
@@ -1928,7 +1928,7 @@ export default function POS() {
             ) : (
               <>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 16, justifyContent: 'center' }}>
-                  {['Cash', 'Online', 'Payment Pending', 'Credit'].map(pm => {
+                  {['Cash', 'Card', 'Payment Pending', 'Credit'].map(pm => {
                     const isSelected = paymentMethod === pm || (pm === 'Payment Pending' && paymentMethod === 'Hold');
                     return (
                       <button 
@@ -1945,7 +1945,7 @@ export default function POS() {
                           cursor: 'pointer'
                         }}
                       >
-                        {pm === 'Payment Pending' ? 'Pending' : (pm === 'Online' ? 'Card' : pm)}
+                        {pm === 'Payment Pending' ? 'Pending' : pm}
                       </button>
                     )
                   })}

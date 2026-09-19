@@ -138,7 +138,9 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
 
     // Major payments received in the date range
     let paymentsQuery = `
-      SELECT SUM(ct.amount) as major_payments_total 
+      SELECT SUM(ct.amount) as major_payments_total,
+             SUM(CASE WHEN ct.payment_method = 'Cash' THEN ct.amount ELSE 0 END) as major_payments_cash,
+             SUM(CASE WHEN ct.payment_method = 'Card' THEN ct.amount ELSE 0 END) as major_payments_card
       FROM credit_transactions ct
       JOIN credit_customers cc ON ct.credit_customer_id = cc.id
       WHERE ct.type = 'PAYMENT'
@@ -165,10 +167,12 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
 
     const paymentsResult = await pool.query(paymentsQuery, paymentsParams);
     const majorPaymentsTotal = parseFloat(paymentsResult.rows[0]?.major_payments_total || 0);
+    const majorPaymentsCash = parseFloat(paymentsResult.rows[0]?.major_payments_cash || 0);
+    const majorPaymentsCard = parseFloat(paymentsResult.rows[0]?.major_payments_card || 0);
 
     // Also fetch the individual major payments for the report table
     let paymentsListQuery = `
-      SELECT ct.id, ct.amount, ct.created_at, ct.cashier_name, cc.name as customer_name
+      SELECT ct.id, ct.amount, ct.created_at, ct.cashier_name, cc.name as customer_name, ct.payment_method
       FROM credit_transactions ct
       JOIN credit_customers cc ON ct.credit_customer_id = cc.id
       WHERE ct.type = 'PAYMENT'
@@ -198,6 +202,8 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     res.json({
       totalCredit,
       majorPaymentsTotal,
+      majorPaymentsCash,
+      majorPaymentsCard,
       majorPayments: paymentsListResult.rows
     });
   } catch (err) {
