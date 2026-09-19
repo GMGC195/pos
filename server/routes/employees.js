@@ -78,25 +78,29 @@ const autoCreateUserForEmployee = async (employee) => {
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const userRole = req.user.role?.toLowerCase();
-    let query = 'SELECT * FROM employees';
+    let query = `
+      SELECT e.*, ewh.start_time as shift_start_time, ewh.end_time as shift_end_time 
+      FROM employees e
+      LEFT JOIN employee_working_hours ewh ON e.working_hours = ewh.name
+    `;
     const params = [];
     
     if (userRole === 'operator') {
       if (req.user.shift) {
-        query += ` WHERE COALESCE(shift, 'Day') = ANY($1)`;
+        query += ` WHERE COALESCE(e.shift, 'Day') = ANY($1)`;
         params.push(req.user.shift.split(',').map(s => s.trim()));
       }
       if (req.user.branch) {
         if (params.length === 1) {
-          query += ` AND COALESCE(branch, '') = ANY($2)`;
+          query += ` AND COALESCE(e.branch, '') = ANY($2)`;
         } else {
-          query += ` WHERE COALESCE(branch, '') = ANY($1)`;
+          query += ` WHERE COALESCE(e.branch, '') = ANY($1)`;
         }
         params.push(req.user.branch.split(',').map(s => s.trim()));
       }
     }
     
-    query += ' ORDER BY id DESC';
+    query += ' ORDER BY e.id DESC';
     
     const result = await pool.query(query, params);
     res.json(result.rows);

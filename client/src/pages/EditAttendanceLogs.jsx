@@ -371,7 +371,9 @@ export default function EditAttendanceLogs() {
                             </>
                           )}
                         </td>
-                        <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 500 }}>{req.reason}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 500 }}>
+                          {req.reason ? req.reason.replace(/\s*\[Approved.*?\]/, '') : ''}
+                        </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           <span style={{ 
                             padding: '3px 8px', 
@@ -383,6 +385,11 @@ export default function EditAttendanceLogs() {
                           }}>
                             {req.status}
                           </span>
+                          {req.status === 'Approved' && req.reason && req.reason.match(/\[Approved.*?\]/) && (
+                            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>
+                              {req.reason.match(/\[(Approved.*?)\]/)[0]}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           {req.status === 'Pending' ? (
@@ -415,7 +422,7 @@ export default function EditAttendanceLogs() {
                                       const initialTime = req.requested_check_in ? new Date(req.requested_check_in).toTimeString().slice(0,5) : req.requested_check_out ? new Date(req.requested_check_out).toTimeString().slice(0,5) : ""
                                       setEditingRequestTimeValue(initialTime)
                                       if (req.request_type === 'Overtime' && req.original_check_out && req.requested_check_out) {
-                                        const diffMins = Math.max(0, Math.floor((new Date(req.requested_check_out) - new Date(req.original_check_out)) / 60000));
+                                        const diffMins = Math.max(0, Math.round((new Date(req.requested_check_out) - new Date(req.original_check_out)) / 60000));
                                         setEditingOvertimeMinutes(diffMins.toString());
                                       } else {
                                         setEditingOvertimeMinutes('');
@@ -507,14 +514,14 @@ export default function EditAttendanceLogs() {
                  if (!activeRequestModal.original_check_in || !activeRequestModal.original_check_out) return '--';
                  const diff = new Date(activeRequestModal.original_check_out) - new Date(activeRequestModal.original_check_in);
                  if (diff < 0) return '--';
-                 return `${Math.floor(diff / 3600000)}h ${Math.floor((diff % 3600000) / 60000)}m`;
+                 return `${Math.floor(diff / 3600000)}h ${Math.round((diff % 3600000) / 60000)}m`;
                })()}</p>
                {activeRequestModal.request_type === 'Overtime' && (
                  <p style={{ marginBottom: 8 }}><strong>Overtime Requested:</strong> {(() => {
                    if (!activeRequestModal.original_check_out || !activeRequestModal.requested_check_out) return '--';
                    const diff = new Date(activeRequestModal.requested_check_out) - new Date(activeRequestModal.original_check_out);
                    if (diff < 0) return '0h 0m';
-                   return `${Math.floor(diff / 3600000)}h ${Math.floor((diff % 3600000) / 60000)}m`;
+                   return `${Math.floor(diff / 3600000)}h ${Math.round((diff % 3600000) / 60000)}m`;
                  })()}</p>
                )}
             </div>
@@ -558,7 +565,7 @@ export default function EditAttendanceLogs() {
                       newOut.setDate(newOut.getDate() + 1);
                     }
                     const diff = newOut - d;
-                    setEditingOvertimeMinutes(Math.max(0, Math.floor(diff / 60000)).toString());
+                    setEditingOvertimeMinutes(Math.max(0, Math.round(diff / 60000)).toString());
                   } else if (!newTime) {
                     setEditingOvertimeMinutes('');
                   }
@@ -568,7 +575,11 @@ export default function EditAttendanceLogs() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
                   let overrideTime = null;
-                  if (editingRequestTimeValue) {
+                  if (activeRequestModal.request_type === 'Overtime' && editingOvertimeMinutes !== '') {
+                    const mins = parseInt(editingOvertimeMinutes, 10);
+                    const baseDateOut = new Date(activeRequestModal.original_check_out);
+                    overrideTime = new Date(baseDateOut.getTime() + mins * 60000).toISOString();
+                  } else if (editingRequestTimeValue) {
                     const baseDateIn = new Date(activeRequestModal.original_check_in || activeRequestModal.attendance_date || activeRequestModal.created_at);
                     const y = baseDateIn.getFullYear();
                     const mo = String(baseDateIn.getMonth() + 1).padStart(2, '0');

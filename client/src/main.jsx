@@ -3,6 +3,24 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
+// Force all local date/time formatting to use Saudi Arabia time (Asia/Riyadh)
+const tz = 'Asia/Riyadh';
+
+const originalToLocaleString = Date.prototype.toLocaleString;
+Date.prototype.toLocaleString = function (locales, options) {
+  return originalToLocaleString.call(this, locales, { ...options, timeZone: tz });
+};
+
+const originalToLocaleDateString = Date.prototype.toLocaleDateString;
+Date.prototype.toLocaleDateString = function (locales, options) {
+  return originalToLocaleDateString.call(this, locales, { ...options, timeZone: tz });
+};
+
+const originalToLocaleTimeString = Date.prototype.toLocaleTimeString;
+Date.prototype.toLocaleTimeString = function (locales, options) {
+  return originalToLocaleTimeString.call(this, locales, { ...options, timeZone: tz });
+};
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />

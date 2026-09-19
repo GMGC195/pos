@@ -412,7 +412,7 @@ export default function AttendanceTracker() {
     const expectedCheckoutTime = checkInTime + (shiftHours * 60 * 60 * 1000) + (totalBreakSecs * 1000);
     const overtimeMins = Math.floor((Date.now() - expectedCheckoutTime) / (1000 * 60));
 
-    if (overtimeMins > 15) {
+    if (overtimeMins > 0) {
       setOvertimeModal({ empId, name, overtimeMins });
       setOvertimeReason('');
       setOvertimeWithSameTime(true);

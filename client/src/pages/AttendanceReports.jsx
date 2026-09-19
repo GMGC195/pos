@@ -367,6 +367,8 @@ export default function AttendanceReports() {
         role: emp.role,
         shift: emp.shift || 'R1',
         shift_hours: parseFloat(emp.shift_hours || 12.0),
+        shift_start_time: emp.shift_start_time,
+        shift_end_time: emp.shift_end_time,
         department: emp.department || '',
         branch: emp.branch || '',
         days: {}
@@ -1151,8 +1153,27 @@ export default function AttendanceReports() {
                               const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
                               const dayBreakSecs = sessions.reduce((acc, s) => acc + parseInt(s.total_break_duration_seconds || 0), 0)
                               
+                              const assignedShiftTime = (sessions[0]?.shift_start_time && sessions[0]?.shift_end_time) 
+                                ? `${sessions[0].shift_start_time.substring(0,5)} - ${sessions[0].shift_end_time.substring(0,5)}` 
+                                : (emp.shift_start_time && emp.shift_end_time ? `${emp.shift_start_time.substring(0,5)} - ${emp.shift_end_time.substring(0,5)}` : null);
+
                               cellContent = (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', fontSize: 9 }}>
+                                  {assignedShiftTime && (
+                                    <div style={{
+                                      fontSize: '8px',
+                                      fontWeight: 800,
+                                      color: 'var(--text-secondary)',
+                                      background: 'var(--surface-2)',
+                                      padding: '2px 5px',
+                                      borderRadius: '4px',
+                                      border: '1px solid var(--border)',
+                                      marginBottom: '2px',
+                                      width: 'fit-content'
+                                    }}>
+                                      Shift: {assignedShiftTime}
+                                    </div>
+                                  )}
                                   {sessions.map((s, idx) => {
                                     const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
                                     const isSystem = s.remarks === 'automatically system check out' || s.remarks === 'System Checkout'
@@ -1201,9 +1222,53 @@ export default function AttendanceReports() {
                             }
                           } else {
                             const todayStr = formatLocalDate(new Date())
+                            
+                            const assignedShiftTime = (emp.shift_start_time && emp.shift_end_time) 
+                              ? `${emp.shift_start_time.substring(0,5)} - ${emp.shift_end_time.substring(0,5)}` 
+                              : null;
+
                             if (dateStr < todayStr) {
-                              cellContent = <span style={{ fontWeight: 750, color: 'var(--red)' }}>A</span>
+                              cellContent = (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+                                  {assignedShiftTime && (
+                                    <div style={{
+                                      fontSize: '8px',
+                                      fontWeight: 800,
+                                      color: 'var(--red)',
+                                      background: 'rgba(255, 69, 58, 0.1)',
+                                      padding: '2px 5px',
+                                      borderRadius: '4px',
+                                      border: '1px solid rgba(255, 69, 58, 0.2)',
+                                      marginBottom: '2px',
+                                      width: 'fit-content'
+                                    }}>
+                                      Shift: {assignedShiftTime}
+                                    </div>
+                                  )}
+                                  <span style={{ fontWeight: 750, color: 'var(--red)' }}>A</span>
+                                </div>
+                              )
                               cellBg = 'rgba(255, 69, 58, 0.08)'
+                            } else if (dateStr === todayStr) {
+                              cellContent = (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+                                  {assignedShiftTime && (
+                                    <div style={{
+                                      fontSize: '8px',
+                                      fontWeight: 800,
+                                      color: 'var(--text-secondary)',
+                                      background: 'var(--surface-2)',
+                                      padding: '2px 5px',
+                                      borderRadius: '4px',
+                                      border: '1px solid var(--border)',
+                                      marginBottom: '2px',
+                                      width: 'fit-content'
+                                    }}>
+                                      Shift: {assignedShiftTime}
+                                    </div>
+                                  )}
+                                </div>
+                              )
                             }
                           }
 

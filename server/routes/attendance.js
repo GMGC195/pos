@@ -490,8 +490,14 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       
       // Early check-in restriction for employees, operators, cashiers, and order takers
       const ur = req.user.role?.toLowerCase();
-      if ((ur === 'employee' || ur === 'operator' || ur === 'cashier' || ur === 'order taker') && timeDiff < -5) {
-        return res.status(403).json({ error: 'Your duty hours haven\'t started yet, you can just request check-in 5 minutes before.' });
+      if ((ur === 'employee' || ur === 'operator' || ur === 'cashier' || ur === 'order taker') && timeDiff < -15) {
+        return res.status(403).json({ error: 'Your duty hours haven\'t started yet, you can just request check-in 15 minutes before.' });
+      }
+
+      // If early check-in, set the checkInTime precisely to the shift start time
+      if (timeDiff < 0) {
+        checkInTime = new Date();
+        checkInTime.setHours(startHour, startMin, 0, 0);
       }
 
       let thresholdMins = startMin + 15;
@@ -588,18 +594,23 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     
     const checkInTime = new Date(session.check_in).getTime();
     const expectedCheckoutTime = checkInTime + remainingMs + (totalBreakSecs * 1000);
-    const actualCheckoutTime = Date.now();
+    let actualCheckoutTime = Date.now();
     
-    let finalCheckoutTime = new Date();
+    // Prevent negative duty hours if checkout happens before the clamped check-in time
+    if (actualCheckoutTime < checkInTime) {
+      actualCheckoutTime = checkInTime;
+    }
+    
+    let finalCheckoutTime = new Date(actualCheckoutTime);
     const overtimeMs = actualCheckoutTime - expectedCheckoutTime;
-    const overtimeMins = Math.floor(overtimeMs / (1000 * 60));
+    const overtimeMins = Math.round(overtimeMs / (1000 * 60));
 
     if (overtimeMins > 0) {
-      // Keep actual check_out time in DB, do not trim to expected time.
-      // finalCheckoutTime remains new Date()
+      // Override final checkout time so attendance sheet initially doesn't show unapproved overtime
+      finalCheckoutTime = new Date(expectedCheckoutTime);
       
-      if (overtimeMins > 15 && !ignore_overtime) {
-        // Overtime > 15 mins, require reason to generate a pending request
+      if (!ignore_overtime) {
+        // Overtime > 0 mins, require reason to generate a pending request
         if (!overtime_reason) {
           return res.status(400).json({ 
             error: 'Overtime requires a reason.', 
@@ -614,8 +625,8 @@ router.post('/check-out', authenticateToken, async (req, res) => {
       [finalCheckoutTime, totalBreakSecs, session.id, req.user.username]
     );
 
-    // If overtime exceeded 15 mins (or explicit overtime was requested) and reason was provided, log it as an Overtime Request for Admin
-    if ((overtimeMins > 15 || (requested_overtime_minutes !== undefined && requested_overtime_minutes !== null)) && overtime_reason && !ignore_overtime) {
+    // If overtime occurred (or explicit overtime was requested) and reason was provided, log it as an Overtime Request for Admin
+    if ((overtimeMins > 0 || (requested_overtime_minutes !== undefined && requested_overtime_minutes !== null)) && overtime_reason && !ignore_overtime) {
       let requestedCheckoutDate;
       let finalOvertimeMins = overtimeMins;
       if (requested_overtime_minutes !== undefined && requested_overtime_minutes !== null) {
@@ -1659,6 +1670,27 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
       }
 
       // 3. Insert audit log in edited_attendance
+      let finalReason = request.reason;
+      if (request.request_type === 'Overtime' && effectiveCheckOut && request.original_check_out) {
+        const approvedMins = Math.round((new Date(effectiveCheckOut).getTime() - new Date(request.original_check_out).getTime()) / 60000);
+        let requestedMins = null;
+        if (request.requested_check_out) {
+          requestedMins = Math.round((new Date(request.requested_check_out).getTime() - new Date(request.original_check_out).getTime()) / 60000);
+        }
+        
+        if (requestedMins !== null && approvedMins === requestedMins) {
+          finalReason += ` [Approved Same: ${approvedMins} min]`;
+        } else {
+          finalReason += ` [Approved: ${approvedMins} min]`;
+        }
+      }
+
+      // Update attendance_edit_requests to reflect the approved reason
+      await pool.query(
+        `UPDATE attendance_edit_requests SET reason = $2 WHERE id = $1`,
+        [id, finalReason]
+      );
+
       if (finalAttendanceId) {
         await pool.query(
           `INSERT INTO edited_attendance (attendance_id, employee_id, original_check_in, original_check_out, new_check_in, new_check_out, edited_by, reason)
@@ -1671,7 +1703,7 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
             effectiveCheckIn || request.original_check_in,
             effectiveCheckOut || request.original_check_out,
             editorName,
-            request.reason
+            finalReason
           ]
         );
       }
