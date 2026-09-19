@@ -1010,7 +1010,7 @@ export default function POS() {
             </div>
           )}
           {customerInfo.orderType === 'Dine-In' && !customerInfo.tableNumber ? (
-            <div className="table-selection-view" style={{ padding: '4px 10px 10px 10px', height: '100%', maxHeight: 'calc(100dvh - 100px)', display: 'flex', flexDirection: 'column' }}>
+            <div className="table-selection-view" style={{ padding: '4px 10px 10px 10px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginBottom: 6 }}>
                 {['Dine-In', 'Takeaway', 'Delivery'].map(type => (
                   <button 
@@ -1057,7 +1057,7 @@ export default function POS() {
                 )}
               </div>
               <h4 style={{ margin: '0 0 6px 0', textAlign: 'center', fontSize: '13px' }}>Select a Table</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12, overflowY: 'auto', flex: 1, paddingRight: 4, paddingBottom: 60, WebkitOverflowScrolling: 'touch' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 10, overflowY: 'auto', flex: 1, paddingRight: 4, paddingBottom: 60, WebkitOverflowScrolling: 'touch', alignContent: 'start' }}>
                 {tablesList.map(t => {
                   const tableStr = String(t.table_number);
                   const activeOrder = activeOrders.find(o => (o.order_type === 'Dine-In' || (!o.order_type && o.customer_address?.startsWith('Table '))) && String(o.table_number || o.customer_address?.replace('Table ', '')) === tableStr && o.status === 'Hold');
@@ -1073,18 +1073,20 @@ export default function POS() {
                         }
                       }}
                       style={{
-                        padding: '20px 10px',
+                        padding: '12px 8px',
                         borderRadius: 12,
                         border: 'none',
                         background: isBooked ? '#3b82f6' : '#10b981',
                         color: 'white',
-                        fontWeight: 800,
-                        fontSize: 16,
+                        fontWeight: 700,
+                        fontSize: 14,
                         cursor: 'pointer',
                         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
+                        justifyContent: 'center',
+                        minHeight: '80px',
                         gap: 4,
                         transition: 'transform 0.1s'
                       }}
