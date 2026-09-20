@@ -607,26 +607,26 @@ export default function Layout() {
                             <div 
                               className="notif-item-icon" 
                               style={{ 
-                                backgroundColor: item.type === 'attendance_warning' ? 'rgba(255, 152, 0, 0.1)' : item.type === 'attendance_request' ? 'rgba(255, 193, 7, 0.1)' : undefined, 
-                                color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : undefined 
+                                backgroundColor: item.type === 'attendance_warning' ? 'rgba(255, 152, 0, 0.1)' : item.type === 'attendance_request' ? 'rgba(255, 193, 7, 0.1)' : item.type === 'expiry_alert' ? 'rgba(227, 24, 55, 0.1)' : undefined, 
+                                color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : item.type === 'expiry_alert' ? '#e31837' : undefined 
                               }}
                             >
-                              {item.type === 'attendance_warning' ? <Clock size={18} /> : <AlertTriangle size={18} />}
+                              {item.type === 'attendance_warning' ? <Clock size={18} /> : item.type === 'expiry_alert' ? <AlertTriangle size={18} /> : <AlertTriangle size={18} />}
                             </div>
                             <div className="notif-item-content">
                               <span 
                                 className="notif-item-title" 
                                 style={{ 
-                                  color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : undefined 
+                                  color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : item.type === 'expiry_alert' ? '#e31837' : undefined 
                                 }}
                               >
-                                {item.type === 'attendance_warning' ? 'Long Session Warning' : item.type === 'attendance_request' ? (item.request_type === 'Overtime' ? 'Overtime' : 'Correction Request') : `Low Stock: ${item.name}`}
+                                {item.type === 'attendance_warning' ? 'Long Session Warning' : item.type === 'attendance_request' ? (item.request_type === 'Overtime' ? 'Overtime' : 'Correction Request') : item.type === 'expiry_alert' ? 'Document Expiry Alert' : `Low Stock: ${item.name}`}
                               </span>
                               <span className="notif-item-desc">
-                                {item.type === 'attendance_warning' || item.type === 'attendance_request' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}
+                                {item.type === 'attendance_warning' || item.type === 'attendance_request' || item.type === 'expiry_alert' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}
                               </span>
                               <span className="notif-item-time">
-                                {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.type === 'attendance_request' ? item.created_at : item.low_stock_at)}
+                                {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.type === 'attendance_request' ? item.created_at : item.type === 'expiry_alert' ? item.created_at : item.low_stock_at)}
                               </span>
                               {!item.read && (
                                 <div style={{ width: 6, height: 6, background: 'var(--primary)', borderRadius: '50%', position: 'absolute', top: 14, left: -4 }}></div>

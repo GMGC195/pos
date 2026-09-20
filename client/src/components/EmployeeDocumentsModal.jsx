@@ -36,8 +36,8 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files)
-    if (selectedFiles.length > 5) {
-      toast.error('You can upload a maximum of 5 files at once.')
+    if (selectedFiles.length > 10) {
+      toast.error('You can upload a maximum of 10 files at once.')
       return
     }
     setFiles(selectedFiles)
@@ -224,7 +224,7 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select File(s) (Max 5, images/pdfs)</label>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select File(s) (Max 10, images/pdfs)</label>
                 <input 
                   id="file-upload-input"
                   type="file" 

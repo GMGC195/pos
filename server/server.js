@@ -13,6 +13,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 const pool = require('./db');
+const { initCron } = require('./cron/expiryCheck');
 
 // Database initialization (reloaded)
 const runWithStartupRetry = async (fn, maxRetries = 3) => {
@@ -577,4 +578,5 @@ app.use((err, req, res, next) => {
 
 server.listen(PORT, () => {
   console.log(`🍕 Pizza Shop Server running on http://localhost:${PORT}`);
+  initCron();
 });

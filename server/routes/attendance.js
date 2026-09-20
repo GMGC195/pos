@@ -198,8 +198,8 @@ router.get('/notifications', authenticateToken, async (req, res) => {
     let systemNotifs = [];
     try {
       const sysNotifRes = await pool.query(
-        `SELECT * FROM notifications WHERE target_roles @> $1::jsonb ORDER BY created_at DESC LIMIT 20`,
-        [JSON.stringify([userRole])]
+        `SELECT * FROM notifications WHERE target_roles @> $1::jsonb OR target_users @> $2::jsonb ORDER BY created_at DESC LIMIT 20`,
+        [JSON.stringify([userRole]), JSON.stringify([req.user.id])]
       );
       systemNotifs = sysNotifRes.rows.map(n => ({
         id: `sys-${n.id}`,

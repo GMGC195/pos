@@ -138,7 +138,15 @@ export default function Employees() {
     is_split_shift: false,
     start_time_2: '18:00',
     end_time_2: '22:00',
-    strict_attendance: false
+    strict_attendance: false,
+    iqama_id: '',
+    iqama_expiry: '',
+    baladiya_card_expiry: '',
+    insurance_expiry: '',
+    phones: '',
+    address: '',
+    company_name: '',
+    reference_info: ''
   })
   const [isCustomShift, setIsCustomShift] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -202,7 +210,15 @@ export default function Employees() {
       end_time_2: workingHours[0]?.end_time_2 || '22:00',
       strict_attendance: false,
       custom_deduction_active: false,
-      custom_deduction_rules: []
+      custom_deduction_rules: [],
+      iqama_id: '',
+      iqama_expiry: '',
+      baladiya_card_expiry: '',
+      insurance_expiry: '',
+      phones: '',
+      address: '',
+      company_name: '',
+      reference_info: ''
     })
     setShowModal(true)
   }
@@ -233,7 +249,15 @@ export default function Employees() {
       end_time_2: matchedShift ? (matchedShift.end_time_2 || '22:00') : '22:00',
       strict_attendance: emp.strict_attendance || false,
       custom_deduction_active: emp.custom_deduction_active || false,
-      custom_deduction_rules: (typeof emp.custom_deduction_rules === 'string' ? JSON.parse(emp.custom_deduction_rules) : emp.custom_deduction_rules) || []
+      custom_deduction_rules: (typeof emp.custom_deduction_rules === 'string' ? JSON.parse(emp.custom_deduction_rules) : emp.custom_deduction_rules) || [],
+      iqama_id: emp.iqama_id || '',
+      iqama_expiry: emp.iqama_expiry ? new Date(emp.iqama_expiry).toISOString().split('T')[0] : '',
+      baladiya_card_expiry: emp.baladiya_card_expiry ? new Date(emp.baladiya_card_expiry).toISOString().split('T')[0] : '',
+      insurance_expiry: emp.insurance_expiry ? new Date(emp.insurance_expiry).toISOString().split('T')[0] : '',
+      phones: emp.phones || '',
+      address: emp.address || '',
+      company_name: emp.company_name || '',
+      reference_info: emp.reference_info || ''
     })
     setShowModal(true)
   }
@@ -761,10 +785,90 @@ export default function Employees() {
                     style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
                   />
                 </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Iqama ID *</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={formData.iqama_id}
+                      onChange={e => setFormData({ ...formData, iqama_id: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Iqama Expiry Date</label>
+                    <input 
+                      type="date" 
+                      value={formData.iqama_expiry}
+                      onChange={e => setFormData({ ...formData, iqama_expiry: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                </div>
 
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Baladiya Card Expiry</label>
+                    <input 
+                      type="date" 
+                      value={formData.baladiya_card_expiry}
+                      onChange={e => setFormData({ ...formData, baladiya_card_expiry: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Insurance Expiry</label>
+                    <input 
+                      type="date" 
+                      value={formData.insurance_expiry}
+                      onChange={e => setFormData({ ...formData, insurance_expiry: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                </div>
 
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Phones #</label>
+                    <input 
+                      type="text" 
+                      value={formData.phones}
+                      onChange={e => setFormData({ ...formData, phones: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Company Name</label>
+                    <input 
+                      type="text" 
+                      value={formData.company_name}
+                      onChange={e => setFormData({ ...formData, company_name: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                </div>
 
-
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Address</label>
+                    <input 
+                      type="text" 
+                      value={formData.address}
+                      onChange={e => setFormData({ ...formData, address: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Reference Info</label>
+                    <input 
+                      type="text" 
+                      value={formData.reference_info}
+                      onChange={e => setFormData({ ...formData, reference_info: e.target.value })}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface-1)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                </div>
 
                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
