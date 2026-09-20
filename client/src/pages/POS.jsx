@@ -1120,7 +1120,12 @@ export default function POS() {
                       key={t.id}
                       onClick={() => {
                         if (isBooked) {
-                          loadOrderForEdit(activeOrder.id);
+                          if (user?.role?.trim().toLowerCase() === 'cashier') {
+                            setPaymentMethod('Cash');
+                            setQuickCompleteModal(activeOrder);
+                          } else {
+                            loadOrderForEdit(activeOrder.id);
+                          }
                         } else {
                           setCustomerInfo(prev => ({ ...prev, tableNumber: tableStr }));
                         }
@@ -1449,7 +1454,7 @@ export default function POS() {
                                     )}
                                     <button className="btn btn-sm btn-secondary" style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600, background: '#f5f5f5', color: '#333' }} onClick={() => setDetailOrder(o)}>Detail View</button>
                                     {!(o.status === 'Payment Requested' && user?.role?.trim().toLowerCase() === 'order taker') && (
-                                      <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) setQuickCompleteModal(o) }} disabled={isManagement}>Complete</button>
+                                      <button className="btn btn-sm btn-success" style={{ padding: '2px 10px', fontSize: 11, fontWeight: 700, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) { setPaymentMethod('Cash'); setQuickCompleteModal(o); } }} disabled={isManagement}>Complete</button>
                                     )}
                                   </>
                                 )}
@@ -1902,7 +1907,23 @@ export default function POS() {
       {quickCompleteModal && (
         <div className="modal-overlay" style={{ zIndex: 9999 }}>
           <div className="modal" style={{ maxWidth: paymentMethod === 'Credit' ? 800 : 360, padding: 24, textAlign: 'center', transition: 'max-width 0.3s' }}>
-            <h3 style={{ marginBottom: 16 }}>Complete Order #{quickCompleteModal.id} (Slip #{quickCompleteModal.slip_number})</h3>
+            <h3 style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+              Complete Order #{quickCompleteModal.id} (Slip #{quickCompleteModal.slip_number})
+              {user?.role?.trim().toLowerCase() === 'cashier' && (
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1px solid #ddd' }} 
+                  onClick={() => {
+                    const id = quickCompleteModal.id;
+                    setQuickCompleteModal(null);
+                    loadOrderForEdit(id);
+                  }}
+                  title="Edit Order"
+                >
+                  <Edit size={16} color="var(--text-muted)" />
+                </button>
+              )}
+            </h3>
             
             {user?.role?.trim().toLowerCase() === 'order taker' ? (
               <>
