@@ -1221,7 +1221,7 @@ export default function AttendanceTracker() {
                       {/* Three dots dropdown menu - only show if NOT checked in */}
                       {!isCheckedIn && (
                         <div style={{ position: 'relative' }}>
-                          {['admin', 'operator', 'developer'].includes(user?.role?.toLowerCase()) && (
+                          {['admin', 'operator', 'developer', 'cashier'].includes(user?.role?.trim().toLowerCase()) && (
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation()
@@ -1285,7 +1285,7 @@ export default function AttendanceTracker() {
                                 onMouseOver={e => e.currentTarget.style.background = 'var(--surface-1)'}
                                 onMouseOut={e => e.currentTarget.style.background = 'transparent'}
                               >
-                                Edit Shift
+                                Edit Working Hours
                               </button>
                             </div>
                           )}

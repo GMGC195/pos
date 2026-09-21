@@ -7,8 +7,8 @@ const pool = new Pool({
 
 async function run() {
   try {
-    const res = await pool.query("SELECT * FROM employee_working_hours WHERE UPPER(name) = 'M. YASIR ACC'");
-    console.log(res.rows);
+    const res = await pool.query("SELECT * FROM employees WHERE UPPER(name) LIKE '%YASIR%'");
+    console.log(res.rows.map(r => ({ name: r.name, working_hours: r.working_hours, shift: r.shift })));
   } catch(e) {
     console.error(e);
   } finally {

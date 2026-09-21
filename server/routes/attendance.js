@@ -34,7 +34,7 @@ async function verifyOperator24HourLimit(employee_id, recordDate, pool) {
   const shift = empRes.rows[0].working_hours || 'R1';
   
   let startHour = 9, startMin = 0;
-  const shiftDetails = await pool.query('SELECT start_time FROM employee_working_hours WHERE name = $1', [shift]);
+  const shiftDetails = await pool.query('SELECT start_time FROM employee_working_hours WHERE UPPER(name) = UPPER($1)', [shift]);
   
   if (shiftDetails.rows.length > 0 && shiftDetails.rows[0].start_time) {
     const timeMatch = shiftDetails.rows[0].start_time.match(/^(\d+):(\d+)/);
@@ -417,7 +417,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     let startHour = 10;
     let startMin = 0;
 
-    const shiftDetails = await pool.query('SELECT * FROM employee_working_hours WHERE name = $1', [shift]);
+    const shiftDetails = await pool.query('SELECT * FROM employee_working_hours WHERE UPPER(name) = UPPER($1)', [shift]);
     if (shiftDetails.rows.length > 0) {
       const sd = shiftDetails.rows[0];
       shiftStartTime = sd.start_time;
