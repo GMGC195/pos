@@ -113,6 +113,12 @@ router.get('/', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2, strict_attendance, custom_deduction_active, custom_deduction_rules, iqama_id, iqama_expiry, baladiya_card_expiry, insurance_expiry, phones, address, company_name, reference_info } = req.body;
   try {
+    // Check for duplicate name
+    const existingName = await pool.query('SELECT id FROM employees WHERE LOWER(name) = LOWER($1)', [name]);
+    if (existingName.rows.length > 0) {
+      return res.status(400).json({ error: 'Employee with this name already exists. Please choose a slightly different name.' });
+    }
+
     // Upsert employee working hours config
     if (shift_start_time && shift_end_time) {
       await pool.query(
@@ -170,6 +176,12 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
   const { name, role, salary, status, shift_hours, shift_start_time, shift_end_time, department, position, employee_id, branch, shift, is_split_shift, start_time_2, end_time_2, strict_attendance, custom_deduction_active, custom_deduction_rules, iqama_id, iqama_expiry, baladiya_card_expiry, insurance_expiry, phones, address, company_name, reference_info } = req.body;
   try {
+    // Check for duplicate name excluding current employee
+    const existingName = await pool.query('SELECT id FROM employees WHERE LOWER(name) = LOWER($1) AND id != $2', [name, req.params.id]);
+    if (existingName.rows.length > 0) {
+      return res.status(400).json({ error: 'Employee with this name already exists. Please choose a slightly different name.' });
+    }
+
     // Upsert employee working hours config
     if (shift_start_time && shift_end_time) {
       await pool.query(
