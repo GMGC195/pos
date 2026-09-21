@@ -183,6 +183,7 @@ export default function AttendanceTracker() {
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
   const [confirmModal, setConfirmModal] = useState(null)
+  const [earlyCheckInModal, setEarlyCheckInModal] = useState(null)
   const [overtimeModal, setOvertimeModal] = useState(null)
   const [overtimeReason, setOvertimeReason] = useState('')
   const [overtimeWithSameTime, setOvertimeWithSameTime] = useState(true)
@@ -384,6 +385,11 @@ export default function AttendanceTracker() {
       toast.success(`${name} Successfully Checked In!`, { duration: 2000 })
     } catch (err) {
       toast.dismiss()
+      if (err?.response?.status === 409 && err?.response?.data?.requires_early_decision) {
+        setEarlyCheckInModal({ empId, name });
+        setPendingActions(prev => ({ ...prev, [actionKey]: false }));
+        return;
+      }
       if (!navigator.onLine || err.message === 'Network Error') {
         queueAttendanceAction({ type: 'check-in', employee_id: empId, late_threshold: lateThreshold })
         optimisticUpdate(empId, { 
@@ -396,6 +402,22 @@ export default function AttendanceTracker() {
       } else {
         toast.error(err?.response?.data?.error || 'Failed to check in', { duration: 2500 })
       }
+    } finally {
+      setPendingActions(prev => ({ ...prev, [actionKey]: false }));
+    }
+  }
+
+  const proceedWithEarlyCheckIn = async (decision) => {
+    const { empId, name } = earlyCheckInModal;
+    setEarlyCheckInModal(null);
+    const actionKey = `check-in-${empId}`;
+    setPendingActions(prev => ({ ...prev, [actionKey]: true }));
+    try {
+      await axios.post('/api/attendance/check-in', { employee_id: empId, early_checkin_decision: decision })
+      await loadAttendance()
+      toast.success(`${name} Successfully Checked In!`, { duration: 2000 })
+    } catch(err) {
+      toast.error(err?.response?.data?.error || 'Failed to check in', { duration: 2500 })
     } finally {
       setPendingActions(prev => ({ ...prev, [actionKey]: false }));
     }
@@ -1613,6 +1635,44 @@ export default function AttendanceTracker() {
                 }}
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Early Check-In Prompt Modal */}
+      {earlyCheckInModal && (
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999 }}>
+          <div className="modal-content" style={{ width: 450, padding: 24, borderRadius: 16, background: 'var(--surface)', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Early Check-In Options</h3>
+              <button onClick={() => setEarlyCheckInModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+                <X size={20} style={{ color: 'var(--text-muted)' }} />
+              </button>
+            </div>
+            
+            <p style={{ margin: '0 0 20px 0', fontSize: 14, color: 'var(--text-muted)', lineHeight: '1.5' }}>
+              You are checking in <strong style={{ color: 'var(--text)' }}>{earlyCheckInModal.name}</strong> before their shift starts. How would you like to record the check-in time?
+            </p>
+
+            <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
+              <button 
+                className="btn btn-secondary"
+                onClick={() => proceedWithEarlyCheckIn('current')}
+                style={{ flex: 1, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              >
+                <span>Use Current Time</span>
+                <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.7 }}>Log exact time now</span>
+              </button>
+              
+              <button 
+                className="btn btn-primary"
+                onClick={() => proceedWithEarlyCheckIn('shift')}
+                style={{ flex: 1, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              >
+                <span>Use Shift Start Time</span>
+                <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>Log duty start time</span>
               </button>
             </div>
           </div>

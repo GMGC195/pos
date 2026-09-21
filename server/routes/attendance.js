@@ -486,7 +486,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       const currentTotalMins = currentHours * 60 + currentMins;
       const startTotalMins = startHour * 60 + startMin;
       let timeDiff = currentTotalMins - startTotalMins;
-      if (timeDiff < -12 * 60) timeDiff += 24 * 60; // handle wrap around midnight
+      if (timeDiff < -16 * 60) timeDiff += 24 * 60; // handle wrap around midnight (allow up to 8 hours late into the next day, otherwise treat as early for today's shift)
       
       // Early check-in restriction for employees, operators, cashiers, and order takers
       const ur = req.user.role?.toLowerCase();
@@ -496,8 +496,19 @@ router.post('/check-in', authenticateToken, async (req, res) => {
 
       // If early check-in, set the checkInTime precisely to the shift start time
       if (timeDiff < 0) {
-        checkInTime = new Date();
-        checkInTime.setHours(startHour, startMin, 0, 0);
+        if ((ur === 'admin' || ur === 'developer') && req.body.early_checkin_decision === undefined) {
+          return res.status(409).json({
+            requires_early_decision: true,
+            message: 'You are checking in early. Do you want to use the Current Time or Shift Start Time?'
+          });
+        }
+
+        if ((ur === 'admin' || ur === 'developer') && req.body.early_checkin_decision === 'current') {
+          checkInTime = new Date();
+        } else {
+          checkInTime = new Date();
+          checkInTime.setHours(startHour, startMin, 0, 0);
+        }
       }
 
       let thresholdMins = startMin + 15;
