@@ -29,7 +29,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const result = await pool.queryWithRetry(
-      'SELECT * FROM users WHERE username = $1 OR email = $1',
+      'SELECT * FROM "users" WHERE username = $1 OR email = $1',
       [usernameOrEmail]
     );
 

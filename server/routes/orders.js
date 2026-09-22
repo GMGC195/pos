@@ -25,7 +25,7 @@ async function checkBranchAccess(req, orderId) {
   const role = req.user.role?.trim().toLowerCase();
   const isAdmin = role === 'admin' || role === 'developer';
   if (!isAdmin && req.user.branch) {
-    const check = await pool.query('SELECT branch FROM orders WHERE id = $1', [orderId]);
+    const check = await pool.query('SELECT branch FROM "orders" WHERE id = $1', [orderId]);
     if (check.rows.length > 0 && check.rows[0].branch !== req.user.branch) {
       return false;
     }
@@ -131,7 +131,7 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     // Idempotency check: If client_order_id exists, return existing order
     if (client_order_id) {
-       const existing = await client.query('SELECT * FROM orders WHERE client_order_id = $1', [client_order_id]);
+       const existing = await client.query('SELECT * FROM "orders" WHERE client_order_id = $1', [client_order_id]);
        if (existing.rows.length > 0) {
          console.log('--- Duplicate Order Detected ---', client_order_id);
          return res.status(200).json({ success: true, order: existing.rows[0], duplicated: true });
@@ -149,7 +149,7 @@ router.post('/', authenticateToken, async (req, res) => {
     // Calculate daily resetting slip number per branch
     const slipResult = await client.query(
       `SELECT COALESCE(MAX(slip_number), 0) + 1 as next_slip 
-       FROM orders 
+       FROM "orders" 
        WHERE created_at >= CURRENT_DATE AND branch = $1`,
       [finalBranch]
     );
@@ -167,7 +167,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Insert order
     const orderResult = await client.query(
-      `INSERT INTO orders (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at, credit_customer_id) 
+      `INSERT INTO "orders" (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at, credit_customer_id) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
       [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt, credit_customer_id || null]
     );
@@ -312,7 +312,7 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT o.*, 
         (SELECT json_agg(json_build_object('id', oi.item_id, 'cartId', oi.item_id, 'name', oi.item_name, 'qty', oi.qty, 'price', oi.unit_price)) 
          FROM order_items oi WHERE oi.order_id = o.id) as items 
-      FROM orders o WHERE 1=1
+      FROM "orders" o WHERE 1=1
     `;
     const params = [];
 
@@ -417,7 +417,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     const orderResult = await pool.query(`
       SELECT o.*, t.payment_method 
-      FROM orders o
+      FROM "orders" o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE o.id = $1
     `, [req.params.id]);
@@ -444,7 +444,7 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied: Order belongs to another branch' });
     }
     const result = await pool.query(
-      'UPDATE orders SET status=$1 WHERE id=$2 RETURNING *',
+      'UPDATE "orders" SET status=$1 WHERE id=$2 RETURNING *',
       [status, req.params.id]
     );
     const updatedOrder = result.rows[0];
@@ -470,7 +470,7 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     
     // Update order status to Completed
     const orderResult = await client.query(
-      `UPDATE orders SET status = 'Completed', completed_by = $2, completed_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE "orders" SET status = 'Completed', completed_by = $2, completed_at = NOW() WHERE id = $1 RETURNING *`,
       [req.params.id, req.user.username]
     );
     
@@ -491,7 +491,7 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
       
       // Also update the order table with the credit_customer_id
       await client.query(
-        `UPDATE orders SET credit_customer_id = $1 WHERE id = $2`,
+        `UPDATE "orders" SET credit_customer_id = $1 WHERE id = $2`,
         [credit_customer_id, req.params.id]
       );
       
@@ -595,7 +595,7 @@ router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) 
     
     // Update order status and clear cancellation request if any
     const orderResult = await client.query(
-      `UPDATE orders SET status = $1, cancel_requested = FALSE, cancel_reason = $3, completed_by = $4 WHERE id = $2 RETURNING *`,
+      `UPDATE "orders" SET status = $1, cancel_requested = FALSE, cancel_reason = $3, completed_by = $4 WHERE id = $2 RETURNING *`,
       [updateTo, req.params.id, finalReason, req.user.username]
     );
     
@@ -631,11 +631,11 @@ router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) 
 router.patch('/:id/request-cancel', authenticateToken, async (req, res) => {
   const { reason } = req.body;
   try {
-    const orderCheck = await pool.query('SELECT status FROM orders WHERE id = $1', [req.params.id]);
+    const orderCheck = await pool.query('SELECT status FROM "orders" WHERE id = $1', [req.params.id]);
     if (orderCheck.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
 
     const result = await pool.query(
-      'UPDATE orders SET cancel_requested = TRUE, cancel_reason = $1 WHERE id = $2 RETURNING *',
+      'UPDATE "orders" SET cancel_requested = TRUE, cancel_reason = $1 WHERE id = $2 RETURNING *',
       [reason || 'No reason provided', req.params.id]
     );
     const updatedOrder = result.rows[0];
@@ -656,7 +656,7 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
     if (action === 'approve') {
        // Similar to void but specifically for requests
        const orderResult = await client.query(
-         `UPDATE orders SET status = 'Cancelled', cancel_requested = FALSE, completed_by = $2 WHERE id = $1 RETURNING *`,
+         `UPDATE "orders" SET status = 'Cancelled', cancel_requested = FALSE, completed_by = $2 WHERE id = $1 RETURNING *`,
          [req.params.id, req.user.username]
        );
        if (orderResult.rows.length === 0) {
@@ -674,7 +674,7 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
     } else {
        // Reject: Just clear the request
        const result = await pool.query(
-         'UPDATE orders SET cancel_requested = FALSE, cancel_reason = NULL WHERE id = $1 RETURNING *',
+         'UPDATE "orders" SET cancel_requested = FALSE, cancel_reason = NULL WHERE id = $1 RETURNING *',
          [req.params.id]
        );
        await client.query('COMMIT');
@@ -928,7 +928,7 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
         COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
         COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
         COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
-      FROM orders o
+      FROM "orders" o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE o.is_shift_closed = FALSE 
         AND o.status IN ('Completed', 'Returned') 
@@ -961,7 +961,7 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       ORDER BY amount DESC
     `, [branch, req.user.username]);
 
-    const firstOrderRes = await client.query(`SELECT MIN(created_at) as first_order_time FROM orders WHERE is_shift_closed = FALSE AND branch = $1 AND completed_by = $2`, [branch, req.user.username]);
+    const firstOrderRes = await client.query(`SELECT MIN(created_at) as first_order_time FROM "orders" WHERE is_shift_closed = FALSE AND branch = $1 AND completed_by = $2`, [branch, req.user.username]);
     
     let loginTime = new Date();
     if (firstOrderRes.rows.length > 0 && firstOrderRes.rows[0].first_order_time) {
@@ -1022,7 +1022,7 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     insertRes.rows[0].interval_items = intervals;
 
     await client.query(`
-      UPDATE orders 
+      UPDATE "orders" 
       SET is_shift_closed = TRUE 
       WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1 AND completed_by = $2
     `, [branch, req.user.username]);
@@ -1060,7 +1060,7 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
         COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
         COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
         COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
-      FROM orders o
+      FROM "orders" o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE o.is_daily_closed = FALSE 
         AND o.status IN ('Completed', 'Returned') 
@@ -1153,7 +1153,7 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     insertRes.rows[0].interval_items = intervals;
 
     await client.query(`
-      UPDATE orders 
+      UPDATE "orders" 
       SET is_daily_closed = TRUE, is_shift_closed = TRUE
       WHERE is_daily_closed = FALSE AND status != 'Hold' AND branch = $1
     `, [branch]);
@@ -1178,7 +1178,7 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
     await client.query('BEGIN');
     
     // Check if order exists
-    const orderCheck = await client.query('SELECT status FROM orders WHERE id = $1', [req.params.id]);
+    const orderCheck = await client.query('SELECT status FROM "orders" WHERE id = $1', [req.params.id]);
     if (orderCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Order not found' });
@@ -1191,7 +1191,7 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
     await client.query('DELETE FROM transactions WHERE order_id = $1', [req.params.id]);
     
     // Delete order
-    await client.query('DELETE FROM orders WHERE id = $1', [req.params.id]);
+    await client.query('DELETE FROM "orders" WHERE id = $1', [req.params.id]);
     
     await client.query('COMMIT');
     if (req.io) req.io.emit('orderUpdated', { id: req.params.id, deleted: true });
@@ -1215,7 +1215,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
 
     // Check if order exists and get existing items
-    const orderCheck = await client.query('SELECT status, edit_history FROM orders WHERE id = $1', [req.params.id]);
+    const orderCheck = await client.query('SELECT status, edit_history FROM "orders" WHERE id = $1', [req.params.id]);
     if (orderCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Order not found' });
@@ -1266,7 +1266,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     // Update order details
     const orderResult = await client.query(
-      `UPDATE orders 
+      `UPDATE "orders" 
        SET subtotal = $1, tax = $2, grand_total = $3, status = $4, 
            customer_name = $5, customer_phone = $6, customer_address = $7, discount = $8,
            client_order_id = COALESCE($9, client_order_id),
@@ -1311,7 +1311,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // POST /api/orders/:id/reprint - Trigger a reprint to the cloud printer via Pusher
 router.post('/:id/reprint', authenticateToken, async (req, res) => {
   try {
-    const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    const orderRes = await pool.query('SELECT * FROM "orders" WHERE id = $1', [req.params.id]);
     if (orderRes.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
     const order = orderRes.rows[0];
 

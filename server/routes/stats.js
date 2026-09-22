@@ -69,7 +69,7 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN o.grand_total ELSE 0 END), 0) as cash_sale,
         COALESCE(SUM(CASE WHEN t.payment_method = 'Card' OR t.payment_method = 'Online' THEN o.grand_total ELSE 0 END), 0) as card_sale,
         COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN o.grand_total ELSE 0 END), 0) as credit_sale
-      FROM orders o
+      FROM "orders" o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE DATE(o.created_at) = CURRENT_DATE AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
     `, params);
@@ -126,13 +126,13 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Total fulfilled orders today
     const totalOrdersResult = await pool.query(`
-      SELECT COUNT(*) as count FROM orders
+      SELECT COUNT(*) as count FROM "orders"
       WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond} ${shiftCond}
     `, params);
 
     // Guest Today (Today's total orders excluding cancelled)
     const guestsTodayResult = await pool.query(`
-      SELECT COUNT(*) as count FROM orders
+      SELECT COUNT(*) as count FROM "orders"
       WHERE DATE(created_at) = CURRENT_DATE AND status != 'Cancelled' ${branchCond} ${shiftCond}
     `, params);
 

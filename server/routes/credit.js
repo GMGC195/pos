@@ -235,7 +235,7 @@ router.get('/:id/history', async (req, res) => {
       SELECT o.id, o.created_at, o.grand_total, o.slip_number,
         (SELECT json_agg(json_build_object('name', oi.item_name, 'qty', oi.qty)) 
          FROM order_items oi WHERE oi.order_id = o.id) as items
-      FROM orders o
+      FROM "orders" o
       WHERE o.credit_customer_id = $1
       ORDER BY o.created_at DESC
       LIMIT 50

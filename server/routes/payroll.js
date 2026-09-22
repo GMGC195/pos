@@ -139,22 +139,21 @@ router.get('/calculate', authenticateToken, async (req, res) => {
     const totalDaysInMonth = new Date(year, monthNum, 0).getDate();
     
     // Get global settings
-    const settingsRes = await pool.query('SELECT * FROM payroll_settings');
+    const settingsRes = await pool.query('SELECT * FROM "payroll_settings"');
     const settings = {};
     settingsRes.rows.forEach(r => { settings[r.key] = r.value; });
     const globalOvertimeRate = parseFloat(settings.global_overtime_rate || 150.00);
     const globalAllowedLeaves = parseInt(settings.allowed_leaves || 2);
 
     // Get adjustment types
-    const adjTypesRes = await pool.query('SELECT * FROM payroll_adjustment_types');
+    const adjTypesRes = await pool.query('SELECT * FROM "payroll_adjustment_types"');
     const adjTypes = adjTypesRes.rows;
 
     // Get employees
-    const employeesRes = await pool.query("SELECT * FROM employees WHERE status = 'Active' ORDER BY id ASC");
-
+    const employeesRes = await pool.query("SELECT * FROM \"employees\" WHERE status = 'Active' ORDER BY id ASC");
     
     // Get overrides
-    const overridesRes = await pool.query('SELECT * FROM employee_payroll_settings');
+    const overridesRes = await pool.query('SELECT * FROM "employee_payroll_settings"');
     const overridesMap = {};
     overridesRes.rows.forEach(r => { overridesMap[r.employee_id] = r; });
 
@@ -468,7 +467,7 @@ const syncSpreadsheetAdjustment = async (client, employee_id, month, label, expe
   // Fetch Recurring
   const recurringRes = await client.query(
     `SELECT id, amount, action_type FROM employee_recurring_adjustments
-     WHERE employee_id = $1 AND custom_label ILIKE $2 AND start_date <= $4`,
+     WHERE employee_id = $1 AND custom_label ILIKE $2 AND start_date <= $3`,
     [employee_id, label, monthEnd]
   );
   
@@ -528,9 +527,9 @@ const syncSpreadsheetAdjustment = async (client, employee_id, month, label, expe
     }
     
     await client.query(
-      `INSERT INTO employee_financial_adjustments (employee_id, action_type, amount, date, notes, custom_label)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [employee_id, newAction, insertVal, `${month}-15`, 'Added from spreadsheet', label] // Using middle of month
+      `INSERT INTO employee_financial_adjustments (employee_id, type, action_type, amount, date, notes, custom_label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [employee_id, label, newAction, insertVal, `${month}-15`, 'Added from spreadsheet', label] // Using middle of month
     );
   }
 };

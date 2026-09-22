@@ -19,6 +19,7 @@ pool.queryWithRetry = async function(text, params, retries = 3) {
     try {
       return await this.query(text, params);
     } catch (err) {
+      console.error(`🚨 QUERY FAILED: ${text} | ERROR: ${err.message}`);
       const isTransient = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || 
                           err.message?.includes('Connection terminated') ||
                           err.message?.includes('connection timeout');

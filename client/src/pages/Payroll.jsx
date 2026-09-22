@@ -46,7 +46,7 @@ export default function Payroll() {
       this_month_adv: { label: 'This M. Adv', hidden: false, action: 'Deduct', bg: '#e0f2fe' },
       overtime_pay: { label: 'Overtime', hidden: false, action: 'Give', bg: '#fef3c7' },
       bonus: { label: 'Bonus', hidden: false, action: 'Give', bg: '#dcfce7' },
-      last_month_adjustment: { label: 'Last M. Adj', hidden: false, action: 'Give', bg: '#f3e8ff' },
+      last_month_adjustment: { label: 'Last M. Adj', hidden: false, action: 'Both', bg: '#f3e8ff' },
       internet: { label: 'InterNet', hidden: false, action: 'Deduct', bg: '#ffedd5' },
       kafalat: { label: 'Kafalat', hidden: false, action: 'Deduct', bg: '#fee2e2' }
     };
@@ -150,9 +150,9 @@ export default function Payroll() {
   }
 
   // Load calculations
-  const loadPayroll = async () => {
+  const loadPayroll = async (silent = false) => {
     if (!selectedMonth) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     try {
       const res = await axios.get('/api/payroll/calculate', {
         params: { month: selectedMonth }
@@ -183,7 +183,7 @@ export default function Payroll() {
       toast.error('Error loading payroll calculations')
       console.error(err)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -200,6 +200,16 @@ export default function Payroll() {
 
   useEffect(() => {
     loadInitialData()
+    
+    // Prevent number input scrolling
+    const handleWheel = (e) => {
+      if (e.target.type === 'number') {
+        e.preventDefault();
+        e.target.blur();
+      }
+    };
+    document.addEventListener('wheel', handleWheel, { passive: false });
+    return () => document.removeEventListener('wheel', handleWheel);
   }, [])
 
   useEffect(() => {
@@ -433,7 +443,7 @@ export default function Payroll() {
     setSavingCustomAdj(true)
     try {
       const payload = {
-        employee_id: selectedEmployeeForModal.id,
+        employee_id: currentEmpData.id,
         type: actualLabel === 'Advance Salary / Loan' ? 'Advance Salary / Loan' : 'Custom Adjustment',
         custom_label: actualLabel,
         amount: parseFloat(customAdjAmount),
@@ -461,8 +471,8 @@ export default function Payroll() {
       }
 
       resetAdjForm()
-      loadEmpAdjs(selectedEmployeeForModal.id)
-      loadPayroll()
+      loadEmpAdjs(currentEmpData.id)
+      loadPayroll(true)
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to save adjustment';
       toast.error(errorMsg);
@@ -486,8 +496,8 @@ export default function Payroll() {
       if (type === 'Adjustment Column') {
         loadAdjustmentTypes()
       } else {
-        loadEmpAdjs(selectedEmployeeForModal?.id)
-        loadPayroll()
+        loadEmpAdjs(currentEmpData?.id)
+        loadPayroll(true)
       }
     } catch (err) {
       toast.error('Failed to delete')
@@ -508,6 +518,8 @@ export default function Payroll() {
   const totalBaseSalary = filteredEmployees.reduce((sum, item) => sum + (parseFloat(item.base_salary) || 0), 0)
   const totalNetSalary = filteredEmployees.reduce((sum, item) => sum + (parseFloat(item.net_salary) || 0), 0)
   const totalDeductions = filteredEmployees.reduce((sum, item) => sum + (parseFloat(item.deductions) || 0), 0)
+
+  const currentEmpData = selectedEmployeeForModal ? (editableData[selectedEmployeeForModal.id] || selectedEmployeeForModal) : null;
 
   return (
     <div style={{ padding: '16px', maxWidth: '100%', margin: '0 auto', fontFamily: 'var(--font-family)', background: 'var(--background)' }}>
@@ -599,13 +611,13 @@ export default function Payroll() {
                 
                 {/* Default Editable Columns */}
                 {Object.entries(baseColumns).map(([key, config]) => !config.hidden && (
-                  <th key={key} style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: config.bg }}>{config.label}</th>
+                  <th key={key} style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: config.bg }}>{config.label} ({config.action === 'Add' || config.action === 'Give' ? '+' : config.action === 'Deduct' ? '-' : '+/-'})</th>
                 ))}
 
                 {/* Dynamic Editable Columns */}
                 {adjustmentTypes.map(adj => !hiddenDynamicCols[adj.id] && (
-                  <th key={adj.id} style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: adj.action === 'Add' ? 'var(--green)' : '#ef4444', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: adj.action === 'Add' ? '#dcfce7' : '#fee2e2' }}>
-                    {adj.label} ({adj.action === 'Add' ? '+' : '-'})
+                  <th key={adj.id} style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: adj.action === 'Add' ? 'var(--green)' : adj.action === 'Deduct' ? '#ef4444' : 'var(--primary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: adj.action === 'Add' ? '#dcfce7' : adj.action === 'Deduct' ? '#fee2e2' : '#f3e8ff' }}>
+                    {adj.label} ({adj.action === 'Add' ? '+' : adj.action === 'Deduct' ? '-' : '+/-'})
                   </th>
                 ))}
                 
@@ -686,7 +698,7 @@ export default function Payroll() {
 
                       {/* Dynamic Editables */}
                       {adjustmentTypes.map(adj => !hiddenDynamicCols[adj.id] && (
-                        <td key={adj.id} style={{ padding: '4px', background: adj.action === 'Add' ? '#f0fdf4' : '#fef2f2' }}>
+                        <td key={adj.id} style={{ padding: '4px', background: adj.action === 'Add' ? '#f0fdf4' : adj.action === 'Deduct' ? '#fef2f2' : '#f3e8ff' }}>
                           <input 
                             type="number" 
                             className="cell-input" 
@@ -734,15 +746,15 @@ export default function Payroll() {
       </div>
 
       {/* Employee Details & Adjustments Modal */}
-      {selectedEmployeeForModal && (
+      {currentEmpData && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
           <div style={{ background: 'var(--white)', borderRadius: '16px', width: '100%', maxWidth: '900px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
             
             {/* Header */}
             <div style={{ position: 'sticky', top: 0, background: 'var(--white)', zIndex: 10, padding: '20px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h2 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 4px 0', color: 'var(--text-primary)' }}>{selectedEmployeeForModal.name}</h2>
-                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>ID: {selectedEmployeeForModal.employee_id} • Role: {selectedEmployeeForModal.role}</div>
+                <h2 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 4px 0', color: 'var(--text-primary)' }}>{currentEmpData.name}</h2>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>ID: {currentEmpData.employee_id} • Role: {currentEmpData.role}</div>
               </div>
               <button onClick={() => setSelectedEmployeeForModal(null)} style={{ background: 'var(--surface-2)', border: 'none', cursor: 'pointer', color: 'var(--text-primary)', padding: '6px', borderRadius: '50%' }}><X size={20} /></button>
             </div>
@@ -754,48 +766,48 @@ export default function Payroll() {
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '8px' }}>Attendance Summary</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Presents:</span><span style={{ fontWeight: 700, color: 'var(--green)' }}>{selectedEmployeeForModal.presents}</span>
+                    <span style={{ fontSize: '13px' }}>Presents:</span><span style={{ fontWeight: 700, color: 'var(--green)' }}>{currentEmpData.presents}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Absents:</span><span style={{ fontWeight: 700, color: '#ef4444' }}>{selectedEmployeeForModal.absents}</span>
+                    <span style={{ fontSize: '13px' }}>Absents:</span><span style={{ fontWeight: 700, color: '#ef4444' }}>{currentEmpData.absents}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Leaves:</span><span style={{ fontWeight: 700, color: '#f59e0b' }}>{selectedEmployeeForModal.leaves}</span>
+                    <span style={{ fontSize: '13px' }}>Leaves:</span><span style={{ fontWeight: 700, color: '#f59e0b' }}>{currentEmpData.leaves}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '13px' }}>Holidays:</span><span style={{ fontWeight: 700, color: 'var(--primary)' }}>{selectedEmployeeForModal.holidays}</span>
+                    <span style={{ fontSize: '13px' }}>Holidays:</span><span style={{ fontWeight: 700, color: 'var(--primary)' }}>{currentEmpData.holidays}</span>
                   </div>
                 </div>
 
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '8px' }}>Hours & Overtime</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Expected Hours:</span><span style={{ fontWeight: 700 }}>{selectedEmployeeForModal.expected_hours}h</span>
+                    <span style={{ fontSize: '13px' }}>Expected Hours:</span><span style={{ fontWeight: 700 }}>{currentEmpData.expected_hours}h</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Actual Hours:</span><span style={{ fontWeight: 700, color: selectedEmployeeForModal.actual_hours < selectedEmployeeForModal.expected_hours ? '#ef4444' : 'var(--green)' }}>{selectedEmployeeForModal.actual_hours}h</span>
+                    <span style={{ fontSize: '13px' }}>Actual Hours:</span><span style={{ fontWeight: 700, color: currentEmpData.actual_hours < currentEmpData.expected_hours ? '#ef4444' : 'var(--green)' }}>{currentEmpData.actual_hours}h</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Overtime Hours:</span><span style={{ fontWeight: 700 }}>{selectedEmployeeForModal.overtime_hours}h</span>
+                    <span style={{ fontSize: '13px' }}>Overtime Hours:</span><span style={{ fontWeight: 700 }}>{currentEmpData.overtime_hours}h</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '13px' }}>Overtime Pay:</span><span style={{ fontWeight: 700, color: 'var(--green)' }}>{CURRENCY} {selectedEmployeeForModal.overtime_pay}</span>
+                    <span style={{ fontSize: '13px' }}>Overtime Pay:</span><span style={{ fontWeight: 700, color: 'var(--green)' }}>{CURRENCY} {Number(currentEmpData.overtime_pay || 0).toFixed(2)}</span>
                   </div>
                 </div>
 
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '8px' }}>Financials</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Base Salary:</span><span style={{ fontWeight: 700 }}>{CURRENCY} {selectedEmployeeForModal.base_salary}</span>
+                    <span style={{ fontSize: '13px' }}>Base Salary:</span><span style={{ fontWeight: 700 }}>{CURRENCY} {Number(currentEmpData.base_salary || 0).toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Deductions:</span><span style={{ fontWeight: 700, color: '#ef4444' }}>{CURRENCY} {selectedEmployeeForModal.deductions}</span>
+                    <span style={{ fontSize: '13px' }}>Deductions:</span><span style={{ fontWeight: 700, color: '#ef4444' }}>{CURRENCY} {Number(currentEmpData.deductions || 0).toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Net to Pay:</span><span style={{ fontWeight: 800, color: 'var(--primary)' }}>{CURRENCY} {selectedEmployeeForModal.net_salary}</span>
+                    <span style={{ fontSize: '13px' }}>Net to Pay:</span><span style={{ fontWeight: 800, color: 'var(--primary)' }}>{CURRENCY} {Number(currentEmpData.net_salary || 0).toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '13px' }}>Advance Balance:</span><span style={{ fontWeight: 700, color: '#f59e0b' }}>{CURRENCY} {selectedEmployeeForModal.advance_balance}</span>
+                    <span style={{ fontSize: '13px' }}>Advance Balance:</span><span style={{ fontWeight: 700, color: '#f59e0b' }}>{CURRENCY} {Number(currentEmpData.advance_balance || 0).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -855,15 +867,17 @@ export default function Payroll() {
                           >
                             <option value="">Select Adjustment Type</option>
                             <optgroup label="Standard Adjustments">
-                              <option value="Advance Salary / Loan">Advance Salary / Loan</option>
-                              <option value="Bonus">Bonus</option>
-                              <option value="Last Month Adjustment">Last Month Adjustment</option>
-                              <option value="Internet">Internet</option>
-                              <option value="Kafalat">Kafalat</option>
+                              {(baseColumns.this_month_adv.action === customAdjAction || baseColumns.this_month_adv.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv.label}</option>}
+                              {(baseColumns.bonus.action === customAdjAction || baseColumns.bonus.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus.label}</option>}
+                              {(baseColumns.last_month_adjustment.action === customAdjAction || baseColumns.last_month_adjustment.action === 'Both') && <option value="Last Month Adjustment">{baseColumns.last_month_adjustment.label}</option>}
+                              {(baseColumns.internet.action === customAdjAction || baseColumns.internet.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet.label}</option>}
+                              {(baseColumns.kafalat.action === customAdjAction || baseColumns.kafalat.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat.label}</option>}
                             </optgroup>
                             {adjustmentTypes.length > 0 && (
                               <optgroup label="Custom Columns">
-                                {adjustmentTypes.map(adj => (
+                                {adjustmentTypes
+                                  .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
+                                  .map(adj => (
                                   <option key={adj.id} value={adj.label}>{adj.label}</option>
                                 ))}
                               </optgroup>
@@ -898,13 +912,13 @@ export default function Payroll() {
                         ) : (
                           <>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Total Limit Amount (Optional)</label>
-                              <input type="number" value={customAdjTotalLimit} onChange={e => setCustomAdjTotalLimit(e.target.value)} placeholder="e.g. 10000" style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
-                              <span style={{ fontSize: '9px', color: '#64748b', lineHeight: 1 }}>Stop cutting after limit (e.g. Loans).</span>
+                              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>{customAdjAction === 'Give' ? 'Every Month Pay Amount' : 'Monthly Cut Amount'}</label>
+                              <input type="number" value={customAdjAmount} onChange={e => setCustomAdjAmount(e.target.value)} placeholder="e.g. 500" required style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Monthly Cut Amount</label>
-                              <input type="number" value={customAdjAmount} onChange={e => setCustomAdjAmount(e.target.value)} placeholder="e.g. 500" required style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
+                              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Total Limit Amount (Optional)</label>
+                              <input type="number" value={customAdjTotalLimit} onChange={e => setCustomAdjTotalLimit(e.target.value)} placeholder="e.g. 10000" style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
+                              <span style={{ fontSize: '9px', color: '#64748b', lineHeight: 1 }}>Stop {customAdjAction === 'Give' ? 'paying' : 'cutting'} after limit (e.g. Loans).</span>
                             </div>
                           </>
                         )}
@@ -1042,6 +1056,7 @@ export default function Payroll() {
               <select value={newAdjAction} onChange={e => setNewAdjAction(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}>
                 <option value="Add">Add (+)</option>
                 <option value="Deduct">Deduct (-)</option>
+                <option value="Both">Both (+/-)</option>
               </select>
               <button type="submit" disabled={savingAdjType} className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700 }}>
                 {savingAdjType ? '...' : 'Add'}
