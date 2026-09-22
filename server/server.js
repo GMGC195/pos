@@ -413,6 +413,13 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         overtime_pay NUMERIC(10, 2) DEFAULT 0,
         deductions NUMERIC(10, 2) DEFAULT 0,
         other_adjustments NUMERIC(10, 2) DEFAULT 0,
+        bonus NUMERIC(10, 2) DEFAULT 0,
+        last_month_adjustment NUMERIC(10, 2) DEFAULT 0,
+        internet NUMERIC(10, 2) DEFAULT 0,
+        kafalat NUMERIC(10, 2) DEFAULT 0,
+        expected_hours NUMERIC(10, 2) DEFAULT 0,
+        actual_hours NUMERIC(10, 2) DEFAULT 0,
+        dynamic_adjustments JSONB DEFAULT '{}'::jsonb,
         net_salary NUMERIC(10, 2) NOT NULL,
         paid_amount NUMERIC(10, 2) DEFAULT 0,
         status VARCHAR(20) DEFAULT 'Pending',
@@ -421,6 +428,80 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         UNIQUE(employee_id, month)
       )
     `);
+
+    // Ensure dynamic_adjustments column exists if table already existed
+    try {
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN dynamic_adjustments JSONB DEFAULT \'{}\'::jsonb');
+    } catch (e) {}
+
+    // Create payroll adjustment types table for dynamic columns
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS payroll_adjustment_types (
+        id SERIAL PRIMARY KEY,
+        label VARCHAR(100) UNIQUE NOT NULL,
+        type VARCHAR(20) DEFAULT 'One-Time', -- 'One-Time' or 'Recurring'
+        action VARCHAR(20) DEFAULT 'Add', -- 'Add' or 'Deduct'
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Create employee_financial_adjustments table for one-time historical logs
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_financial_adjustments (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL,
+        custom_label VARCHAR(150),
+        amount NUMERIC(10, 2) NOT NULL,
+        action_type VARCHAR(20) NOT NULL, -- 'Give' or 'Deduct'
+        date DATE NOT NULL,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Ensure columns exist if table was created previously without them
+    try {
+      await pool.query('ALTER TABLE employee_financial_adjustments ADD COLUMN custom_label VARCHAR(150)');
+    } catch (e) {}
+    try {
+      await pool.query('ALTER TABLE employee_financial_adjustments ADD COLUMN notes TEXT');
+    } catch (e) {}
+
+    // Create employee_recurring_adjustments table for monthly automated cuts
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_recurring_adjustments (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL,
+        custom_label VARCHAR(150),
+        amount NUMERIC(10, 2) NOT NULL,
+        amount_type VARCHAR(20) DEFAULT 'Fixed', -- 'Fixed' or 'Percentage'
+        action_type VARCHAR(20) NOT NULL, -- 'Give' or 'Deduct'
+        remaining_amount NUMERIC(10, 2), -- For loans tracking
+        start_date DATE NOT NULL,
+        end_date DATE,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Ensure columns exist if table was created previously without them
+    try {
+      await pool.query('ALTER TABLE employee_recurring_adjustments ADD COLUMN custom_label VARCHAR(150)');
+    } catch (e) {}
+    try {
+      await pool.query('ALTER TABLE employee_recurring_adjustments ADD COLUMN amount_type VARCHAR(20) DEFAULT \'Fixed\'');
+    } catch (e) {}
+    try {
+      await pool.query('ALTER TABLE employee_recurring_adjustments ADD COLUMN notes TEXT');
+    } catch (e) {}
+    try {
+      await pool.query('ALTER TABLE employee_recurring_adjustments ADD COLUMN start_date DATE DEFAULT CURRENT_DATE');
+    } catch (e) {}
+    try {
+      await pool.query('ALTER TABLE employee_recurring_adjustments ADD COLUMN end_date DATE');
+    } catch (e) {}
 
     // Create item_categories schema and migrate existing data
     await pool.query(`

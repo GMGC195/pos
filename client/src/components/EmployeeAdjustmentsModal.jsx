@@ -31,6 +31,7 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [amountType, setAmountType] = useState('Fixed'); // Fixed or Percentage (for recurring)
+  const [totalAmount, setTotalAmount] = useState(''); // Total Loan amount for recurring
 
   const fetchData = async () => {
     try {
@@ -64,6 +65,7 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
     setDate(new Date().toISOString().slice(0, 10));
     setNotes('');
     setAmountType('Fixed');
+    setTotalAmount('');
   };
 
   const handleEditInit = (item, isRecurring) => {
@@ -78,6 +80,7 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
       setNotes(item.notes || '');
     } else {
       setAmountType(item.amount_type || 'Fixed');
+      setTotalAmount(item.total_amount || '');
     }
   };
 
@@ -91,6 +94,7 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
     }
     setCustomLabel('');
     setAmount('');
+    setTotalAmount('');
   };
 
   const handleSubmit = async (e) => {
@@ -141,7 +145,8 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
           label: type === 'Other' ? customLabel : null,
           action_type: actionType,
           amount_type: amountType,
-          amount: parseFloat(amount)
+          amount: parseFloat(amount),
+          total_amount: type === 'Loan' && totalAmount ? parseFloat(totalAmount) : null
         };
 
         if (editingId) {
@@ -151,6 +156,9 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
           await axios.post('/api/payroll/recurring', payload);
           showNotification('Repeated adjustment saved', 'success');
         }
+        
+        // Trigger parent refresh
+        onUpdate(employee);
       }
 
       fetchData();
@@ -175,6 +183,7 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
       if (isRecurring) {
         await axios.delete(`/api/payroll/recurring/${id}`);
         showNotification('Record deleted', 'success');
+        onUpdate(employee); // Trigger parent refresh
       } else {
         await axios.delete(`/api/payroll/adjustments/${id}`);
         showNotification('Record deleted', 'success');
@@ -317,7 +326,9 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
                 )}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Amount {amountType === 'Percentage' ? '(%)' : ''}</label>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    {tab === 'recurring' && type === 'Loan' ? 'Monthly Deduction' : `Amount ${amountType === 'Percentage' ? '(%)' : ''}`}
+                  </label>
                   <div style={{ position: 'relative' }}>
                     <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '12px', fontWeight: 700 }}>
                       {amountType === 'Percentage' ? '%' : CURRENCY}
@@ -325,6 +336,18 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
                     <input type="number" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ width: '100%', padding: '8px 10px 8px 45px', border: '1px solid var(--surface-2)', borderRadius: '6px', background: 'var(--white)', fontSize: '13px', outline: 'none', fontWeight: 600, color: 'var(--text-primary)' }} />
                   </div>
                 </div>
+
+                {tab === 'recurring' && type === 'Loan' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Total Loan Amount (Optional)</label>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '12px', fontWeight: 700 }}>
+                        {CURRENCY}
+                      </span>
+                      <input type="number" step="0.01" value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} placeholder="Leave blank for infinite" style={{ width: '100%', padding: '8px 10px 8px 45px', border: '1px solid var(--surface-2)', borderRadius: '6px', background: 'var(--white)', fontSize: '13px', outline: 'none', fontWeight: 600, color: 'var(--text-primary)' }} />
+                    </div>
+                  </div>
+                )}
 
                 {tab === 'one-time' && (
                   <>
