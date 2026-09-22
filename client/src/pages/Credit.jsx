@@ -8,6 +8,46 @@ import OrderDetailModal from '../components/OrderDetailModal';
 
 const AVAILABLE_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3'];
 
+const MultiSelectDropdown = ({ options, selectedIds, onChange, placeholder, style }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const toggleId = (id) => {
+    if (selectedIds.includes(id)) {
+      onChange(selectedIds.filter(i => i !== id));
+    } else {
+      onChange([...selectedIds, id]);
+    }
+  };
+
+  return (
+    <div style={{ position: 'relative', flex: 1, ...style }}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <span>{selectedIds.length > 0 ? `${selectedIds.length} Selected` : placeholder}</span>
+        <span>▼</span>
+      </div>
+      {isOpen && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9 }} onClick={() => setIsOpen(false)} />
+          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 6, marginTop: 4, maxHeight: 200, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+            {options.map(opt => (
+              <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', position: 'relative', zIndex: 11 }}>
+                <input 
+                  type="checkbox" 
+                  checked={selectedIds.includes(opt.id.toString())}
+                  onChange={() => toggleId(opt.id.toString())}
+                />
+                <span style={{ fontSize: 13 }}>{opt.name}</span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 export default function Credit() {
   const { user } = useAuth();
   const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || user?.role?.trim().toLowerCase() === 'developer';
@@ -39,7 +79,7 @@ export default function Credit() {
 
   const [discountRules, setDiscountRules] = useState([]);
   const [ruleTargetType, setRuleTargetType] = useState('all');
-  const [ruleTargetId, setRuleTargetId] = useState('');
+  const [ruleTargetIds, setRuleTargetIds] = useState([]);
   const [ruleDiscountType, setRuleDiscountType] = useState('percentage');
   const [ruleDiscountValue, setRuleDiscountValue] = useState('');
   const [showLedgerDiscounts, setShowLedgerDiscounts] = useState(false);
@@ -226,28 +266,40 @@ export default function Credit() {
   };
 
   const handleAddDiscountRule = () => {
-    if (ruleTargetType !== 'all' && !ruleTargetId) return toast.error('Please specify target');
+    if (ruleTargetType !== 'all' && (!ruleTargetIds || ruleTargetIds.length === 0)) return toast.error('Please specify target');
     if (!ruleDiscountValue || Number(ruleDiscountValue) <= 0) return toast.error('Enter valid discount value');
 
-    let targetName = 'All';
-    if (ruleTargetType === 'category') {
-      const cat = categories.find(c => c.id.toString() === ruleTargetId);
-      targetName = cat ? cat.name : ruleTargetId;
-    } else if (ruleTargetType === 'item') {
-      const it = items.find(i => i.id.toString() === ruleTargetId);
-      targetName = it ? it.name : ruleTargetId;
+    let newRules = [];
+    if (ruleTargetType === 'all') {
+      newRules.push({
+        targetType: 'all',
+        targetId: 'all',
+        targetName: 'All',
+        discountType: ruleDiscountType,
+        discountValue: Number(ruleDiscountValue)
+      });
+    } else {
+      ruleTargetIds.forEach(id => {
+        let targetName = 'Unknown';
+        if (ruleTargetType === 'category') {
+          const cat = categories.find(c => c.id.toString() === id);
+          if (cat) targetName = cat.name;
+        } else if (ruleTargetType === 'item') {
+          const it = items.find(i => i.id.toString() === id);
+          if (it) targetName = it.name;
+        }
+        newRules.push({
+          targetType: ruleTargetType,
+          targetId: id,
+          targetName,
+          discountType: ruleDiscountType,
+          discountValue: Number(ruleDiscountValue)
+        });
+      });
     }
-
-    const newRule = {
-      targetType: ruleTargetType,
-      targetId: ruleTargetType === 'all' ? 'all' : ruleTargetId,
-      targetName,
-      discountType: ruleDiscountType,
-      discountValue: Number(ruleDiscountValue)
-    };
     
-    setDiscountRules([...discountRules, newRule]);
-    setRuleTargetId('');
+    setDiscountRules([...discountRules, ...newRules]);
+    setRuleTargetIds([]);
     setRuleDiscountValue('');
   };
 
@@ -363,7 +415,7 @@ export default function Credit() {
       {/* Add/Edit Modal */}
       {showModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 400, borderRadius: 16, padding: 24, position: 'relative' }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 400, maxHeight: '90vh', overflowY: 'visible', borderRadius: 16, padding: 24, position: 'relative' }}>
             <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20}/></button>
             <h3 style={{ margin: '0 0 20px', fontSize: 20 }}>{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h3>
             <form onSubmit={handleSaveCustomer} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -410,7 +462,7 @@ export default function Credit() {
                 <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 8 }}>
                   <h4 style={{ margin: '0 0 12px', fontSize: 14 }}>Discount Rules</h4>
                   {discountRules.length > 0 && (
-                    <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '150px', overflowY: 'auto', paddingRight: 4 }}>
                       {discountRules.map((rule, idx) => (
                         <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, background: 'var(--bg)', padding: '6px 12px', borderRadius: 6 }}>
                           <span>
@@ -422,23 +474,17 @@ export default function Credit() {
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <select value={ruleTargetType} onChange={e => { setRuleTargetType(e.target.value); setRuleTargetId(''); }} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
+                    <select value={ruleTargetType} onChange={e => { setRuleTargetType(e.target.value); setRuleTargetIds([]); }} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
                       <option value="all">Apply For All</option>
                       <option value="category">Specific Category</option>
                       <option value="item">Specific Item</option>
                     </select>
                     
                     {ruleTargetType === 'category' && (
-                      <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
-                        <option value="">Select Category...</option>
-                        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
+                      <MultiSelectDropdown options={categories} selectedIds={ruleTargetIds} onChange={setRuleTargetIds} placeholder="Select Categories..." style={{ padding: 0 }} />
                     )}
                     {ruleTargetType === 'item' && (
-                      <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '6px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
-                        <option value="">Select Item...</option>
-                        {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                      </select>
+                      <MultiSelectDropdown options={items} selectedIds={ruleTargetIds} onChange={setRuleTargetIds} placeholder="Select Items..." style={{ padding: 0 }} />
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -484,7 +530,7 @@ export default function Credit() {
               <div style={{ background: 'var(--surface-2)', padding: 16, borderRadius: 8, marginBottom: 20 }}>
                 <h4 style={{ margin: '0 0 12px', fontSize: 15 }}>Manage Special Discounts for {activeCustomer.name}</h4>
                 {discountRules.length > 0 && (
-                  <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '200px', overflowY: 'auto', paddingRight: 4 }}>
                     {discountRules.map((rule, idx) => (
                       <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, background: 'var(--bg)', padding: '8px 12px', borderRadius: 6 }}>
                         <span>
@@ -496,23 +542,17 @@ export default function Credit() {
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-                  <select value={ruleTargetType} onChange={e => { setRuleTargetType(e.target.value); setRuleTargetId(''); }} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
+                  <select value={ruleTargetType} onChange={e => { setRuleTargetType(e.target.value); setRuleTargetIds([]); }} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)' }}>
                     <option value="all">Apply For All Items</option>
                     <option value="category">Specific Category</option>
                     <option value="item">Specific Item</option>
                   </select>
                   
                   {ruleTargetType === 'category' && (
-                    <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
-                      <option value="">Select Category...</option>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <MultiSelectDropdown options={categories} selectedIds={ruleTargetIds} onChange={setRuleTargetIds} placeholder="Select Categories..." style={{ padding: 0 }} />
                   )}
                   {ruleTargetType === 'item' && (
-                    <select value={ruleTargetId} onChange={e => setRuleTargetId(e.target.value)} style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', flex: 1 }}>
-                      <option value="">Select Item...</option>
-                      {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                    </select>
+                    <MultiSelectDropdown options={items} selectedIds={ruleTargetIds} onChange={setRuleTargetIds} placeholder="Select Items..." style={{ padding: 0 }} />
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>

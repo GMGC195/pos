@@ -12,7 +12,8 @@ import {
   Edit, 
   Trash2, 
   CheckCircle2, 
-  MoreVertical 
+  MoreVertical,
+  Download
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { usePOS } from '../contexts/POSContext'
@@ -98,6 +99,58 @@ export default function Inventory() {
     setImgPreview('')
     setModal('add')
   }
+
+  const exportToExcel = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const data = filteredItems.map(item => {
+        let sizePrices = '';
+        if (Array.isArray(item.size_options)) {
+          sizePrices = item.size_options.map(o => {
+             const opt = parseSizeOpt(o, item.price);
+             return `${opt.name}: ${opt.price}`;
+          }).join(', ');
+        }
+        
+        let branches = [];
+        if (Array.isArray(item.available_branches)) {
+          branches = item.available_branches;
+        } else if (typeof item.available_branches === 'string') {
+          try { branches = JSON.parse(item.available_branches); } 
+          catch(e) { branches = item.available_branches.replace(/^{|}$/g, '').split(',').map(b=>b.replace(/(^"|"$)/g, '').trim()); }
+        }
+
+        return {
+          'Short Code': item.short_code || '',
+          'Item Name': item.name,
+          'Category': item.category_name || item.category || (item.category_names ? item.category_names.join(', ') : ''),
+          'Sizes & Prices': sizePrices || `Default: ${item.price}`,
+          'Status': item.status || 'Active',
+          'Available Branches': branches.join(', ')
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      
+      // Set column widths so they don't look squished
+      ws['!cols'] = [
+        { wch: 15 }, // Short Code
+        { wch: 30 }, // Item Name
+        { wch: 25 }, // Category
+        { wch: 45 }, // Sizes & Prices
+        { wch: 15 }, // Status
+        { wch: 30 }, // Available Branches
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Menu Items");
+      XLSX.writeFile(wb, `Menu-Items-${new Date().toISOString().split('T')[0]}.xlsx`);
+      toast.success('Excel downloaded successfully!');
+    } catch (err) {
+      console.error('Error exporting to Excel:', err);
+      toast.error('Failed to export to Excel');
+    }
+  };
 
   const openEdit = item => {
     setForm({
@@ -301,9 +354,14 @@ export default function Inventory() {
             <option value="Branch 3">Restaurant 3</option>
           </select>
         )}
-        <button className="btn btn-primary" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg, #ff9800, #ff4b4b)', color: 'white', border: 'none' }} onClick={openAdd}>
-          <Plus size={18} /> Add New Item
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid var(--surface-2)', color: 'var(--text)' }} onClick={exportToExcel}>
+            <Download size={18} /> Export Excel
+          </button>
+          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg, #ff9800, #ff4b4b)', color: 'white', border: 'none' }} onClick={openAdd}>
+            <Plus size={18} /> Add New Item
+          </button>
+        </div>
       </div>
 
       {/* Table */}

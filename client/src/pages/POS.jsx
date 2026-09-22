@@ -110,8 +110,10 @@ const CreditCustomerDropdown = ({
         </div>
         
         {isOpen && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 6, marginTop: 4, zIndex: 100, maxHeight: 200, display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-            <div style={{ padding: 8, borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setIsOpen(false)} />
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 6, marginTop: 4, zIndex: 100, maxHeight: 350, display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+              <div style={{ padding: 8, borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Search size={14} color="var(--text-muted)" />
               <input 
                 autoFocus
@@ -150,6 +152,7 @@ const CreditCustomerDropdown = ({
               )}
             </div>
           </div>
+        </>
         )}
       </div>
       
@@ -1905,8 +1908,15 @@ export default function POS() {
       }
       {/* Quick Complete Modal */}
       {quickCompleteModal && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal" style={{ maxWidth: paymentMethod === 'Credit' ? 800 : 360, padding: 24, textAlign: 'center', transition: 'max-width 0.3s' }}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setQuickCompleteModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: paymentMethod === 'Credit' ? 800 : 360, padding: 24, textAlign: 'center', transition: 'max-width 0.3s', position: 'relative' }}>
+            <button 
+              onClick={() => setQuickCompleteModal(null)}
+              style={{ position: 'absolute', right: 16, top: 16, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title="Close"
+            >
+              <X size={22} />
+            </button>
             <h3 style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
               Complete Order #{quickCompleteModal.id} (Slip #{quickCompleteModal.slip_number})
               {user?.role?.trim().toLowerCase() === 'cashier' && (
