@@ -3,7 +3,7 @@ const pool = require('../db');
 const nodemailer = require('nodemailer');
 
 // Helper to send email
-async function sendExpiryEmail(employeeName, documentName, expiryDateStr) {
+async function sendExpiryEmail(employeeName, documentName, expiryDateStr, diffDays) {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD || !process.env.SUPPORT_EMAIL) {
     console.log('Email configuration missing, skipping expiry email.');
     return;
@@ -31,7 +31,7 @@ async function sendExpiryEmail(employeeName, documentName, expiryDateStr) {
           <p><strong>Employee:</strong> ${employeeName}</p>
           <p><strong>Document:</strong> ${documentName}</p>
           <p><strong>Expiry Date:</strong> ${expiryDateStr}</p>
-          <p>This document will expire in exactly 7 days. Please take action immediately.</p>
+          <p>This document will expire in exactly <strong>${diffDays} days</strong>. Please take action immediately.</p>
         </div>
       `
     };
@@ -111,7 +111,7 @@ async function checkExpiries() {
         }
 
         if (shouldEmail) {
-          await sendExpiryEmail(emp.name, doc.name, expiryDate.toLocaleDateString());
+          await sendExpiryEmail(emp.name, doc.name, expiryDate.toLocaleDateString(), diffDays);
         }
       }
     }
