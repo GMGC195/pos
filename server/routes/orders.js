@@ -403,7 +403,23 @@ router.get('/closings', authenticateToken, async (req, res) => {
     query += ' ORDER BY created_at DESC';
     
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    const pastClosings = result.rows;
+
+    let liveQuery = `SELECT DISTINCT completed_by as cashier_name FROM "orders" WHERE is_shift_closed = FALSE AND DATE(created_at) = CURRENT_DATE AND status = 'Completed'`;
+    let liveParams = [];
+    if (branchFilter) {
+      liveParams.push(branchFilter);
+      liveQuery += ` AND branch = $1`;
+    }
+    const liveRes = await pool.query(liveQuery, liveParams);
+    const liveClosings = liveRes.rows.filter(r => r.cashier_name).map(r => ({
+      id: 'live_' + r.cashier_name,
+      closing_type: 'Live',
+      cashier_name: r.cashier_name,
+      created_at: new Date().toISOString()
+    }));
+
+    res.json([...liveClosings, ...pastClosings]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

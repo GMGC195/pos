@@ -14,6 +14,11 @@ import { CURRENCY } from '../config'
 import { usePOS } from '../contexts/POSContext'
 
 const today = () => new Date().toISOString().split('T')[0]
+const yesterday = () => {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return d.toISOString().split('T')[0]
+}
 
 
 export default function SalesItem() {
@@ -152,102 +157,106 @@ export default function SalesItem() {
 
   return (
     <>
-      <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
-        {/* Date Filters Row */}
-        <div className="date-filter-bar" style={{ marginBottom: '20px', borderBottom: 'none', padding: 0, boxShadow: 'none' }}>
-          <div className="filter-group">
-            <div className="filter-item">
-              <label>From:</label>
-              <input type="date" className="date-input" value={from} max={to} onChange={e => setFrom(e.target.value)} />
-            </div>
-            <div className="filter-item">
-              <label>To:</label>
-              <input type="date" className="date-input" value={to} min={from} onChange={e => setTo(e.target.value)} />
+      <div className="card" style={{ padding: 0, marginBottom: 160, background: '#f8fafc' }}>
+        <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
+          
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                <ClipboardList size={18} /> Sales Items
+              </h3>
+              <select 
+                value={catFilter} 
+                onChange={e => setCatFilter(e.target.value)}
+                style={{ padding: '4px 8px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 13, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', maxWidth: '140px' }}
+              >
+                <option value="All">All Categories</option>
+                {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
             </div>
             
-            <button 
-              className="btn btn-secondary" 
-              onClick={() => { setFrom(today()); setTo(today()); }}
-              style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 6,
-                background: (from === today() && to === today()) ? 'linear-gradient(135deg, #E31837, #FF6B35)' : '',
-                color: (from === today() && to === today()) ? 'white' : '',
-                borderColor: (from === today() && to === today()) ? '#b0112a' : '',
-                fontWeight: (from === today() && to === today()) ? 'bold' : ''
-              }}
-            >
-              Today
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, flex: 1, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>From:</label>
+                    <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>To:</label>
+                    <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                  <button className="btn" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', color: 'var(--text-primary)', borderRadius: '6px' }}>
+                    <Search size={14} /> Filter
+                  </button>
+                  <button 
+                    className="btn btn-secondary btn-sm" 
+                    onClick={() => { setFrom(today()); setTo(today()); }}
+                    style={{ 
+                      display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
+                      background: (from === today() && to === today()) ? 'linear-gradient(135deg, #E31837, #FF6B35)' : '',
+                      color: (from === today() && to === today()) ? 'white' : ''
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button 
+                    className="btn btn-secondary btn-sm" 
+                    onClick={() => { setFrom(yesterday()); setTo(yesterday()); }}
+                    style={{ 
+                      display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
+                      background: (from === yesterday() && to === yesterday()) ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '',
+                      color: (from === yesterday() && to === yesterday()) ? 'white' : ''
+                    }}
+                  >
+                    Yesterday
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-          
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button 
-              className="btn btn-secondary" 
-              onClick={load}
-              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-              title="Manual Refresh"
-            >
-              <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
-            </button>
-            <button className="btn btn-primary" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Search size={16} /> Filter</button>
-          </div>
-        </div>
 
-        {/* Category Filter Row (Below Date Filter) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <div className="filter-group" style={{ flex: 1, minWidth: '240px' }}>
-            <label style={{ fontWeight: 600, fontSize: 14 }}>Category:</label>
-            <select 
-              value={catFilter} 
-              onChange={e => setCatFilter(e.target.value)}
-              style={{ 
-                padding: '8px 12px', 
-                borderRadius: '8px', 
-                border: '1.5px solid var(--surface-2)',
-                flex: 1,
-                fontFamily: 'inherit',
-                fontSize: '14px'
-              }}
-            >
-              <option value="All">All Categories</option>
-              {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-            </select>
-          </div>
-          <div className="filter-group" style={{ flex: 1, minWidth: '240px' }}>
-            <label style={{ fontWeight: 600, fontSize: 14 }}>Branch:</label>
-            <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ width: '100%', maxWidth: '400px', display: 'flex', flexWrap: 'wrap', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4 }}>
               {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
                 <button
                   key={b}
                   onClick={() => setBranch(b)}
                   style={{
-                    flex: '1 1 auto', padding: '8px 12px', fontSize: 13, fontWeight: 700, border: 'none', borderRadius: 6,
+                    flex: '1 1 auto', padding: '6px 12px', fontSize: 12, fontWeight: 700, border: 'none', borderRadius: 6,
                     background: branch === b ? 'var(--surface)' : 'transparent',
                     color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
                     boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                     cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center',
-                    minWidth: '80px'
+                    minWidth: '60px'
                   }}
                 >
-                  {b}
+                  <span className="hide-mobile">{b}</span>
+                  <span className="show-mobile">{b.startsWith('Branch') ? `B${b.split(' ')[1]}` : b}</span>
                 </button>
               ))}
             </div>
-          </div>
-          
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn-secondary" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={16} /> Export PDF</button>
-            <button className="btn btn-secondary" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><BarChart3 size={16} /> Export Excel</button>
-          </div>
-        </div>
-      </div>
 
-      <div className="card" style={{ padding: 0, marginBottom: 24, background: '#f8fafc' }}>
-        <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ClipboardList size={20} />
-          <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Sales Items and Revenue Report</h3>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
+              <button 
+                className="btn btn-secondary btn-sm" 
+                onClick={load}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }}
+                title="Refresh Data"
+              >
+                <RefreshCw size={14} className={loading ? 'spin' : ''} /> <span className="hide-mobile">Refresh</span>
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }} title="Export PDF">
+                <Printer size={14} /> <span className="hide-mobile">PDF</span>
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }} title="Export Excel">
+                <BarChart3 size={14} /> <span className="hide-mobile">Excel</span>
+              </button>
+            </div>
+          </div>
         </div>
         <div className="table-wrap">
           <table className="report-table">

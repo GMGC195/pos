@@ -19,12 +19,18 @@ import {
   RefreshCw,
   History,
   ChevronRight,
-  X
+  X,
+  Filter
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import OrderDetailModal from '../components/OrderDetailModal'
 
 const today = () => new Date().toISOString().split('T')[0]
+const yesterday = () => {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return d.toISOString().split('T')[0]
+}
 const weekAgo = () => {
   const d = new Date()
   d.setDate(d.getDate() - 7)
@@ -77,6 +83,7 @@ export default function Reports({ isTodaySales = false }) {
   const [historyFilterType, setHistoryFilterType] = useState('All')
   const [historyFilterUser, setHistoryFilterUser] = useState('All')
   const [showHistoryFilters, setShowHistoryFilters] = useState(false)
+  const [tableFilters, setTableFilters] = useState({ placedBy: 'All', completedBy: 'All', branch: 'All', type: 'All' })
 
   const load = () => {
     setLoading(true)
@@ -493,6 +500,11 @@ export default function Reports({ isTodaySales = false }) {
     }
   }
 
+  const uniquePlacedBy = ['All', ...new Set(transactions.map(t => t.order_taker).filter(Boolean))];
+  const uniqueCompletedBy = ['All', ...new Set(transactions.map(t => t.completed_by).filter(Boolean))];
+  const uniqueBranch = ['All', ...new Set(transactions.map(t => t.branch).filter(Boolean))];
+  const uniqueType = ['All', ...new Set(transactions.map(t => t.order_type).filter(Boolean))];
+
   const filteredTransactions = transactions.filter(t => {
     const matchesSearch = search ? t.order_id.toString().includes(search.trim()) : true;
     let matchesStatus = true;
@@ -501,7 +513,13 @@ export default function Reports({ isTodaySales = false }) {
     } else if (statusFilter !== 'All') {
       matchesStatus = t.order_status === statusFilter;
     }
-    return matchesSearch && matchesStatus;
+    
+    const matchesPlacedBy = tableFilters.placedBy === 'All' || t.order_taker === tableFilters.placedBy;
+    const matchesCompletedBy = tableFilters.completedBy === 'All' || t.completed_by === tableFilters.completedBy;
+    const matchesBranch = tableFilters.branch === 'All' || t.branch === tableFilters.branch;
+    const matchesType = tableFilters.type === 'All' || t.order_type === tableFilters.type;
+
+    return matchesSearch && matchesStatus && matchesPlacedBy && matchesCompletedBy && matchesBranch && matchesType;
   })
 
   const paginatedTransactions = filteredTransactions.slice(
@@ -520,43 +538,6 @@ export default function Reports({ isTodaySales = false }) {
 
   return (
     <>
-      {/* Date Filter Bar -- only show if not forced to Today */}
-      {!isTodaySales && (
-        <div className="date-filter-bar">
-          <div className="filter-group">
-            <div className="filter-item">
-              <label>From:</label>
-              <input type="date" className="date-input" value={from} onChange={e => setFrom(e.target.value)} />
-            </div>
-            <div className="filter-item">
-              <label>To:</label>
-              <input type="date" className="date-input" value={to} onChange={e => setTo(e.target.value)} />
-            </div>
-            <button 
-              className="btn btn-secondary" 
-              onClick={() => { setFrom(today()); setTo(today()); }}
-              style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 6,
-                background: (from === today() && to === today()) ? 'linear-gradient(135deg, #E31837, #FF6B35)' : '',
-                color: (from === today() && to === today()) ? 'white' : '',
-                borderColor: (from === today() && to === today()) ? '#b0112a' : '',
-                fontWeight: (from === today() && to === today()) ? 'bold' : ''
-              }}
-            >
-              Today
-            </button>
-          </div>
-
-          <div className="filter-group">
-            <button className="btn btn-primary" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Search size={16} /> Filter</button>
-          </div>
-        </div>
-      )}
-
-
-
       
       <div className="summary-tiles">
         {tiles.map(t => {
@@ -587,6 +568,8 @@ export default function Reports({ isTodaySales = false }) {
           );
         })}
       </div>
+
+
 
       {creditSummary.majorPayments && creditSummary.majorPayments.length > 0 && (
         <div className="card" style={{ padding: 0, marginBottom: 24, background: '#f8fafc' }}>
@@ -627,51 +610,101 @@ export default function Reports({ isTodaySales = false }) {
       {/* Transactions Table */}
       <div className="card" style={{ padding: 0, marginBottom: 160, background: '#f8fafc' }}>
         <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ClipboardList size={20} /> Transactions ({filteredTransactions.length})
-            </h3>
-            <input 
-              type="text" 
-              placeholder="Search Order ID..." 
-              value={search} 
-              onChange={e => setSearch(e.target.value)}
-              className="pos-search-input"
-              style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
-            />
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
-            >
-              <option value="All">All Statuses</option>
-              <option value="Completed">Completed (Delivered)</option>
-              <option value="Hold">Hold / Pending</option>
-              <option value="Cancelled">Cancelled</option>
-              <option value="Returned">Returned</option>
-              <option value="Credit">Credit</option>
-            </select>
-
-            {/* Action Buttons moved here as requested */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button 
-                className="btn btn-secondary btn-sm" 
-                onClick={load}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 13 }}
-                title="Refresh Data"
-              >
-                <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 13 }}>
-                <Printer size={14} /> PDF
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 13 }}>
-                <BarChart3 size={14} /> Excel
-              </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
+            
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+              
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                  <ClipboardList size={18} /> Transactions ({filteredTransactions.length})
+                </h3>
+                <select
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value)}
+                  style={{ padding: '4px 8px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 13, background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', maxWidth: '140px' }}
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Hold">Hold / Pending</option>
+                  <option value="Cancelled">Cancelled</option>
+                  <option value="Returned">Returned</option>
+                  <option value="Credit">Credit</option>
+                </select>
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, flex: 1, justifyContent: 'flex-end' }}>
+                {!isTodaySales && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>From:</label>
+                        <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>To:</label>
+                        <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                      <button className="btn" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', color: 'var(--text-primary)', borderRadius: '6px' }}>
+                        <Search size={14} /> Filter
+                      </button>
+                      <button 
+                        className="btn btn-secondary btn-sm" 
+                        onClick={() => { setFrom(today()); setTo(today()); }}
+                        style={{ 
+                          display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
+                          background: (from === today() && to === today()) ? 'linear-gradient(135deg, #E31837, #FF6B35)' : '',
+                          color: (from === today() && to === today()) ? 'white' : ''
+                        }}
+                      >
+                        Today
+                      </button>
+                      <button 
+                        className="btn btn-secondary btn-sm" 
+                        onClick={() => { setFrom(yesterday()); setTo(yesterday()); }}
+                        style={{ 
+                          display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
+                          background: (from === yesterday() && to === yesterday()) ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '',
+                          color: (from === yesterday() && to === yesterday()) ? 'white' : ''
+                        }}
+                      >
+                        Yesterday
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
 
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <input 
+                type="text" 
+                placeholder="Search Order ID..." 
+                value={search} 
+                onChange={e => setSearch(e.target.value)}
+                className="pos-search-input"
+                style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, flex: 1, minWidth: '120px' }}
+              />
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  onClick={load}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }}
+                  title="Refresh Data"
+                >
+                  <RefreshCw size={14} className={loading ? 'spin' : ''} /> <span className="hide-mobile">Refresh</span>
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }} title="Export PDF">
+                  <Printer size={14} /> <span className="hide-mobile">PDF</span>
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }} title="Export Excel">
+                  <BarChart3 size={14} /> <span className="hide-mobile">Excel</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
           {(isAdminOrDev || isManagement) && (
             <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, marginTop: 8 }}>
               {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
@@ -684,10 +717,11 @@ export default function Reports({ isTodaySales = false }) {
                     color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
                     boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                     cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center',
-                    minWidth: '80px'
+                    minWidth: '60px'
                   }}
                 >
-                  {b}
+                  <span className="hide-mobile">{b}</span>
+                  <span className="show-mobile">{b.startsWith('Branch') ? `B${b.split(' ')[1]}` : b}</span>
                 </button>
               ))}
             </div>
@@ -698,18 +732,94 @@ export default function Reports({ isTodaySales = false }) {
           <table>
             <thead>
               <tr>
-                <th>#</th>
-                <th>Order ID</th>
-                <th>Txn ID</th>
-                <th>Placed By</th>
-                <th>Completed By</th>
-                <th>Branch</th>
-                <th>Type</th>
-                <th>Items</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Date & Time</th>
-                <th>Actions</th>
+                <th style={{ whiteSpace: 'nowrap' }}>#</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Order ID</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Txn ID</th>
+                <th style={{ whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>Placed By</span>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <Filter size={14} style={{ cursor: 'pointer', color: tableFilters.placedBy !== 'All' ? 'var(--primary)' : 'inherit' }} />
+                      <select 
+                        value={tableFilters.placedBy} 
+                        onChange={e => setTableFilters({ ...tableFilters, placedBy: e.target.value })}
+                        style={{ position: 'absolute', opacity: 0, top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                      >
+                        {uniquePlacedBy.map(val => <option key={val} value={val}>{val}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {tableFilters.placedBy !== 'All' && (
+                    <div style={{ fontSize: '10px', color: 'var(--primary)', marginTop: '2px' }}>
+                      {tableFilters.placedBy}
+                    </div>
+                  )}
+                </th>
+                <th style={{ whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>Completed By</span>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <Filter size={14} style={{ cursor: 'pointer', color: tableFilters.completedBy !== 'All' ? 'var(--primary)' : 'inherit' }} />
+                      <select 
+                        value={tableFilters.completedBy} 
+                        onChange={e => setTableFilters({ ...tableFilters, completedBy: e.target.value })}
+                        style={{ position: 'absolute', opacity: 0, top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                      >
+                        {uniqueCompletedBy.map(val => <option key={val} value={val}>{val}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {tableFilters.completedBy !== 'All' && (
+                    <div style={{ fontSize: '10px', color: 'var(--primary)', marginTop: '2px' }}>
+                      {tableFilters.completedBy}
+                    </div>
+                  )}
+                </th>
+                <th style={{ whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>Branch</span>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <Filter size={14} style={{ cursor: 'pointer', color: tableFilters.branch !== 'All' ? 'var(--primary)' : 'inherit' }} />
+                      <select 
+                        value={tableFilters.branch} 
+                        onChange={e => setTableFilters({ ...tableFilters, branch: e.target.value })}
+                        style={{ position: 'absolute', opacity: 0, top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                      >
+                        {uniqueBranch.map(val => <option key={val} value={val}>{val}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {tableFilters.branch !== 'All' && (
+                    <div style={{ fontSize: '10px', color: 'var(--primary)', marginTop: '2px' }}>
+                      {tableFilters.branch}
+                    </div>
+                  )}
+                </th>
+                <th style={{ whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>Type</span>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <Filter size={14} style={{ cursor: 'pointer', color: tableFilters.type !== 'All' ? 'var(--primary)' : 'inherit' }} />
+                      <select 
+                        value={tableFilters.type} 
+                        onChange={e => setTableFilters({ ...tableFilters, type: e.target.value })}
+                        style={{ position: 'absolute', opacity: 0, top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                      >
+                        {uniqueType.map(val => <option key={val} value={val}>{val}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {tableFilters.type !== 'All' && (
+                    <div style={{ fontSize: '10px', color: 'var(--primary)', marginTop: '2px' }}>
+                      {tableFilters.type}
+                    </div>
+                  )}
+                </th>
+                <th style={{ whiteSpace: 'nowrap' }}>Items</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Amount</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Status</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Date & Time</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
               </tr>
             </thead>
             <tbody>

@@ -166,29 +166,8 @@ export default function HoldPayments() {
 
   return (
     <>
-      <div className="page-content" style={{ paddingTop: 0 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20, marginBottom: 24,marginTop:-60 }}>
-          <div className="stat-card" style={{ '--card-color': 'var(--orange)' }}>
-            <div className="stat-icon" style={{ background: 'rgba(255, 107, 53, 0.1)', color: 'var(--orange)' }}>
-              <Clock size={24} />
-            </div>
-            <div className="stat-info">
-              <p>Total Held Amount</p>
-              <h3>{CURRENCY}{totalHeldAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-            </div>
-          </div>
-          <div className="stat-card" style={{ '--card-color': 'var(--yellow)' }}>
-            <div className="stat-icon" style={{ background: 'rgba(255, 184, 0, 0.1)', color: 'var(--yellow)' }}>
-              <Sparkles size={24} />
-            </div>
-            <div className="stat-info">
-              <p>Today's Held Amount</p>
-              <h3>{CURRENCY}{todayHeldAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-            </div>
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '0 8px', maxWidth: '100%', width: '100%' }}>
+        <div className="card" style={{ padding: 0, overflow: 'hidden', marginTop: 12 }}>
           <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -203,27 +182,35 @@ export default function HoldPayments() {
                 style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
               />
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={loadHeldOrders} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><RefreshCw size={14} /> Refresh</button>
-
             {isAdmin && (
-              <div style={{ width: '100%', display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, overflowX: 'auto', marginTop: 8 }}>
+              <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4 }}>
                 {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
                   <button
                     key={b}
                     onClick={() => setBranch(b)}
                     style={{
-                      flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, border: 'none', borderRadius: 6,
+                      padding: '4px 12px', fontSize: 12, fontWeight: 700, border: 'none', borderRadius: 6,
                       background: branch === b ? 'var(--surface)' : 'transparent',
                       color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
                       boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                      cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center'
+                      cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap'
                     }}
                   >
-                    {b}
+                    {b.replace('Branch ', 'B')}
                   </button>
                 ))}
               </div>
             )}
+            
+            <div style={{ display: 'flex', gap: 16, marginLeft: 'auto', flexWrap: 'wrap' }}>
+              <div style={{ color: '#000', fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Total: {CURRENCY}{totalHeldAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
+              <div style={{ color: '#000', fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Today: {CURRENCY}{todayHeldAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={loadHeldOrders} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><RefreshCw size={14} /></button>
+            </div>
           </div>
           <div className="table-wrap" style={{ minHeight: '300px' }}>
             <table>
@@ -231,8 +218,7 @@ export default function HoldPayments() {
                 <tr>
                   <th>#</th>
                   <th>Order ID</th>
-                  <th>Placed By</th>
-                  <th>Completed By</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Placed By</th>
                   <th>Branch</th>
                   <th>Type</th>
                   <th>Subtotal</th>
@@ -245,7 +231,7 @@ export default function HoldPayments() {
               {loading
                 ? Array.from({ length: 3 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: 7 }).map((__, j) => (
+                      {Array.from({ length: 6 }).map((__, j) => (
                         <td key={j}><div className="skeleton" style={{ height: 18, width: '80%', borderRadius: 4 }} /></td>
                       ))}
                     </tr>
@@ -264,10 +250,6 @@ export default function HoldPayments() {
                         <div style={{ fontWeight: 600 }}>{o.order_taker || '-'}</div>
                         {o.created_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
                       </td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{o.completed_by || '-'}</div>
-                        {o.completed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(o.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
-                      </td>
                       <td>{o.branch || '-'}</td>
                       <td>{o.order_type || '-'}</td>
                       <td>{CURRENCY}{parseFloat(o.subtotal).toFixed(2)}</td>
@@ -280,20 +262,20 @@ export default function HoldPayments() {
                           {role !== 'order taker' && (
                             <button 
                               className="btn btn-success btn-sm" 
-                              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px' }}
                               onClick={() => handlePay(o.id, 'Cash')}
                             >
-                              <Banknote size={16} /> Pay Cash
+                              <Banknote size={14} /> Pay Cash
                             </button>
                           )}
                           {role !== 'order taker' && (
                             <button 
                               className="btn btn-secondary btn-sm"
-                              style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3b82f6', borderColor: '#3b82f6' }}
+                              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px', color: '#3b82f6', borderColor: '#3b82f6' }}
                               onClick={() => handlePay(o.id, 'Card')}
                               title="Pay Card"
                             >
-                              <CreditCard size={16} /> Pay Card
+                              <CreditCard size={14} /> Pay Card
                             </button>
                           )}
                           

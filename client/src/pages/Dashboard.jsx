@@ -29,7 +29,8 @@ import {
   Filter,
   CreditCard,
   Banknote,
-  ClipboardList
+  ClipboardList,
+  Coins
 } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler)
@@ -50,7 +51,7 @@ const decimalHoursToText = (hoursDec) => {
 };
 
 const statCards = [
-  { key: 'totalSale', label: 'Total Sale', icon: <CircleDollarSign size={20} strokeWidth={2.5} />, color: BRAND_SECONDARY, prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'totalSale', label: 'Total Sale', icon: <Coins size={20} strokeWidth={2.5} />, color: BRAND_SECONDARY, prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
   { key: 'cashSale', label: 'Cash Sales', icon: <Banknote size={20} strokeWidth={2.5} />, color: '#10b981', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
   { key: 'cardSale', label: 'Card Sales', icon: <CreditCard size={20} strokeWidth={2.5} />, color: '#3b82f6', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
   { key: 'creditSale', label: "Today's Credit", icon: <ClipboardList size={20} strokeWidth={2.5} />, color: '#8b5cf6', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
@@ -60,8 +61,8 @@ const statCards = [
 ]
 
 const payrollStatCards = [
-  { key: 'total_salary_paid', label: 'Salary Paid (This Month)', icon: <CircleDollarSign size={24} strokeWidth={2.5} />, color: '#ef4444', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
-  { key: 'total_advance_given', label: 'Advances Given', icon: <CircleDollarSign size={24} strokeWidth={2.5} />, color: '#f59e0b', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'total_salary_paid', label: 'Salary Paid (This Month)', icon: <Coins size={24} strokeWidth={2.5} />, color: '#ef4444', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
+  { key: 'total_advance_given', label: 'Advances Given', icon: <Coins size={24} strokeWidth={2.5} />, color: '#f59e0b', prefix: CURRENCY, format: v => Math.round(v).toLocaleString() },
 ]
 
 function StatCard({ stat, value, loading }) {
@@ -72,7 +73,7 @@ function StatCard({ stat, value, loading }) {
     <div className="stat-card" style={{ '--card-color': stat.color }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start', gap: 4 }}>
         <p style={{ fontSize: 11, margin: 0, fontWeight: 700, color: 'var(--text-secondary)', lineHeight: 1.2 }}>{stat.label}</p>
-        <div className="stat-icon" style={{ '--card-color': stat.color, color: stat.color }}>
+        <div className="stat-icon" style={{ '--card-color': stat.color, color: '#000' }}>
           {stat.icon}
         </div>
       </div>
@@ -123,6 +124,10 @@ export default function Dashboard() {
   const [attendanceSelectedBranch, setAttendanceSelectedBranch] = useState('All')
   const [showAttendanceTable, setShowAttendanceTable] = useState(false)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [showTopItemsFilter, setShowTopItemsFilter] = useState(false)
+  const [topItemsFromDate, setTopItemsFromDate] = useState('')
+  const [topItemsToDate, setTopItemsToDate] = useState('')
+  const [topItemsData, setTopItemsData] = useState([])
 
   const loadStats = () => {
     setLoading(true)
@@ -151,7 +156,7 @@ export default function Dashboard() {
         }))
         
       // Fetch today's closings for filter dropdown
-      axios.get('/api/orders/closings', { params: { date: new Date().toISOString().split('T')[0] } })
+      axios.get('/api/orders/closings', { params: { date: new Date().toISOString().split('T')[0], branch: salesSelectedBranch } })
         .then(r => setPastClosings(r.data))
         .catch(() => setPastClosings([]))
     }
@@ -180,6 +185,17 @@ export default function Dashboard() {
       })
       .finally(() => setLoading(false))
   }
+
+  const loadTopItems = () => {
+    if (!isAdminOrDev) return;
+    axios.get('/api/stats/top-items', { params: { branch: salesSelectedBranch, from_date: topItemsFromDate, to_date: topItemsToDate } })
+      .then(r => setTopItemsData(r.data))
+      .catch(() => setTopItemsData([]))
+  }
+
+  useEffect(() => {
+    loadTopItems()
+  }, [salesSelectedBranch, topItemsFromDate, topItemsToDate, isAdminOrDev])
 
   useEffect(() => {
     loadStats()
@@ -286,20 +302,23 @@ export default function Dashboard() {
     },
   }
 
-  const donutData = {
-    labels: stats?.topItems?.map(f => f.name) ?? [],
+  const topItemsBarData = {
+    labels: topItemsData?.map(f => f.name) ?? [],
     datasets: [{
-      data: stats?.topItems?.map(f => f.value) ?? [],
+      label: 'Quantity Sold',
+      data: topItemsData?.map(f => f.value) ?? [],
       backgroundColor: PALETTE,
-      borderWidth: 0,
-      hoverOffset: 8,
+      borderRadius: 4,
     }],
   }
 
-  const donutOpts = {
+  const topItemsBarOpts = {
     responsive: true, maintainAspectRatio: false,
-    cutout: '68%',
-    plugins: { legend: { position: 'bottom', labels: { padding: 16, font: { size: 12 } } } },
+    plugins: { legend: { display: false }, tooltip: { padding: 12 } },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: { size: 11 }, maxRotation: 45, minRotation: 45 } },
+      y: { grid: { color: 'rgba(0,0,0,0.05)' }, beginAtZero: true }
+    }
   }
 
   // --- DEVELOPER DASHBOARD VIEW ---
@@ -312,7 +331,7 @@ export default function Dashboard() {
             <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Good evening, {user?.username} 👋</h2>
             <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: 13 }}>Sales & Point of Sale Dashboard</p>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             {isAdminOrDev && (
               <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4 }}>
                 <button 
@@ -340,10 +359,13 @@ export default function Dashboard() {
               </div>
             )}
             {isAdminOrDev && dashboardView === 'pos' && (
-              <div style={{ display: 'flex', gap: 10 }}>
+              <>
                 <select
                   value={salesSelectedBranch}
-                  onChange={e => setSalesSelectedBranch(e.target.value)}
+                  onChange={e => {
+                    setSalesSelectedBranch(e.target.value);
+                    setSalesSelectedClosing('current');
+                  }}
                   style={{ padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', height: 38 }}
                 >
                   <option value="All">All Branches</option>
@@ -356,17 +378,17 @@ export default function Dashboard() {
                   onChange={e => setSalesSelectedClosing(e.target.value)}
                   style={{ padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', height: 38, maxWidth: 200 }}
                 >
-                  <option value="current">Current Shift (Live)</option>
+                  <option value="current">All Live</option>
                   {pastClosings.map(c => (
                     <option key={c.id} value={c.id}>
-                      [{c.closing_type}] {c.cashier_name} (#{c.id})
+                      [{c.closing_type}] {c.cashier_name} {String(c.id).startsWith('live_') ? '' : `(#${c.id})`}
                     </option>
                   ))}
                 </select>
-              </div>
+              </>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38 }}>
-              <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+            <button className="btn btn-secondary btn-sm" onClick={loadStats} disabled={loading} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, padding: 0 }} title="Refresh">
+              <RefreshCw size={16} className={loading ? 'spin' : ''} />
             </button>
           </div>
         </div>
@@ -393,12 +415,73 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="chart-card">
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Flame size={20} color="#FF6B35" fill="#FF6B35" /> Top Selling Items</h3>
-            <div className="donut-chart-container" style={{ height: 280, position: 'relative' }}>
-              {loading
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}><Flame size={20} color="#FF6B35" fill="#FF6B35" /> Top Selling Items</h3>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {(topItemsFromDate || topItemsToDate) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255, 107, 53, 0.1)', color: 'var(--orange)', padding: '4px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                    {topItemsFromDate || '...'} to {topItemsToDate || '...'}
+                    <div 
+                      onClick={() => { setTopItemsFromDate(''); setTopItemsToDate(''); setShowTopItemsFilter(false); }} 
+                      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 107, 53, 0.2)', borderRadius: '50%', width: 16, height: 16, fontSize: 10 }}
+                      title="Clear Filter"
+                    >
+                      ✕
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ position: 'relative' }}>
+                  <button 
+                    className="btn btn-secondary btn-sm" 
+                    onClick={() => setShowTopItemsFilter(!showTopItemsFilter)} 
+                    style={{ 
+                      padding: '6px', 
+                      background: (topItemsFromDate || topItemsToDate) ? 'rgba(255, 107, 53, 0.1)' : 'transparent',
+                      borderColor: (topItemsFromDate || topItemsToDate) ? 'var(--orange)' : 'var(--border)',
+                      color: (topItemsFromDate || topItemsToDate) ? 'var(--orange)' : 'var(--text-muted)'
+                    }} 
+                    title="Filter by Date"
+                  >
+                    <Filter size={16} />
+                  </button>
+                  {showTopItemsFilter && (
+                    <div style={{ position: 'absolute', right: 0, top: '110%', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', display: 'flex', gap: 12, flexDirection: 'column', minWidth: 160 }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        setTopItemsFromDate(today);
+                        setTopItemsToDate(today);
+                        setShowTopItemsFilter(false);
+                      }}>Today</button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>From</span>
+                        <input type="date" value={topItemsFromDate} onChange={e => setTopItemsFromDate(e.target.value)} style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }} />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>To</span>
+                        <input type="date" value={topItemsToDate} onChange={e => setTopItemsToDate(e.target.value)} style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }} />
+                      </div>
+                      
+                      <button className="btn btn-primary btn-sm" style={{ marginTop: 4 }} onClick={() => setShowTopItemsFilter(false)}>Apply</button>
+
+                      {(topItemsFromDate || topItemsToDate) && (
+                        <button className="btn btn-secondary btn-sm" style={{ color: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => {
+                          setTopItemsFromDate('');
+                          setTopItemsToDate('');
+                          setShowTopItemsFilter(false);
+                        }}>Clear Filter</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{ height: 280, marginTop: 12 }}>
+              {loading && topItemsData.length === 0
                 ? <div className="skeleton" style={{ height: '100%' }} />
-                : stats?.topItems?.length > 0
-                  ? <Doughnut data={donutData} options={donutOpts} />
+                : topItemsData?.length > 0
+                  ? <Bar data={topItemsBarData} options={topItemsBarOpts} />
                   : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af' }}>No sales data yet</div>
               }
             </div>

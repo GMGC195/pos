@@ -40,6 +40,9 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
 (async () => {
   await runWithStartupRetry(async () => {
   try {
+    // Make timezone permanent for the DB user (fixes Hostinger / Neon pooling timezone drops)
+    await pool.query("ALTER ROLE current_user SET timezone TO 'Asia/Riyadh'");
+    
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE');
     
     // Update shift_closings for credit reporting

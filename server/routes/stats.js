@@ -33,6 +33,20 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(branch);
     }
 
+    // Cashier should only see the current unclosed shift
+    const isCashier = role === 'cashier';
+    let shiftCond = isCashier ? `AND is_shift_closed = FALSE AND completed_by = '${req.user.username}'` : '';
+    let shiftCondO = isCashier ? `AND o.is_shift_closed = FALSE AND o.completed_by = '${req.user.username}'` : '';
+    let targetCashierForMP = isCashier ? req.user.username : null;
+
+    if (closing_id && typeof closing_id === 'string' && closing_id.startsWith('live_')) {
+      const liveUser = closing_id.replace('live_', '');
+      shiftCond = `AND is_shift_closed = FALSE AND completed_by = '${liveUser}'`;
+      shiftCondO = `AND o.is_shift_closed = FALSE AND o.completed_by = '${liveUser}'`;
+      targetCashierForMP = liveUser;
+      closing_id = null; // Skip shift_closings block
+    }
+
     // If closing_id is provided (usually by admin), fetch from shift_closings
     if (closing_id) {
       const closingRes = await pool.query(`SELECT * FROM shift_closings WHERE id = $1`, [closing_id]);
@@ -57,12 +71,6 @@ router.get('/', authenticateToken, async (req, res) => {
         });
       }
     }
-
-    // Cashier should only see the current unclosed shift
-    const isCashier = role === 'cashier';
-    const shiftCond = isCashier ? `AND is_shift_closed = FALSE AND completed_by = '${req.user.username}'` : '';
-    const shiftCondO = isCashier ? `AND o.is_shift_closed = FALSE AND o.completed_by = '${req.user.username}'` : '';
-
     const totalSaleResult = await pool.query(`
       SELECT 
         COALESCE(SUM(o.grand_total), 0) as total_sale,
@@ -85,8 +93,8 @@ router.get('/', authenticateToken, async (req, res) => {
       mpParams.push(JSON.stringify([branch]));
       mpQuery += ` AND cc.available_branches @> $${mpParams.length}::jsonb`;
     }
-    if (isCashier) {
-      mpParams.push(req.user.username);
+    if (targetCashierForMP) {
+      mpParams.push(targetCashierForMP);
       mpQuery += ` AND ct.cashier_name = $${mpParams.length}`;
     }
     const majorPaymentResult = await pool.query(mpQuery, mpParams);
@@ -204,6 +212,49 @@ router.get('/', authenticateToken, async (req, res) => {
       })),
       payrollStats
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET top items by date range
+router.get('/top-items', authenticateToken, async (req, res) => {
+  try {
+    let { branch, from_date, to_date } = req.query;
+    let params = [];
+    let branchCond = '';
+    
+    if (branch && branch !== 'All') {
+      branchCond = 'AND o.branch = $1';
+      params.push(branch);
+    }
+    
+    let dateCond = '';
+    if (from_date && to_date) {
+      dateCond = `AND DATE(o.created_at) >= $${params.length + 1} AND DATE(o.created_at) <= $${params.length + 2}`;
+      params.push(from_date, to_date);
+    } else if (from_date) {
+      dateCond = `AND DATE(o.created_at) >= $${params.length + 1}`;
+      params.push(from_date);
+    } else if (to_date) {
+      dateCond = `AND DATE(o.created_at) <= $${params.length + 1}`;
+      params.push(to_date);
+    }
+
+    const topItems = await pool.query(`
+      SELECT oi.item_name, SUM(oi.qty) as total_qty
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE 1=1 ${branchCond} ${dateCond}
+      GROUP BY oi.item_name
+      ORDER BY total_qty DESC
+      LIMIT 6
+    `, params);
+
+    res.json(topItems.rows.map(r => ({
+      name: r.item_name,
+      value: parseInt(r.total_qty),
+    })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
