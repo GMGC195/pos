@@ -630,6 +630,7 @@ router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) 
     // Actually, safest is to check previous status or just return if it's currently Completed
     // But since this route is for voiding, we can assume it was completed.
     await returnStock(req.params.id, client);
+    await reverseCreditTransactions(req.params.id, client);
 
     await client.query('COMMIT');
     const updatedOrder = orderResult.rows[0];
@@ -683,6 +684,7 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
          `UPDATE transactions SET payment_method = 'Cancelled' WHERE order_id = $1`,
          [req.params.id]
        );
+       await reverseCreditTransactions(req.params.id, client);
        await client.query('COMMIT');
        const updatedOrder = orderResult.rows[0];
        if (req.io) req.io.emit('orderUpdated', updatedOrder);
@@ -1373,5 +1375,37 @@ router.post('/:id/reprint', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to reprint' });
   }
 });
+async function reverseCreditTransactions(orderId, client) {
+  try {
+    const txs = await client.query('SELECT * FROM credit_transactions WHERE order_id = $1', [orderId]);
+    if (txs.rows.length === 0) return;
+    
+    for (let tx of txs.rows) {
+      if (tx.type === 'CREDIT_ORDER') {
+        // Reverse order debt
+        await client.query(
+          `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+          [tx.credit_customer_id, orderId, 'ORDER_CANCELLED', tx.amount]
+        );
+        await client.query(
+          `UPDATE credit_customers SET balance = balance - $1 WHERE id = $2`,
+          [tx.amount, tx.credit_customer_id]
+        );
+      } else if (tx.type === 'PAYMENT') {
+        // Reverse payment
+        await client.query(
+          `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+          [tx.credit_customer_id, orderId, 'PAYMENT_CANCELLED', tx.amount]
+        );
+        await client.query(
+          `UPDATE credit_customers SET balance = balance + $1 WHERE id = $2`,
+          [tx.amount, tx.credit_customer_id]
+        );
+      }
+    }
+  } catch (err) {
+    console.error('Error reversing credit transactions:', err);
+  }
+}
 
 module.exports = router;

@@ -183,6 +183,11 @@ export default function AttendanceTracker() {
   const [pendingActions, setPendingActions] = useState({})
   const [restaurantOnBreak, setRestaurantOnBreak] = useState(() => localStorage.getItem('pizza_shop_restaurant_on_break') === 'true')
   const [confirmModal, setConfirmModal] = useState(null)
+  const [showEarlyWarning, setShowEarlyWarning] = useState(false)
+  const [speechHighlightWord, setSpeechHighlightWord] = useState(-1)
+  const earlyCheckInText = "ابھی آپ کی ڈیوٹی کا وقت شروع نہیں ہوا۔ آپ شفٹ سے صرف 15 منٹ پہلے چیک اِن کر سکتے ہیں۔"
+  const earlyCheckInTTS = "Abhi aap ki duty ka waqt shuru nahi hua. Aap shift se sirf 15 minute pehlay check in kar saktay hain."
+  const earlyCheckInWords = earlyCheckInText.split(' ')
   const [earlyCheckInModal, setEarlyCheckInModal] = useState(null)
   const [overtimeModal, setOvertimeModal] = useState(null)
   const [overtimeReason, setOvertimeReason] = useState('')
@@ -199,6 +204,16 @@ export default function AttendanceTracker() {
   const [editEndTimeVal, setEditEndTimeVal] = useState('23:00')
   const [isCustomShiftEdit, setIsCustomShiftEdit] = useState(false)
   const [shiftsList, setShiftsList] = useState([])
+
+  // Preload speech voices to remove delay
+  useEffect(() => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
 
   const loadAttendance = (showSpinner = false) => {
     if (showSpinner) setLoading(true)
@@ -400,7 +415,43 @@ export default function AttendanceTracker() {
         })
         toast.error('Offline Mode: Check-In saved locally (pending sync)', { duration: 2500 })
       } else {
-        toast.error(err?.response?.data?.error || 'Failed to check in', { duration: 2500 })
+        const errMsg = err?.response?.data?.error || '';
+        if (err?.response?.status === 403 && errMsg.includes('15 minutes')) {
+          if ('speechSynthesis' in window) {
+            const msg = new SpeechSynthesisUtterance(earlyCheckInTTS);
+            const voices = window.speechSynthesis.getVoices();
+            // Find a male Indian/Urdu voice (Hemant for Windows, Rishi for Mac)
+            let maleVoice = voices.find(v => 
+              v.name.includes('Rishi') || 
+              v.name.includes('Hemant') || 
+              (v.name.toLowerCase().includes('male') && (v.lang.includes('hi') || v.lang.includes('ur') || v.lang.includes('en-IN')))
+            );
+            if (!maleVoice) {
+              maleVoice = voices.find(v => v.lang.includes('hi')) || voices[0];
+            }
+            if (maleVoice) msg.voice = maleVoice;
+            msg.pitch = 0.6; // Deeper pitch to ensure it sounds like a male if fallback is female
+            msg.lang = 'hi-IN'; // Highly reliable for reading Roman text natively
+            
+            msg.onboundary = (event) => {
+              if (event.name === 'word') {
+                const textUpToBoundary = earlyCheckInTTS.substring(0, event.charIndex);
+                const wordIndex = textUpToBoundary.split(' ').length - 1;
+                setSpeechHighlightWord(wordIndex);
+              }
+            };
+            msg.onend = () => setSpeechHighlightWord(-1);
+            
+            window.speechSynthesis.cancel();
+            setSpeechHighlightWord(0);
+            window.speechSynthesis.speak(msg);
+          }
+          setShowEarlyWarning(true);
+          // Auto close after 8 seconds
+          setTimeout(() => setShowEarlyWarning(false), 8000);
+        } else {
+          toast.error(errMsg || 'Failed to check in', { duration: 2500 })
+        }
       }
     } finally {
       setPendingActions(prev => ({ ...prev, [actionKey]: false }));
@@ -1635,6 +1686,60 @@ export default function AttendanceTracker() {
                 }}
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Early Check-In Warning Modal (Replaces Toast) */}
+      {showEarlyWarning && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowEarlyWarning(false)}>
+          <div className="animate-enter" style={{ background: 'var(--surface)', maxWidth: 500, width: '90%', borderRadius: 20, overflow: 'hidden', borderTop: '8px solid #ef4444', borderBottom: '8px solid #ef4444', position: 'relative' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '32px 24px', textAlign: 'center' }}>
+              <style>{`
+                @keyframes speechPulse {
+                  0%, 100% { transform: scale(1) translateY(0); opacity: 0.8; }
+                  50% { transform: scale(1.1) translateY(-4px); opacity: 1; }
+                }
+                @keyframes handWarn {
+                  0%, 100% { transform: rotate(-10deg); }
+                  50% { transform: rotate(-25deg); }
+                }
+              `}</style>
+              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', marginBottom: 24, marginTop: 16 }}>
+                <span style={{ fontSize: 80, zIndex: 2 }}>🤖</span>
+                <span style={{ fontSize: 45, position: 'absolute', top: -20, right: '32%', animation: 'speechPulse 1s infinite', zIndex: 1 }}>💬</span>
+                <span style={{ fontSize: 45, position: 'absolute', bottom: -10, left: '33%', animation: 'handWarn 1.5s infinite', transformOrigin: 'bottom right', zIndex: 3 }}>✋</span>
+              </div>
+              <h3 style={{ fontSize: 28, color: '#ef4444', margin: '0 0 16px 0', fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 }}>Hold On! / ایک منٹ!</h3>
+              <div style={{ background: '#fef2f2', padding: '20px', borderRadius: '16px', border: '1px solid #fee2e2' }}>
+                <p style={{ margin: 0, fontSize: 18, color: '#991b1b', fontWeight: 600, lineHeight: 1.5 }}>
+                  Your duty time hasn't started yet. You can only check in 15 minutes before your shift.
+                </p>
+                <hr style={{ borderTop: '1px solid #fca5a5', margin: '16px 0' }} />
+                <p style={{ margin: 0, fontSize: 22, fontWeight: 'bold', color: '#991b1b', lineHeight: 1.6 }} dir="rtl">
+                  {earlyCheckInWords.map((word, idx) => (
+                    <span 
+                      key={idx} 
+                      style={{ 
+                        backgroundColor: speechHighlightWord === idx ? '#fef08a' : 'transparent', 
+                        color: speechHighlightWord === idx ? '#854d0e' : 'inherit',
+                        padding: '0 2px', 
+                        borderRadius: 4, 
+                        transition: 'background-color 0.1s'
+                      }}
+                    >
+                      {word}{' '}
+                    </span>
+                  ))}
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowEarlyWarning(false)}
+                style={{ marginTop: 24, padding: '10px 32px', background: 'var(--surface-2)', color: 'var(--text)', border: 'none', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}
+              >
+                Close
               </button>
             </div>
           </div>

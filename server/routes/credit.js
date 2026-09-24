@@ -39,7 +39,7 @@ router.get('/', async (req, res) => {
       }
     }
 
-    query += ' ORDER BY name ASC';
+    query += ' ORDER BY COALESCE((SELECT MAX(created_at) FROM credit_transactions WHERE credit_customer_id = credit_customers.id), credit_customers.created_at) DESC, name ASC';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {

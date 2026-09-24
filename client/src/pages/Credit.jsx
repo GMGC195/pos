@@ -30,7 +30,7 @@ const MultiSelectDropdown = ({ options, selectedIds, onChange, placeholder, styl
       {isOpen && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 9 }} onClick={() => setIsOpen(false)} />
-          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 6, marginTop: 4, maxHeight: 200, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+          <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 6, marginBottom: 4, maxHeight: 220, overflowY: 'auto', zIndex: 10, boxShadow: '0 -4px 6px rgba(0,0,0,0.1)' }}>
             {options.map(opt => (
               <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', position: 'relative', zIndex: 11 }}>
                 <input 
@@ -415,10 +415,13 @@ export default function Credit() {
       {/* Add/Edit Modal */}
       {showModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 400, maxHeight: '90vh', overflowY: 'visible', borderRadius: 16, padding: 24, position: 'relative' }}>
-            <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20}/></button>
-            <h3 style={{ margin: '0 0 20px', fontSize: 20 }}>{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h3>
-            <form onSubmit={handleSaveCustomer} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 450, maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, position: 'relative' }}>
+            <div style={{ padding: '24px 24px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-2)', flexShrink: 0 }}>
+              <h3 style={{ margin: 0, fontSize: 20 }}>{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h3>
+              <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4 }}><X size={20}/></button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+              <form onSubmit={handleSaveCustomer} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
                 <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600 }}>Name</label>
                 <input required value={name} onChange={e => setName(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--bg)', outline: 'none', color: 'var(--text)', boxSizing: 'border-box' }} />
@@ -502,6 +505,7 @@ export default function Credit() {
                 {saving ? 'Saving...' : 'Save'}
               </button>
             </form>
+            </div>
           </div>
         </div>
       )}
@@ -624,26 +628,51 @@ export default function Credit() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ledger.map(t => (
-                    <tr key={t.id} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                      <td style={{ padding: '12px 16px', fontSize: 13 }}>{new Date(t.created_at).toLocaleString()}</td>
-                      <td style={{ padding: '12px 16px', fontSize: 13 }}>
-                        {t.type === 'CREDIT_ORDER' ? (
-                          <span onClick={() => handleViewOrder(t.order_id)} style={{ color: 'var(--red)', fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>Bill # {t.order_id}</span>
-                        ) : t.type === 'CHARGE' ? (
-                          <span style={{ color: 'var(--red)', fontWeight: 500 }}>Credit Added {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <span style={{ color: 'var(--green)', fontWeight: 500 }}>Major Payment {t.cashier_name ? `(to ${t.cashier_name})` : ''}</span>
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>via {t.payment_method || 'Cash'}</span>
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: (t.type === 'CREDIT_ORDER') ? 'var(--red)' : 'var(--green)' }}>
-                        {(t.type === 'CREDIT_ORDER') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
+                  {(() => {
+                    const processedLedger = [];
+                    const cancelledOrderIds = new Set();
+                    
+                    // First pass: find cancellations
+                    ledger.forEach(t => {
+                      if (t.type === 'ORDER_CANCELLED') cancelledOrderIds.add(t.order_id);
+                    });
+
+                    ledger.forEach(t => {
+                      if (t.type === 'ORDER_CANCELLED' || t.type === 'PAYMENT_CANCELLED') {
+                        return; // Hide these reverse entries from UI
+                      }
+                      
+                      let isCancelled = false;
+                      if (t.type === 'CREDIT_ORDER' && cancelledOrderIds.has(t.order_id)) {
+                        isCancelled = true;
+                      }
+                      processedLedger.push({ ...t, isCancelled });
+                    });
+
+                    return processedLedger.map(t => (
+                      <tr key={t.id} style={{ borderBottom: '1px solid var(--surface-2)', opacity: t.isCancelled ? 0.6 : 1 }}>
+                        <td style={{ padding: '12px 16px', fontSize: 13, textDecoration: t.isCancelled ? 'line-through' : 'none' }}>{new Date(t.created_at).toLocaleString()}</td>
+                        <td style={{ padding: '12px 16px', fontSize: 13 }}>
+                          {t.type === 'CREDIT_ORDER' ? (
+                            <span>
+                              <span onClick={() => handleViewOrder(t.order_id)} style={{ color: 'var(--red)', fontWeight: 500, cursor: 'pointer', textDecoration: t.isCancelled ? 'line-through' : 'underline' }}>Bill # {t.order_id}</span>
+                              {t.isCancelled && <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold' }}>(Cancelled)</span>}
+                            </span>
+                          ) : t.type === 'CHARGE' ? (
+                            <span style={{ color: 'var(--red)', fontWeight: 500 }}>Credit Added {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{ color: 'var(--green)', fontWeight: 500 }}>Major Payment {t.cashier_name ? `(to ${t.cashier_name})` : ''}</span>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>via {t.payment_method || 'Cash'}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px 16px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? 'var(--red)' : 'var(--green)', textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
+                          {(t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}
+                        </td>
+                      </tr>
+                    ));
+                  })()}
                   {ledger.length === 0 && (
                     <tr>
                       <td colSpan={3} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No transactions yet.</td>

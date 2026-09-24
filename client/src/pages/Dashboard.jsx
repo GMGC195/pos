@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
@@ -128,6 +128,7 @@ export default function Dashboard() {
   const [topItemsFromDate, setTopItemsFromDate] = useState('')
   const [topItemsToDate, setTopItemsToDate] = useState('')
   const [topItemsData, setTopItemsData] = useState([])
+  const topItemsFilterRef = useRef(null)
 
   const loadStats = () => {
     setLoading(true)
@@ -196,6 +197,16 @@ export default function Dashboard() {
   useEffect(() => {
     loadTopItems()
   }, [salesSelectedBranch, topItemsFromDate, topItemsToDate, isAdminOrDev])
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (topItemsFilterRef.current && !topItemsFilterRef.current.contains(event.target)) {
+        setShowTopItemsFilter(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   useEffect(() => {
     loadStats()
@@ -432,7 +443,7 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative' }} ref={topItemsFilterRef}>
                   <button 
                     className="btn btn-secondary btn-sm" 
                     onClick={() => setShowTopItemsFilter(!showTopItemsFilter)} 
@@ -448,7 +459,17 @@ export default function Dashboard() {
                   </button>
                   {showTopItemsFilter && (
                     <div style={{ position: 'absolute', right: 0, top: '110%', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', display: 'flex', gap: 12, flexDirection: 'column', minWidth: 160 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => {
+                      
+                      {/* Inner Close Icon */}
+                      <div 
+                        onClick={() => setShowTopItemsFilter(false)}
+                        style={{ position: 'absolute', top: 6, right: 6, cursor: 'pointer', padding: 4, color: 'var(--text-muted)' }}
+                        title="Close"
+                      >
+                        ✕
+                      </div>
+
+                      <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => {
                         const today = new Date().toISOString().split('T')[0];
                         setTopItemsFromDate(today);
                         setTopItemsToDate(today);

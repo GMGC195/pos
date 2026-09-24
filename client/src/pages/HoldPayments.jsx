@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import axios from '../api'
-import { Clock, RefreshCw, Banknote, CreditCard, Sparkles, MoreVertical, Pencil, Trash2, Ban } from 'lucide-react'
+import { Clock, RefreshCw, Banknote, CreditCard, Sparkles, MoreVertical, Pencil, Trash2, Ban, Search } from 'lucide-react'
 import { CURRENCY } from '../config'
 import OrderDetailModal from '../components/OrderDetailModal'
 import { useAuth } from '../contexts/AuthContext'
@@ -173,14 +173,17 @@ export default function HoldPayments() {
               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Clock size={16} /> Held Orders List
               </h3>
-              <input 
-                type="text" 
-                placeholder="Search Order ID..." 
-                value={search} 
-                onChange={e => setSearch(e.target.value)}
-                className="pos-search-input"
-                style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
-              />
+              <div style={{ position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input 
+                  type="text" 
+                  placeholder="Search Order ID..." 
+                  value={search} 
+                  onChange={e => setSearch(e.target.value)}
+                  className="pos-search-input"
+                  style={{ padding: '6px 12px 6px 32px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14 }}
+                />
+              </div>
             </div>
             {isAdmin && (
               <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4 }}>

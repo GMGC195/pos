@@ -1725,7 +1725,7 @@ export default function POS() {
       {
         confirmModal && (
           <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setConfirmModal(false) }}>
-            <div className="modal" style={{ maxWidth: 700, width: "90%", padding: window.innerWidth <= 900 ? 12 : 20, maxHeight: '90vh', overflowY: 'auto', minHeight: paymentMethod === 'Credit' ? (window.innerWidth <= 900 ? 500 : 550) : 'auto' }}>
+            <div className="modal" style={{ maxWidth: 700, width: "90%", padding: window.innerWidth <= 900 ? 12 : 20, maxHeight: '90vh', overflowY: 'auto', minHeight: paymentMethod === 'Credit' ? (window.innerWidth <= 900 ? 600 : 650) : 'auto' }}>
               <div className="modal-header" style={{ paddingBottom: window.innerWidth <= 900 ? 0 : 16, marginBottom: window.innerWidth <= 900 ? 4 : 16, borderBottom: window.innerWidth <= 900 ? 'none' : '1px solid var(--surface-2)' }}>
                 <h3 style={{ fontSize: window.innerWidth <= 900 ? 13 : 24, margin: 0 }}>Confirm Order</h3>
                 <button className="modal-close" onClick={() => setConfirmModal(false)}>✕</button>
@@ -1894,10 +1894,10 @@ export default function POS() {
 
                   <div style={{ paddingTop: window.innerWidth <= 900 ? 12 : 4, paddingBottom: window.innerWidth <= 900 ? 12 : 0, display: 'flex', gap: window.innerWidth <= 900 ? 6 : 10, position: window.innerWidth <= 900 ? 'sticky' : 'static', bottom: window.innerWidth <= 900 ? -12 : 'auto', background: 'white', zIndex: 10, borderTop: window.innerWidth <= 900 ? '1px solid #eee' : 'none', marginTop: window.innerWidth <= 900 ? 12 : 0 }}>
                     <button className="btn btn-secondary" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) handlePlaceOrder(paymentMethod, false) }} disabled={processing !== false || isManagement}>
-                      {processing === 'punch' ? 'Punching...' : 'Punch Only'}
+                      {processing === 'punch' ? 'Completing...' : 'Complete'}
                     </button>
                     <button className="btn btn-primary" style={{ flex: 1.5, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) handlePlaceOrder(paymentMethod, true) }} disabled={processing !== false || isManagement}>
-                      {processing === 'print' ? 'Processing...' : 'Print & Punch'}
+                      {processing === 'print' ? 'Processing...' : 'Complete & Print'}
                     </button>
                   </div>
                 </div>
