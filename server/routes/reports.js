@@ -44,7 +44,7 @@ router.get('/sales-items', authenticateToken, isAdminOrManagement, async (req, r
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         LEFT JOIN items i ON oi.item_id = i.id
-        LEFT JOIN categories c ON i.category_id = c.id
+        LEFT JOIN categories c ON c.id = (SELECT category_id FROM item_categories WHERE item_id = i.id LIMIT 1)
         WHERE o.status = 'Completed'
           AND DATE(o.created_at) >= $1 
           AND DATE(o.created_at) <= $2

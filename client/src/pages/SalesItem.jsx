@@ -268,9 +268,9 @@ export default function SalesItem() {
                 <th style={{ textAlign: 'center' }}>Qty</th>
                 <th style={{ textAlign: 'right' }}>Subtotal</th>
                 <th style={{ textAlign: 'right' }}>Discount</th>
-                <th style={{ textAlign: 'right' }}>Sale Price</th>
-                <th style={{ textAlign: 'right' }}>Produce Cost</th>
-                <th style={{ textAlign: 'right' }}>Revenue Produced</th>
+                <th style={{ textAlign: 'center' }}>Sale Price</th>
+                <th style={{ textAlign: 'center' }}>Produce Cost</th>
+                <th style={{ textAlign: 'center' }}>Revenue Produced</th>
               </tr>
             </thead>
             <tbody>
@@ -302,9 +302,9 @@ export default function SalesItem() {
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 500 }}>{CURRENCY}{parseFloat(item.subtotal).toFixed(2)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--red)' }}>{CURRENCY}{parseFloat(item.discount).toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{CURRENCY}{parseFloat(item.sale_price).toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', color: '#666' }}>{CURRENCY}{parseFloat(item.produce_cost).toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>{CURRENCY}{parseFloat(item.revenue).toFixed(2)}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 600 }}>{CURRENCY}{parseFloat(item.sale_price).toFixed(2)}</td>
+                        <td style={{ textAlign: 'center', color: '#666' }}>{CURRENCY}{parseFloat(item.produce_cost).toFixed(2)}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)' }}>{CURRENCY}{parseFloat(item.revenue).toFixed(2)}</td>
                       </tr>
                     ))}
                     </header>
@@ -337,9 +337,9 @@ export default function SalesItem() {
                   <th style={{ padding: '12px 24px' }}>Items Total</th>
                   <th style={{ padding: '12px 24px', textAlign: 'right' }}>Total Subtotal</th>
                   <th style={{ padding: '12px 24px', textAlign: 'right' }}>Total Discount</th>
-                  <th style={{ padding: '12px 24px', textAlign: 'right' }}>Total Sale Price</th>
-                  <th style={{ padding: '12px 24px', textAlign: 'right' }}>Total Produce Cost</th>
-                  <th style={{ padding: '12px 24px', textAlign: 'right' }}>Net Revenue</th>
+                  <th style={{ padding: '12px 24px', textAlign: 'center' }}>Total Sale Price</th>
+                  <th style={{ padding: '12px 24px', textAlign: 'center' }}>Total Produce Cost</th>
+                  <th style={{ padding: '12px 24px', textAlign: 'center' }}>Net Revenue</th>
                 </tr>
               </thead>
               <tbody>
@@ -355,13 +355,13 @@ export default function SalesItem() {
                   <td style={{ padding: '20px 24px', textAlign: 'right', color: 'var(--red)' }}>
                    {CURRENCY}{grandTotals.discount.toFixed(2)}
                   </td>
-                   <td style={{ padding: '20px 24px', textAlign: 'right' }}>
+                   <td style={{ padding: '20px 24px', textAlign: 'center' }}>
                     {CURRENCY}{grandTotals.salePrice.toFixed(2)}
                   </td>
-                  <td style={{ padding: '20px 24px', textAlign: 'right', color: '#666' }}>
+                  <td style={{ padding: '20px 24px', textAlign: 'center', color: '#666' }}>
                     {CURRENCY}{grandTotals.produceCost.toFixed(2)}
                   </td>
-                  <td style={{ padding: '20px 24px', textAlign: 'right', color: 'var(--green)', fontSize: 24 }}>
+                  <td style={{ padding: '20px 24px', textAlign: 'center', color: 'var(--green)', fontSize: 24 }}>
                     {CURRENCY}{grandTotals.revenue.toFixed(2)}
                   </td>
                 </tr>
