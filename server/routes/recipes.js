@@ -97,6 +97,50 @@ router.post('/', async (req, res) => {
   }
 });
 
+// POST add MULTIPLE ingredients to recipe
+router.post('/bulk', async (req, res) => {
+  const { items } = req.body;
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Missing items array' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // First, verify item and stocks exist
+    const item_id = items[0].item_id;
+    const itemCheck = await client.query('SELECT id FROM items WHERE id = $1', [item_id]);
+    if (itemCheck.rows.length === 0) throw new Error('Menu item not found');
+
+    const createdItems = [];
+    for (const item of items) {
+      const { item_id: i_id, stock_id, quantity_used, size_label } = item;
+      if (i_id !== item_id) throw new Error('All items must belong to the same menu item');
+      
+      const normalizedSize = size_label && size_label.trim() !== '' ? size_label.trim() : null;
+
+      const result = await client.query(
+        'INSERT INTO recipes (item_id, stock_id, quantity_used, size_label) VALUES ($1, $2, $3, $4) RETURNING *',
+        [item_id, stock_id, quantity_used, normalizedSize]
+      );
+      createdItems.push(result.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ success: true, items: createdItems });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error adding bulk to recipe:', error);
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'One or more ingredients already exist in the recipe for this size.' });
+    }
+    res.status(500).json({ error: error.message || 'Failed to add ingredients to recipe' });
+  } finally {
+    client.release();
+  }
+});
+
 // PUT update ingredient quantity/size in recipe
 router.put('/:id', async (req, res) => {
   const { id } = req.params;

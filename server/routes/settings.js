@@ -10,7 +10,7 @@ router.get('/', authenticateToken, async (req, res) => {
     if (result.rows.length > 0) {
       res.json(result.rows[0]);
     } else {
-      res.json({ auto_print_enabled: false, printer_ip: '127.0.0.1' });
+      res.json({ auto_print_enabled: false, printer_ip: '127.0.0.1', low_stock_behavior: 'block' });
     }
   } catch (err) {
     console.error('Error fetching settings:', err);
@@ -20,20 +20,20 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // PUT /api/settings - Update POS settings
 router.put('/', authenticateToken, isAdmin, async (req, res) => {
-  const { auto_print_enabled, printer_ip } = req.body;
+  const { auto_print_enabled, printer_ip, low_stock_behavior } = req.body;
   try {
     const check = await pool.query('SELECT id FROM settings ORDER BY id ASC LIMIT 1');
     let result;
     
     if (check.rows.length > 0) {
       result = await pool.query(
-        'UPDATE settings SET auto_print_enabled = $1, printer_ip = $2 WHERE id = $3 RETURNING *',
-        [auto_print_enabled, printer_ip, check.rows[0].id]
+        'UPDATE settings SET auto_print_enabled = $1, printer_ip = $2, low_stock_behavior = $3 WHERE id = $4 RETURNING *',
+        [auto_print_enabled, printer_ip, low_stock_behavior || 'block', check.rows[0].id]
       );
     } else {
       result = await pool.query(
-        'INSERT INTO settings (auto_print_enabled, printer_ip) VALUES ($1, $2) RETURNING *',
-        [auto_print_enabled, printer_ip]
+        'INSERT INTO settings (auto_print_enabled, printer_ip, low_stock_behavior) VALUES ($1, $2, $3) RETURNING *',
+        [auto_print_enabled, printer_ip, low_stock_behavior || 'block']
       );
     }
     

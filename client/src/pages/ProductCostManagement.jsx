@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Search, ChefHat, ArrowLeft, Tag, LayoutList, Pencil } from 'lucide-react'
+import { Plus, Trash2, Search, ChefHat, ArrowLeft, Tag, LayoutList, Pencil, Database, MinusCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import axios from '../api'
 
@@ -20,6 +20,10 @@ export default function ProductCostManagement() {
   // Edit Ingredient State
   const [editingIngredient, setEditingIngredient] = useState(null)
   const [editForm, setEditForm] = useState({ quantity_input: '', size_label: '' })
+
+  // Bulk Add Ingredients State
+  const [selectedStocks, setSelectedStocks] = useState([]) // Array of stock objects with quantity_input
+
 
   useEffect(() => {
     fetchItems()
@@ -75,10 +79,6 @@ export default function ProductCostManagement() {
     }
   }
 
-  const selectedStock = stockItems.find(s => s.id === parseInt(ingredientForm.stock_id))
-  const unit = selectedStock ? selectedStock.unit : ''
-  const hasSizes = selectedItem?.size_options?.length > 0
-
   // Helper to parse "Name:Price"
   const parseSizeOpt = (str) => {
     if (typeof str !== 'string') return { name: '', price: parseFloat(selectedItem?.price) || 0 };
@@ -89,27 +89,97 @@ export default function ProductCostManagement() {
     return { name: str, price: parseFloat(selectedItem?.price) || 0 };
   };
 
-  const handleAddIngredient = async (e) => {
-    e.preventDefault()
-    if (!ingredientForm.stock_id || !ingredientForm.quantity_input) {
-      return toast.error('Please select an ingredient and specify quantity')
-    }
-    let qty = parseFloat(ingredientForm.quantity_input)
-    if (isNaN(qty) || qty <= 0) return toast.error('Invalid quantity')
-    if (unit === 'kg') qty = qty / 1000
+  const rawSizes = selectedItem?.size_options || []
+  const sizes = rawSizes.map(s => parseSizeOpt(s).name)
+  const hasSizes = sizes.length > 0
 
-    try {
-      await axios.post('/api/recipes', {
-        item_id: selectedItem.id,
-        stock_id: ingredientForm.stock_id,
-        quantity_used: qty,
-        size_label: ingredientForm.size_label || null
-      })
-      toast.success('Ingredient added to recipe')
-      setIngredientForm({ stock_id: '', quantity_input: '', size_label: ingredientForm.size_label })
-      fetchRecipe(selectedItem.id)
-    } catch (err) {
-      toast.error(err?.response?.data?.error || err.message)
+  const toggleStockSelection = (stock) => {
+    const isSelected = selectedStocks.some(s => s.stock_id === stock.id)
+    if (isSelected) {
+      setSelectedStocks(prev => prev.filter(s => s.stock_id !== stock.id))
+    } else {
+      if (hasSizes) {
+        const newEntries = sizes.map(size => ({
+          unique_id: `${stock.id}-${size}`,
+          stock_id: stock.id,
+          name: stock.name,
+          unit: stock.unit,
+          price_per_unit: stock.price_per_unit,
+          size_label: size,
+          quantity_input: ''
+        }))
+        setSelectedStocks(prev => [...prev, ...newEntries])
+      } else {
+        setSelectedStocks(prev => [...prev, {
+          unique_id: `${stock.id}-nosize`,
+          stock_id: stock.id,
+          name: stock.name,
+          unit: stock.unit,
+          price_per_unit: stock.price_per_unit,
+          size_label: null,
+          quantity_input: ''
+        }])
+      }
+    }
+  }
+
+  const updateSelectedStockQuantity = (unique_id, val) => {
+    setSelectedStocks(prev => prev.map(s => s.unique_id === unique_id ? { ...s, quantity_input: val } : s))
+  }
+
+  const removeSelectedRow = (unique_id) => {
+    setSelectedStocks(prev => prev.filter(s => s.unique_id !== unique_id))
+  }
+
+  const handleBulkAddIngredients = async (e) => {
+    e.preventDefault()
+    if (selectedStocks.length === 0) return toast.error('Please select at least one ingredient')
+
+    const validRows = selectedStocks.filter(s => {
+      const q = parseFloat(s.quantity_input)
+      return !isNaN(q) && q > 0
+    })
+    const emptyCount = selectedStocks.length - validRows.length
+
+    if (validRows.length === 0) {
+      return toast.error('All selected fields are empty!')
+    }
+
+    const saveValid = async (tid) => {
+      if (tid) toast.dismiss(tid)
+      try {
+        const items = validRows.map(s => {
+          let qty = parseFloat(s.quantity_input)
+          if (s.unit === 'kg') qty = qty / 1000
+          return {
+            item_id: selectedItem.id,
+            stock_id: s.stock_id,
+            quantity_used: qty,
+            size_label: s.size_label
+          }
+        })
+        await axios.post('/api/recipes/bulk', { items })
+        toast.success(`${items.length} ingredient(s) added!`)
+        setSelectedStocks([])
+        fetchRecipe(selectedItem.id)
+      } catch (err) {
+        toast.error(err?.response?.data?.error || err.message)
+      }
+    }
+
+    if (emptyCount > 0) {
+      toast((t) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 220 }}>
+          <span style={{ fontWeight: 600, fontSize: 15 }}>{emptyCount} field(s) empty!</span>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Do you want to save the filled items without them?</span>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 5 }}>
+            <button className="btn btn-sm btn-secondary" onClick={() => toast.dismiss(t.id)}>Cancel</button>
+            <button className="btn btn-sm btn-primary" style={{ background: 'var(--red)', border: 'none' }} onClick={() => saveValid(t.id)}>Save Filled Only</button>
+          </div>
+        </div>
+      ), { duration: Infinity, id: 'bulk-recipe-empty-confirm' })
+    } else {
+      saveValid()
     }
   }
 
@@ -180,9 +250,6 @@ export default function ProductCostManagement() {
   }
 
   // ─── DETAIL VIEW ─────────────────────────────────────────────────────
-  // Compute sizes at top level so EditModal can access them
-  const rawSizes = selectedItem?.size_options || []
-  const sizes = rawSizes.map(s => parseSizeOpt(s).name)
 
   if (selectedItem) {
     const grouped = groupedIngredients()
@@ -212,75 +279,91 @@ export default function ProductCostManagement() {
         {/* Add Ingredient Card */}
         <div className="card">
           <h3 style={{ marginBottom: 20, fontSize: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Plus size={18} color="var(--red)" /> Add Component
+            <Plus size={18} color="var(--red)" /> Add Components
           </h3>
-          <form onSubmit={handleAddIngredient} style={{ display: 'flex', gap: 15, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-
-            {/* Size dropdown — only if item has sizes */}
-            {hasSizes && (
-              <div className="form-group" style={{ minWidth: 170, marginBottom: 0 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Tag size={13} /> Size</label>
-                <select
-                  className="form-control"
-                  value={ingredientForm.size_label}
-                  onChange={e => setIngredientForm({ ...ingredientForm, size_label: e.target.value })}
-                >
-                  <option value="">All Sizes</option>
-                  {sizes.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            )}
-
-            {/* Stock ingredient */}
-            <div className="form-group" style={{ flex: 1, minWidth: 250, marginBottom: 0 }}>
-              <label>Select Stock Ingredient</label>
-              <select
-                className="form-control"
-                required
-                value={ingredientForm.stock_id}
-                onChange={e => setIngredientForm({ ...ingredientForm, stock_id: e.target.value, quantity_input: '' })}
-              >
-                <option value="">-- Choose from Stock --</option>
+          
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+            {/* Checkbox List */}
+            <div style={{ flex: '1 1 300px', maxWidth: 400 }}>
+              <label style={{ display: 'block', fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Select Stock Ingredients</label>
+              <div style={{ 
+                maxHeight: 250, overflowY: 'auto', border: '1px solid var(--surface-2)', 
+                borderRadius: 8, padding: 10, background: 'var(--surface)' 
+              }}>
                 {stockItems.map(stock => (
-                  <option key={stock.id} value={stock.id}>
-                    {stock.name} — SAR {Number(stock.price_per_unit).toFixed(2)} per {stock.unit}
-                  </option>
+                  <label key={stock.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', cursor: 'pointer', borderRadius: 4, transition: 'background 0.2s', ':hover': { background: 'white' } }}>
+                    <input 
+                      type="checkbox" 
+                      style={{ width: 16, height: 16, accentColor: 'var(--red)', cursor: 'pointer' }}
+                      checked={selectedStocks.some(s => s.stock_id === stock.id)}
+                      onChange={() => toggleStockSelection(stock)}
+                    />
+                    <span style={{ fontSize: 13, fontWeight: 500 }}>{stock.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>SAR {Number(stock.price_per_unit).toFixed(2)} / {stock.unit}</span>
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
 
-            {/* Quantity */}
-            {unit && (
-              <>
-                <div className="form-group" style={{ minWidth: 100, marginBottom: 0 }}>
-                  <label>Base Unit</label>
-                  <div style={{ padding: '10px 15px', background: 'var(--surface)', borderRadius: 6, color: 'var(--red)', fontWeight: 'bold', border: '1px solid var(--surface-2)' }}>
-                    {unit}
+            {/* Selected Inputs Form */}
+            <div style={{ flex: '2 1 400px' }}>
+              {selectedStocks.length > 0 ? (
+                <form onSubmit={handleBulkAddIngredients}>
+                  <div style={{ marginBottom: 15 }}>
+                    <label style={{ display: 'block', fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Enter Quantities</label>
+                    {selectedStocks.map(stock => (
+                      <div key={stock.unique_id} style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10, background: 'var(--surface)', padding: '8px 12px', borderRadius: 8 }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: 13, fontWeight: 600 }}>{stock.name}</span>
+                          {stock.size_label && (
+                            <span style={{ fontSize: 11, color: 'var(--red)', fontWeight: 700, textTransform: 'uppercase' }}>
+                              Size: {stock.size_label}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <input 
+                            className="form-control"
+                            type="number"
+                            step={stock.unit === 'kg' ? '1' : '0.01'}
+                            min="0"
+                            placeholder={stock.unit === 'kg' ? 'grams' : 'pieces'}
+                            style={{ width: 120, fontSize: 13 }}
+                            value={stock.quantity_input}
+                            onChange={e => updateSelectedStockQuantity(stock.unique_id, e.target.value)}
+                          />
+                          <span style={{ fontSize: 13, color: 'var(--text-secondary)', width: 30, fontWeight: 500 }}>{stock.unit === 'kg' ? 'g' : 'pcs'}</span>
+                          <button 
+                            type="button" 
+                            className="btn btn-sm" 
+                            style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: 'none', padding: '6px' }}
+                            onClick={() => removeSelectedRow(stock.unique_id)}
+                            title="Remove"
+                          >
+                            <MinusCircle size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-                <div className="form-group" style={{ minWidth: 150, marginBottom: 0 }}>
-                  <label>{unit === 'kg' ? 'Amount in Grams' : 'Amount in Pieces'} *</label>
-                  <input
-                    className="form-control"
-                    type="number" step={unit === 'kg' ? '1' : '0.01'} required
-                    placeholder={unit === 'kg' ? 'e.g., 250 grams' : 'e.g., 2 pieces'}
-                    value={ingredientForm.quantity_input}
-                    onChange={e => setIngredientForm({ ...ingredientForm, quantity_input: e.target.value })}
-                  />
-                </div>
-              </>
-            )}
 
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6, height: 42, background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none', color: 'white' }}>
-                <Plus size={18} /> Add
-              </button>
+                  <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--red)', border: 'none', color: 'white' }}>
+                    <Plus size={18} /> Save {selectedStocks.filter(s => s.quantity_input > 0).length || selectedStocks.length} Item(s)
+                  </button>
+                </form>
+              ) : (
+                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', border: '2px dashed var(--surface-2)', borderRadius: 12, minHeight: 200 }}>
+                  <Database size={32} style={{ marginBottom: 10, opacity: 0.5 }} />
+                  <span>Check ingredients from the list</span>
+                  <span style={{ fontSize: 12 }}>to enter quantities</span>
+                </div>
+              )}
             </div>
-          </form>
+          </div>
 
           {hasSizes && (
-            <p style={{ marginTop: 12, marginBottom: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
-              💡 <strong>All Sizes</strong> = ingredient shared across all sizes (e.g. sauce, base). Select a specific size to set different quantities per size variant.
+            <p style={{ marginTop: 20, marginBottom: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
+              💡 <strong>All Sizes</strong> = ingredients shared across all sizes. Select a specific size to set different quantities per size variant.
             </p>
           )}
         </div>

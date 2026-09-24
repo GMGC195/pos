@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
-import { Plus, Edit2, Trash2, Search, Database, RefreshCw, Clock, TrendingDown, Package, AlertTriangle, Settings, MinusCircle, Info } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import * as XLSX from 'xlsx'
+import { Plus, Edit2, Trash2, Search, Database, RefreshCw, Clock, TrendingDown, Package, AlertTriangle, Settings, MinusCircle, Info, FileText, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import axios from '../api'
 
@@ -18,6 +19,16 @@ export default function StockManagement() {
 
   // Form State for Daily Addition
   const [dailyData, setDailyData] = useState({ stock_id: '', quantity: '', price_per_unit: '', total_price: '' })
+
+  // Bulk Daily Stock Add
+  const [isBulkDailyModalOpen, setIsBulkDailyModalOpen] = useState(false)
+  const [bulkDailyItems, setBulkDailyItems] = useState([]) // Array of objects
+  const fileInputRef = useRef(null)
+
+  // Bulk Add NEW Stock Items
+  const [isBulkNewStockModalOpen, setIsBulkNewStockModalOpen] = useState(false)
+  const [bulkNewItems, setBulkNewItems] = useState([])
+  const newStockFileInputRef = useRef(null)
 
   const [wasteHistory, setWasteHistory] = useState([])
   const [isEditHistoryModalOpen, setIsEditHistoryModalOpen] = useState(false)
@@ -68,7 +79,7 @@ export default function StockManagement() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!formData.name || !formData.price_per_unit) return toast.error('Name and price required')
+    if (!formData.name || !formData.unit) return toast.error('Name and unit required')
     
     setSaving(true)
     try {
@@ -80,7 +91,7 @@ export default function StockManagement() {
         name: formData.name,
         unit: formData.unit,
         quantity: isEdit ? undefined : 0,
-        price_per_unit: parseFloat(formData.price_per_unit) || 0,
+        price_per_unit: 0,
         low_stock_threshold: parseFloat(formData.low_stock_threshold) || 0
       })
 
@@ -147,12 +158,12 @@ export default function StockManagement() {
       setFormData({ 
         name: item.name, 
         unit: item.unit, 
-        price_per_unit: item.price_per_unit,
+        price_per_unit: 0,
         low_stock_threshold: item.low_stock_threshold || ''
       })
     } else {
       setEditId(null)
-      setFormData({ name: '', unit: 'kg', price_per_unit: '', low_stock_threshold: '' })
+      setFormData({ name: '', unit: 'kg', price_per_unit: 0, low_stock_threshold: '' })
     }
     setIsModalOpen(true)
   }
@@ -252,6 +263,220 @@ export default function StockManagement() {
     item.name.toLowerCase().includes(search.toLowerCase())
   )
 
+  // --- Bulk Daily Handlers ---
+  const initBulkDaily = () => {
+    return stockItems.map(item => ({
+      stock_id: String(item.id),
+      stock_name_raw: item.name,
+      unit: item.unit,
+      quantity: '',
+      price_per_unit: '',
+      total_price: '',
+      checked: false
+    }))
+  }
+
+  const handleExcelImport = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: 'binary' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws)
+        
+        setBulkDailyItems(prev => {
+          const newItems = [...prev]
+          let matchCount = 0
+          rows.forEach(row => {
+            const name = row['Item Name'] || row['item_name'] || row['name'] || ''
+            const qty = parseFloat(row['Quantity'] || row['quantity'] || 0)
+            const ppu = parseFloat(row['Price Per Unit'] || row['price_per_unit'] || 0)
+            const total = qty && ppu ? (qty * ppu).toFixed(2) : (row['Total Price'] || row['total_price'] || '')
+            
+            const existingIdx = newItems.findIndex(i => i.stock_name_raw.toLowerCase().trim() === name.toLowerCase().trim())
+            if (existingIdx !== -1) {
+              newItems[existingIdx].quantity = qty ? String(qty) : ''
+              newItems[existingIdx].price_per_unit = ppu ? String(ppu) : ''
+              newItems[existingIdx].total_price = String(total)
+              if (qty && total) newItems[existingIdx].checked = true
+              matchCount++
+            }
+          })
+          toast.success(`${matchCount} items auto-filled from Excel`)
+          return newItems
+        })
+      } catch {
+        toast.error('Failed to parse Excel file')
+      }
+    }
+    reader.readAsBinaryString(file)
+    e.target.value = ''
+  }
+
+  const updateBulkItem = (idx, field, value) => {
+    setBulkDailyItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      const updated = { ...item, [field]: value }
+      
+      const q = parseFloat(field === 'quantity' ? value : item.quantity) || 0
+      const p = parseFloat(field === 'price_per_unit' ? value : item.price_per_unit) || 0
+      const t = parseFloat(field === 'total_price' ? value : item.total_price) || 0
+
+      if (field === 'total_price') {
+        if (q > 0) updated.price_per_unit = String((t / q).toFixed(2))
+      } else if (field === 'price_per_unit') {
+        updated.total_price = q && p ? String((q * p).toFixed(2)) : ''
+      } else if (field === 'quantity') {
+        if (item.total_price && !item.price_per_unit && q > 0) {
+          updated.price_per_unit = String((t / q).toFixed(2))
+        } else if (item.price_per_unit) {
+          updated.total_price = q && p ? String((q * p).toFixed(2)) : ''
+        }
+      }
+      
+      // Auto-check if quantity and total_price are filled (only if user is not manually toggling the checkbox)
+      if (field !== 'checked') {
+        if (updated.quantity && updated.total_price) {
+          updated.checked = true
+        } else if (!updated.quantity && !updated.total_price) {
+          updated.checked = false
+        }
+      }
+      
+      return updated
+    }))
+  }
+
+  const handleBulkDailySubmit = (e) => {
+    e.preventDefault()
+    const valid = bulkDailyItems.filter(r => r.checked && r.stock_id && r.quantity && r.total_price)
+    if (valid.length === 0) return toast.error('Check at least one valid item to save')
+    
+    toast((t) => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 220 }}>
+        <span style={{ fontWeight: 600, fontSize: 15 }}>Save {valid.length} Selected Item(s)?</span>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>This will add stock to inventory. Are you sure?</span>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 5 }}>
+          <button className="btn btn-sm btn-secondary" onClick={() => toast.dismiss(t.id)}>Cancel</button>
+          <button className="btn btn-sm btn-primary" style={{ background: '#4f46e5', border: 'none' }} onClick={async () => {
+            toast.dismiss(t.id)
+            setSaving(true)
+            try {
+              const items = valid.map(r => ({
+                stock_id: parseInt(r.stock_id),
+                quantity: parseFloat(r.quantity),
+                price_per_unit: parseFloat(r.price_per_unit) || parseFloat(r.total_price) / parseFloat(r.quantity),
+                total_price: parseFloat(r.total_price)
+              }))
+              await axios.post('/api/stock/add-daily-bulk', { items })
+              toast.success(`${items.length} stock item(s) added successfully!`)
+              setIsBulkDailyModalOpen(false)
+              setBulkDailyItems([])
+              await loadData()
+            } catch (err) {
+              toast.error(err?.response?.data?.error || err.message)
+            } finally {
+              setSaving(false)
+            }
+          }}>Confirm Save</button>
+        </div>
+      </div>
+    ), { duration: Infinity, id: 'bulk-save-confirm' })
+  }
+  // --- End Bulk Daily Handlers ---
+
+  // --- Bulk New Stock Handlers ---
+  const handleNewStockExcelImport = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: 'binary' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws)
+        
+        const mapped = rows.map(row => {
+          const name = row['Item Name'] || row['item_name'] || row['name'] || ''
+          const unit = row['Unit'] || row['unit'] || 'kg'
+          const ppu = parseFloat(row['Price Per Unit'] || row['price_per_unit'] || 0)
+          const threshold = parseFloat(row['Threshold'] || row['threshold'] || row['low_stock_threshold'] || 0)
+          
+          return {
+            name,
+            unit,
+            low_stock_threshold: threshold ? String(threshold) : '',
+            checked: !!name.trim()
+          }
+        }).filter(r => r.name)
+        
+        setBulkNewItems(mapped.length > 0 ? mapped : [{ name: '', unit: 'kg', low_stock_threshold: '', checked: false }])
+        toast.success(`${mapped.length} new items imported from Excel`)
+      } catch {
+        toast.error('Failed to parse Excel file')
+      }
+    }
+    reader.readAsBinaryString(file)
+    e.target.value = ''
+  }
+
+  const addNewBulkRow = () => setBulkNewItems(prev => [...prev, { name: '', unit: 'kg', low_stock_threshold: '', checked: false }])
+  const updateNewBulkItem = (idx, field, value) => {
+    setBulkNewItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      const updated = { ...item, [field]: value }
+      if (field !== 'checked') {
+        if (updated.name && updated.name.trim() !== '') {
+          updated.checked = true
+        } else {
+          updated.checked = false
+        }
+      }
+      return updated
+    }))
+  }
+
+  const handleBulkNewStockSubmit = (e) => {
+    e.preventDefault()
+    const valid = bulkNewItems.filter(r => r.checked && r.name && r.name.trim() !== '')
+    if (valid.length === 0) return toast.error('Check at least one valid item to save')
+    
+    toast((t) => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 220 }}>
+        <span style={{ fontWeight: 600, fontSize: 15 }}>Create {valid.length} New Item(s)?</span>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>This will add new items to the inventory definition. Are you sure?</span>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 5 }}>
+          <button className="btn btn-sm btn-secondary" onClick={() => toast.dismiss(t.id)}>Cancel</button>
+          <button className="btn btn-sm btn-primary" style={{ background: '#e65c00', border: 'none' }} onClick={async () => {
+            toast.dismiss(t.id)
+            setSaving(true)
+            try {
+              const items = valid.map(r => ({
+                name: r.name,
+                unit: r.unit || 'kg',
+                price_per_unit: 0,
+                low_stock_threshold: parseFloat(r.low_stock_threshold) || 0
+              }))
+              await axios.post('/api/stock/bulk', { items })
+              toast.success(`${items.length} new stock item(s) created successfully!`)
+              setIsBulkNewStockModalOpen(false)
+              setBulkNewItems([])
+              await loadData()
+            } catch (err) {
+              toast.error(err?.response?.data?.error || err.message)
+            } finally {
+              setSaving(false)
+            }
+          }}>Confirm Create</button>
+        </div>
+      </div>
+    ), { duration: Infinity, id: 'bulk-new-save-confirm' })
+  }
+  // --- End Bulk New Stock Handlers ---
+
+
   const lowStockItems = stockItems.filter(item => 
     parseFloat(item.quantity) <= parseFloat(item.low_stock_threshold) && parseFloat(item.low_stock_threshold) > 0
   )
@@ -287,7 +512,7 @@ export default function StockManagement() {
                 <tr>
                   <th style={{ color: '#ff4b4b' }}>Item Name</th>
                   <th style={{ color: '#ff4b4b' }}>Current Stock</th>
-                  <th style={{ color: '#ff4b4b' }}>Threshold</th>
+                  <th style={{ color: '#ff4b4b' }}>Min Stock Alert</th>
                   <th style={{ color: '#ff4b4b', textAlign: 'right' }}>Status</th>
                 </tr>
               </thead>
@@ -320,15 +545,23 @@ export default function StockManagement() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <div className="inventory-toolbar-actions" style={{ marginLeft: 'auto' }}>
+        <div className="inventory-toolbar-actions" style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button className="btn btn-secondary" onClick={() => loadData()}>
             <RefreshCw size={18} /> Refresh
           </button>
+          
           <button className="btn btn-primary" style={{ background: 'linear-gradient(135deg, #11998e, #38ef7d)', color: 'white', border: 'none', boxShadow: '0 4px 12px rgba(17, 153, 142, 0.2)' }} onClick={() => setIsDailyModalOpen(true)}>
             <Plus size={18} /> Add Daily Stock
           </button>
+          <button className="btn btn-primary" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white', border: 'none' }} onClick={() => { setBulkDailyItems(initBulkDaily()); setIsBulkDailyModalOpen(true); }}>
+            <Database size={18} /> Bulk Update Stock
+          </button>
+          
           <button className="btn btn-primary" style={{ background: 'linear-gradient(135deg, #ff9800, #ff4b4b)', color: 'white', border: 'none' }} onClick={() => handleOpenModal()}>
             <Package size={18} /> New Stock Item
+          </button>
+          <button className="btn btn-primary" style={{ background: 'linear-gradient(135deg, #e65c00, #F9D423)', color: 'white', border: 'none' }} onClick={() => { setBulkNewItems([{ name: '', unit: 'kg', low_stock_threshold: '', checked: false }]); setIsBulkNewStockModalOpen(true); }}>
+            <Database size={18} /> Bulk New Items
           </button>
         </div>
       </div>
@@ -346,7 +579,7 @@ export default function StockManagement() {
                 <th>Item Name</th>
                 <th>Unit</th>
                 <th>Remaining Quantity</th>
-                <th>Min. Threshold</th>
+                <th>Min Stock Alert</th>
                 <th>Price per Unit</th>
                 <th>Last Updated</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -422,7 +655,7 @@ export default function StockManagement() {
                 <tr><td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No stock added today.</td></tr>
               ) : (
                 history.map(h => (
-                  <tr key={h.id}>
+                  <tr key={h.history_id || h.id}>
                     <td style={{ fontWeight: 500 }}>{h.stock_name}</td>
                     <td><span className="badge badge-success">+{Number(h.quantity).toFixed(3)} {h.unit}</span></td>
                     <td>SAR {Number(h.price_per_unit).toFixed(2)}</td>
@@ -433,14 +666,66 @@ export default function StockManagement() {
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                         <button className="btn btn-sm btn-secondary" onClick={() => {
-                          setEditHistoryData({ id: h.id, quantity: h.quantity, price_per_unit: h.price_per_unit, total_price: h.total_price });
+                          setEditHistoryData({ id: h.history_id || h.id, quantity: h.quantity, price_per_unit: h.price_per_unit, total_price: h.total_price });
                           setIsEditHistoryModalOpen(true);
                         }}><Edit2 size={14} /></button>
-                        <button className="btn btn-sm btn-danger" onClick={() => handleDeleteHistory(h.id)}><Trash2 size={14} /></button>
+                        <button className="btn btn-sm btn-danger" onClick={() => handleDeleteHistory(h.history_id || h.id)}><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
                 ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Stock Items Definitions (Bottom Table) */}
+      <div className="card" style={{ padding: 0, marginTop: 30 }}>
+        <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Package size={18} color="var(--primary)" />
+            <h3 style={{ fontSize: 16 }}>Stock Items Dictionary</h3>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary btn-sm" style={{ background: 'linear-gradient(135deg, #ff9800, #ff4b4b)', color: 'white', border: 'none' }} onClick={() => handleOpenModal()}>
+              <Package size={14} /> New Stock Item
+            </button>
+            <button className="btn btn-primary btn-sm" style={{ background: 'linear-gradient(135deg, #e65c00, #F9D423)', color: 'white', border: 'none' }} onClick={() => { setBulkNewItems([{ name: '', unit: 'kg', low_stock_threshold: '', checked: false }]); setIsBulkNewStockModalOpen(true); }}>
+              <Database size={14} /> Bulk New Items
+            </button>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Item Name</th>
+                <th>Unit</th>
+                <th>Min Stock Alert</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading
+                ? <tr><td colSpan={4}><div className="skeleton" style={{ height: 20 }} /></td></tr>
+                : filteredItems.map(item => (
+                <tr key={item.id}>
+                  <td style={{ fontWeight: 600 }}>{item.name}</td>
+                  <td><span className="badge badge-info">{item.unit}</span></td>
+                  <td style={{ color: 'var(--text-muted)' }}>
+                    {item.low_stock_threshold > 0 ? `${Number(item.low_stock_threshold).toFixed(3)} ${item.unit}` : 'Not set'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-sm btn-secondary" onClick={() => handleOpenModal(item)}><Settings size={14} /></button>
+                      <button className="btn btn-sm btn-danger" onClick={() => handleDelete(item.id)}><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!loading && filteredItems.length === 0 && (
+                <tr><td colSpan={4} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No stock items found.</td></tr>
               )}
             </tbody>
           </table>
@@ -507,21 +792,17 @@ export default function StockManagement() {
             </div>
             
             <div className="form-row" style={{ marginBottom: 15 }}>
-              <div className="form-group">
+              <div className="form-group" style={{ width: '100%' }}>
                 <label>Unit</label>
                 <select className="form-control" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})}>
                   <option value="kg">kg</option>
                   <option value="pieces">pieces</option>
                 </select>
               </div>
-              <div className="form-group">
-                <label>Default Price (per {formData.unit})</label>
-                <input className="form-control" type="number" step="0.01" value={formData.price_per_unit} onChange={e => setFormData({...formData, price_per_unit: e.target.value})} />
-              </div>
             </div>
 
             <div className="form-group" style={{ marginBottom: 20 }}>
-              <label>Low Stock Threshold ({formData.unit})</label>
+              <label>Min Stock Alert ({formData.unit})</label>
               <input 
                 className="form-control" 
                 type="number" 
@@ -684,6 +965,257 @@ export default function StockManagement() {
               <button className="btn btn-secondary" onClick={() => setIsMinusModalOpen(false)}>Cancel</button>
               <button className="btn btn-primary" style={{ background: '#ff9800', border: 'none' }} onClick={handleMinusSubmit} disabled={saving}>
                 {saving ? 'Deducting...' : 'Confirm Deduction'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Daily Stock Modal */}
+      {isBulkDailyModalOpen && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setIsBulkDailyModalOpen(false) }}>
+          <div className="modal" style={{ maxWidth: 850, width: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: 'white', padding: 0 }}>
+            <div className="modal-header" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', padding: '16px 20px', borderRadius: '16px 16px 0 0' }}>
+              <h2 style={{ color: 'white', fontSize: 18, display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                <Database size={20} /> Bulk Add Daily Stock
+              </h2>
+              <button className="btn btn-sm" style={{ color: 'white', background: 'rgba(255,255,255,0.15)', border: 'none', marginLeft: 'auto' }} onClick={() => setIsBulkDailyModalOpen(false)}>✕</button>
+            </div>
+
+            {/* Excel Import Row */}
+            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: 'rgba(79, 70, 229, 0.05)' }}>
+              <span style={{ fontSize: 13, color: 'black', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <FileText size={16} /> Excel
+              </span>
+              <button className="btn btn-sm" style={{ background: 'transparent', color: 'black', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => {
+                const ws = XLSX.utils.aoa_to_sheet([
+                  ['Item Name', 'Quantity', 'Total Price', 'Price Per Unit'],
+                  ...stockItems.map(s => [s.name, '', '', ''])
+                ])
+                ws['!cols'] = [{ wch: 25 }, { wch: 12 }, { wch: 14 }, { wch: 15 }]
+                const wb = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(wb, ws, 'Stock')
+                XLSX.writeFile(wb, 'daily_stock_template.xlsx')
+              }}>
+                <Download size={14} /> Download Template
+              </button>
+
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={handleExcelImport} />
+              <button className="btn btn-sm" style={{ background: 'transparent', color: 'black', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => fileInputRef.current?.click()}>
+                <Upload size={14} /> Import File
+              </button>
+              
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Columns: <strong>Item Name, Quantity, Total Price, Price Per Unit</strong></span>
+            </div>
+
+            {/* Bulk Table */}
+            <div style={{ overflowY: 'auto', flex: 1, padding: '15px 20px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-secondary)', borderBottom: '2px solid var(--border)' }}>
+                    <th style={{ padding: '8px 10px', width: '5%', textAlign: 'center' }}>Select</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', width: '30%' }}>Stock Item</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', width: '17%' }}>Quantity *</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', width: '20%' }}>Total Price *</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', width: '18%' }}>Price/Unit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkDailyItems.map((row, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid var(--border)', background: row.checked ? 'rgba(56, 239, 125, 0.05)' : 'transparent' }}>
+                      <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                        <input 
+                          type="checkbox" 
+                          style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--primary)' }}
+                          checked={row.checked} 
+                          onChange={e => updateBulkItem(idx, 'checked', e.target.checked)}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 10px', verticalAlign: 'middle' }}>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: row.stock_id ? 'var(--text-main)' : '#ff4b4b' }}>
+                          {row.stock_name || row.stock_name_raw} {row.unit ? `(${row.unit})` : ''}
+                        </span>
+                        {row.stock_name_raw && !row.stock_id && (
+                          <div style={{ fontSize: 10, color: '#ff4b4b', marginTop: 2 }}>⚠️ Not mapped</div>
+                        )}
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <input
+                          type="number"
+                          className="form-control"
+                          style={{ fontSize: 13, padding: '5px 8px', textAlign: 'center' }}
+                          placeholder={`0 ${row.unit || ''}`}
+                          value={row.quantity}
+                          onChange={e => updateBulkItem(idx, 'quantity', e.target.value)}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <input
+                          type="number"
+                          className="form-control"
+                          style={{ fontSize: 13, padding: '5px 8px', textAlign: 'center', fontWeight: 'bold' }}
+                          placeholder="0.00"
+                          value={row.total_price}
+                          onChange={e => updateBulkItem(idx, 'total_price', e.target.value)}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <input
+                          type="number"
+                          className="form-control"
+                          style={{ fontSize: 13, padding: '5px 8px', textAlign: 'center' }}
+                          placeholder="0.00"
+                          value={row.price_per_unit}
+                          onChange={e => updateBulkItem(idx, 'price_per_unit', e.target.value)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Summary */}
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                  Grand Total:{' '}
+                  <strong style={{ color: 'var(--primary)', fontSize: 15 }}>
+                    SAR {bulkDailyItems.filter(r => r.checked).reduce((sum, r) => sum + (parseFloat(r.total_price) || 0), 0).toFixed(2)}
+                  </strong>
+                  {' '}· {bulkDailyItems.filter(r => r.checked && r.stock_id && r.quantity).length} item(s) selected
+                </span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="modal-footer" style={{ borderTop: '1px solid var(--border)', padding: '14px 20px', background: 'var(--bg-secondary)', borderRadius: '0 0 16px 16px' }}>
+              <button className="btn btn-secondary" onClick={() => setIsBulkDailyModalOpen(false)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', border: 'none', color: 'white' }}
+                onClick={handleBulkDailySubmit}
+                disabled={saving || bulkDailyItems.filter(r => r.checked && r.stock_id && r.quantity && r.total_price).length === 0}
+              >
+                {saving ? 'Saving...' : `Save ${bulkDailyItems.filter(r => r.checked && r.stock_id && r.quantity && r.total_price).length} Selected Item(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Add NEW Stock Items Modal */}
+      {isBulkNewStockModalOpen && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setIsBulkNewStockModalOpen(false) }}>
+          <div className="modal" style={{ maxWidth: 850, width: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: 'white', padding: 0 }}>
+            <div className="modal-header" style={{ background: 'linear-gradient(135deg, #e65c00, #F9D423)', padding: '16px 20px', borderRadius: '16px 16px 0 0' }}>
+              <h2 style={{ color: 'white', fontSize: 18, display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                <Database size={20} /> Bulk Add New Items (Inventory)
+              </h2>
+              <button className="btn btn-sm" style={{ color: 'white', background: 'rgba(255,255,255,0.15)', border: 'none', marginLeft: 'auto' }} onClick={() => setIsBulkNewStockModalOpen(false)}>✕</button>
+            </div>
+
+            {/* Excel Import Row */}
+            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: 'rgba(230, 92, 0, 0.05)' }}>
+              <span style={{ fontSize: 13, color: 'black', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <FileText size={16} /> Excel
+              </span>
+
+              <button className="btn btn-sm" style={{ background: 'transparent', color: 'black', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => {
+                const ws = XLSX.utils.aoa_to_sheet([['Item Name', 'Unit', 'Price Per Unit', 'Min Stock Alert']])
+                ws['!cols'] = [{ wch: 25 }, { wch: 10 }, { wch: 15 }, { wch: 14 }]
+                const wb = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(wb, ws, 'NewItems')
+                XLSX.writeFile(wb, 'new_stock_template.xlsx')
+              }}>
+                <Download size={14} /> Download Template
+              </button>
+
+              <input ref={newStockFileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={handleNewStockExcelImport} />
+              <button className="btn btn-sm" style={{ background: 'transparent', color: 'black', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => newStockFileInputRef.current?.click()}>
+                <Upload size={14} /> Import File
+              </button>
+              
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Columns: <strong>Item Name, Unit, Price Per Unit, Min Stock Alert</strong></span>
+            </div>
+
+            {/* Bulk Table */}
+            <div style={{ overflowY: 'auto', flex: 1, padding: '15px 20px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-secondary)', borderBottom: '2px solid var(--border)' }}>
+                    <th style={{ padding: '8px 10px', width: '5%', textAlign: 'center' }}>Select</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', width: '45%' }}>New Item Name *</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', width: '25%' }}>Unit</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', width: '25%' }}>Low Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkNewItems.map((row, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid var(--border)', background: row.checked ? 'rgba(56, 239, 125, 0.05)' : 'transparent' }}>
+                      <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                        <input 
+                          type="checkbox" 
+                          style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--primary)' }}
+                          checked={row.checked} 
+                          onChange={e => updateNewBulkItem(idx, 'checked', e.target.checked)}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <input
+                          type="text"
+                          className="form-control"
+                          style={{ fontSize: 13, padding: '5px 8px' }}
+                          placeholder="Item Name"
+                          value={row.name}
+                          onChange={e => updateNewBulkItem(idx, 'name', e.target.value)}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <select
+                          className="form-control"
+                          style={{ fontSize: 13, padding: '5px 8px' }}
+                          value={row.unit}
+                          onChange={e => updateNewBulkItem(idx, 'unit', e.target.value)}
+                        >
+                          <option value="kg">kg</option>
+                          <option value="g">g</option>
+                          <option value="ltr">ltr</option>
+                          <option value="ml">ml</option>
+                          <option value="pieces">pieces</option>
+                          <option value="packets">packets</option>
+                          <option value="boxes">boxes</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <input
+                          type="number"
+                          className="form-control"
+                          style={{ fontSize: 13, padding: '5px 8px', textAlign: 'center' }}
+                          placeholder="0"
+                          value={row.low_stock_threshold}
+                          onChange={e => updateNewBulkItem(idx, 'low_stock_threshold', e.target.value)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ marginTop: 12 }}>
+                <button className="btn btn-sm btn-secondary" onClick={addNewBulkRow} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Plus size={14} /> Add Row
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="modal-footer" style={{ borderTop: '1px solid var(--border)', padding: '14px 20px', background: 'var(--bg-secondary)', borderRadius: '0 0 16px 16px' }}>
+              <button className="btn btn-secondary" onClick={() => setIsBulkNewStockModalOpen(false)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                style={{ background: 'linear-gradient(135deg, #e65c00, #F9D423)', border: 'none', color: 'white' }}
+                onClick={handleBulkNewStockSubmit}
+                disabled={saving || bulkNewItems.filter(r => r.checked && r.name && r.name.trim() !== '').length === 0}
+              >
+                {saving ? 'Saving...' : `Save ${bulkNewItems.filter(r => r.checked && r.name && r.name.trim() !== '').length} New Item(s)`}
               </button>
             </div>
           </div>

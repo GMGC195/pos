@@ -148,11 +148,53 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// ADD bulk new stock items
+router.post('/bulk', async (req, res) => {
+  const { items } = req.body;
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Missing items array' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const createdItems = [];
+
+    for (const item of items) {
+      const { name, unit, price_per_unit, low_stock_threshold } = item;
+      
+      if (!name || price_per_unit === undefined) {
+        throw new Error(`Missing required fields for item: ${name}`);
+      }
+
+      const result = await client.query(
+        `INSERT INTO stock (name, quantity, unit, price_per_unit, low_stock_threshold) 
+         VALUES ($1, 0, $2, $3, $4) RETURNING *`,
+        [name, unit || 'kg', price_per_unit, low_stock_threshold || 0]
+      );
+      createdItems.push(result.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ 
+      success: true, 
+      count: createdItems.length,
+      items: createdItems
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error adding bulk new stock:', error);
+    res.status(500).json({ error: error.message || 'Failed to add bulk new stock items' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET today's stock history
 router.get('/history', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT sh.*, s.name as stock_name 
+      SELECT sh.id as history_id, sh.stock_id, sh.quantity, sh.remaining_quantity, sh.unit, sh.price_per_unit, sh.total_price, sh.created_at, s.name as stock_name 
       FROM stock_history sh
       JOIN stock s ON sh.stock_id = s.id
       WHERE sh.created_at >= CURRENT_DATE
@@ -220,6 +262,75 @@ router.post('/add-daily', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error adding daily stock:', error);
     res.status(500).json({ error: 'Failed to add daily stock' });
+  } finally {
+    client.release();
+  }
+});
+
+// ADD bulk daily stock (increment quantity and record history for multiple items)
+router.post('/add-daily-bulk', async (req, res) => {
+  const { items } = req.body;
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Missing items array' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const addedHistories = [];
+
+    for (const item of items) {
+      const { stock_id, quantity, price_per_unit, total_price } = item;
+      
+      if (!stock_id || !quantity || price_per_unit === undefined || total_price === undefined) {
+        throw new Error(`Missing required fields for stock_id: ${stock_id}`);
+      }
+
+      // 1. Get current unit from stock
+      const stockCheck = await client.query('SELECT unit FROM stock WHERE id = $1', [stock_id]);
+      if (stockCheck.rows.length === 0) {
+        throw new Error(`Stock item not found for id: ${stock_id}`);
+      }
+      const unit = stockCheck.rows[0].unit;
+
+      // 2. Update stock quantity
+      const updateResult = await client.query(
+        'UPDATE stock SET quantity = quantity + $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+        [quantity, stock_id]
+      );
+
+      // Reset alert state if quantity is now above threshold
+      if (updateResult.rows.length > 0) {
+        const currentQty = parseFloat(updateResult.rows[0].quantity) || 0;
+        const threshold = parseFloat(updateResult.rows[0].low_stock_threshold) || 0;
+        
+        if (currentQty > threshold) {
+          await client.query(
+            'UPDATE stock SET low_stock_at = NULL, is_dismissed = false WHERE id = $1',
+            [stock_id]
+          );
+        }
+      }
+
+      // 3. Record in history
+      const historyResult = await client.query(
+        `INSERT INTO stock_history (stock_id, quantity, remaining_quantity, unit, price_per_unit, total_price) 
+         VALUES ($1, $2, $2, $3, $4, $5) RETURNING *`,
+        [stock_id, quantity, unit, price_per_unit, total_price]
+      );
+      
+      addedHistories.push(historyResult.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ 
+      success: true, 
+      count: addedHistories.length
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error adding bulk daily stock:', error);
+    res.status(500).json({ error: error.message || 'Failed to add bulk daily stock' });
   } finally {
     client.release();
   }
@@ -362,6 +473,7 @@ router.put('/history/:id', async (req, res) => {
     const historyCheck = await client.query('SELECT * FROM stock_history WHERE id = $1', [id]);
     if (historyCheck.rows.length === 0) {
       await client.query('ROLLBACK');
+      console.log(`[EDIT HISTORY] Record not found for id: ${id}`);
       return res.status(404).json({ error: 'History record not found' });
     }
     
@@ -412,6 +524,7 @@ router.delete('/history/:id', async (req, res) => {
     const historyCheck = await client.query('SELECT * FROM stock_history WHERE id = $1', [id]);
     if (historyCheck.rows.length === 0) {
       await client.query('ROLLBACK');
+      console.log(`[DELETE HISTORY] Record not found for id: ${id}`);
       return res.status(404).json({ error: 'History record not found' });
     }
     const record = historyCheck.rows[0];

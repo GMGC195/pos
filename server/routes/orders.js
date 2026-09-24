@@ -34,7 +34,9 @@ async function checkBranchAccess(req, orderId) {
 }
 
 // Helper to deduct stock based on recipe (FIFO)
-async function deductStock(orderId, client) {
+async function deductStock(orderId, client, behavior = 'block') {
+  if (behavior === 'ignore') return;
+
   const orderItems = await client.query('SELECT id, item_id, qty FROM order_items WHERE order_id = $1', [orderId]);
   for (const item of orderItems.rows) {
     if (!item.item_id) continue;
@@ -42,6 +44,16 @@ async function deductStock(orderId, client) {
     const recipe = await client.query('SELECT stock_id, quantity_used FROM recipes WHERE item_id = $1', [item.item_id]);
     for (const ingredient of recipe.rows) {
       let requiredQty = ingredient.quantity_used * item.qty;
+      
+      if (behavior === 'block') {
+        const stockCheck = await client.query('SELECT quantity, name FROM stock WHERE id = $1', [ingredient.stock_id]);
+        if (stockCheck.rows.length > 0) {
+          const currentQty = parseFloat(stockCheck.rows[0].quantity) || 0;
+          if (currentQty < requiredQty) {
+             throw new Error(`Stock not available for ${stockCheck.rows[0].name}. (Required: ${requiredQty.toFixed(3)}, Available: ${currentQty.toFixed(3)})`);
+          }
+        }
+      }
       
       // FIFO: find oldest batches with remaining stock
       const batches = await client.query(
@@ -218,7 +230,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Deduct stock if order is Completed
     if (status === 'Completed') {
-      await deductStock(order.id, client);
+      const settingsRes = await client.query('SELECT low_stock_behavior FROM settings ORDER BY id ASC LIMIT 1');
+      const behavior = settingsRes.rows.length > 0 ? (settingsRes.rows[0].low_stock_behavior || 'block') : 'block';
+      await deductStock(order.id, client, behavior);
     }
 
     await client.query('COMMIT');
@@ -298,6 +312,9 @@ router.post('/', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('❌ Order insertion failed:', err);
     await client.query('ROLLBACK');
+    if (err.message && err.message.includes('Stock not available')) {
+        return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -537,7 +554,9 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     }
     
     // Deduct stock now that it's paid/completed
-    await deductStock(req.params.id, client);
+    const settingsRes = await client.query('SELECT low_stock_behavior FROM settings ORDER BY id ASC LIMIT 1');
+    const behavior = settingsRes.rows.length > 0 ? (settingsRes.rows[0].low_stock_behavior || 'block') : 'block';
+    await deductStock(req.params.id, client, behavior);
 
     await client.query('COMMIT');
     const updatedOrder = orderResult.rows[0];
@@ -593,6 +612,12 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     res.json({ success: true, order: updatedOrder });
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.message && err.message.includes('Stock not available')) {
+        return res.status(400).json({ error: err.message });
+    }
+    if (err.constraint && (err.constraint === 'stock_quantity_non_negative' || err.constraint === 'stock_history_remaining_non_negative')) {
+        return res.status(400).json({ error: 'Stock not available / negative stock reached.' });
+    }
     res.status(500).json({ error: err.message });
   } finally {
     client.release();

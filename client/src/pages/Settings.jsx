@@ -15,7 +15,9 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
-  MoreVertical
+  MoreVertical,
+  X,
+  Store
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -27,6 +29,8 @@ export default function Settings() {
   const [printMode, setPrintMode] = useState(localStorage.getItem('printMode') || 'standard')
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
   const [printerIp, setPrinterIp] = useState(localStorage.getItem('printerIp') || '127.0.0.1')
+  const [lowStockBehavior, setLowStockBehavior] = useState('block')
+  const [savingSettings, setSavingSettings] = useState(false)
   const shiftDropdownRef = useRef(null)
   const branchDropdownRef = useRef(null)
   
@@ -113,7 +117,35 @@ export default function Settings() {
       fetchUsers()
       fetchShifts()
     }
+    if ((activeTab === 'hardware' || activeTab === 'pos_settings') && isAdminRole) {
+      fetchSettings()
+    }
   }, [activeTab, user?.role])
+
+  const fetchSettings = async () => {
+    try {
+      const res = await api.get('/api/settings')
+      if (res.data) {
+        setAutoPrintEnabled(res.data.auto_print_enabled)
+        setPrinterIp(res.data.printer_ip)
+        setLowStockBehavior(res.data.low_stock_behavior || 'block')
+      }
+    } catch (err) {
+      console.error('Failed to fetch settings', err)
+    }
+  }
+
+  const saveSettings = async () => {
+    setSavingSettings(true)
+    try {
+      await api.put('/api/settings', { auto_print_enabled: autoPrintEnabled, printer_ip: printerIp, low_stock_behavior: lowStockBehavior })
+      toast.success('Settings saved globally')
+    } catch (err) {
+      toast.error('Failed to save settings')
+    } finally {
+      setSavingSettings(false)
+    }
+  }
 
   const fetchUsers = async () => {
     try {
@@ -298,6 +330,14 @@ export default function Settings() {
           >
             <AlertCircle size={18} /> Hardware & Printers
           </button>
+          {isAdmin && (
+            <button 
+              className={`settings-nav-item ${activeTab === 'pos_settings' ? 'active' : ''}`}
+              onClick={() => setActiveTab('pos_settings')}
+            >
+              <Store size={18} /> POS Options
+            </button>
+          )}
         </aside>
 
         {/* Content Area */}
@@ -355,6 +395,73 @@ export default function Settings() {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+          {activeTab === 'pos_settings' && isAdmin && (
+            <div className="settings-card fade-in">
+              <div className="card-header">
+                <div>
+                  <h2>POS Options</h2>
+                  <p>Global settings for Point of Sale functionality</p>
+                </div>
+              </div>
+              <div className="settings-form">
+                  <div className="form-group" style={{ maxWidth: 500 }}>
+                    <label>Insufficient Stock Behavior</label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: lowStockBehavior === 'block' ? '2px solid var(--primary)' : '2px solid transparent' }}>
+                        <input 
+                          type="radio" 
+                          name="lowStockBehavior" 
+                          value="block" 
+                          checked={lowStockBehavior === 'block'}
+                          onChange={() => setLowStockBehavior('block')}
+                          style={{ marginTop: '4px' }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 500 }}>Block Order (Default)</div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Prevent order placement if required ingredients are out of stock.</div>
+                        </div>
+                      </label>
+
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: lowStockBehavior === 'allow_negative' ? '2px solid var(--primary)' : '2px solid transparent' }}>
+                        <input 
+                          type="radio" 
+                          name="lowStockBehavior" 
+                          value="allow_negative" 
+                          checked={lowStockBehavior === 'allow_negative'}
+                          onChange={() => setLowStockBehavior('allow_negative')}
+                          style={{ marginTop: '4px' }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 500 }}>Allow Negative Stock</div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Allow order placement, and let the inventory quantity drop below zero.</div>
+                        </div>
+                      </label>
+                      
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: lowStockBehavior === 'ignore' ? '2px solid var(--primary)' : '2px solid transparent' }}>
+                        <input 
+                          type="radio" 
+                          name="lowStockBehavior" 
+                          value="ignore" 
+                          checked={lowStockBehavior === 'ignore'}
+                          onChange={() => setLowStockBehavior('ignore')}
+                          style={{ marginTop: '4px' }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 500 }}>Ignore Stock Check</div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Allow order placement, but do not deduct any stock from the inventory.</div>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 24 }}>
+                    <button type="button" className="btn-save" onClick={saveSettings} disabled={savingSettings}>
+                      {savingSettings ? 'Saving...' : <><CheckCircle2 size={18} /> Save Global Settings</>}
+                    </button>
+                  </div>
               </div>
             </div>
           )}

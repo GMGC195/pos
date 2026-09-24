@@ -726,7 +726,22 @@ export default function Reports({ isTodaySales = false }) {
               ))}
             </div>
           )}
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: (isAdminOrDev || isManagement) ? 4 : 0 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
+            {(tableFilters.placedBy !== 'All' || tableFilters.completedBy !== 'All' || tableFilters.branch !== 'All' || tableFilters.type !== 'All' || statusFilter !== 'All' || search !== '') && (
+              <button 
+                className="btn btn-sm btn-secondary" 
+                onClick={() => {
+                  setTableFilters({ placedBy: 'All', completedBy: 'All', branch: 'All', type: 'All' })
+                  setStatusFilter('All')
+                  setSearch('')
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '4px 8px' }}
+              >
+                <X size={14} /> Clear Filters
+              </button>
+            )}
+          </div>
         </div>
         <div className="table-wrap">
           <table>
