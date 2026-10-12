@@ -542,6 +542,28 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       console.log('Migrated: Auto-created default tables 1 to 20');
     }
 
+    // Auto-verify Order Sequences ranges per branch
+    try {
+      await pool.query(`CREATE SEQUENCE IF NOT EXISTS order_id_branch_1 START 100000;`);
+      await pool.query(`CREATE SEQUENCE IF NOT EXISTS order_id_branch_2 START 200000;`);
+      await pool.query(`CREATE SEQUENCE IF NOT EXISTS order_id_branch_3 START 300000;`);
+
+      const s1 = await pool.query("SELECT last_value FROM order_id_branch_1");
+      if (s1.rows.length && Number(s1.rows[0].last_value) < 100000) {
+        await pool.query("ALTER SEQUENCE order_id_branch_1 RESTART WITH 100000;");
+      }
+      const s2 = await pool.query("SELECT last_value FROM order_id_branch_2");
+      if (s2.rows.length && Number(s2.rows[0].last_value) < 200000) {
+        await pool.query("ALTER SEQUENCE order_id_branch_2 RESTART WITH 200000;");
+      }
+      const s3 = await pool.query("SELECT last_value FROM order_id_branch_3");
+      if (s3.rows.length && Number(s3.rows[0].last_value) < 300000) {
+        await pool.query("ALTER SEQUENCE order_id_branch_3 RESTART WITH 300000;");
+      }
+    } catch (seqErr) {
+      console.warn('⚠️ Order sequences verification warning:', seqErr.message);
+    }
+
     console.log('✅ Database schema verified: all columns and constraints up to date.');
   } catch (err) {
     throw err; // Let runWithStartupRetry handle it

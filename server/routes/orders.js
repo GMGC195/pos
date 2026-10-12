@@ -167,8 +167,8 @@ router.post('/', authenticateToken, async (req, res) => {
     );
     const slipNumber = slipResult.rows[0].next_slip;
     let seqName = 'order_id_branch_1';
-    if (finalBranch === 'Branch 2') seqName = 'order_id_branch_2';
-    else if (finalBranch === 'Branch 3') seqName = 'order_id_branch_3';
+    if (finalBranch === 'Branch 2' || /2/.test(finalBranch)) seqName = 'order_id_branch_2';
+    else if (finalBranch === 'Branch 3' || /3/.test(finalBranch)) seqName = 'order_id_branch_3';
 
     const seqResult = await client.query(`SELECT nextval('${seqName}') as next_id`);
     const newOrderId = seqResult.rows[0].next_id;

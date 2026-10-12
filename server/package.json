@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "npm install --prefix ../client && npm run build --prefix ../client"
+    "build": "npm install --prefix ../client && npm run build --prefix ../client",
+    "migrate:sequences": "node migrations/update_order_sequences_ranges.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
