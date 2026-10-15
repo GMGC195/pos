@@ -158,11 +158,11 @@ router.post('/', authenticateToken, async (req, res) => {
     const isAdmin = role === 'admin' || role === 'developer';
     const finalBranch = (!isAdmin && req.user.branch) ? req.user.branch : (req.body.branch || 'Branch 1');
 
-    // Calculate daily resetting slip number per branch
+    // Calculate daily resetting slip number per branch (Saudi Arabia Asia/Riyadh date)
     const slipResult = await client.query(
       `SELECT COALESCE(MAX(slip_number), 0) + 1 as next_slip 
        FROM "orders" 
-       WHERE created_at >= CURRENT_DATE AND branch = $1`,
+       WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND branch = $1`,
       [finalBranch]
     );
     const slipNumber = slipResult.rows[0].next_slip;
@@ -177,11 +177,23 @@ router.post('/', authenticateToken, async (req, res) => {
     const completedBy = isCompleted ? (req.user.username || order_taker || null) : null;
     const completedAt = isCompleted ? new Date() : null;
 
+    // Attach active cashier shift_id if exists
+    let shiftId = req.body.shift_id || null;
+    if (!shiftId && (role === 'cashier' || completedBy)) {
+      const activeShiftRes = await client.query(
+        `SELECT id FROM cashier_shifts WHERE cashier_name = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+        [completedBy || req.user.username]
+      );
+      if (activeShiftRes.rows.length > 0) {
+        shiftId = activeShiftRes.rows[0].id;
+      }
+    }
+
     // Insert order
     const orderResult = await client.query(
-      `INSERT INTO "orders" (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at, credit_customer_id) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
-      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt, credit_customer_id || null]
+      `INSERT INTO "orders" (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at, credit_customer_id, shift_id) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING *`,
+      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt, credit_customer_id || null, shiftId]
     );
     const order = orderResult.rows[0];
 
@@ -501,10 +513,20 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     }
     await client.query('BEGIN');
     
+    // Attach active shift_id if cashier is paying
+    let shiftId = null;
+    const activeShiftRes = await client.query(
+      `SELECT id FROM cashier_shifts WHERE cashier_name = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+      [req.user.username]
+    );
+    if (activeShiftRes.rows.length > 0) {
+      shiftId = activeShiftRes.rows[0].id;
+    }
+
     // Update order status to Completed
     const orderResult = await client.query(
-      `UPDATE "orders" SET status = 'Completed', completed_by = $2, completed_at = NOW() WHERE id = $1 RETURNING *`,
-      [req.params.id, req.user.username]
+      `UPDATE "orders" SET status = 'Completed', completed_by = $2, completed_at = NOW(), shift_id = COALESCE(shift_id, $3) WHERE id = $1 RETURNING *`,
+      [req.params.id, req.user.username, shiftId]
     );
     
     if (orderResult.rows.length === 0) {
@@ -926,8 +948,10 @@ async function sendClosingEmail(report, closingType) {
             <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Card Sales: SAR ${parseFloat(report.card_sales || 0).toFixed(2)}</p>
             <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Credit Sales: SAR ${parseFloat(report.credit_sales || 0).toFixed(2)}</p>
             <p style="margin: 4px 0;"><strong>Major Payments Received:</strong> SAR ${parseFloat(report.major_payments || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0;"><strong>Opening Drawer Cash:</strong> SAR ${parseFloat(report.opening_cash || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0;"><strong>Remaining Drawer Cash:</strong> SAR ${parseFloat(report.closing_cash || 0).toFixed(2)}</p>
             <p style="margin: 4px 0;"><strong>Active Time:</strong> ${report.total_active_time}</p>
-            <p style="margin: 4px 0; font-size: 12px; color: #777;">${new Date(report.login_time).toLocaleString()} - ${new Date(report.logout_time).toLocaleString()}</p>
+            <p style="margin: 4px 0; font-size: 12px; color: #777;">${new Date(report.login_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} - ${new Date(report.logout_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} (KSA)</p>
           </div>
           
           <h3 style="margin-top: 24px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Items Sold by Category</h3>
@@ -950,6 +974,130 @@ async function sendClosingEmail(report, closingType) {
     console.error('Error sending closing email:', err);
   }
 }
+
+// GET active cashier shift
+router.get('/cashier-shift/active', authenticateToken, async (req, res) => {
+  try {
+    const cashierName = req.user.username;
+    const branch = req.user.branch || 'Branch 1';
+    const role = req.user.role?.trim().toLowerCase();
+
+    let query = `SELECT * FROM cashier_shifts WHERE status = 'Open'`;
+    const params = [];
+    if (role === 'cashier') {
+      params.push(cashierName);
+      query += ` AND cashier_name = $${params.length}`;
+    }
+    if (branch && branch !== 'All') {
+      params.push(branch);
+      query += ` AND branch = $${params.length}`;
+    }
+    query += ` ORDER BY id DESC LIMIT 1`;
+
+    const result = await pool.query(query, params);
+    if (result.rows.length > 0) {
+      return res.json({ hasActiveShift: true, shift: result.rows[0] });
+    }
+    return res.json({ hasActiveShift: false, shift: null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET previous shift info and uncompleted / pending orders for branch
+router.get('/cashier-shift/previous-shift-info', authenticateToken, async (req, res) => {
+  try {
+    let branch = req.query?.branch || req.user?.branch || 'Branch 1';
+    if (branch === 'All') branch = 'Branch 1';
+
+    // 1. Get the last closed shift for this branch (from cashier_shifts or shift_closings)
+    const lastShiftQuery = `
+      SELECT cashier_name, logout_time, login_time, closing_cash
+      FROM (
+        SELECT cashier_name, end_time AS logout_time, start_time AS login_time, COALESCE(closing_cash, 0) AS closing_cash, id 
+        FROM cashier_shifts 
+        WHERE branch = $1 AND status = 'Closed'
+        UNION ALL
+        SELECT cashier_name, logout_time, login_time, COALESCE(closing_cash, 0) AS closing_cash, id 
+        FROM shift_closings 
+        WHERE branch = $1
+      ) combined
+      ORDER BY logout_time DESC NULLS LAST, id DESC
+      LIMIT 1
+    `;
+    const lastShiftRes = await pool.query(lastShiftQuery, [branch]);
+    const lastShift = lastShiftRes.rows[0] || null;
+
+    // 2. Count pending / uncompleted orders for this branch
+    const pendingOrdersRes = await pool.query(`
+      SELECT 
+        COUNT(*)::int as total_pending,
+        COUNT(*) FILTER (
+          WHERE LOWER(COALESCE(order_type, '')) = 'takeaway' 
+             OR customer_address = 'Takeaway'
+        )::int as takeaway,
+        COUNT(*) FILTER (
+          WHERE LOWER(COALESCE(order_type, '')) = 'delivery' 
+             OR (customer_address IS NOT NULL AND customer_address NOT LIKE 'Table %' AND customer_address NOT IN ('Takeaway', 'Dine-In'))
+        )::int as delivery,
+        COUNT(*) FILTER (
+          WHERE LOWER(COALESCE(order_type, '')) IN ('dine-in', 'dine in', 'dining') 
+             OR customer_address LIKE 'Table %' 
+             OR customer_address = 'Dine-In'
+        )::int as dine_in
+      FROM "orders"
+      WHERE branch = $1
+        AND (status IN ('Hold', 'Payment Requested') OR status NOT IN ('Completed', 'Cancelled', 'Returned'))
+    `, [branch]);
+
+    const pendingStats = pendingOrdersRes.rows[0] || { total_pending: 0, takeaway: 0, delivery: 0, dine_in: 0 };
+
+    res.json({
+      success: true,
+      lastCashier: lastShift?.cashier_name || null,
+      lastShiftEndTime: lastShift?.logout_time || null,
+      previousRemainingCash: parseFloat(lastShift?.closing_cash || 0),
+      totalPending: pendingStats.total_pending || 0,
+      takeaway: pendingStats.takeaway || 0,
+      delivery: pendingStats.delivery || 0,
+      dineIn: pendingStats.dine_in || 0
+    });
+  } catch (err) {
+    console.error('Error fetching previous shift info:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST start cashier shift
+router.post('/cashier-shift/start', authenticateToken, isAdminOrCashier, async (req, res) => {
+  try {
+    const cashierName = req.user.username;
+    const cashierId = req.user.id;
+    let branch = req.body?.branch || req.user?.branch || 'Branch 1';
+    if (branch === 'All') branch = 'Branch 1';
+    const openingCash = parseFloat(req.body?.opening_cash || 0) || 0;
+
+    // Check if an open shift already exists for this cashier
+    const existing = await pool.query(
+      `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+      [cashierName, branch]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ success: true, message: 'Shift already open', shift: existing.rows[0] });
+    }
+
+    const insertRes = await pool.query(
+      `INSERT INTO cashier_shifts (cashier_id, cashier_name, branch, start_time, opening_cash, status)
+       VALUES ($1, $2, $3, NOW(), $4, 'Open')
+       RETURNING *`,
+      [cashierId, cashierName, branch, openingCash]
+    );
+
+    res.json({ success: true, message: 'Shift started successfully', shift: insertRes.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST shift closing
 router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res) => {
@@ -1004,11 +1152,19 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       ORDER BY amount DESC
     `, [branch, req.user.username]);
 
-    const firstOrderRes = await client.query(`SELECT MIN(created_at) as first_order_time FROM "orders" WHERE is_shift_closed = FALSE AND branch = $1 AND completed_by = $2`, [branch, req.user.username]);
-    
-    let loginTime = new Date();
-    if (firstOrderRes.rows.length > 0 && firstOrderRes.rows[0].first_order_time) {
-      loginTime = new Date(firstOrderRes.rows[0].first_order_time);
+    // Fetch active shift record if exists
+    const activeShiftRes = await client.query(
+      `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+      [req.user.username, branch]
+    );
+    const activeShift = activeShiftRes.rows[0] || null;
+
+    let loginTime = activeShift ? new Date(activeShift.start_time) : new Date();
+    if (!activeShift) {
+      const firstOrderRes = await client.query(`SELECT MIN(created_at) as first_order_time FROM "orders" WHERE is_shift_closed = FALSE AND branch = $1 AND completed_by = $2`, [branch, req.user.username]);
+      if (firstOrderRes.rows.length > 0 && firstOrderRes.rows[0].first_order_time) {
+        loginTime = new Date(firstOrderRes.rows[0].first_order_time);
+      }
     }
     const logoutTime = new Date();
     const diffMs = Math.max(0, logoutTime - loginTime);
@@ -1043,9 +1199,12 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       if (intervals[hb].length < 3) intervals[hb].push(r);
     });
 
+    const closingCash = parseFloat(req.body?.remaining_cash ?? req.body?.closing_cash ?? 0) || 0;
+    const openingCash = parseFloat(activeShift?.opening_cash || 0) || 0;
+
     const insertRes = await client.query(`
-      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Shift')
+      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type, closing_cash, opening_cash, interval_items)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Shift', $14, $15, $16)
       RETURNING *
     `, [
       req.user.id,
@@ -1060,7 +1219,10 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       totals.rows[0].credit_sales,
       majorPayments,
       totals.rows[0].total_orders,
-      JSON.stringify(itemsResult.rows)
+      JSON.stringify(itemsResult.rows),
+      closingCash,
+      openingCash,
+      JSON.stringify(intervals)
     ]);
     insertRes.rows[0].interval_items = intervals;
 
@@ -1069,6 +1231,13 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       SET is_shift_closed = TRUE 
       WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1 AND completed_by = $2
     `, [branch, req.user.username]);
+    
+    if (activeShift) {
+      await client.query(
+        `UPDATE cashier_shifts SET status = 'Closed', end_time = NOW(), closing_cash = $2 WHERE id = $1`,
+        [activeShift.id, closingCash]
+      );
+    }
     
     // Send email report asynchronously
     sendClosingEmail(insertRes.rows[0], 'Shift');
@@ -1174,9 +1343,18 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       if (intervals[idx].length < 3) intervals[idx].push(r);
     });
 
+    const closingCash = parseFloat(req.body?.remaining_cash ?? req.body?.closing_cash ?? 0) || 0;
+
+    // Get opening cash from active shift or latest cashier shift for this branch
+    const shiftRes = await client.query(
+      `SELECT opening_cash FROM cashier_shifts WHERE branch = $1 ORDER BY id DESC LIMIT 1`,
+      [branch]
+    );
+    const openingCash = parseFloat(shiftRes.rows[0]?.opening_cash || 0) || 0;
+
     const insertRes = await client.query(`
-      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Daily')
+      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type, closing_cash, opening_cash, interval_items)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Daily', $14, $15, $16)
       RETURNING *
     `, [
       req.user.id,
@@ -1191,7 +1369,10 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       totals.rows[0].credit_sales,
       majorPayments,
       totals.rows[0].total_orders,
-      JSON.stringify(itemsResult.rows)
+      JSON.stringify(itemsResult.rows),
+      closingCash,
+      openingCash,
+      JSON.stringify(intervals)
     ]);
     insertRes.rows[0].interval_items = intervals;
 
@@ -1200,6 +1381,12 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       SET is_daily_closed = TRUE, is_shift_closed = TRUE
       WHERE is_daily_closed = FALSE AND status != 'Hold' AND branch = $1
     `, [branch]);
+
+    // Close any active cashier shifts for this branch
+    await client.query(
+      `UPDATE cashier_shifts SET status = 'Closed', end_time = NOW(), closing_cash = $2 WHERE branch = $1 AND status = 'Open'`,
+      [branch, closingCash]
+    );
     
     // Send email report asynchronously
     sendClosingEmail(insertRes.rows[0], 'Daily');

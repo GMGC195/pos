@@ -44,12 +44,52 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
     await pool.query("ALTER ROLE current_user SET timezone TO 'Asia/Riyadh'");
     
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE');
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift_id INTEGER');
     
-    // Update shift_closings for credit reporting
+    // Create cashier_shifts table for explicit shift tracking
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cashier_shifts (
+        id SERIAL PRIMARY KEY,
+        cashier_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        cashier_name VARCHAR(100) NOT NULL,
+        branch VARCHAR(100) NOT NULL,
+        start_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        end_time TIMESTAMPTZ,
+        opening_cash NUMERIC(10, 2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'Open',
+        closing_cash NUMERIC(10, 2) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool.query('ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS closing_cash NUMERIC(10, 2) DEFAULT 0');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_cashier_shifts_active ON cashier_shifts(cashier_name, branch, status)');
+
+    // Update shift_closings for credit reporting, closing cash, opening cash, and interval items
     try {
-      await pool.query('ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS credit_sales DECIMAL(10,2) DEFAULT 0, ADD COLUMN IF NOT EXISTS major_payments DECIMAL(10,2) DEFAULT 0');
+      await pool.query('ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS credit_sales DECIMAL(10,2) DEFAULT 0, ADD COLUMN IF NOT EXISTS major_payments DECIMAL(10,2) DEFAULT 0, ADD COLUMN IF NOT EXISTS closing_cash NUMERIC(10, 2) DEFAULT 0, ADD COLUMN IF NOT EXISTS opening_cash NUMERIC(10, 2) DEFAULT 0, ADD COLUMN IF NOT EXISTS interval_items TEXT');
+      // Backfill opening_cash from cashier_shifts where available
+      await pool.query(`
+        UPDATE shift_closings sc
+        SET opening_cash = COALESCE(cs.opening_cash, 0)
+        FROM cashier_shifts cs
+        WHERE sc.cashier_name = cs.cashier_name 
+          AND sc.branch = cs.branch 
+          AND cs.start_time <= sc.logout_time
+          AND (sc.opening_cash IS NULL OR sc.opening_cash = 0)
+      `);
+      // Backfill closing_cash from cashier_shifts where available
+      await pool.query(`
+        UPDATE shift_closings sc
+        SET closing_cash = COALESCE(cs.closing_cash, 0)
+        FROM cashier_shifts cs
+        WHERE sc.cashier_name = cs.cashier_name 
+          AND sc.branch = cs.branch 
+          AND cs.start_time <= sc.logout_time
+          AND (sc.closing_cash IS NULL OR sc.closing_cash = 0)
+          AND cs.closing_cash > 0
+      `);
     } catch (e) {
-      console.warn('Could not alter shift_closings:', e.message);
+      console.warn('Could not alter or backfill shift_closings:', e.message);
     }
     
     // Create employees table

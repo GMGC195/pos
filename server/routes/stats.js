@@ -79,14 +79,14 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN o.grand_total ELSE 0 END), 0) as credit_sale
       FROM "orders" o
       LEFT JOIN transactions t ON o.id = t.order_id
-      WHERE DATE(o.created_at) = CURRENT_DATE AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
+      WHERE (o.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
     `, params);
 
     let mpQuery = `
       SELECT COALESCE(SUM(ct.amount), 0) as major_payment
       FROM credit_transactions ct
       JOIN credit_customers cc ON ct.credit_customer_id = cc.id
-      WHERE ct.type = 'PAYMENT' AND DATE(ct.created_at) = CURRENT_DATE
+      WHERE ct.type = 'PAYMENT' AND (ct.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date
     `;
     let mpParams = [];
     if (branch && branch !== 'All') {
@@ -122,7 +122,7 @@ router.get('/', authenticateToken, async (req, res) => {
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         WHERE o.status = 'Completed'
-          AND DATE(o.created_at) = CURRENT_DATE ${branchCondO} ${shiftCondO}
+          AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date ${branchCondO} ${shiftCondO}
         GROUP BY oi.item_id
       )
       SELECT 
@@ -135,26 +135,26 @@ router.get('/', authenticateToken, async (req, res) => {
     // Total fulfilled orders today
     const totalOrdersResult = await pool.query(`
       SELECT COUNT(*) as count FROM "orders"
-      WHERE DATE(created_at) = CURRENT_DATE AND status = 'Completed' ${branchCond} ${shiftCond}
+      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND status = 'Completed' ${branchCond} ${shiftCond}
     `, params);
 
     // Guest Today (Today's total orders excluding cancelled)
     const guestsTodayResult = await pool.query(`
       SELECT COUNT(*) as count FROM "orders"
-      WHERE DATE(created_at) = CURRENT_DATE AND status != 'Cancelled' ${branchCond} ${shiftCond}
+      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND status != 'Cancelled' ${branchCond} ${shiftCond}
     `, params);
 
-    // Last 7 days sales data guaranteed using Postgres generate_series
+    // Last 7 days sales data guaranteed using Postgres generate_series (Saudi Arabia Asia/Riyadh)
     const last7DaysQuery = await pool.query(`
       SELECT 
         TO_CHAR(d.date, 'Mon DD') as label,
         COALESCE(SUM(o.grand_total), 0) as total
       FROM (
-        SELECT CURRENT_DATE - i as date
+        SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date - i as date
         FROM generate_series(6, 0, -1) i
       ) d
       LEFT JOIN orders o 
-        ON DATE(o.created_at) = d.date AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
+        ON (o.created_at AT TIME ZONE 'Asia/Riyadh')::date = d.date AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
       GROUP BY d.date
       ORDER BY d.date ASC
     `, params);

@@ -24,23 +24,25 @@ import {
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import OrderDetailModal from '../components/OrderDetailModal'
+import { 
+  getSaudiTodayDate, 
+  getSaudiYesterdayDate, 
+  getSaudiWeekAgoDate,
+  formatSaudiDate,
+  formatSaudiTime,
+  formatSaudiDateTime
+} from '../utils/timezone'
 
-const today = () => new Date().toISOString().split('T')[0]
-const yesterday = () => {
-  const d = new Date()
-  d.setDate(d.getDate() - 1)
-  return d.toISOString().split('T')[0]
-}
-const weekAgo = () => {
-  const d = new Date()
-  d.setDate(d.getDate() - 7)
-  return d.toISOString().split('T')[0]
-}
+const today = () => getSaudiTodayDate()
+const yesterday = () => getSaudiYesterdayDate()
+const weekAgo = () => getSaudiWeekAgoDate()
 
 export default function Reports({ isTodaySales = false }) {
   const { user } = useAuth()
   const isAdminOrDev = ['admin', 'developer'].includes(user?.role?.toLowerCase())
   const isManagement = user?.role?.toLowerCase() === 'management'
+  const isCashier = user?.role?.trim().toLowerCase() === 'cashier'
+  const [activeShift, setActiveShift] = useState(null)
   const [from, setFrom] = useState(today())
   const [to, setTo] = useState(today())
   const [transactions, setTransactions] = useState([])
@@ -69,6 +71,14 @@ export default function Reports({ isTodaySales = false }) {
   const [closingType, setClosingType] = useState(null) // 'Shift' | 'Daily'
   const [closingProcessing, setClosingProcessing] = useState(false)
   const [closingProcessingType, setClosingProcessingType] = useState(null)
+  const [closingPendingInfo, setClosingPendingInfo] = useState({
+    loading: false,
+    totalPending: 0,
+    takeaway: 0,
+    delivery: 0,
+    dineIn: 0
+  })
+  const [closingRemainingCash, setClosingRemainingCash] = useState('')
 
   // History Modal States
   const [showHistoryModal, setShowHistoryModal] = useState(false)
@@ -110,6 +120,64 @@ export default function Reports({ isTodaySales = false }) {
     return () => clearInterval(interval)
   }, [from, to, branch])
 
+  // Fetch and sync active shift for Cashier
+  useEffect(() => {
+    if (isTodaySales && isCashier) {
+      axios.get('/api/orders/cashier-shift/active')
+        .then(res => {
+          if (res.data?.hasActiveShift) {
+            setActiveShift(res.data.shift)
+          } else {
+            setActiveShift(null)
+          }
+        })
+        .catch(err => console.error("Failed to load active shift in reports:", err))
+    }
+  }, [isTodaySales, isCashier])
+
+  useEffect(() => {
+    const handleShiftStarted = (e) => {
+      if (isTodaySales && isCashier) {
+        if (e.detail) {
+          setActiveShift(e.detail)
+        } else {
+          axios.get('/api/orders/cashier-shift/active')
+            .then(res => {
+              if (res.data?.hasActiveShift) setActiveShift(res.data.shift)
+            })
+            .catch(() => {})
+        }
+        load()
+      }
+    }
+    window.addEventListener('cashier_shift_started', handleShiftStarted)
+    return () => window.removeEventListener('cashier_shift_started', handleShiftStarted)
+  }, [isTodaySales, isCashier])
+
+  // Fetch live uncompleted/hold orders breakdown when Closing Modal is opened
+  useEffect(() => {
+    if (showClosingModal) {
+      const targetBranch = branch === 'All' ? (user?.branch || 'Branch 1') : branch;
+      setClosingPendingInfo(prev => ({ ...prev, loading: true }));
+      axios.get(`/api/orders/cashier-shift/previous-shift-info?branch=${encodeURIComponent(targetBranch)}`)
+        .then(res => {
+          if (res.data) {
+            setClosingPendingInfo({
+              loading: false,
+              totalPending: res.data.totalPending || 0,
+              takeaway: res.data.takeaway || 0,
+              delivery: res.data.delivery || 0,
+              dineIn: res.data.dineIn || 0
+            });
+          }
+        })
+        .catch(err => {
+          console.error("Failed to load closing pending orders:", err);
+          setClosingPendingInfo(prev => ({ ...prev, loading: false }));
+        });
+    }
+  }, [showClosingModal, branch, user?.branch])
+
   useEffect(() => {
     setFrom(today())
     setTo(today())
@@ -141,12 +209,49 @@ export default function Reports({ isTodaySales = false }) {
   const cardTotal = parseFloat(cardRow?.total || 0) + parseFloat(onlineRow?.total || 0)
   const cardCount = parseInt(cardRow?.count || 0) + parseInt(onlineRow?.count || 0)
 
+  const isShiftSaleView = isTodaySales && isCashier
+
   const tiles = [
-    { label: 'Total Revenue', val: `${CURRENCY}${totalSales.toFixed(2)}`, icon: <CircleDollarSign size={20} />, color: '#E31837', bg: '#fff1f2', sub: `${totalCount} total transactions` },
-    { label: 'Cash Sales', val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#10b981', bg: '#ecfdf5', sub: `${cashRow?.count || 0} orders` },
-    { label: 'Card Sales', val: `${CURRENCY}${cardTotal.toFixed(2)}`, icon: <CreditCard size={20} />, color: '#3b82f6', bg: '#eff6ff', sub: `${cardCount} orders` },
-    { label: "Today's Credit", val: `${CURRENCY}${parseFloat(creditRow?.total || 0).toFixed(2)}`, icon: <ClipboardList size={20} />, color: '#8b5cf6', bg: '#f3e8ff', sub: `${creditRow?.count || 0} orders` },
-    { label: 'Major Payment', val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, icon: <Banknote size={20} />, color: '#14b8a6', bg: '#ccfbf1', sub: `Cash: ${CURRENCY}${(creditSummary.majorPaymentsCash || 0).toFixed(2)} | Card: ${CURRENCY}${(creditSummary.majorPaymentsCard || 0).toFixed(2)}` }
+    { 
+      label: isShiftSaleView ? 'Your Shift Revenue' : 'Total Revenue', 
+      val: `${CURRENCY}${totalSales.toFixed(2)}`, 
+      icon: <CircleDollarSign size={20} />, 
+      color: '#E31837', 
+      bg: '#fff1f2', 
+      sub: `${totalCount} total transactions` 
+    },
+    { 
+      label: 'Cash Sales', 
+      val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, 
+      icon: <Banknote size={20} />, 
+      color: '#10b981', 
+      bg: '#ecfdf5', 
+      sub: `${cashRow?.count || 0} orders` 
+    },
+    { 
+      label: 'Card Sales', 
+      val: `${CURRENCY}${cardTotal.toFixed(2)}`, 
+      icon: <CreditCard size={20} />, 
+      color: '#3b82f6', 
+      bg: '#eff6ff', 
+      sub: `${cardCount} orders` 
+    },
+    { 
+      label: isShiftSaleView ? 'Shift Credit' : "Today's Credit", 
+      val: `${CURRENCY}${parseFloat(creditRow?.total || 0).toFixed(2)}`, 
+      icon: <ClipboardList size={20} />, 
+      color: '#8b5cf6', 
+      bg: '#f3e8ff', 
+      sub: `${creditRow?.count || 0} orders` 
+    },
+    { 
+      label: 'Major Payment', 
+      val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, 
+      icon: <Banknote size={20} />, 
+      color: '#14b8a6', 
+      bg: '#ccfbf1', 
+      sub: `Cash: ${CURRENCY}${(creditSummary.majorPaymentsCash || 0).toFixed(2)} | Card: ${CURRENCY}${(creditSummary.majorPaymentsCard || 0).toFixed(2)}` 
+    }
   ]
 
   if (isAdminOrDev || isManagement) {
@@ -309,6 +414,12 @@ export default function Reports({ isTodaySales = false }) {
                 await axios.post('/api/orders/daily-closing')
                 toast.success('Daily closing complete.')
                 load()
+                if (isCashier) {
+                  setActiveShift(null)
+                  const deadline = Date.now() + 90 * 1000
+                  localStorage.setItem('cashier_closing_deadline', deadline.toString())
+                  window.dispatchEvent(new CustomEvent('cashier_shift_closed', { detail: { deadline } }))
+                }
               } catch (err) {
                 toast.error('Error: ' + err.message)
               }
@@ -334,6 +445,12 @@ export default function Reports({ isTodaySales = false }) {
                 }
                 
                 setShowTodaySummary(true)
+                if (isCashier) {
+                  setActiveShift(null)
+                  const deadline = Date.now() + 90 * 1000
+                  localStorage.setItem('cashier_closing_deadline', deadline.toString())
+                  window.dispatchEvent(new CustomEvent('cashier_shift_closed', { detail: { deadline } }))
+                }
               } catch (err) {
                 toast.error('Error: ' + err.message)
               }
@@ -347,8 +464,8 @@ export default function Reports({ isTodaySales = false }) {
   }
 
   const printClosingReport = (report) => {
-    const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '-'
-    const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString() : '-'
+    const fmtTime = (ts) => ts ? formatSaudiTime(ts) : '-'
+    const fmtDate = (ts) => ts ? formatSaudiDate(ts) : '-'
     const items = Array.isArray(report.items_summary) ? report.items_summary : JSON.parse(report.items_summary || '[]')
     const printWindow = window.open('', '', 'width=500,height=700')
     const html = `
@@ -382,6 +499,11 @@ export default function Reports({ isTodaySales = false }) {
       <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
       <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Cash Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.cash_sales || 0).toFixed(2)}</span></div>
       <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Card Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
+      <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Credit Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
+      <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
+      <div class="divider"></div>
+      <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
+      <div class="row"><span class="label">Remaining Drawer Cash:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
       <div class="divider"></div>
       <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
       <table>
@@ -397,7 +519,7 @@ export default function Reports({ isTodaySales = false }) {
         </tbody>
       </table>
       <div class="divider"></div>
-      <p class="center" style="font-size:11px;color:#888;margin-top:12px">Generated: ${new Date().toLocaleString()}</p>
+      <p class="center" style="font-size:11px;color:#888;margin-top:12px">Generated: ${formatSaudiDateTime(new Date())}</p>
     </body></html>`
     printWindow.document.write(html)
     printWindow.document.close()
@@ -411,14 +533,26 @@ export default function Reports({ isTodaySales = false }) {
     setClosingProcessingType(shouldPrint ? 'close_print' : 'just_close')
     try {
       const endpoint = closingType === 'Shift' ? '/api/orders/shift-close' : '/api/orders/daily-closing'
-      const res = await axios.post(endpoint, { branch })
+      const res = await axios.post(endpoint, { 
+        branch,
+        remaining_cash: parseFloat(closingRemainingCash || 0)
+      })
       toast.success(`${closingType} closing complete!`)
       setShowClosingModal(false)
       setClosingType(null)
+      setClosingRemainingCash('')
       load()
       // Auto-print the report if requested
       if (shouldPrint && res.data?.report) {
         setTimeout(() => printClosingReport(res.data.report), 400)
+      }
+
+      // If Cashier, start 90-second countdown to auto-logout!
+      if (isCashier) {
+        setActiveShift(null)
+        const deadline = Date.now() + 90 * 1000
+        localStorage.setItem('cashier_closing_deadline', deadline.toString())
+        window.dispatchEvent(new CustomEvent('cashier_shift_closed', { detail: { deadline } }))
       }
     } catch (err) {
       toast.error('Error: ' + (err?.response?.data?.error || err.message))
@@ -538,6 +672,59 @@ export default function Reports({ isTodaySales = false }) {
 
   return (
     <>
+      {isTodaySales && isCashier && activeShift && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.08) 100%)',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          borderRadius: 10,
+          padding: '14px 20px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: '#10b981',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 800,
+              fontSize: 16
+            }}>
+              ✓
+            </div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 16, color: '#065f46' }}>
+                <span style={{ textTransform: 'capitalize' }}>{activeShift?.cashier_name || user?.username || 'Cashier'}</span>'s Active Shift is Open
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
+                Cashier: <strong style={{ textTransform: 'capitalize' }}>{activeShift?.cashier_name || user?.username}</strong> • Shift Started: <strong>{formatSaudiDateTime(activeShift.start_time)}</strong> (KSA) • Opening Cash: <strong>{CURRENCY}{parseFloat(activeShift.opening_cash || 0).toFixed(2)}</strong>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              background: '#fff',
+              padding: '6px 14px',
+              borderRadius: 20,
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#065f46',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            }}>
+              🟢 Live Active Shift
+            </span>
+          </div>
+        </div>
+      )}
       
       <div className="summary-tiles">
         {tiles.map(t => {
@@ -569,8 +756,6 @@ export default function Reports({ isTodaySales = false }) {
         })}
       </div>
 
-
-
       {creditSummary.majorPayments && creditSummary.majorPayments.length > 0 && (
         <div className="card" style={{ padding: 0, marginBottom: 24, background: '#f8fafc' }}>
           <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--surface-2)' }}>
@@ -597,7 +782,7 @@ export default function Reports({ isTodaySales = false }) {
                     <td style={{ fontWeight: 600 }}>{p.customer_name}</td>
                     <td>{p.cashier_name || '-'}</td>
                     <td>{p.payment_method || 'Cash'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{new Date(p.created_at).toLocaleString()}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{formatSaudiDateTime(p.created_at)}</td>
                     <td style={{ fontWeight: 700, color: 'var(--green)' }}>{CURRENCY}{parseFloat(p.amount).toFixed(2)}</td>
                   </tr>
                 ))}
@@ -635,45 +820,45 @@ export default function Reports({ isTodaySales = false }) {
               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, flex: 1, justifyContent: 'flex-end' }}>
                 {!isTodaySales && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>From:</label>
-                        <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>From:</label>
+                          <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>To:</label>
+                          <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>To:</label>
-                        <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                        <button className="btn" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', color: 'var(--text-primary)', borderRadius: '6px' }}>
+                          <Search size={14} /> Filter
+                        </button>
+                        <button 
+                          className="btn btn-secondary btn-sm" 
+                          onClick={() => { setFrom(today()); setTo(today()); }}
+                          style={{ 
+                            display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
+                            background: (from === today() && to === today()) ? 'linear-gradient(135deg, #E31837, #FF6B35)' : '',
+                            color: (from === today() && to === today()) ? 'white' : ''
+                          }}
+                        >
+                          Today
+                        </button>
+                        <button 
+                          className="btn btn-secondary btn-sm" 
+                          onClick={() => { setFrom(yesterday()); setTo(yesterday()); }}
+                          style={{ 
+                            display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
+                            background: (from === yesterday() && to === yesterday()) ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '',
+                            color: (from === yesterday() && to === yesterday()) ? 'white' : ''
+                          }}
+                        >
+                          Yesterday
+                        </button>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
-                      <button className="btn" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', color: 'var(--text-primary)', borderRadius: '6px' }}>
-                        <Search size={14} /> Filter
-                      </button>
-                      <button 
-                        className="btn btn-secondary btn-sm" 
-                        onClick={() => { setFrom(today()); setTo(today()); }}
-                        style={{ 
-                          display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
-                          background: (from === today() && to === today()) ? 'linear-gradient(135deg, #E31837, #FF6B35)' : '',
-                          color: (from === today() && to === today()) ? 'white' : ''
-                        }}
-                      >
-                        Today
-                      </button>
-                      <button 
-                        className="btn btn-secondary btn-sm" 
-                        onClick={() => { setFrom(yesterday()); setTo(yesterday()); }}
-                        style={{ 
-                          display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px',
-                          background: (from === yesterday() && to === yesterday()) ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '',
-                          color: (from === yesterday() && to === yesterday()) ? 'white' : ''
-                        }}
-                      >
-                        Yesterday
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  )}
               </div>
             </div>
 
@@ -727,7 +912,9 @@ export default function Reports({ isTodaySales = false }) {
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: (isAdminOrDev || isManagement) ? 4 : 0 }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{from} → {to}</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              {isTodaySales && isCashier ? (activeShift ? `Shift started: ${formatSaudiTime(activeShift.start_time)} (KSA)` : 'Active Shift') : `${from} → ${to}`}
+            </span>
             {(tableFilters.placedBy !== 'All' || tableFilters.completedBy !== 'All' || tableFilters.branch !== 'All' || tableFilters.type !== 'All' || statusFilter !== 'All' || search !== '') && (
               <button 
                 className="btn btn-sm btn-secondary" 
@@ -858,11 +1045,11 @@ export default function Reports({ isTodaySales = false }) {
                       <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>#{t.id}</td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{t.order_taker || '-'}</div>
-                        {t.order_placed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(t.order_placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
+                        {t.order_placed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSaudiTime(t.order_placed_at)}</div>}
                       </td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{t.completed_by || '-'}</div>
-                        {t.completed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(t.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</div>}
+                        {t.completed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSaudiTime(t.completed_at)}</div>}
                       </td>
                       <td>{t.branch || '-'}</td>
                       <td>{t.order_type || '-'}</td>
@@ -876,7 +1063,7 @@ export default function Reports({ isTodaySales = false }) {
                         </span>
                       </td>
                       <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-                        {new Date(t.created_at).toLocaleString()}
+                        {formatSaudiDateTime(t.created_at)}
                       </td>
                       <td>
                         {(!['Cancelled', 'Returned'].includes(t.order_status)) && (
@@ -1046,7 +1233,7 @@ export default function Reports({ isTodaySales = false }) {
                             {t.payment_method === t.order_status ? t.order_status : `${t.payment_method} - ${t.order_status}`}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#666' }}>{new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</td>
+                        <td style={{ padding: '10px 12px', color: '#666' }}>{formatSaudiTime(t.created_at)}</td>
                       </tr>
                     ))}
                     {filteredTransactions.length === 0 && (
@@ -1109,75 +1296,322 @@ export default function Reports({ isTodaySales = false }) {
       {/* ── CLOSING MODAL ── */}
       {showClosingModal && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) { setShowClosingModal(false); setClosingType(null); } }}>
-          <div className="modal" style={{ maxWidth: 460, padding: 28 }}>
-            <div className="modal-header" style={{ marginBottom: 20 }}>
-              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Lock size={20} /> Closing</h3>
+          <div className="modal" style={{ maxWidth: 650, width: '95vw', padding: '20px 24px', maxHeight: '92vh', overflow: 'hidden' }}>
+            <div className="modal-header" style={{ marginBottom: 14 }}>
+              <div>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0, fontSize: 17 }}>
+                  <Lock size={18} color="var(--primary)" /> Shift & Daily Closing
+                </h3>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Select closing type. <b>Hold orders</b> remain safe & unaffected.
+                </span>
+              </div>
               <button className="modal-close" onClick={() => { setShowClosingModal(false); setClosingType(null); }}>✕</button>
             </div>
 
-            <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20 }}>
-              Select the type of closing to perform. <b>Hold orders</b> are never affected.
-            </p>
+            {/* 2-Column Grid Body */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.05fr 0.95fr', gap: 14, marginBottom: 16 }}>
+              {/* Left Column: Pending Orders + Shift Stats (Start time, Current time, Total Orders, Total Sales) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* 1. Pending Orders Card */}
+                <div style={{
+                  background: closingPendingInfo.totalPending > 0 ? '#fffbeb' : '#f8fafc',
+                  border: `1.5px solid ${closingPendingInfo.totalPending > 0 ? '#fde68a' : '#e2e8f0'}`,
+                  borderRadius: 10,
+                  padding: '10px 12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 15 }}>{closingPendingInfo.totalPending > 0 ? '⏳' : '✅'}</span>
+                      <strong style={{ fontSize: 12, color: closingPendingInfo.totalPending > 0 ? '#92400e' : '#334155' }}>
+                        Pending / Hold Orders
+                      </strong>
+                    </div>
+                    <span style={{
+                      background: closingPendingInfo.totalPending > 0 ? '#f59e0b' : '#10b981',
+                      color: '#fff',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      padding: '2px 7px',
+                      borderRadius: 8
+                    }}>
+                      {closingPendingInfo.loading ? '...' : `${closingPendingInfo.totalPending} Orders`}
+                    </span>
+                  </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
-              {/* Shift Close */}
-              <div
-                onClick={() => setClosingType('Shift')}
-                style={{
-                  border: closingType === 'Shift' ? '2px solid var(--primary)' : '2px solid var(--surface-2)',
-                  borderRadius: 12,
-                  padding: 16,
-                  cursor: 'pointer',
-                  background: closingType === 'Shift' ? 'rgba(227,24,55,0.04)' : 'white',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <div style={{ fontSize: 28, marginBottom: 8 }}>🔄</div>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6, color: closingType === 'Shift' ? 'var(--primary)' : 'var(--text-primary)' }}>Shift Close</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>Clears <b>your shift's</b> sales from the screen. Saves your personal summary report (X-Report).</div>
+
+                  {/* 3 Breakdown Cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6, padding: '5px 2px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🛍️ Takeaway</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                        {closingPendingInfo.loading ? '...' : closingPendingInfo.takeaway}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6, padding: '5px 2px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🛵 Delivery</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                        {closingPendingInfo.loading ? '...' : closingPendingInfo.delivery}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6, padding: '5px 2px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🍽️ Dine-In</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                        {closingPendingInfo.loading ? '...' : closingPendingInfo.dineIn}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Shift Stats Card (Start Time, Current Time, Total Orders, Total Sales) */}
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 10,
+                  padding: '10px 12px'
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Clock size={13} color="var(--primary)" /> Shift Summary (موجودہ شفٹ)
+                  </div>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {/* Shift Start Time */}
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🕒 Start Time</div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                        {activeShift?.start_time ? formatSaudiTime(activeShift.start_time) : '-'} <span style={{ fontSize: 9, color: '#94a3b8' }}>KSA</span>
+                      </div>
+                    </div>
+
+                    {/* Current Time */}
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>⏰ Current Time</div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', marginTop: 1 }}>
+                        {formatSaudiTime(new Date())} <span style={{ fontSize: 9, color: '#94a3b8' }}>KSA</span>
+                      </div>
+                    </div>
+
+                    {/* Total Orders Punched */}
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🧾 Total Orders</div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                        {totalCount} <span style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>orders</span>
+                      </div>
+                    </div>
+
+                    {/* Total Sales */}
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>💰 Total Sales</div>
+                      <div style={{ fontSize: 12, fontWeight: 900, color: '#047857', marginTop: 1 }}>
+                        {CURRENCY}{totalSales.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              {/* Daily Close */}
-              <div
-                onClick={() => setClosingType('Daily')}
-                style={{
-                  border: closingType === 'Daily' ? '2px solid #7c3aed' : '2px solid var(--surface-2)',
-                  borderRadius: 12,
-                  padding: 16,
-                  cursor: 'pointer',
-                  background: closingType === 'Daily' ? 'rgba(124,58,237,0.04)' : 'white',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <div style={{ fontSize: 28, marginBottom: 8 }}>⚡</div>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6, color: closingType === 'Daily' ? '#7c3aed' : 'var(--text-primary)' }}>Daily Close</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>Clears <b>all today's</b> sales from the screen. Finalizes the full-day summary (Z-Report).</div>
+              {/* Right Column: Closing Type Selection & Remaining Cash */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
+                    Select Closing Type
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {/* Shift Close */}
+                    <div
+                      onClick={() => setClosingType('Shift')}
+                      style={{
+                        border: closingType === 'Shift' ? '2px solid var(--primary)' : '1.5px solid var(--surface-2)',
+                        borderRadius: 10,
+                        padding: '10px 8px',
+                        cursor: 'pointer',
+                        background: closingType === 'Shift' ? 'rgba(227,24,55,0.06)' : 'white',
+                        textAlign: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ fontSize: 22, marginBottom: 2 }}>🔄</div>
+                      <div style={{ fontWeight: 800, fontSize: 13, color: closingType === 'Shift' ? 'var(--primary)' : 'var(--text-primary)' }}>
+                        Shift Close
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        (X-Report)
+                      </div>
+                    </div>
+
+                    {/* Daily Close */}
+                    <div
+                      onClick={() => setClosingType('Daily')}
+                      style={{
+                        border: closingType === 'Daily' ? '2px solid #7c3aed' : '1.5px solid var(--surface-2)',
+                        borderRadius: 10,
+                        padding: '10px 8px',
+                        cursor: 'pointer',
+                        background: closingType === 'Daily' ? 'rgba(124,58,237,0.06)' : 'white',
+                        textAlign: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ fontSize: 22, marginBottom: 2 }}>⚡</div>
+                      <div style={{ fontWeight: 800, fontSize: 13, color: closingType === 'Daily' ? '#7c3aed' : 'var(--text-primary)' }}>
+                        Daily Close
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        (Z-Report)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Remaining Cash in Drawer input */}
+                <div style={{
+                  background: 'var(--surface-1)',
+                  border: '1px solid var(--surface-2)',
+                  borderRadius: 8,
+                  padding: '9px 10px'
+                }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: 'var(--text-primary)',
+                    marginBottom: 4
+                  }}>
+                    Remaining Cash in Drawer (دراز میں رقم) ({CURRENCY})
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{
+                      position: 'absolute',
+                      left: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      fontWeight: 700,
+                      color: 'var(--text-muted)',
+                      fontSize: 12
+                    }}>
+                      {CURRENCY}
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={closingRemainingCash}
+                      onChange={e => setClosingRemainingCash(e.target.value)}
+                      placeholder="0.00 (Optional)"
+                      style={{
+                        width: '100%',
+                        padding: '6px 8px 6px 38px',
+                        borderRadius: 6,
+                        border: '1.5px solid var(--surface-2)',
+                        background: '#ffffff',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {closingType && (
+                  <div style={{
+                    background: closingType === 'Daily' ? '#faf5ff' : '#fff1f2',
+                    border: `1px solid ${closingType === 'Daily' ? '#ddd6fe' : '#fca5a5'}`,
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                    fontSize: 10,
+                    color: closingType === 'Daily' ? '#6b21a8' : '#991b1b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}>
+                    <span>⚠️</span>
+                    <span>Completed orders will be cleared & archived.</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {closingType && (
-              <div style={{ background: closingType === 'Daily' ? '#faf5ff' : '#fff1f2', border: `1px solid ${closingType === 'Daily' ? '#ddd6fe' : '#fca5a5'}`, borderRadius: 8, padding: 12, marginBottom: 20, fontSize: 13 }}>
-                ⚠️ This will <b>clear completed orders</b> from the active screen and optionally <b>print a closing report</b>.
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <button className="btn btn-secondary" style={{ flex: 1, minWidth: '100px' }} onClick={() => { setShowClosingModal(false); setClosingType(null); }} disabled={closingProcessing}>Cancel</button>
+            {/* Buttons Row - Compact, Centered text, Site-matched dark & brand palette */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 4 }}>
               <button
-                className="btn btn-primary"
-                style={{ flex: 1, background: '#f59e0b', minWidth: '120px', opacity: !closingType ? 0.5 : 1 }}
+                type="button"
+                style={{
+                  padding: '6px 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  color: '#475569',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseOver={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#1e293b'; }}
+                onMouseOut={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#475569'; }}
+                onClick={() => { setShowClosingModal(false); setClosingType(null); }}
+                disabled={closingProcessing}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={{
+                  padding: '6px 16px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  borderRadius: 6,
+                  border: '1px solid #0f172a',
+                  background: '#1e293b',
+                  color: '#ffffff',
+                  cursor: !closingType || closingProcessing ? 'not-allowed' : 'pointer',
+                  opacity: !closingType ? 0.45 : 1,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseOver={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#0f172a'; }}
+                onMouseOut={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#1e293b'; }}
                 onClick={() => handleClosingConfirm(false)}
                 disabled={!closingType || closingProcessing}
               >
-                {closingProcessing && closingProcessingType === 'just_close' ? '...' : `Just Close`}
+                {closingProcessing && closingProcessingType === 'just_close' ? 'Processing...' : 'Just Close'}
               </button>
               <button
-                className="btn btn-primary"
-                style={{ flex: 1.5, background: closingType === 'Daily' ? '#7c3aed' : 'var(--primary)', minWidth: '140px', opacity: !closingType ? 0.5 : 1 }}
+                type="button"
+                style={{
+                  padding: '6px 16px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  borderRadius: 6,
+                  border: '1px solid #0a2428',
+                  background: '#103C43',
+                  color: '#ffffff',
+                  cursor: !closingType || closingProcessing ? 'not-allowed' : 'pointer',
+                  opacity: !closingType ? 0.45 : 1,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                  gap: 6,
+                  boxShadow: closingType ? '0 2px 8px rgba(16, 60, 67, 0.25)' : 'none',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseOver={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#0a2428'; }}
+                onMouseOut={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#103C43'; }}
                 onClick={() => handleClosingConfirm(true)}
                 disabled={!closingType || closingProcessing}
               >
-                {closingProcessing && closingProcessingType === 'close_print' ? 'Processing...' : `Close & Print`}
+                <Printer size={13} color="#F4B400" />
+                <span>{closingProcessing && closingProcessingType === 'close_print' ? 'Processing...' : 'Close & Print Report'}</span>
               </button>
             </div>
           </div>
@@ -1259,162 +1693,242 @@ export default function Reports({ isTodaySales = false }) {
             {historyLoading ? (
               <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading...</div>
             ) : selectedHistoryReport ? (
-              /* ── Detail View ── */
+              /* ── Detail View: Exact 100% Email Report Layout ── */
               <div>
-                <button className="btn btn-secondary btn-sm" style={{ marginBottom: 16 }} onClick={() => setSelectedHistoryReport(null)}>← Back to List</button>
-                <div style={{ background: '#f8f9fa', borderRadius: 10, padding: 20, border: '1px solid var(--surface-2)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-                    <div>
-                      <span style={{ fontWeight: 800, fontSize: 16 }}>{selectedHistoryReport.closing_type === 'Daily' ? '⚡ Daily Closing' : '🔄 Shift Closing'}</span>
-                      <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--text-muted)' }}>{new Date(selectedHistoryReport.created_at).toLocaleString()}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setSelectedHistoryReport(null)}>
+                    ← Back to List
+                  </button>
+                  <button className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => printClosingReport(selectedHistoryReport)}>
+                    <Printer size={15} /> Reprint Report
+                  </button>
+                </div>
+
+                {/* Email-identical Report Card */}
+                <div style={{
+                  fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+                  width: '100%',
+                  maxWidth: 620,
+                  margin: '0 auto',
+                  border: '1px solid #eaeaea',
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  background: '#fafafa',
+                  boxSizing: 'border-box',
+                  boxShadow: '0 4px 18px rgba(0,0,0,0.06)'
+                }}>
+                  {/* Red/Brand Header Banner */}
+                  <div style={{ backgroundColor: '#E31837', padding: 20, borderBottom: '1px solid #eaeaea', textAlign: 'center', color: 'white' }}>
+                    <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>{selectedHistoryReport.closing_type} Closing Report</h2>
+                    <p style={{ margin: '5px 0 0 0', fontSize: 14, opacity: 0.9 }}>{selectedHistoryReport.branch}</p>
+                  </div>
+
+                  <div style={{ padding: 24 }}>
+                    {/* Summary Card */}
+                    <div style={{ background: 'white', padding: 15, borderRadius: 8, border: '1px solid #eaeaea', marginBottom: 20 }}>
+                      <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Cashier:</strong> {selectedHistoryReport.cashier_name}</p>
+                      <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Orders:</strong> {selectedHistoryReport.total_orders}</p>
+                      <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Sales:</strong> SAR {parseFloat(selectedHistoryReport.total_sales || 0).toFixed(2)}</p>
+                      <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: '#555' }}>↳ Cash Sales: SAR {parseFloat(selectedHistoryReport.cash_sales || 0).toFixed(2)}</p>
+                      <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: '#555' }}>↳ Card Sales: SAR {parseFloat(selectedHistoryReport.card_sales || 0).toFixed(2)}</p>
+                      <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: '#555' }}>↳ Credit Sales: SAR {parseFloat(selectedHistoryReport.credit_sales || 0).toFixed(2)}</p>
+                      <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Major Payments Received:</strong> SAR {parseFloat(selectedHistoryReport.major_payments || 0).toFixed(2)}</p>
+                      <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Opening Drawer Cash:</strong> SAR {parseFloat(selectedHistoryReport.opening_cash || 0).toFixed(2)}</p>
+                      <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Remaining Drawer Cash:</strong> SAR {parseFloat(selectedHistoryReport.closing_cash || 0).toFixed(2)}</p>
+                      <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Active Time:</strong> {selectedHistoryReport.total_active_time}</p>
+                      <p style={{ margin: '4px 0', fontSize: 12, color: '#777' }}>
+                        {formatSaudiDateTime(selectedHistoryReport.login_time)} - {formatSaudiDateTime(selectedHistoryReport.logout_time)} (KSA)
+                      </p>
                     </div>
-                    <button className="btn btn-primary btn-sm" onClick={() => printClosingReport(selectedHistoryReport)}>🖨️ Reprint</button>
-                  </div>
-                  <div style={{ background: 'white', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)', marginBottom: 20 }}>
-                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Cashier:</strong> {selectedHistoryReport.cashier_name}</p>
-                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Orders:</strong> {selectedHistoryReport.total_orders}</p>
-                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Sales:</strong> {CURRENCY} {parseFloat(selectedHistoryReport.total_sales || 0).toFixed(2)}</p>
-                    <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Cash Sales: {CURRENCY} {parseFloat(selectedHistoryReport.cash_sales || 0).toFixed(2)}</p>
-                    <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Card Sales: {CURRENCY} {parseFloat(selectedHistoryReport.card_sales || 0).toFixed(2)}</p>
-                    <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: 'var(--text-secondary)' }}>↳ Credit Sales: {CURRENCY} {parseFloat(selectedHistoryReport.credit_sales || 0).toFixed(2)}</p>
-                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Major Payments Received:</strong> {CURRENCY} {parseFloat(selectedHistoryReport.major_payments || 0).toFixed(2)}</p>
-                    <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Active Time:</strong> {selectedHistoryReport.total_active_time}</p>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--text-muted)' }}>{new Date(selectedHistoryReport.login_time).toLocaleString()} - {new Date(selectedHistoryReport.logout_time).toLocaleString()}</p>
-                  </div>
 
-                  <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Items Sold by Category</h3>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
-                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Category</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(Array.isArray(selectedHistoryReport.items_summary) ? selectedHistoryReport.items_summary : JSON.parse(selectedHistoryReport.items_summary || '[]')).map((cat, i) => (
-                        <React.Fragment key={i}>
-                          <tr style={{ background: 'var(--surface-1)' }}>
-                            <td style={{ padding: '8px 10px', fontWeight: 700 }}>{cat.category}</td>
-                            <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700 }}>{cat.qty}</td>
-                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{CURRENCY} {parseFloat(cat.amount || 0).toFixed(2)}</td>
-                          </tr>
-                          {cat.items && cat.items.map((sub, j) => (
-                            <tr key={`${i}-${j}`} style={{ borderBottom: j === cat.items.length - 1 ? '1px solid var(--surface-2)' : 'none' }}>
-                              <td style={{ padding: '4px 10px 4px 25px', color: 'var(--text-secondary)' }}>- {sub.name}</td>
-                              <td style={{ padding: '4px 10px', textAlign: 'center', color: 'var(--text-secondary)' }}>{sub.qty}</td>
-                              <td style={{ padding: '4px 10px', textAlign: 'right', color: 'var(--text-secondary)' }}>{CURRENCY} {parseFloat(sub.amount || 0).toFixed(2)}</td>
-                            </tr>
-                          ))}
-                        </React.Fragment>
-                      ))}
-                    </tbody>
-                  </table>
+                    {/* Items Sold by Category */}
+                    <h3 style={{ marginTop: 24, borderBottom: '2px solid #eaeaea', paddingBottom: 8, color: '#333', fontSize: 16 }}>Items Sold by Category</h3>
+                    {(() => {
+                      let items = [];
+                      try {
+                        items = Array.isArray(selectedHistoryReport.items_summary) 
+                          ? selectedHistoryReport.items_summary 
+                          : JSON.parse(selectedHistoryReport.items_summary || '[]');
+                      } catch(e) { items = []; }
 
-                  {(() => {
-                    let intervalsObj = {};
-                    try {
-                      intervalsObj = typeof selectedHistoryReport.interval_items === 'string' 
-                        ? JSON.parse(selectedHistoryReport.interval_items || '{}') 
-                        : (selectedHistoryReport.interval_items || {});
-                    } catch (e) {}
-
-                    const keys = Object.keys(intervalsObj);
-                    if (keys.length > 0) {
-                      const loginDate = new Date(selectedHistoryReport.login_time);
-                      let maxIndex = 0;
-                      for (const key of keys) {
-                        if (parseInt(key) > maxIndex) maxIndex = parseInt(key);
-                      }
-                      
-                      const rows = [];
-                      for (let i = 0; i <= maxIndex; i++) {
-                        const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000);
-                        const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000);
-                        
-                        const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        const timeWindow = `${startTimeStr} - ${endTimeStr}`;
-                        
-                        const items = intervalsObj[i] || [];
-                        if (items.length > 0) {
-                          rows.push({ time_window: timeWindow, items });
-                        } else {
-                          rows.push({ time_window: timeWindow, items: [{ name: '-', qty: '-' }] });
-                        }
+                      if (!items || items.length === 0) {
+                        return <p style={{ textAlign: 'center', color: '#999', padding: 20 }}>No items sold</p>;
                       }
 
-                      return (
-                        <>
-                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top Items by 2-Hour Intervals</h3>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
-                            <thead>
-                              <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
-                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Time Interval</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item Name</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rows.map((interval, idx) => (
-                                interval.items.map((it, i) => (
-                                  <tr key={`${idx}-${i}`} style={{ borderBottom: i === interval.items.length - 1 ? '2px solid var(--surface-2)' : '1px solid var(--surface-1)' }}>
-                                    {i === 0 && (
-                                      <td rowSpan={interval.items.length} style={{ padding: '8px 10px', verticalAlign: 'top', fontWeight: 600, borderRight: '1px solid var(--surface-2)' }}>
-                                        {interval.time_window}
-                                      </td>
-                                    )}
-                                    <td style={{ padding: '8px 10px' }}>{it.name}</td>
-                                    <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600 }}>{it.qty}</td>
-                                  </tr>
-                                ))
-                              ))}
-                            </tbody>
-                          </table>
-                        </>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {(() => {
-                    let topItems = [];
-                    try {
-                      topItems = typeof selectedHistoryReport.top_selling_items === 'string' 
-                        ? JSON.parse(selectedHistoryReport.top_selling_items || '[]') 
-                        : (selectedHistoryReport.top_selling_items || []);
-                    } catch (e) {}
-
-                    if (topItems && topItems.length > 0) {
-                      const top5 = topItems.slice(0, 5);
-                      return (
-                        <>
-                          <h3 style={{ fontSize: 15, marginBottom: 8, borderBottom: '2px solid var(--surface-2)', paddingBottom: 8, color: 'var(--text)' }}>Top 5 Selling Items</h3>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 20 }}>
-                            <thead>
-                              <tr style={{ background: 'var(--surface-1)', borderBottom: '2px solid var(--surface-2)' }}>
-                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item Name</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty Sold</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'right' }}>Revenue</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {top5.map((item, i) => (
-                                <tr key={i} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                                  <td style={{ padding: '8px 10px' }}>{item.name}</td>
-                                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>{item.qty}</td>
-                                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{CURRENCY} {parseFloat(item.amount || 0).toFixed(2)}</td>
+                      return items.map((cat, idx) => (
+                        <div key={idx} style={{ marginBottom: 20, background: '#fff', border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
+                          <div style={{ background: '#f8f9fa', fontWeight: 'bold', fontSize: 15, color: '#111', padding: '10px 15px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span>{cat.category}</span>
+                            <span style={{ color: '#E31837', fontSize: 14 }}>
+                              SAR {parseFloat(cat.amount || 0).toFixed(2)} ({cat.qty} items)
+                            </span>
+                          </div>
+                          <div style={{ padding: '0 10px', overflowX: 'auto' }}>
+                            <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', margin: '10px 0', fontSize: 13, color: '#555', tableLayout: 'fixed', wordWrap: 'break-word' }}>
+                              <thead>
+                                <tr style={{ borderBottom: '1px solid #eee', textAlign: 'left' }}>
+                                  <th style={{ padding: '8px 4px', width: '40%' }}>Item</th>
+                                  <th style={{ padding: '8px 4px', textAlign: 'center', width: '15%' }}>Qty</th>
+                                  <th style={{ padding: '8px 4px', textAlign: 'right', width: '22%' }}>Price</th>
+                                  <th style={{ padding: '8px 4px', textAlign: 'right', width: '23%' }}>Total</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </>
-                      );
-                    }
-                    return null;
-                  })()}
+                              </thead>
+                              <tbody>
+                                {cat.items && Array.isArray(cat.items) && cat.items.map((it, itemIdx) => {
+                                  const unitPrice = parseFloat(it.amount / (it.qty || 1)).toFixed(2);
+                                  const totalPrice = parseFloat(it.amount || 0).toFixed(2);
+                                  return (
+                                    <tr key={itemIdx} style={{ borderBottom: '1px dashed #f0f0f0' }}>
+                                      <td style={{ padding: '6px 4px' }}>{it.name}</td>
+                                      <td style={{ padding: '6px 4px', textAlign: 'center' }}><strong>{it.qty}</strong></td>
+                                      <td style={{ padding: '6px 4px', textAlign: 'right' }}>SAR {unitPrice}</td>
+                                      <td style={{ padding: '6px 4px', textAlign: 'right' }}>SAR {totalPrice}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ));
+                    })()}
 
+                    {/* Top Items by 2-Hour Intervals */}
+                    {(() => {
+                      let intervalsObj = {};
+                      try {
+                        intervalsObj = typeof selectedHistoryReport.interval_items === 'string'
+                          ? JSON.parse(selectedHistoryReport.interval_items || '{}')
+                          : (selectedHistoryReport.interval_items || {});
+                      } catch(e) { intervalsObj = {}; }
 
+                      if (intervalsObj && Object.keys(intervalsObj).length > 0) {
+                        const loginDate = new Date(selectedHistoryReport.login_time);
+                        let maxIndex = 0;
+                        for (const key of Object.keys(intervalsObj)) {
+                          if (parseInt(key) > maxIndex) maxIndex = parseInt(key);
+                        }
+
+                        const intervalRows = [];
+                        for (let i = 0; i <= maxIndex; i++) {
+                          const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000);
+                          const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000);
+                          const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          const itemsInBlock = intervalsObj[i] || [];
+
+                          intervalRows.push({
+                            timeWindow: `${startTimeStr} - ${endTimeStr}`,
+                            items: itemsInBlock
+                          });
+                        }
+
+                        return (
+                          <>
+                            <h3 style={{ marginTop: 30, borderBottom: '2px solid #eaeaea', paddingBottom: 8, color: '#333', fontSize: 16 }}>
+                              Top Items by 2-Hour Intervals
+                            </h3>
+                            <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: 6, overflowX: 'auto', marginBottom: 20 }}>
+                              <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', fontSize: 13, color: '#555', tableLayout: 'fixed', wordWrap: 'break-word' }}>
+                                <thead>
+                                  <tr style={{ background: '#f8f9fa', borderBottom: '1px solid #eee', textAlign: 'left', color: '#111' }}>
+                                    <th style={{ padding: '10px 8px', width: '35%' }}>Time</th>
+                                    <th style={{ padding: '10px 8px', width: '65%' }}>Top Items (Qty)</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {intervalRows.map((row, rIdx) => (
+                                    <tr key={rIdx} style={{ borderBottom: '1px solid #eee' }}>
+                                      <td style={{ padding: '8px 15px', fontWeight: 'bold', borderRight: '1px solid #eee', verticalAlign: 'top' }}>
+                                        {row.timeWindow}
+                                      </td>
+                                      <td style={{ padding: '8px 15px' }}>
+                                        {row.items.length > 0 ? (
+                                          row.items.map((it, itIdx) => (
+                                            <div key={itIdx} style={{ marginBottom: 4, paddingBottom: 4, borderBottom: itIdx === row.items.length - 1 ? 'none' : '1px dashed #f0f0f0' }}>
+                                              {it.name} <strong>({it.qty})</strong>
+                                            </div>
+                                          ))
+                                        ) : (
+                                          '-'
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        );
+                      }
+                      return null;
+                    })()}
+
+                    {/* Top 5 Selling Items */}
+                    {(() => {
+                      let items = [];
+                      try {
+                        items = Array.isArray(selectedHistoryReport.items_summary) 
+                          ? selectedHistoryReport.items_summary 
+                          : JSON.parse(selectedHistoryReport.items_summary || '[]');
+                      } catch(e) { items = []; }
+
+                      let allFlat = [];
+                      items.forEach(cat => {
+                        if (cat.items && Array.isArray(cat.items)) {
+                          cat.items.forEach(it => {
+                            allFlat.push({
+                              name: it.name,
+                              qty: parseInt(it.qty, 10) || 0,
+                              totalPrice: parseFloat(it.amount) || 0
+                            });
+                          });
+                        }
+                      });
+
+                      if (allFlat.length > 0) {
+                        const grouped = {};
+                        allFlat.forEach(it => {
+                          if (!grouped[it.name]) grouped[it.name] = { name: it.name, qty: 0, totalPrice: 0 };
+                          grouped[it.name].qty += it.qty;
+                          grouped[it.name].totalPrice += it.totalPrice;
+                        });
+
+                        const sorted = Object.values(grouped).sort((a, b) => b.qty - a.qty).slice(0, 5);
+
+                        return (
+                          <>
+                            <h3 style={{ marginTop: 30, borderBottom: '2px solid #eaeaea', paddingBottom: 8, color: '#333', fontSize: 16 }}>
+                              Top 5 Selling Items
+                            </h3>
+                            <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: 6, overflowX: 'auto' }}>
+                              <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', fontSize: 13, color: '#555', tableLayout: 'fixed', wordWrap: 'break-word' }}>
+                                <thead>
+                                  <tr style={{ background: '#fff3f4', borderBottom: '1px solid #ffccd0', textAlign: 'left', color: '#E31837' }}>
+                                    <th style={{ padding: '10px 8px', width: '15%' }}>#</th>
+                                    <th style={{ padding: '10px 8px', width: '45%' }}>Item</th>
+                                    <th style={{ padding: '10px 8px', textAlign: 'center', width: '15%' }}>Qty</th>
+                                    <th style={{ padding: '10px 8px', textAlign: 'right', width: '25%' }}>Rev</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {sorted.map((it, idx) => (
+                                    <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                      <td style={{ padding: '8px 15px', fontWeight: 'bold' }}>#{idx + 1}</td>
+                                      <td style={{ padding: '8px 15px' }}>{it.name}</td>
+                                      <td style={{ padding: '8px 15px', textAlign: 'center' }}><strong>{it.qty}</strong></td>
+                                      <td style={{ padding: '8px 15px', textAlign: 'right' }}>SAR {it.totalPrice.toFixed(2)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1446,7 +1960,7 @@ export default function Reports({ isTodaySales = false }) {
                           <div>
                             <div style={{ fontWeight: 700, fontSize: 14 }}>{c.closing_type} Closing — {c.cashier_name} ({c.branch})</div>
                             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                              {new Date(c.login_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} → {new Date(c.logout_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} · Active: {c.total_active_time} · {c.total_orders} orders
+                              {formatSaudiTime(c.login_time)} → {formatSaudiTime(c.logout_time)} · Active: {c.total_active_time} · {c.total_orders} orders{c.closing_cash ? ` · Drawer: ${CURRENCY}${parseFloat(c.closing_cash).toFixed(2)}` : ''}
                             </div>
                           </div>
                         </div>

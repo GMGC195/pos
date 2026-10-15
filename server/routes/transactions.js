@@ -25,13 +25,48 @@ router.get('/', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
+    // For Cashier on Today's / Active Shift Sale: only show orders from their current shift
+    if (req.query.unclosed_only === 'true' && role === 'cashier') {
+      const activeShiftRes = await pool.query(
+        `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+        [req.user.username]
+      );
+      const activeShift = activeShiftRes.rows[0];
+
+      if (activeShift) {
+        params.push(activeShift.id);
+        const shiftIdParam = `$${params.length}`;
+        params.push(req.user.username);
+        const userParam = `$${params.length}`;
+        params.push(activeShift.start_time);
+        const startTimeParam = `$${params.length}`;
+
+        query += ` AND (o.shift_id = ${shiftIdParam} OR (o.is_shift_closed = FALSE AND (o.completed_by = ${userParam} OR (o.completed_by IS NULL AND o.order_taker = ${userParam})) AND t.created_at >= ${startTimeParam}))`;
+      } else {
+        params.push(req.user.username);
+        query += ` AND o.is_shift_closed = FALSE AND (o.completed_by = $${params.length} OR (o.completed_by IS NULL AND o.order_taker = $${params.length}))`;
+      }
+
+      if (branch && branch !== 'All') {
+        params.push(branch);
+        query += ` AND o.branch = $${params.length}`;
+      }
+      params.push(req.user.username);
+      query += ` AND (t.payment_method != 'Credit' OR o.completed_by = $${params.length})`;
+      query += ' ORDER BY t.created_at DESC';
+
+      const result = await pool.query(query, params);
+      return res.json(result.rows);
+    }
+
+    // Standard date filtering for Admin / Developer / Reports (Saudi Arabia Asia/Riyadh UTC+3)
     if (from) {
       params.push(from);
-      query += ` AND t.created_at >= $${params.length}::date`;
+      query += ` AND t.created_at >= ($${params.length} || ' 00:00:00+03')::timestamptz`;
     }
     if (to) {
       params.push(to);
-      query += ` AND t.created_at < ($${params.length}::date + INTERVAL '1 day')`;
+      query += ` AND t.created_at <= ($${params.length} || ' 23:59:59.999+03')::timestamptz`;
     }
     if (branch && branch !== 'All') {
       params.push(branch);
@@ -39,15 +74,11 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     if (req.query.unclosed_only === 'true') {
       query += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
-      if (role === 'cashier') {
-        params.push(req.user.username);
-        query += ` AND o.completed_by = $${params.length}`;
-      }
     }
 
     if (!isAdminRole) {
       params.push(req.user.username);
-      query += ` AND (t.payment_method != 'Credit' OR (o.completed_by = $${params.length} AND t.created_at >= CURRENT_DATE))`;
+      query += ` AND (t.payment_method != 'Credit' OR (o.completed_by = $${params.length} AND (t.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date))`;
     }
 
     query += ' ORDER BY t.created_at DESC';
@@ -74,13 +105,57 @@ router.get('/summary', authenticateToken, async (req, res) => {
     let whereClause = 'WHERE 1=1';
     const params = [];
 
+    // For Cashier on Today's / Active Shift Sale: only summarize their current shift
+    if (req.query.unclosed_only === 'true' && role === 'cashier') {
+      const activeShiftRes = await pool.query(
+        `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+        [req.user.username]
+      );
+      const activeShift = activeShiftRes.rows[0];
+
+      if (activeShift) {
+        params.push(activeShift.id);
+        const shiftIdParam = `$${params.length}`;
+        params.push(req.user.username);
+        const userParam = `$${params.length}`;
+        params.push(activeShift.start_time);
+        const startTimeParam = `$${params.length}`;
+
+        whereClause += ` AND (o.shift_id = ${shiftIdParam} OR (o.is_shift_closed = FALSE AND (o.completed_by = ${userParam} OR (o.completed_by IS NULL AND o.order_taker = ${userParam})) AND t.created_at >= ${startTimeParam}))`;
+      } else {
+        params.push(req.user.username);
+        whereClause += ` AND o.is_shift_closed = FALSE AND (o.completed_by = $${params.length} OR (o.completed_by IS NULL AND o.order_taker = $${params.length}))`;
+      }
+
+      if (branch && branch !== 'All') {
+        params.push(branch);
+        whereClause += ` AND o.branch = $${params.length}`;
+      }
+      params.push(req.user.username);
+      whereClause += ` AND (t.payment_method != 'Credit' OR o.completed_by = $${params.length})`;
+
+      const result = await pool.query(
+        `SELECT 
+          t.payment_method, 
+          COUNT(*) as count, 
+          SUM(t.amount) as total 
+         FROM transactions t
+         JOIN orders o ON t.order_id = o.id
+         ${whereClause}
+         GROUP BY t.payment_method`,
+        params
+      );
+      return res.json(result.rows);
+    }
+
+    // Standard date filtering for Admin / Developer / Reports (Saudi Arabia Asia/Riyadh UTC+3)
     if (from) {
       params.push(from);
-      whereClause += ` AND t.created_at >= $${params.length}::date`;
+      whereClause += ` AND t.created_at >= ($${params.length} || ' 00:00:00+03')::timestamptz`;
     }
     if (to) {
       params.push(to);
-      whereClause += ` AND t.created_at < ($${params.length}::date + INTERVAL '1 day')`;
+      whereClause += ` AND t.created_at <= ($${params.length} || ' 23:59:59.999+03')::timestamptz`;
     }
     if (branch && branch !== 'All') {
       params.push(branch);
@@ -88,15 +163,11 @@ router.get('/summary', authenticateToken, async (req, res) => {
     }
     if (req.query.unclosed_only === 'true') {
       whereClause += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
-      if (role === 'cashier') {
-        params.push(req.user.username);
-        whereClause += ` AND o.completed_by = $${params.length}`;
-      }
     }
 
     if (!isAdminRole) {
       params.push(req.user.username);
-      whereClause += ` AND (t.payment_method != 'Credit' OR (o.completed_by = $${params.length} AND t.created_at >= CURRENT_DATE))`;
+      whereClause += ` AND (t.payment_method != 'Credit' OR (o.completed_by = $${params.length} AND (t.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date))`;
     }
 
     const result = await pool.query(
@@ -136,6 +207,18 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     const totalCreditResult = await pool.query(totalCreditQuery, totalCreditParams);
     const totalCredit = parseFloat(totalCreditResult.rows[0]?.total_credit || 0);
 
+    // Check if cashier has active shift
+    let cashierShiftStartTime = null;
+    if (role === 'cashier') {
+      const activeShiftRes = await pool.query(
+        `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+        [req.user.username]
+      );
+      if (activeShiftRes.rows.length > 0) {
+        cashierShiftStartTime = activeShiftRes.rows[0].start_time;
+      }
+    }
+
     // Major payments received in the date range
     let paymentsQuery = `
       SELECT SUM(ct.amount) as major_payments_total,
@@ -147,22 +230,33 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     `;
     let paymentsParams = [];
     
-    if (from) {
-      paymentsParams.push(from);
-      paymentsQuery += ` AND ct.created_at >= $${paymentsParams.length}::date`;
-    }
-    if (to) {
-      paymentsParams.push(to);
-      paymentsQuery += ` AND ct.created_at < ($${paymentsParams.length}::date + INTERVAL '1 day')`;
-    }
-    if (!isAdminRole && req.user?.branch) {
-      paymentsParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
-      paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
+    if (role === 'cashier' && cashierShiftStartTime) {
       paymentsParams.push(req.user.username);
-      paymentsQuery += ` AND ct.cashier_name = $${paymentsParams.length} AND ct.created_at >= CURRENT_DATE`;
-    } else if (branch && branch !== 'All') {
-      paymentsParams.push(JSON.stringify([branch]));
-      paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
+      paymentsQuery += ` AND ct.cashier_name = $${paymentsParams.length}`;
+      paymentsParams.push(cashierShiftStartTime);
+      paymentsQuery += ` AND ct.created_at >= $${paymentsParams.length}`;
+      if (req.user?.branch) {
+        paymentsParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
+        paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
+      }
+    } else {
+      if (from) {
+        paymentsParams.push(from);
+        paymentsQuery += ` AND ct.created_at >= ($${paymentsParams.length} || ' 00:00:00+03')::timestamptz`;
+      }
+      if (to) {
+        paymentsParams.push(to);
+        paymentsQuery += ` AND ct.created_at <= ($${paymentsParams.length} || ' 23:59:59.999+03')::timestamptz`;
+      }
+      if (!isAdminRole && req.user?.branch) {
+        paymentsParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
+        paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
+        paymentsParams.push(req.user.username);
+        paymentsQuery += ` AND ct.cashier_name = $${paymentsParams.length}`;
+      } else if (branch && branch !== 'All') {
+        paymentsParams.push(JSON.stringify([branch]));
+        paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
+      }
     }
 
     const paymentsResult = await pool.query(paymentsQuery, paymentsParams);
@@ -178,22 +272,33 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
       WHERE ct.type = 'PAYMENT'
     `;
     let listParams = [];
-    if (from) {
-      listParams.push(from);
-      paymentsListQuery += ` AND ct.created_at >= $${listParams.length}::date`;
-    }
-    if (to) {
-      listParams.push(to);
-      paymentsListQuery += ` AND ct.created_at < ($${listParams.length}::date + INTERVAL '1 day')`;
-    }
-    if (!isAdminRole && req.user?.branch) {
-      listParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
-      paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
+    if (role === 'cashier' && cashierShiftStartTime) {
       listParams.push(req.user.username);
-      paymentsListQuery += ` AND ct.cashier_name = $${listParams.length} AND ct.created_at >= CURRENT_DATE`;
-    } else if (branch && branch !== 'All') {
-      listParams.push(JSON.stringify([branch]));
-      paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
+      paymentsListQuery += ` AND ct.cashier_name = $${listParams.length}`;
+      listParams.push(cashierShiftStartTime);
+      paymentsListQuery += ` AND ct.created_at >= $${listParams.length}`;
+      if (req.user?.branch) {
+        listParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
+        paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
+      }
+    } else {
+      if (from) {
+        listParams.push(from);
+        paymentsListQuery += ` AND ct.created_at >= ($${listParams.length} || ' 00:00:00+03')::timestamptz`;
+      }
+      if (to) {
+        listParams.push(to);
+        paymentsListQuery += ` AND ct.created_at <= ($${listParams.length} || ' 23:59:59.999+03')::timestamptz`;
+      }
+      if (!isAdminRole && req.user?.branch) {
+        listParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
+        paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
+        listParams.push(req.user.username);
+        paymentsListQuery += ` AND ct.cashier_name = $${listParams.length}`;
+      } else if (branch && branch !== 'All') {
+        listParams.push(JSON.stringify([branch]));
+        paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
+      }
     }
     paymentsListQuery += ' ORDER BY ct.created_at DESC';
 
@@ -208,7 +313,6 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     if (err.code === '42703') {
-       // Ignore column errors gracefully during migration
        return res.json({ totalCredit: 0, majorPaymentsTotal: 0, majorPayments: [] });
     }
     res.status(500).json({ error: err.message });

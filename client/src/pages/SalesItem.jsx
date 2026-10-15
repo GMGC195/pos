@@ -12,13 +12,11 @@ import {
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import { usePOS } from '../contexts/POSContext'
+import { getSaudiTodayDate, getSaudiYesterdayDate } from '../utils/timezone'
 
-const today = () => new Date().toISOString().split('T')[0]
-const yesterday = () => {
-  const d = new Date()
-  d.setDate(d.getDate() - 1)
-  return d.toISOString().split('T')[0]
-}
+const today = () => getSaudiTodayDate()
+const yesterday = () => getSaudiYesterdayDate()
+
 
 
 export default function SalesItem() {

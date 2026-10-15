@@ -25,8 +25,8 @@ router.get('/sales-items', authenticateToken, isAdminOrManagement, async (req, r
         JOIN orders o ON oi.order_id = o.id
         LEFT JOIN order_item_usage oiu ON oi.id = oiu.order_item_id
         WHERE o.status = 'Completed'
-          AND DATE(o.created_at) >= $1 
-          AND DATE(o.created_at) <= $2
+          AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date >= $1::date 
+          AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date <= $2::date
           ${branchCond}
         GROUP BY oi.item_id
       ),
@@ -46,8 +46,8 @@ router.get('/sales-items', authenticateToken, isAdminOrManagement, async (req, r
         LEFT JOIN items i ON oi.item_id = i.id
         LEFT JOIN categories c ON c.id = (SELECT category_id FROM item_categories WHERE item_id = i.id LIMIT 1)
         WHERE o.status = 'Completed'
-          AND DATE(o.created_at) >= $1 
-          AND DATE(o.created_at) <= $2
+          AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date >= $1::date 
+          AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date <= $2::date
           ${branchCond}
         GROUP BY c.name, oi.item_name, oi.item_id
       )

@@ -1,8 +1,10 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import axios from '../api'
 import toast from 'react-hot-toast'
+import StartShiftModal from './StartShiftModal'
+import { getSaudiLiveTimeString } from '../utils/timezone'
 import {
   BRAND_NAME,
   BRAND_TAGLINE,
@@ -88,11 +90,100 @@ export default function Layout() {
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const location = useLocation()
 
+  // Cashier Shift & Countdown States
+  const [showStartShiftModal, setShowStartShiftModal] = useState(false);
+  const [activeShift, setActiveShift] = useState(null);
+  const [closingCountdown, setClosingCountdown] = useState(null);
+  const [liveKsaTime, setLiveKsaTime] = useState(getSaudiLiveTimeString());
+
   // Password change states
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passError, setPassError] = useState('');
   const [passSubmitting, setPassSubmitting] = useState(false);
+
+  // Live Saudi time ticker
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLiveKsaTime(getSaudiLiveTimeString());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Cashier 90-second auto-logout countdown timer
+  useEffect(() => {
+    const isCashier = user?.role?.trim().toLowerCase() === 'cashier';
+    if (!isCashier) {
+      setClosingCountdown(null);
+      return;
+    }
+
+    const checkDeadline = () => {
+      const stored = localStorage.getItem('cashier_closing_deadline');
+      if (!stored) {
+        setClosingCountdown(null);
+        return;
+      }
+      const deadline = parseInt(stored, 10);
+      const now = Date.now();
+      const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+      if (remaining > 0) {
+        setClosingCountdown(remaining);
+      } else {
+        localStorage.removeItem('cashier_closing_deadline');
+        setClosingCountdown(null);
+        toast('Shift closed. Automatically logged out.', { icon: '⏱️' });
+        handleLogout();
+      }
+    };
+
+    checkDeadline();
+    const interval = setInterval(checkDeadline, 1000);
+    const handleShiftClosed = () => checkDeadline();
+    window.addEventListener('cashier_shift_closed', handleShiftClosed);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('cashier_shift_closed', handleShiftClosed);
+    };
+  }, [user]);
+
+  // Check active cashier shift on mount / login
+  const checkActiveShift = useCallback(async () => {
+    const isCashier = user?.role?.trim().toLowerCase() === 'cashier';
+    if (!isCashier) return;
+    const deadline = localStorage.getItem('cashier_closing_deadline');
+    if (deadline && parseInt(deadline, 10) > Date.now()) {
+      setShowStartShiftModal(false);
+      return;
+    }
+    // If offline and already have an active shift or checked, don't repeat
+    if (typeof navigator !== 'undefined' && !navigator.onLine && activeShift) {
+      return;
+    }
+    try {
+      const res = await axios.get('/api/orders/cashier-shift/active');
+      if (res.data?.hasActiveShift) {
+        setActiveShift(res.data.shift);
+        setShowStartShiftModal(false);
+      } else {
+        setActiveShift(null);
+        setShowStartShiftModal(true);
+      }
+    } catch (err) {
+      console.error('Failed to check active cashier shift:', err);
+      // When offline or network error, do not overwrite existing active shift
+    }
+  }, [user, activeShift]);
+
+  useEffect(() => {
+    checkActiveShift();
+    const handleShiftStarted = () => checkActiveShift();
+    window.addEventListener('cashier_shift_started', handleShiftStarted);
+    return () => {
+      window.removeEventListener('cashier_shift_started', handleShiftStarted);
+    };
+  }, [checkActiveShift]);
 
   const handlePasswordChangeSubmit = async (e) => {
     e.preventDefault();
@@ -286,9 +377,12 @@ export default function Layout() {
         Order Taking - <span className="branch-full">{user.branch}</span><span className="branch-short">{shortBranch}</span>
       </span>
     )
+  } else if (location.pathname === '/today-sales' && user?.role?.trim().toLowerCase() === 'cashier') {
+    currentTitle = 'Your Shift Sales'
   }
 
   const handleLogout = () => {
+    localStorage.removeItem('cashier_closing_deadline');
     logout()
     navigate('/login', { replace: true })
   }
@@ -299,6 +393,15 @@ export default function Layout() {
       if (!item.roles) return true
       return item.roles.some(r => r.toLowerCase() === user?.role?.trim().toLowerCase())
     });
+
+    if (user?.role?.trim().toLowerCase() === 'cashier') {
+      items = items.map(item => {
+        if (item.to === '/today-sales') {
+          return { ...item, label: 'Your Shift Sale' };
+        }
+        return item;
+      });
+    }
 
     if (user?.role?.trim().toLowerCase() === 'employee') {
       items = items.map(item => {
@@ -530,15 +633,82 @@ export default function Layout() {
             </button>
             <div>
               <div className="page-title">{currentTitle}</div>
-              <div className="page-subtitle">
-                {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              <div className="page-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                <span style={{ opacity: 0.5 }}>•</span>
+                <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
               </div>
             </div>
           </div>
-          {/* <div className="topbar-search">
-            <Search className="search-icon" size={16} strokeWidth={2.5} />
-            <input type="text" placeholder="Search anything..." />
-          </div> */}
+
+          {/* Topbar Middle: Auto-Logout Countdown Timer (Pill / Modal Toast style in mid of top bar) */}
+          {closingCountdown !== null && closingCountdown > 0 && (
+            <div style={{
+              margin: '0 auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+              border: '1.5px solid #ef4444',
+              borderRadius: 30,
+              padding: '6px 16px',
+              boxShadow: '0 4px 14px rgba(239, 68, 68, 0.22)'
+            }}>
+              <div style={{
+                background: '#dc2626',
+                color: '#fff',
+                width: 24,
+                height: 24,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 2px 6px rgba(220, 38, 38, 0.35)'
+              }}>
+                <Clock size={14} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#991b1b', whiteSpace: 'nowrap' }}>
+                  Shift Closed • Auto-Logout:
+                </span>
+                <span style={{
+                  fontFamily: 'monospace',
+                  fontWeight: 900,
+                  fontSize: 15,
+                  background: '#dc2626',
+                  color: '#fff',
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  letterSpacing: '0.5px'
+                }}>
+                  00:{String(closingCountdown).padStart(2, '0')}
+                </span>
+              </div>
+              <button
+                onClick={handleLogout}
+                style={{
+                  background: '#991b1b',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '5px 12px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  whiteSpace: 'nowrap',
+                  transition: 'background 0.2s'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.background = '#7f1d1d'}
+                onMouseOut={(e) => e.currentTarget.style.background = '#991b1b'}
+              >
+                <LogOut size={12} /> Logout Now
+              </button>
+            </div>
+          )}
+
           <div className="topbar-right">
             {user && (
               <div className="notif-wrapper" style={{ position: 'relative' }}>
@@ -700,6 +870,18 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Cashier Start Shift Modal */}
+      <StartShiftModal
+        isOpen={showStartShiftModal}
+        user={user}
+        onShiftStarted={(shift) => {
+          setActiveShift(shift);
+          setShowStartShiftModal(false);
+          window.dispatchEvent(new CustomEvent('cashier_shift_started', { detail: shift }));
+        }}
+      />
     </div>
   )
 }
+

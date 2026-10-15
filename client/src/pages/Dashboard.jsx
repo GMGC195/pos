@@ -37,6 +37,8 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 
 import { CURRENCY } from '../config'
 import { BRAND_NAME, BRAND_PRIMARY, BRAND_SECONDARY, BRAND_LOGO } from '../branding'
+import { getSaudiTodayDate } from '../utils/timezone'
+
 
 const PALETTE = [BRAND_PRIMARY, BRAND_SECONDARY, '#10b981', '#3b82f6', '#8b5cf6', '#f97316']
 
@@ -157,7 +159,7 @@ export default function Dashboard() {
         }))
         
       // Fetch today's closings for filter dropdown
-      axios.get('/api/orders/closings', { params: { date: new Date().toISOString().split('T')[0], branch: salesSelectedBranch } })
+      axios.get('/api/orders/closings', { params: { date: getSaudiTodayDate(), branch: salesSelectedBranch } })
         .then(r => setPastClosings(r.data))
         .catch(() => setPastClosings([]))
     }
@@ -470,7 +472,7 @@ export default function Dashboard() {
                       </div>
 
                       <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => {
-                        const today = new Date().toISOString().split('T')[0];
+                        const today = getSaudiTodayDate();
                         setTopItemsFromDate(today);
                         setTopItemsToDate(today);
                         setShowTopItemsFilter(false);
