@@ -1127,7 +1127,32 @@ router.get('/employee-date', authenticateToken, async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, check_in, check_out, status, on_break, break_start, total_break_duration_seconds, break_logs FROM employee_attendance WHERE employee_id = $1 AND TO_CHAR(date, 'YYYY-MM-DD') = $2 ORDER BY check_in ASC",
+      `SELECT 
+        ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, 
+        ea.break_start, ea.total_break_duration_seconds, ea.break_logs,
+        ea.created_by, ea.checked_out_by, ea.created_at, ea.remarks,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', ed.id,
+                'edited_by', ed.edited_by,
+                'edited_at', ed.edited_at,
+                'reason', ed.reason,
+                'original_check_in', ed.original_check_in,
+                'original_check_out', ed.original_check_out,
+                'new_check_in', ed.new_check_in,
+                'new_check_out', ed.new_check_out
+              ) ORDER BY ed.edited_at DESC
+            )
+            FROM edited_attendance ed
+            WHERE ed.attendance_id = ea.id
+          ),
+          '[]'::json
+        ) AS edit_history
+      FROM employee_attendance ea 
+      WHERE ea.employee_id = $1 AND TO_CHAR(ea.date, 'YYYY-MM-DD') = $2 
+      ORDER BY ea.check_in ASC`,
       [employee_id, date]
     );
     res.json(result.rows);
@@ -1236,23 +1261,44 @@ router.post('/session', authenticateToken, async (req, res) => {
   let parsedBreakLogs = [];
   if (break_logs !== undefined && break_logs !== null) {
     parsedBreakLogs = Array.isArray(break_logs) ? break_logs : (typeof break_logs === 'string' ? JSON.parse(break_logs) : []);
-    parsedBreakLogs.forEach(b => {
-      if (b.break_in && b.break_out) {
-        const dur = Math.max(0, Math.floor((new Date(b.break_out).getTime() - new Date(b.break_in).getTime()) / 1000));
-        b.duration_seconds = dur;
-        totalBreakSecs += dur;
-      } else if (b.duration_seconds) {
-        totalBreakSecs += Number(b.duration_seconds);
+    const sessionInMs = new Date(check_in).getTime();
+    const sessionOutMs = check_out ? new Date(check_out).getTime() : null;
+
+    for (let i = 0; i < parsedBreakLogs.length; i++) {
+      const b = parsedBreakLogs[i];
+      if (b.break_in) {
+        const bInMs = new Date(b.break_in).getTime();
+        if (bInMs < sessionInMs) {
+          return res.status(400).json({ error: `Break #${i + 1} cannot start before session Check-In time.` });
+        }
+        if (sessionOutMs && bInMs >= sessionOutMs) {
+          return res.status(400).json({ error: `Break #${i + 1} cannot start after session Check-Out time.` });
+        }
+        if (b.break_out) {
+          const bOutMs = new Date(b.break_out).getTime();
+          if (bOutMs <= bInMs) {
+            return res.status(400).json({ error: `Break #${i + 1} Out time must be after In time.` });
+          }
+          if (sessionOutMs && bOutMs > sessionOutMs) {
+            return res.status(400).json({ error: `Break #${i + 1} Out time cannot exceed session Check-Out time.` });
+          }
+          const dur = Math.max(0, Math.floor((bOutMs - bInMs) / 1000));
+          b.duration_seconds = dur;
+          totalBreakSecs += dur;
+        } else if (b.duration_seconds) {
+          totalBreakSecs += Number(b.duration_seconds);
+        }
       }
-    });
+    }
   }
   const hasActiveBreak = parsedBreakLogs.length > 0 && !parsedBreakLogs[parsedBreakLogs.length - 1].break_out;
   const activeBreakStart = hasActiveBreak ? parsedBreakLogs[parsedBreakLogs.length - 1].break_in : null;
+  const checkedOutBy = check_out ? req.user.username : null;
 
   try {
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by, remarks, break_logs, total_break_duration_seconds, on_break, break_start) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
-      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username, 'Manual', JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
+      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by, checked_out_by, remarks, break_logs, total_break_duration_seconds, on_break, break_start) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *',
+      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username, checkedOutBy, 'Manual', JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1344,36 +1390,59 @@ router.post('/edit', authenticateToken, async (req, res) => {
     let parsedBreakLogs = null;
     if (break_logs !== undefined && break_logs !== null) {
       parsedBreakLogs = Array.isArray(break_logs) ? break_logs : (typeof break_logs === 'string' ? JSON.parse(break_logs) : []);
+      const finalInMs = new Date(new_check_in || original_check_in).getTime();
+      const finalOutMs = (new_check_out || original_check_out) ? new Date(new_check_out || original_check_out).getTime() : null;
+
       totalBreakSecs = 0;
-      parsedBreakLogs.forEach(b => {
-        if (b.break_in && b.break_out) {
-          const dur = Math.max(0, Math.floor((new Date(b.break_out).getTime() - new Date(b.break_in).getTime()) / 1000));
-          b.duration_seconds = dur;
-          totalBreakSecs += dur;
-        } else if (b.duration_seconds) {
-          totalBreakSecs += Number(b.duration_seconds);
+      for (let i = 0; i < parsedBreakLogs.length; i++) {
+        const b = parsedBreakLogs[i];
+        if (b.break_in) {
+          const bInMs = new Date(b.break_in).getTime();
+          if (bInMs < finalInMs) {
+            return res.status(400).json({ error: `Break #${i + 1} cannot start before session Check-In time.` });
+          }
+          if (finalOutMs && bInMs >= finalOutMs) {
+            return res.status(400).json({ error: `Break #${i + 1} cannot start after session Check-Out time.` });
+          }
+          if (b.break_out) {
+            const bOutMs = new Date(b.break_out).getTime();
+            if (bOutMs <= bInMs) {
+              return res.status(400).json({ error: `Break #${i + 1} Out time must be after In time.` });
+            }
+            if (finalOutMs && bOutMs > finalOutMs) {
+              return res.status(400).json({ error: `Break #${i + 1} Out time cannot exceed session Check-Out time.` });
+            }
+            const dur = Math.max(0, Math.floor((bOutMs - bInMs) / 1000));
+            b.duration_seconds = dur;
+            totalBreakSecs += dur;
+          } else if (b.duration_seconds) {
+            totalBreakSecs += Number(b.duration_seconds);
+          }
         }
-      });
+      }
     }
 
     // Update employee_attendance
+    const setCheckedOutBy = new_check_out ? (original_check_out ? null : edited_by) : null;
     if (parsedBreakLogs !== null) {
       const hasActiveBreak = parsedBreakLogs.length > 0 && !parsedBreakLogs[parsedBreakLogs.length - 1].break_out;
       const activeBreakStart = hasActiveBreak ? parsedBreakLogs[parsedBreakLogs.length - 1].break_in : null;
       await pool.query(
         `UPDATE employee_attendance 
          SET check_in = $1, check_out = $2, remarks = 'Edited',
+             checked_out_by = CASE WHEN $8::varchar IS NOT NULL THEN $8::varchar ELSE checked_out_by END,
              break_logs = $4, total_break_duration_seconds = $5,
              on_break = $6, break_start = $7
          WHERE id = $3`,
-        [new_check_in || null, new_check_out || null, attendance_id, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
+        [new_check_in || null, new_check_out || null, attendance_id, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart, setCheckedOutBy]
       );
     } else {
       await pool.query(
         `UPDATE employee_attendance 
-         SET check_in = $1, check_out = $2, remarks = 'Edited' 
+         SET check_in = $1, check_out = $2, remarks = 'Edited',
+             checked_out_by = CASE WHEN $4::varchar IS NOT NULL THEN $4::varchar ELSE checked_out_by END
          WHERE id = $3`,
-        [new_check_in || null, new_check_out || null, attendance_id]
+        [new_check_in || null, new_check_out || null, attendance_id, setCheckedOutBy]
       );
     }
 

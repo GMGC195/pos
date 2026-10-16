@@ -781,16 +781,50 @@ async function sendClosingEmail(report, closingType) {
   try {
     const apiKey = process.env.RESEND_API_KEY;
     const fromEmail = process.env.RESEND_FROM_EMAIL;
-    const toEmailsStr = process.env.REPORT_TO_EMAILS;
     
-    if (!apiKey || !fromEmail || !toEmailsStr) {
-      console.log(`[Email System] Skipping: Missing Resend configuration in .env`);
+    if (!apiKey || !fromEmail) {
+      console.log(`[Email System] Skipping: Missing Resend API key or From email in .env`);
       return;
     }
-    
-    console.log(`[Email System] Preparing to send ${closingType} report from ${fromEmail} to ${toEmailsStr}`);
+
+    // Load recipient emails from database settings
+    let toEmails = [];
+    try {
+      const settingsRes = await pool.query('SELECT report_emails FROM settings ORDER BY id ASC LIMIT 1');
+      if (settingsRes.rows.length > 0 && settingsRes.rows[0].report_emails) {
+        const dbEmails = settingsRes.rows[0].report_emails;
+        if (Array.isArray(dbEmails)) {
+          toEmails = dbEmails.map(e => (typeof e === 'string' ? e.trim() : '')).filter(Boolean);
+        } else if (typeof dbEmails === 'string') {
+          try {
+            const parsed = JSON.parse(dbEmails);
+            if (Array.isArray(parsed)) {
+              toEmails = parsed.map(e => (typeof e === 'string' ? e.trim() : '')).filter(Boolean);
+            }
+          } catch (pe) {
+            toEmails = dbEmails.split(',').map(e => e.trim()).filter(Boolean);
+          }
+        }
+      }
+    } catch (dbErr) {
+      console.warn('[Email System] Could not load report_emails from settings table:', dbErr.message);
+    }
+
+    // Fallback to process.env.REPORT_TO_EMAILS if DB has no emails configured
+    if (!toEmails || toEmails.length === 0) {
+      const toEmailsStr = process.env.REPORT_TO_EMAILS;
+      if (toEmailsStr) {
+        toEmails = toEmailsStr.split(',').map(e => e.trim()).filter(Boolean);
+      }
+    }
+
+    if (!toEmails || toEmails.length === 0) {
+      console.log(`[Email System] Skipping: No recipient emails configured in Settings or .env`);
+      return;
+    }
+
+    console.log(`[Email System] Preparing to send ${closingType} report from ${fromEmail} to:`, toEmails);
     const resend = new Resend(apiKey);
-    const toEmails = toEmailsStr.split(',').map(e => e.trim()).filter(Boolean);
     
     let itemsHtml = '';
     let topSellingHtml = '';

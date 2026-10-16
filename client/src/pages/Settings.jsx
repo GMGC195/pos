@@ -17,7 +17,8 @@ import {
   RefreshCw,
   MoreVertical,
   X,
-  Store
+  Store,
+  Plus
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -30,6 +31,9 @@ export default function Settings() {
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
   const [printerIp, setPrinterIp] = useState(localStorage.getItem('printerIp') || '127.0.0.1')
   const [lowStockBehavior, setLowStockBehavior] = useState('block')
+  const [reportEmails, setReportEmails] = useState(['mr.caffee25@gmail.com'])
+  const [newEmailInput, setNewEmailInput] = useState('')
+  const [emailInputError, setEmailInputError] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
   const shiftDropdownRef = useRef(null)
   const branchDropdownRef = useRef(null)
@@ -117,7 +121,7 @@ export default function Settings() {
       fetchUsers()
       fetchShifts()
     }
-    if ((activeTab === 'hardware' || activeTab === 'pos_settings') && isAdminRole) {
+    if ((activeTab === 'hardware' || activeTab === 'pos_settings' || activeTab === 'report_emails') && isAdminRole) {
       fetchSettings()
     }
   }, [activeTab, user?.role])
@@ -129,6 +133,18 @@ export default function Settings() {
         setAutoPrintEnabled(res.data.auto_print_enabled)
         setPrinterIp(res.data.printer_ip)
         setLowStockBehavior(res.data.low_stock_behavior || 'block')
+        if (Array.isArray(res.data.report_emails) && res.data.report_emails.length > 0) {
+          setReportEmails(res.data.report_emails)
+        } else if (typeof res.data.report_emails === 'string') {
+          try {
+            const parsed = JSON.parse(res.data.report_emails)
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setReportEmails(parsed)
+            }
+          } catch(e) {
+            if (res.data.report_emails) setReportEmails([res.data.report_emails])
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to fetch settings', err)
@@ -138,10 +154,69 @@ export default function Settings() {
   const saveSettings = async () => {
     setSavingSettings(true)
     try {
-      await api.put('/api/settings', { auto_print_enabled: autoPrintEnabled, printer_ip: printerIp, low_stock_behavior: lowStockBehavior })
+      await api.put('/api/settings', { 
+        auto_print_enabled: autoPrintEnabled, 
+        printer_ip: printerIp, 
+        low_stock_behavior: lowStockBehavior,
+        report_emails: reportEmails
+      })
       toast.success('Settings saved globally')
     } catch (err) {
       toast.error('Failed to save settings')
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  const handleAddEmail = (e) => {
+    if (e) e.preventDefault()
+    const email = newEmailInput.trim().toLowerCase()
+    setEmailInputError('')
+
+    if (!email) {
+      setEmailInputError('Please enter an email address')
+      return
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      setEmailInputError('Please enter a valid email address (e.g. name@domain.com)')
+      return
+    }
+
+    if (reportEmails.some(e => e.toLowerCase() === email)) {
+      setEmailInputError('This email is already in the recipient list')
+      return
+    }
+
+    const updated = [...reportEmails, email]
+    setReportEmails(updated)
+    setNewEmailInput('')
+    saveReportEmails(updated)
+  }
+
+  const handleRemoveEmail = (indexToRemove) => {
+    if (reportEmails.length <= 1) {
+      toast.error('At least one recipient email is required')
+      return
+    }
+    const updated = reportEmails.filter((_, idx) => idx !== indexToRemove)
+    setReportEmails(updated)
+    saveReportEmails(updated)
+  }
+
+  const saveReportEmails = async (emailsList) => {
+    setSavingSettings(true)
+    try {
+      await api.put('/api/settings', { 
+        auto_print_enabled: autoPrintEnabled, 
+        printer_ip: printerIp, 
+        low_stock_behavior: lowStockBehavior,
+        report_emails: emailsList 
+      })
+      toast.success('Recipient emails updated successfully')
+    } catch (err) {
+      toast.error('Failed to update recipient emails')
     } finally {
       setSavingSettings(false)
     }
@@ -338,6 +413,14 @@ export default function Settings() {
               <Store size={18} /> POS Options
             </button>
           )}
+          {isAdmin && (
+            <button 
+              className={`settings-nav-item ${activeTab === 'report_emails' ? 'active' : ''}`}
+              onClick={() => setActiveTab('report_emails')}
+            >
+              <Mail size={18} /> Report Emails
+            </button>
+          )}
         </aside>
 
         {/* Content Area */}
@@ -462,6 +545,203 @@ export default function Settings() {
                       {savingSettings ? 'Saving...' : <><CheckCircle2 size={18} /> Save Global Settings</>}
                     </button>
                   </div>
+              </div>
+            </div>
+          )}
+          {activeTab === 'report_emails' && isAdmin && (
+            <div className="settings-card fade-in">
+              <div className="card-header">
+                <div>
+                  <h2>Report Recipient Emails</h2>
+                  <p>Configure which email addresses automatically receive Shift Closing and Daily Closing sales reports</p>
+                </div>
+              </div>
+
+              {/* Information banner */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '14px',
+                padding: '16px 18px',
+                background: 'rgba(59, 130, 246, 0.08)',
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+                borderRadius: '12px',
+                marginBottom: '24px'
+              }}>
+                <Mail size={22} style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }} />
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                  <strong style={{ color: 'var(--text-primary)', display: 'block', marginBottom: '2px' }}>
+                    Automated Email Dispatch
+                  </strong>
+                  Whenever a cashier completes a Shift Closing or an Admin submits the Daily Closing report, the full financial summary (Sales, Cash, Card, Category breakdown, Interval items) is instantly dispatched via email to all active addresses listed below.
+                </div>
+              </div>
+
+              {/* Add Email Form */}
+              <div style={{ marginBottom: '28px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
+                  Add New Recipient Email
+                </label>
+                <form onSubmit={handleAddEmail} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1', minWidth: '260px', position: 'relative' }}>
+                    <div className="input-with-icon">
+                      <Mail size={16} />
+                      <input 
+                        type="email" 
+                        placeholder="e.g. manager@restaurant.com"
+                        value={newEmailInput}
+                        onChange={(e) => {
+                          setNewEmailInput(e.target.value)
+                          if (emailInputError) setEmailInputError('')
+                        }}
+                        style={{ paddingLeft: '40px' }}
+                      />
+                    </div>
+                    {emailInputError && (
+                      <p style={{ color: 'var(--red, #e31837)', fontSize: '12px', marginTop: '6px', fontWeight: 500 }}>
+                        {emailInputError}
+                      </p>
+                    )}
+                  </div>
+                  <button 
+                    type="submit" 
+                    disabled={savingSettings}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '12px 20px',
+                      background: 'var(--primary, #e31837)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontWeight: 600,
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <Plus size={16} /> Add Email
+                  </button>
+                </form>
+              </div>
+
+              <div className="divider" style={{ margin: '20px 0' }} />
+
+              {/* Email List */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <label style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Configured Recipients ({reportEmails.length})
+                  </label>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    At least one email is required
+                  </span>
+                </div>
+
+                {reportEmails.length === 0 ? (
+                  <div style={{ 
+                    padding: '30px', 
+                    textAlign: 'center', 
+                    background: 'var(--surface)', 
+                    borderRadius: '12px',
+                    border: '1.5px dashed var(--surface-2)',
+                    color: 'var(--text-muted)'
+                  }}>
+                    No recipient emails configured. Please add at least one email.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {reportEmails.map((email, idx) => (
+                      <div 
+                        key={email + idx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px 16px',
+                          background: 'var(--surface)',
+                          border: '1px solid var(--surface-2)',
+                          borderRadius: '10px',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '8px',
+                            background: 'rgba(227, 24, 55, 0.08)',
+                            color: 'var(--primary, #e31837)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <Mail size={18} />
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
+                              {email}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              Receives Shift & Daily Reports
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '3px 8px',
+                            borderRadius: '20px',
+                            background: 'rgba(16, 185, 129, 0.1)',
+                            color: '#10b981'
+                          }}>
+                            Active
+                          </span>
+                          <button
+                            type="button"
+                            title="Remove recipient"
+                            onClick={() => handleRemoveEmail(idx)}
+                            disabled={reportEmails.length <= 1 || savingSettings}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              background: 'transparent',
+                              border: '1px solid var(--surface-2)',
+                              color: reportEmails.length <= 1 ? 'var(--text-muted)' : 'var(--red, #e31837)',
+                              cursor: reportEmails.length <= 1 ? 'not-allowed' : 'pointer',
+                              opacity: reportEmails.length <= 1 ? 0.4 : 1,
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Manual Save Confirmation Button */}
+                <div style={{ marginTop: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <button 
+                    type="button" 
+                    className="btn-save" 
+                    onClick={() => saveReportEmails(reportEmails)} 
+                    disabled={savingSettings}
+                  >
+                    {savingSettings ? 'Saving...' : <><CheckCircle2 size={18} /> Save Recipient Emails</>}
+                  </button>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Changes are also automatically saved when adding or removing emails.
+                  </span>
+                </div>
               </div>
             </div>
           )}

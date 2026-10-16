@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Fingerprint, Coffee, Clock, User, LogIn, Search, RefreshCw, FileText, MoreVertical, X, Download, Filter, Edit } from 'lucide-react'
+import { Fingerprint, Coffee, Clock, User, LogIn, Search, RefreshCw, FileText, MoreVertical, X, Download, Filter, Edit, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -893,9 +893,9 @@ export default function TodayAttendance() {
                   {/* Add new session form */}
                   {editMode === 'add' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
                         <span style={{ fontSize: 14, fontWeight: 700 }}>➕ Add New Session</span>
-                        <button onClick={() => setEditMode('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>← Back</button>
+                        <button onClick={() => setEditMode('')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginRight: 10 }}>← Back</button>
                       </div>
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
                       <div>
@@ -928,9 +928,9 @@ export default function TodayAttendance() {
                   {/* Edit existing sessions */}
                   {editMode === 'edit' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
                         <span style={{ fontSize: 14, fontWeight: 700 }}>✏️ Edit Sessions</span>
-                        <button onClick={() => setEditMode('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>← Back</button>
+                        <button onClick={() => setEditMode('')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginRight: 10 }}>← Back</button>
                       </div>
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
                       {loadingSessions ? (
@@ -990,6 +990,7 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
   const [inVal, setInVal] = useState(() => toLocalTime(session.check_in))
   const [outVal, setOutVal] = useState(() => toLocalTime(session.check_out))
   const [reason, setReason] = useState('')
+  const [showAuditLogs, setShowAuditLogs] = useState(false)
 
   // Parse existing break sessions from session.break_logs
   const [breaks, setBreaks] = useState(() => {
@@ -1066,6 +1067,9 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
       }
     }
 
+    const sessionInDate = new Date(fullInStr)
+    const sessionOutDate = fullOutStr ? new Date(fullOutStr) : null
+
     // Process & validate break sessions
     const formattedBreaks = []
     for (let i = 0; i < breaks.length; i++) {
@@ -1079,8 +1083,22 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
       let bInDate = new Date(baseDateIn)
       const [bInH, bInM] = b.inVal.split(':').map(Number)
       bInDate.setHours(bInH, bInM, 0, 0)
-      if (bInDate < new Date(fullInStr)) {
-        bInDate.setDate(bInDate.getDate() + 1)
+      
+      // If session crosses midnight, adjust break date if break hour is past midnight
+      if (sessionOutDate && sessionOutDate > sessionInDate && sessionInDate.getDate() !== sessionOutDate.getDate()) {
+        if (bInH < sessionInDate.getHours()) {
+          bInDate.setDate(bInDate.getDate() + 1)
+        }
+      }
+
+      // Break must be within session Check-In and Check-Out
+      if (bInDate < sessionInDate) {
+        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be before Check-In time (${inVal}).`)
+        return
+      }
+      if (sessionOutDate && bInDate >= sessionOutDate) {
+        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be after Check-Out time (${outVal}).`)
+        return
       }
 
       let bOutDate = null
@@ -1088,8 +1106,16 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
         bOutDate = new Date(bInDate)
         const [bOutH, bOutM] = b.outVal.split(':').map(Number)
         bOutDate.setHours(bOutH, bOutM, 0, 0)
-        if (bOutDate < bInDate) {
+        if (bOutDate <= bInDate) {
           bOutDate.setDate(bOutDate.getDate() + 1)
+        }
+        if (bOutDate <= bInDate) {
+          toast.error(`Break #${i + 1} Out time must be after In time.`)
+          return
+        }
+        if (sessionOutDate && bOutDate > sessionOutDate) {
+          toast.error(`Break #${i + 1} Out time (${b.outVal}) cannot exceed session Check-Out time (${outVal}).`)
+          return
         }
       } else if (outVal) {
         toast.error(`Break #${i + 1} must have an Out time because the session is checked out.`)
@@ -1109,7 +1135,130 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
 
   return (
     <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Session #{index + 1} — {session.status}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+            Session #{index + 1} — {session.status}
+          </span>
+          {session.remarks && (
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              {session.remarks}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAuditLogs(!showAuditLogs)}
+          title="Click to view session audit history and who created/edited this attendance"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            background: showAuditLogs ? 'rgba(59, 130, 246, 0.15)' : 'var(--surface-2)',
+            color: showAuditLogs ? '#2563eb' : 'var(--text-secondary)',
+            border: '1px solid var(--surface-3)',
+            borderRadius: 6,
+            padding: '3px 8px',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <Info size={13} />
+          <span>Logs & History</span>
+          {session.edit_history && session.edit_history.length > 0 && (
+            <span style={{ 
+              background: '#ef4444', 
+              color: '#fff', 
+              fontSize: 9, 
+              fontWeight: 800, 
+              padding: '1px 5px', 
+              borderRadius: 10 
+            }}>
+              {session.edit_history.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Audit Logs / Session History Popdown */}
+      {showAuditLogs && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--surface-3)',
+          borderRadius: 8,
+          padding: 10,
+          fontSize: 11,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8
+        }}>
+          <div style={{ fontWeight: 700, color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-2)', paddingBottom: 4 }}>
+            📋 Session Audit Trail
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={{ background: 'var(--surface-1)', padding: '6px 8px', borderRadius: 6 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>Checked In / Created By:</div>
+              <div style={{ fontWeight: 700, color: 'var(--green)' }}>
+                {session.created_by || 'System / Auto'}
+              </div>
+              {session.created_at && (
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {new Date(session.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: 'var(--surface-1)', padding: '6px 8px', borderRadius: 6 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>Checked Out By:</div>
+              <div style={{ fontWeight: 700, color: session.check_out ? 'var(--text-primary)' : '#f59e0b' }}>
+                {session.check_out ? (session.checked_out_by || 'Auto System Checkout') : 'Active (Not Checked Out)'}
+              </div>
+              {session.check_out && (
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {new Date(session.check_out).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Edit History Records */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>
+              Edit History ({session.edit_history?.length || 0}):
+            </div>
+            {(!session.edit_history || session.edit_history.length === 0) ? (
+              <div style={{ fontStyle: 'italic', color: 'var(--text-muted)', fontSize: 10 }}>
+                No previous edits recorded for this session.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {session.edit_history.map((h, hIdx) => (
+                  <div key={hIdx} style={{ background: 'var(--surface-1)', padding: '6px 8px', borderRadius: 6, borderLeft: '3px solid #3b82f6' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, color: '#2563eb' }}>Edited by: {h.edited_by || 'Admin'}</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+                        {h.edited_at ? new Date(h.edited_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                      </span>
+                    </div>
+                    {h.reason && (
+                      <div style={{ marginTop: 2, color: 'var(--text-secondary)' }}>
+                        <strong>Reason:</strong> {h.reason}
+                      </div>
+                    )}
+                    {(h.original_check_in || h.new_check_in) && (
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        In: {h.original_check_in ? new Date(h.original_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'} → {h.new_check_in ? new Date(h.new_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'} | Out: {h.original_check_out ? new Date(h.original_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'} → {h.new_check_out ? new Date(h.new_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Check-In</span>

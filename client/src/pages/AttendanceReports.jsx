@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from '../api'
-import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2, ArrowRight } from 'lucide-react'
+import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2, ArrowRight, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -671,6 +671,8 @@ export default function AttendanceReports() {
               cellClass += ' leave-cell'
             } else {
               const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
+              const currentDayShiftHours = main.shift_hours || emp.shift_hours || 12.0
+              const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
               const dayBreakSecs = sessions.reduce((acc, s) => acc + parseInt(s.total_break_duration_seconds || 0), 0)
               
               const sessionLines = sessions.map(s => {
@@ -679,7 +681,11 @@ export default function AttendanceReports() {
                 const outStr = s.check_out 
                   ? `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}${isSystem ? ' (SYS)' : ''}` 
                   : 'Active'
-                const lines = [`In: ${inStr} Out: ${outStr}`]
+                return `In: ${inStr} Out: ${outStr}`
+              })
+
+              const breakLines = []
+              sessions.forEach(s => {
                 let bLogs = []
                 if (Array.isArray(s.break_logs)) bLogs = s.break_logs
                 else if (typeof s.break_logs === 'string') {
@@ -691,9 +697,8 @@ export default function AttendanceReports() {
                 bLogs.forEach(b => {
                   const bIn = b.break_in ? new Date(b.break_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'
                   const bOut = b.break_out ? new Date(b.break_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'
-                  lines.push(`B: In: ${bIn} Out: ${bOut}`)
+                  breakLines.push(`<span style="color: #E11D48; font-weight: bold;">B: In: ${bIn} Out: ${bOut}</span>`)
                 })
-                return lines.join('<br/>')
               })
               
               // Pad cells to align Total Duty text horizontally in Excel
@@ -704,7 +709,13 @@ export default function AttendanceReports() {
               }
               
               cellText = [...sessionLines, ...paddingLines].join('<br/>')
-              cellText += `<br/><span style="font-size: 8pt; color: #475569; font-weight: bold;">Total Duty: ${formatHoursToText(Math.min(currentDayShiftHours, dayHours))}${dayOvertime > 0 ? `<br/>Overtime: +${formatHoursToText(dayOvertime)}` : ''}${dayBreakSecs > 0 ? `<br/>Break Time: ${formatBreakTime(dayBreakSecs)}` : ''}</span>`
+              cellText += `<br/><span style="font-size: 8pt; color: #475569; font-weight: bold;">Total Duty: ${formatHoursToText(Math.min(currentDayShiftHours, dayHours))}${dayOvertime > 0 ? `<br/><span style="color: #16A34A;">Overtime: +${formatHoursToText(dayOvertime)}</span>` : ''}</span>`
+              if (breakLines.length > 0) {
+                cellText += `<br/>` + breakLines.join('<br/>')
+              }
+              if (dayBreakSecs > 0) {
+                cellText += `<br/><span style="font-size: 8pt; color: #E11D48; font-weight: bold;">Break Time: ${formatBreakTime(dayBreakSecs)}</span>`
+              }
               cellClass += ' present-cell'
             }
           } else {
@@ -1170,7 +1181,25 @@ export default function AttendanceReports() {
                               const currentDayShiftHours = sessions[0].shift_hours || emp.shift_hours || 12.0
                               const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
                               const dayBreakSecs = sessions.reduce((acc, s) => acc + parseInt(s.total_break_duration_seconds || 0), 0)
-                              cellPaddingBottom = dayBreakSecs > 0 ? (dayOvertime > 0 ? '54px' : '44px') : (dayOvertime > 0 ? '42px' : '32px')
+
+                              const allDayBreaks = []
+                              sessions.forEach(s => {
+                                let bLogs = []
+                                if (Array.isArray(s.break_logs)) bLogs = s.break_logs
+                                else if (typeof s.break_logs === 'string') {
+                                  try { bLogs = JSON.parse(s.break_logs) } catch (e) {}
+                                }
+                                if (s.on_break && s.break_start && !bLogs.some(b => !b.break_out)) {
+                                  bLogs.push({ break_in: s.break_start, break_out: null })
+                                }
+                                bLogs.forEach(b => allDayBreaks.push(b))
+                              })
+
+                              let neededBottom = 16 + 14
+                              if (dayOvertime > 0) neededBottom += 12
+                              if (allDayBreaks.length > 0) neededBottom += (allDayBreaks.length * 12)
+                              if (dayBreakSecs > 0) neededBottom += 12
+                              cellPaddingBottom = `${neededBottom}px`
                               
                               const assignedShiftTime = (sessions[0]?.shift_start_time && sessions[0]?.shift_end_time) 
                                 ? `${sessions[0].shift_start_time.substring(0,5)} - ${sessions[0].shift_end_time.substring(0,5)}` 
@@ -1205,36 +1234,12 @@ export default function AttendanceReports() {
                                       ? isSystem ? 'SYS' : `${new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}` 
                                       : 'Active'
 
-                                    let bLogs = []
-                                    if (Array.isArray(s.break_logs)) bLogs = s.break_logs
-                                    else if (typeof s.break_logs === 'string') {
-                                      try { bLogs = JSON.parse(s.break_logs) } catch (e) {}
-                                    }
-                                    if (s.on_break && s.break_start && !bLogs.some(b => !b.break_out)) {
-                                      bLogs.push({ break_in: s.break_start, break_out: null })
-                                    }
-
                                     return (
-                                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                                        <div style={{ whiteSpace: 'nowrap', display: 'flex', gap: 3, alignItems: 'center' }}>
-                                          <span style={{ color: 'var(--green)', fontWeight: 700 }}>In:</span>
-                                          <span style={{ color: valColor, display: 'flex', alignItems: 'center', gap: 2 }}>{inStr} {tag}</span>
-                                          <span style={{ color: 'var(--red)', fontWeight: 700 }}>Out:</span>
-                                          <span style={{ color: valColor, display: 'flex', alignItems: 'center', gap: 2 }}>{outStr} {s.check_out && tag}</span>
-                                        </div>
-                                        {bLogs.map((b, bIdx) => {
-                                          const bInStr = b.break_in ? new Date(b.break_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'
-                                          const bOutStr = b.break_out ? new Date(b.break_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'
-                                          return (
-                                            <div key={bIdx} style={{ whiteSpace: 'nowrap', display: 'flex', gap: 2, alignItems: 'center', fontSize: '8px', color: 'var(--text-muted)' }}>
-                                              <span style={{ color: '#F59E0B', fontWeight: 800 }}>B:</span>
-                                              <span style={{ color: 'var(--green)', fontWeight: 700 }}>In:</span>
-                                              <span style={{ color: 'var(--text-secondary)' }}>{bInStr}</span>
-                                              <span style={{ color: 'var(--red)', fontWeight: 700 }}>Out:</span>
-                                              <span style={{ color: b.break_out ? 'var(--text-secondary)' : '#F59E0B', fontWeight: b.break_out ? 400 : 700 }}>{bOutStr}</span>
-                                            </div>
-                                          )
-                                        })}
+                                      <div key={idx} style={{ whiteSpace: 'nowrap', display: 'flex', gap: 3, alignItems: 'center' }}>
+                                        <span style={{ color: 'var(--green)', fontWeight: 700 }}>In:</span>
+                                        <span style={{ color: valColor, display: 'flex', alignItems: 'center', gap: 2 }}>{inStr} {tag}</span>
+                                        <span style={{ color: 'var(--red)', fontWeight: 700 }}>Out:</span>
+                                        <span style={{ color: valColor, display: 'flex', alignItems: 'center', gap: 2 }}>{outStr} {s.check_out && tag}</span>
                                       </div>
                                     )
                                   })}
@@ -1256,6 +1261,15 @@ export default function AttendanceReports() {
                                     {dayOvertime > 0 && (
                                       <div style={{ color: 'var(--green)', fontWeight: 650 }}><strong>Overtime:</strong> +{formatHoursToText(dayOvertime)}</div>
                                     )}
+                                    {allDayBreaks.map((b, bIdx) => {
+                                      const bInStr = b.break_in ? new Date(b.break_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'
+                                      const bOutStr = b.break_out ? new Date(b.break_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'
+                                      return (
+                                        <div key={bIdx} style={{ color: 'var(--primary)', fontWeight: 650, whiteSpace: 'nowrap' }}>
+                                          <strong>B:</strong> In: {bInStr} Out: {bOutStr}
+                                        </div>
+                                      )
+                                    })}
                                     {dayBreakSecs > 0 && (
                                       <div style={{ color: 'var(--primary)', fontWeight: 650 }}><strong>Break Time:</strong> {formatBreakTime(dayBreakSecs)}</div>
                                     )}
@@ -1784,9 +1798,9 @@ export default function AttendanceReports() {
                   {/* Add New Session */}
                   {editMode === 'add' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
                         <span style={{ fontSize: 14, fontWeight: 700 }}>➕ Add New Session</span>
-                        <button onClick={() => setEditMode('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>← Back</button>
+                        <button onClick={() => setEditMode('')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginRight: 10 }}>← Back</button>
                       </div>
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
                       <div style={{ display: 'flex', gap: 12 }}>
@@ -1819,9 +1833,9 @@ export default function AttendanceReports() {
                   {/* Edit Existing Sessions */}
                   {editMode === 'edit' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
                         <span style={{ fontSize: 14, fontWeight: 700 }}>✏️ Edit Sessions</span>
-                        <button onClick={() => setEditMode('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>← Back</button>
+                        <button onClick={() => setEditMode('')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginRight: 10 }}>← Back</button>
                       </div>
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Date: <strong>{editDate}</strong></p>
                       {loadingSessions ? (
@@ -1882,6 +1896,7 @@ function SessionRow({ session, previousSession, nextSession, index, onSave, onDe
   const [inVal, setInVal] = useState(() => toLocalTime(session.check_in))
   const [outVal, setOutVal] = useState(() => toLocalTime(session.check_out))
   const [reason, setReason] = useState('')
+  const [showAuditLogs, setShowAuditLogs] = useState(false)
 
   // Parse existing break sessions from session.break_logs
   const [breaks, setBreaks] = useState(() => {
@@ -1958,6 +1973,9 @@ function SessionRow({ session, previousSession, nextSession, index, onSave, onDe
       }
     }
 
+    const sessionInDate = new Date(fullInStr)
+    const sessionOutDate = fullOutStr ? new Date(fullOutStr) : null
+
     // Process & validate break sessions
     const formattedBreaks = []
     for (let i = 0; i < breaks.length; i++) {
@@ -1971,8 +1989,22 @@ function SessionRow({ session, previousSession, nextSession, index, onSave, onDe
       let bInDate = new Date(baseDateIn)
       const [bInH, bInM] = b.inVal.split(':').map(Number)
       bInDate.setHours(bInH, bInM, 0, 0)
-      if (bInDate < new Date(fullInStr)) {
-        bInDate.setDate(bInDate.getDate() + 1)
+      
+      // If session crosses midnight, adjust break date if break hour is past midnight
+      if (sessionOutDate && sessionOutDate > sessionInDate && sessionInDate.getDate() !== sessionOutDate.getDate()) {
+        if (bInH < sessionInDate.getHours()) {
+          bInDate.setDate(bInDate.getDate() + 1)
+        }
+      }
+
+      // Break must be within session Check-In and Check-Out
+      if (bInDate < sessionInDate) {
+        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be before Check-In time (${inVal}).`)
+        return
+      }
+      if (sessionOutDate && bInDate >= sessionOutDate) {
+        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be after Check-Out time (${outVal}).`)
+        return
       }
 
       let bOutDate = null
@@ -1980,8 +2012,16 @@ function SessionRow({ session, previousSession, nextSession, index, onSave, onDe
         bOutDate = new Date(bInDate)
         const [bOutH, bOutM] = b.outVal.split(':').map(Number)
         bOutDate.setHours(bOutH, bOutM, 0, 0)
-        if (bOutDate < bInDate) {
+        if (bOutDate <= bInDate) {
           bOutDate.setDate(bOutDate.getDate() + 1)
+        }
+        if (bOutDate <= bInDate) {
+          toast.error(`Break #${i + 1} Out time must be after In time.`)
+          return
+        }
+        if (sessionOutDate && bOutDate > sessionOutDate) {
+          toast.error(`Break #${i + 1} Out time (${b.outVal}) cannot exceed session Check-Out time (${outVal}).`)
+          return
         }
       } else if (outVal) {
         toast.error(`Break #${i + 1} must have an Out time because the session is checked out.`)
@@ -2000,10 +2040,131 @@ function SessionRow({ session, previousSession, nextSession, index, onSave, onDe
   }
 
   return (
-    <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)' }}>
-      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text-secondary)' }}>
-        Session #{index + 1} ({session.status})
+    <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+            Session #{index + 1} ({session.status})
+          </span>
+          {session.remarks && (
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              {session.remarks}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAuditLogs(!showAuditLogs)}
+          title="Click to view session audit history and who created/edited this attendance"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            background: showAuditLogs ? 'rgba(59, 130, 246, 0.15)' : 'var(--surface-2)',
+            color: showAuditLogs ? '#2563eb' : 'var(--text-secondary)',
+            border: '1px solid var(--surface-3)',
+            borderRadius: 6,
+            padding: '3px 8px',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <Info size={13} />
+          <span>Logs & History</span>
+          {session.edit_history && session.edit_history.length > 0 && (
+            <span style={{ 
+              background: '#ef4444', 
+              color: '#fff', 
+              fontSize: 9, 
+              fontWeight: 800, 
+              padding: '1px 5px', 
+              borderRadius: 10 
+            }}>
+              {session.edit_history.length}
+            </span>
+          )}
+        </button>
       </div>
+
+      {/* Audit Logs / Session History Popdown */}
+      {showAuditLogs && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--surface-3)',
+          borderRadius: 8,
+          padding: 10,
+          fontSize: 11,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8
+        }}>
+          <div style={{ fontWeight: 700, color: 'var(--text-primary)', borderBottom: '1px solid var(--surface-2)', paddingBottom: 4 }}>
+            📋 Session Audit Trail
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={{ background: 'var(--surface-1)', padding: '6px 8px', borderRadius: 6 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>Checked In / Created By:</div>
+              <div style={{ fontWeight: 700, color: 'var(--green)' }}>
+                {session.created_by || 'System / Auto'}
+              </div>
+              {session.created_at && (
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {new Date(session.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: 'var(--surface-1)', padding: '6px 8px', borderRadius: 6 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>Checked Out By:</div>
+              <div style={{ fontWeight: 700, color: session.check_out ? 'var(--text-primary)' : '#f59e0b' }}>
+                {session.check_out ? (session.checked_out_by || 'Auto System Checkout') : 'Active (Not Checked Out)'}
+              </div>
+              {session.check_out && (
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {new Date(session.check_out).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Edit History Records */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>
+              Edit History ({session.edit_history?.length || 0}):
+            </div>
+            {(!session.edit_history || session.edit_history.length === 0) ? (
+              <div style={{ fontStyle: 'italic', color: 'var(--text-muted)', fontSize: 10 }}>
+                No previous edits recorded for this session.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {session.edit_history.map((h, hIdx) => (
+                  <div key={hIdx} style={{ background: 'var(--surface-1)', padding: '6px 8px', borderRadius: 6, borderLeft: '3px solid #3b82f6' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, color: '#2563eb' }}>Edited by: {h.edited_by || 'Admin'}</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+                        {h.edited_at ? new Date(h.edited_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                      </span>
+                    </div>
+                    {h.reason && (
+                      <div style={{ marginTop: 2, color: 'var(--text-secondary)' }}>
+                        <strong>Reason:</strong> {h.reason}
+                      </div>
+                    )}
+                    {(h.original_check_in || h.new_check_in) && (
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        In: {h.original_check_in ? new Date(h.original_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'} → {h.new_check_in ? new Date(h.new_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'} | Out: {h.original_check_out ? new Date(h.original_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'} → {h.new_check_out ? new Date(h.new_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', gap: 10 }}>

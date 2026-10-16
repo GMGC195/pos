@@ -46,6 +46,19 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE');
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift_id INTEGER');
     
+    // Ensure settings table and report_emails column exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        id SERIAL PRIMARY KEY,
+        auto_print_enabled BOOLEAN DEFAULT FALSE,
+        printer_ip VARCHAR(50) DEFAULT '127.0.0.1',
+        low_stock_behavior VARCHAR(50) DEFAULT 'block',
+        report_emails JSONB DEFAULT '["mr.caffee25@gmail.com"]'::jsonb
+      )
+    `);
+    await pool.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS low_stock_behavior VARCHAR(50) DEFAULT \'block\'');
+    await pool.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS report_emails JSONB DEFAULT \'["mr.caffee25@gmail.com"]\'::jsonb');
+    
     // Create cashier_shifts table for explicit shift tracking
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cashier_shifts (
