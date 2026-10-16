@@ -77,9 +77,9 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
     await pool.query('ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS closing_cash NUMERIC(10, 2) DEFAULT 0');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_cashier_shifts_active ON cashier_shifts(cashier_name, branch, status)');
 
-    // Update shift_closings for credit reporting, closing cash, opening cash, and interval items
+    // Update shift_closings for credit reporting, closing cash, opening cash, interval items, difference tracking, and shifts breakdown
     try {
-      await pool.query('ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS credit_sales DECIMAL(10,2) DEFAULT 0, ADD COLUMN IF NOT EXISTS major_payments DECIMAL(10,2) DEFAULT 0, ADD COLUMN IF NOT EXISTS closing_cash NUMERIC(10, 2) DEFAULT 0, ADD COLUMN IF NOT EXISTS opening_cash NUMERIC(10, 2) DEFAULT 0, ADD COLUMN IF NOT EXISTS interval_items TEXT');
+      await pool.query('ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS credit_sales DECIMAL(10,2) DEFAULT 0, ADD COLUMN IF NOT EXISTS major_payments DECIMAL(10,2) DEFAULT 0, ADD COLUMN IF NOT EXISTS closing_cash NUMERIC(10, 2) DEFAULT 0, ADD COLUMN IF NOT EXISTS opening_cash NUMERIC(10, 2) DEFAULT 0, ADD COLUMN IF NOT EXISTS interval_items TEXT, ADD COLUMN IF NOT EXISTS difference NUMERIC(10, 2) DEFAULT 0, ADD COLUMN IF NOT EXISTS difference_reason TEXT, ADD COLUMN IF NOT EXISTS shifts_summary JSONB');
       // Backfill opening_cash from cashier_shifts where available
       await pool.query(`
         UPDATE shift_closings sc

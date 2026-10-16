@@ -208,13 +208,62 @@ export default function Dashboard() {
       </style></head><body>
       <h2>${report.closing_type === 'Daily' ? '⚡ DAILY CLOSING REPORT' : '🔄 SHIFT CLOSING REPORT'}</h2>
       <p class="center" style="color:#666;font-size:12px;margin:0 0 10px">${fmtDate(report.login_time)}</p>
+
+      ${(() => {
+        const diffVal = parseFloat(report.difference || 0);
+        const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01;
+        const diffSign = diffVal < 0 ? '-' : '+';
+        const diffLabel = diffVal < 0 ? 'SHORTAGE / کمی' : 'EXCESS / زیادتی';
+        if (!hasDiff) return '';
+        return `
+          <div style="background: #dc2626; color: #ffffff; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+            <div style="font-size: 14px; letter-spacing: 0.5px;">⚠️ DIFFERENCE!</div>
+            <div style="font-size: 16px; margin: 2px 0;">${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
+            ${report.difference_reason ? `<div style="font-size: 11px; margin-top: 4px; background: rgba(0,0,0,0.25); padding: 3px 6px; border-radius: 3px; text-align: left; font-weight: normal;">Reason: ${report.difference_reason}</div>` : ''}
+          </div>
+        `;
+      })()}
+
+      ${(() => {
+        if (report.closing_type !== 'Daily') return '';
+        let shiftsArr = [];
+        if (typeof report.shifts_summary === 'string') {
+          try { shiftsArr = JSON.parse(report.shifts_summary); } catch (e) { shiftsArr = []; }
+        } else if (Array.isArray(report.shifts_summary)) {
+          shiftsArr = report.shifts_summary;
+        }
+        if (!shiftsArr || shiftsArr.length === 0) return '';
+        return `
+          <div style="background: #f8fafc; border: 1px dashed #64748b; border-radius: 4px; padding: 6px 8px; margin: 8px 0;">
+            <p style="font-weight:bold; margin: 0 0 4px; font-size: 11px; text-transform: uppercase;">📋 Shifts in Daily Closing:</p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 0;">
+              <thead>
+                <tr style="border-bottom: 1px solid #ccc; text-align: left;">
+                  <th style="padding: 2px 0;">Cashier</th>
+                  <th style="padding: 2px 0; text-align: center;">Orders</th>
+                  <th style="padding: 2px 0; text-align: right;">Total Sale</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${shiftsArr.map(s => `
+                  <tr style="border-bottom: 1px dashed #eee;">
+                    <td style="padding: 2px 0;">👤 ${s.cashier_name}</td>
+                    <td style="padding: 2px 0; text-align: center;">${s.total_orders || '-'}</td>
+                    <td style="padding: 2px 0; text-align: right; font-weight: bold;">${CURRENCY}${parseFloat(s.total_sales || 0).toFixed(2)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      })()}
+
       <div class="divider"></div>
       <div class="row"><span class="label">Cashier:</span><span class="bold">${report.cashier_name}</span></div>
       <div class="row"><span class="label">Branch:</span><span>${report.branch}</span></div>
       <div class="row"><span class="label">Login Time:</span><span>${fmtTime(report.login_time)}</span></div>
       <div class="row"><span class="label">Logout Time:</span><span>${fmtTime(report.logout_time)}</span></div>
       <div class="row"><span class="label">Active Time:</span><span class="bold">${report.total_active_time}</span></div>
-      <div class="divider"></div>
       <div class="divider"></div>
       <div class="row"><span class="label">Total Orders:</span><span class="bold">${report.total_orders}</span></div>
       <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
@@ -225,6 +274,16 @@ export default function Dashboard() {
       <div class="divider"></div>
       <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
       <div class="row"><span class="label">Remaining Drawer Cash:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
+      ${(() => {
+        const diffVal = parseFloat(report.difference || 0);
+        const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01;
+        if (!hasDiff) return '';
+        const diffSign = diffVal < 0 ? '-' : '+';
+        return `
+          <div class="row" style="color: #dc2626; font-weight: bold;"><span class="label" style="color: #dc2626;">Difference:</span><span>${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)}</span></div>
+          ${report.difference_reason ? `<div class="row" style="font-size: 11px;"><span class="label">Diff Reason:</span><span>${report.difference_reason}</span></div>` : ''}
+        `;
+      })()}
       <div class="divider"></div>
       <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
       <table>

@@ -18,6 +18,7 @@ import { formatSaudiDate, getSaudiLiveTimeString } from '../utils/timezone'
 
 export default function StartShiftModal({ isOpen, user, onShiftStarted }) {
   const [openingCash, setOpeningCash] = useState('0')
+  const [addDrawerCash, setAddDrawerCash] = useState(false)
   const [loading, setLoading] = useState(false)
   const [liveTime, setLiveTime] = useState(getSaudiLiveTimeString())
   const [prevShiftInfo, setPrevShiftInfo] = useState({
@@ -33,6 +34,8 @@ export default function StartShiftModal({ isOpen, user, onShiftStarted }) {
 
   useEffect(() => {
     if (!isOpen) return
+    setOpeningCash('0')
+    setAddDrawerCash(false)
     const timer = setInterval(() => {
       setLiveTime(getSaudiLiveTimeString())
     }, 1000)
@@ -47,9 +50,7 @@ export default function StartShiftModal({ isOpen, user, onShiftStarted }) {
       .then(res => {
         if (res.data?.success) {
           setPrevShiftInfo(res.data)
-          if (res.data.previousRemainingCash !== undefined && res.data.previousRemainingCash !== null && res.data.previousRemainingCash > 0) {
-            setOpeningCash(res.data.previousRemainingCash.toString())
-          }
+          // Opening cash is NOT auto-filled; remains 0 unless cashier turns on toggle to enter manually
         }
       })
       .catch(err => {
@@ -64,9 +65,10 @@ export default function StartShiftModal({ isOpen, user, onShiftStarted }) {
     e.preventDefault()
     setLoading(true)
     try {
+      const finalCash = addDrawerCash ? (parseFloat(openingCash) || 0) : 0
       const res = await axios.post('/api/orders/cashier-shift/start', {
         branch: branchName,
-        opening_cash: parseFloat(openingCash) || 0
+        opening_cash: finalCash
       })
       toast.success('Shift started successfully! Ready for orders.')
       if (onShiftStarted) {
@@ -321,56 +323,123 @@ export default function StartShiftModal({ isOpen, user, onShiftStarted }) {
             </div>
           </div>
 
-          {/* Remaining Cash in Drawer Input */}
-          <div style={{ marginBottom: 20 }}>
-            <label style={{
-              display: 'block',
-              fontSize: 13,
-              fontWeight: 700,
-              color: 'var(--text-primary)',
-              marginBottom: 6
-            }}>
-              Remaining Cash in Drawer (دراز میں موجود رقم) ({CURRENCY})
-            </label>
-            <div style={{ position: 'relative' }}>
-              <span style={{
-                position: 'absolute',
-                left: 14,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontWeight: 700,
-                color: 'var(--text-muted)',
-                fontSize: 14
-              }}>
-                {CURRENCY}
-              </span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={openingCash}
-                onChange={(e) => setOpeningCash(e.target.value)}
-                placeholder="0.00"
-                autoFocus
+          {/* Drawer Cash Section with Toggle */}
+          <div style={{
+            background: 'var(--surface-1)',
+            borderRadius: 12,
+            border: '1.5px solid var(--surface-2)',
+            padding: '14px 16px',
+            marginBottom: 20
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 800,
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer'
+                }} onClick={() => {
+                  const next = !addDrawerCash
+                  setAddDrawerCash(next)
+                  if (!next) setOpeningCash('0')
+                }}>
+                  <Banknote size={16} color="var(--primary)" />
+                  Add Drawer Cash (دراز میں رقم شامل کریں)
+                </label>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {addDrawerCash ? 'Manual entry enabled. Enter exact cash counted.' : 'Off by default. Shift will start with 0.00 opening drawer.'}
+                </div>
+              </div>
+
+              {/* Toggle Switch Button */}
+              <div 
+                onClick={() => {
+                  const next = !addDrawerCash
+                  setAddDrawerCash(next)
+                  if (!next) setOpeningCash('0')
+                }}
+                role="switch"
+                aria-checked={addDrawerCash}
                 style={{
-                  width: '100%',
-                  padding: '11px 14px 11px 48px',
-                  borderRadius: 10,
-                  border: '1.5px solid var(--surface-2)',
-                  background: 'var(--surface-1)',
-                  fontSize: 16,
+                  width: 46,
+                  height: 25,
+                  borderRadius: 20,
+                  background: addDrawerCash ? '#10b981' : '#cbd5e1',
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                  flexShrink: 0
+                }}
+              >
+                <div style={{
+                  width: 19,
+                  height: 19,
+                  borderRadius: '50%',
+                  background: '#ffffff',
+                  position: 'absolute',
+                  top: 3,
+                  left: addDrawerCash ? 24 : 3,
+                  transition: 'left 0.2s',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }} />
+              </div>
+            </div>
+
+            {addDrawerCash && (
+              <div style={{ marginTop: 14 }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: 12,
                   fontWeight: 700,
                   color: 'var(--text-primary)',
-                  outline: 'none',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-            <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-              {parseFloat(prevShiftInfo?.previousRemainingCash || 0) > 0
-                ? `Pichle cashier ne ${CURRENCY}${parseFloat(prevShiftInfo.previousRemainingCash).toFixed(2)} daraz me chhori thi. Gin kar confirm ya edit karein.`
-                : 'Pichli shift se daraz me mojood bachi hui raqam enter ya confirm karein.'}
-            </p>
+                  marginBottom: 6
+                }}>
+                  Enter Cash in Drawer (دراز میں موجود رقم) ({CURRENCY})
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <span style={{
+                    position: 'absolute',
+                    left: 14,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontWeight: 700,
+                    color: 'var(--text-muted)',
+                    fontSize: 14
+                  }}>
+                    {CURRENCY}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={openingCash === '0' ? '' : openingCash}
+                    onChange={(e) => setOpeningCash(e.target.value)}
+                    placeholder="0.00"
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px 11px 48px',
+                      borderRadius: 10,
+                      border: '1.5px solid var(--primary)',
+                      background: 'var(--surface)',
+                      fontSize: 16,
+                      fontWeight: 800,
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+                {parseFloat(prevShiftInfo?.previousRemainingCash || 0) > 0 && (
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                    ℹ️ Last shift closing drawer: <strong>{CURRENCY}{parseFloat(prevShiftInfo.previousRemainingCash).toFixed(2)}</strong>. Enter verified amount manually.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Submit Button */}

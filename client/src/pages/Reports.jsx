@@ -80,6 +80,9 @@ export default function Reports({ isTodaySales = false }) {
     dineIn: 0
   })
   const [closingRemainingCash, setClosingRemainingCash] = useState('')
+  const [closingDifferenceReason, setClosingDifferenceReason] = useState('')
+  const [closingPreview, setClosingPreview] = useState(null)
+  const [loadingClosingPreview, setLoadingClosingPreview] = useState(false)
 
   // History Modal States
   const [showHistoryModal, setShowHistoryModal] = useState(false)
@@ -178,6 +181,30 @@ export default function Reports({ isTodaySales = false }) {
         });
     }
   }, [showClosingModal, branch, user?.branch])
+
+  // Fetch live closing preview and shifts breakdown when Closing Modal is opened or type changed
+  useEffect(() => {
+    if (showClosingModal) {
+      const typeToUse = closingType || (isCashier ? 'Shift' : 'Daily')
+      if (!closingType) setClosingType(typeToUse)
+      const targetBranch = branch === 'All' ? (user?.branch || 'Branch 1') : branch
+      setLoadingClosingPreview(true)
+      axios.get('/api/orders/closing-preview', { params: { branch: targetBranch, type: typeToUse } })
+        .then(res => {
+          if (res.data?.success) {
+            setClosingPreview(res.data)
+          }
+        })
+        .catch(err => {
+          console.error("Failed to load closing preview:", err)
+        })
+        .finally(() => setLoadingClosingPreview(false))
+    } else {
+      setClosingRemainingCash('')
+      setClosingDifferenceReason('')
+      setClosingPreview(null)
+    }
+  }, [showClosingModal, closingType, branch, user?.branch, isCashier])
 
   useEffect(() => {
     setFrom(today())
@@ -468,6 +495,21 @@ export default function Reports({ isTodaySales = false }) {
     const fmtTime = (ts) => ts ? formatSaudiTime(ts) : '-'
     const fmtDate = (ts) => ts ? formatSaudiDate(ts) : '-'
     const items = Array.isArray(report.items_summary) ? report.items_summary : JSON.parse(report.items_summary || '[]')
+    
+    const diffVal = parseFloat(report.difference || 0)
+    const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01
+    const diffSign = diffVal < 0 ? '-' : '+'
+    const diffLabel = diffVal < 0 ? 'SHORTAGE / کمی' : 'EXCESS / زیادتی'
+
+    let shiftsArr = []
+    if (report.closing_type === 'Daily') {
+      if (typeof report.shifts_summary === 'string') {
+        try { shiftsArr = JSON.parse(report.shifts_summary) } catch(e) { shiftsArr = [] }
+      } else if (Array.isArray(report.shifts_summary)) {
+        shiftsArr = report.shifts_summary
+      }
+    }
+
     const printWindow = window.open('', '', 'width=500,height=700')
     const html = `
       <html><head><title>${report.closing_type} Closing Report</title>
@@ -486,42 +528,78 @@ export default function Reports({ isTodaySales = false }) {
         td { padding: 4px 0; font-size: 13px; }
         td:last-child { text-align: right; }
       </style></head><body>
-      <h2>${report.closing_type === 'Daily' ? '⚡ DAILY CLOSING REPORT' : '🔄 SHIFT CLOSING REPORT'}</h2>
-      <p class="center" style="color:#666;font-size:12px;margin:0 0 10px">${fmtDate(report.login_time)}</p>
-      <div class="divider"></div>
-      <div class="row"><span class="label">Cashier:</span><span class="bold">${report.cashier_name}</span></div>
-      <div class="row"><span class="label">Branch:</span><span>${report.branch}</span></div>
-      <div class="row"><span class="label">Login Time:</span><span>${fmtTime(report.login_time)}</span></div>
-      <div class="row"><span class="label">Logout Time:</span><span>${fmtTime(report.logout_time)}</span></div>
-      <div class="row"><span class="label">Active Time:</span><span class="bold">${report.total_active_time}</span></div>
-      <div class="divider"></div>
-      <div class="divider"></div>
-      <div class="row"><span class="label">Total Orders:</span><span class="bold">${report.total_orders}</span></div>
-      <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
-      <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Cash Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.cash_sales || 0).toFixed(2)}</span></div>
-      <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Card Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
-      <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Credit Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
-      <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
-      <div class="divider"></div>
-      <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
-      <div class="row"><span class="label">Remaining Drawer Cash:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
-      <div class="divider"></div>
-      <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
-      <table>
-        <thead><tr><th>Category</th><th style="text-align:center">Qty</th><th>Amount</th></tr></thead>
-        <tbody>
-          ${items.map(i => `
-            <tr>
-              <td>${i.category}</td>
-              <td style="text-align:center">${i.qty}</td>
-              <td>${CURRENCY}${parseFloat(i.amount || 0).toFixed(2)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-      <div class="divider"></div>
-      <p class="center" style="font-size:11px;color:#888;margin-top:12px">Generated: ${formatSaudiDateTime(new Date())}</p>
-    </body></html>`
+        <h2>${report.closing_type === 'Daily' ? '⚡ DAILY CLOSING REPORT' : '🔄 SHIFT CLOSING REPORT'}</h2>
+        <p class="center" style="color:#666;font-size:12px;margin:0 0 10px">${fmtDate(report.login_time)}</p>
+
+        ${hasDiff ? `
+          <div style="background: #dc2626; color: #ffffff; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+            <div style="font-size: 14px; letter-spacing: 0.5px;">⚠️ DIFFERENCE!</div>
+            <div style="font-size: 16px; margin: 2px 0;">${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
+            ${report.difference_reason ? `<div style="font-size: 11px; margin-top: 4px; background: rgba(0,0,0,0.25); padding: 3px 6px; border-radius: 3px; text-align: left; font-weight: normal;">Reason: ${report.difference_reason}</div>` : ''}
+          </div>
+        ` : ''}
+
+        ${shiftsArr.length > 0 ? `
+          <div style="background: #f8fafc; border: 1px dashed #64748b; border-radius: 4px; padding: 6px 8px; margin: 8px 0;">
+            <p style="font-weight:bold; margin: 0 0 4px; font-size: 11px; text-transform: uppercase;">📋 Shifts in Daily Closing:</p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 0;">
+              <thead>
+                <tr style="border-bottom: 1px solid #ccc; text-align: left;">
+                  <th style="padding: 2px 0;">Cashier</th>
+                  <th style="padding: 2px 0; text-align: center;">Orders</th>
+                  <th style="padding: 2px 0; text-align: right;">Total Sale</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${shiftsArr.map(s => `
+                  <tr style="border-bottom: 1px dashed #eee;">
+                    <td style="padding: 2px 0;">👤 ${s.cashier_name}</td>
+                    <td style="padding: 2px 0; text-align: center;">${s.total_orders || '-'}</td>
+                    <td style="padding: 2px 0; text-align: right; font-weight: bold;">${CURRENCY}${parseFloat(s.total_sales || 0).toFixed(2)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+
+        <div class="divider"></div>
+        <div class="row"><span class="label">Cashier:</span><span class="bold">${report.cashier_name}</span></div>
+        <div class="row"><span class="label">Branch:</span><span>${report.branch}</span></div>
+        <div class="row"><span class="label">Login Time:</span><span>${fmtTime(report.login_time)}</span></div>
+        <div class="row"><span class="label">Logout Time:</span><span>${fmtTime(report.logout_time)}</span></div>
+        <div class="row"><span class="label">Active Time:</span><span class="bold">${report.total_active_time}</span></div>
+        <div class="divider"></div>
+        <div class="row"><span class="label">Total Orders:</span><span class="bold">${report.total_orders}</span></div>
+        <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
+        <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Cash Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.cash_sales || 0).toFixed(2)}</span></div>
+        <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Card Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
+        <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Credit Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
+        <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
+        <div class="divider"></div>
+        <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
+        <div class="row"><span class="label">Amount in Drawer:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
+        ${hasDiff ? `
+          <div class="row" style="color: #dc2626; font-weight: bold;"><span class="label" style="color: #dc2626;">Difference:</span><span>${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)}</span></div>
+          ${report.difference_reason ? `<div class="row" style="font-size: 11px;"><span class="label">Diff Reason:</span><span>${report.difference_reason}</span></div>` : ''}
+        ` : ''}
+        <div class="divider"></div>
+        <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
+        <table>
+          <thead><tr><th>Category</th><th style="text-align:center">Qty</th><th>Amount</th></tr></thead>
+          <tbody>
+            ${items.map(i => `
+              <tr>
+                <td>${i.category}</td>
+                <td style="text-align:center">${i.qty}</td>
+                <td>${CURRENCY}${parseFloat(i.amount || 0).toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div class="divider"></div>
+        <p class="center" style="font-size:11px;color:#888;margin-top:12px">Generated: ${formatSaudiDateTime(new Date())}</p>
+      </body></html>`
     printWindow.document.write(html)
     printWindow.document.close()
     printWindow.focus()
@@ -529,32 +607,57 @@ export default function Reports({ isTodaySales = false }) {
   }
 
   const handleClosingConfirm = async (shouldPrint = true) => {
-    if (!closingType) return
+    if (!closingType) {
+      toast.error('Please select closing type (Shift or Daily).')
+      return
+    }
+    if (closingRemainingCash.trim() === '' || isNaN(parseFloat(closingRemainingCash))) {
+      toast.error('Please enter the Amount in Drawer (دراز میں رقم درج کریں)')
+      return
+    }
+
+    const currentSalesVal = closingPreview?.total_sales !== undefined 
+      ? parseFloat(closingPreview.total_sales || 0) 
+      : totalSales;
+    const diffVal = parseFloat(closingRemainingCash) - currentSalesVal
+    const hasDiff = Math.abs(diffVal) >= 0.01
+
+    if (hasDiff && !closingDifferenceReason.trim()) {
+      toast.error('Difference found! Please enter the Reason for Difference (فرق کی وجہ).')
+      return
+    }
+
     setClosingProcessing(true)
     setClosingProcessingType(shouldPrint ? 'close_print' : 'just_close')
     try {
       const endpoint = closingType === 'Shift' ? '/api/orders/shift-close' : '/api/orders/daily-closing'
+      const targetBranch = branch === 'All' ? (user?.branch || 'Branch 1') : branch
       const res = await axios.post(endpoint, { 
-        branch,
-        remaining_cash: parseFloat(closingRemainingCash || 0)
+        branch: targetBranch,
+        remaining_cash: parseFloat(closingRemainingCash || 0),
+        difference: diffVal,
+        difference_reason: closingDifferenceReason.trim()
       })
       toast.success(`${closingType} closing complete!`)
       setShowClosingModal(false)
       setClosingType(null)
       setClosingRemainingCash('')
+      setClosingDifferenceReason('')
+      setClosingPreview(null)
       load()
+
       // Auto-print the report if requested
       if (shouldPrint && res.data?.report) {
         setTimeout(() => printClosingReport(res.data.report), 400)
       }
 
-      // If Cashier, start 90-second countdown to auto-logout!
+      // Start 90-second closing countdown with blinking timer
       if (isCashier) {
         setActiveShift(null)
-        const deadline = Date.now() + 90 * 1000
-        localStorage.setItem('cashier_closing_deadline', deadline.toString())
-        window.dispatchEvent(new CustomEvent('cashier_shift_closed', { detail: { deadline } }))
       }
+      const deadline = Date.now() + 90 * 1000
+      localStorage.setItem('cashier_closing_deadline', deadline.toString())
+      window.dispatchEvent(new CustomEvent('cashier_shift_closed', { detail: { deadline } }))
     } catch (err) {
       toast.error('Error: ' + (err?.response?.data?.error || err.message))
     } finally {
@@ -1435,29 +1538,40 @@ export default function Reports({ isTodaySales = false }) {
                 </div>
 
                 {/* 2. Shift Stats Card (Start Time, Current Time, Total Orders, Total Sales) */}
+                {/* 2. Shift / Daily Stats Card */}
                 <div style={{
                   background: '#f8fafc',
                   border: '1px solid #e2e8f0',
                   borderRadius: 10,
                   padding: '10px 12px'
                 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <Clock size={13} color="var(--primary)" /> Shift Summary (موجودہ شفٹ)
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Clock size={13} color="var(--primary)" /> 
+                      {closingType === 'Daily' ? 'Daily Summary (پورے دن کا خلاصہ)' : 'Shift Summary (موجودہ شفٹ)'}
+                    </div>
+                    {loadingClosingPreview && (
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Refreshing...</span>
+                    )}
                   </div>
                   
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    {/* Shift Start Time */}
+                    {/* Shift / Daily Start Time */}
                     <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🕒 Start Time</div>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
-                        {activeShift?.start_time ? formatSaudiTime(activeShift.start_time) : '-'} <span style={{ fontSize: 9, color: '#94a3b8' }}>KSA</span>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>
+                        {closingType === 'Daily' ? '📅 Daily Cycle Start' : '🕒 Shift Start'}
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#1e293b', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {closingType === 'Daily' 
+                          ? (closingPreview?.login_time ? formatSaudiTime(closingPreview.login_time) + ' KSA' : '00:00 KSA')
+                          : (closingPreview?.start_time || activeShift?.start_time ? formatSaudiTime(closingPreview?.start_time || activeShift.start_time) + ' KSA' : '-')}
                       </div>
                     </div>
 
                     {/* Current Time */}
                     <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
                       <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>⏰ Current Time</div>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', marginTop: 1 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', marginTop: 1 }}>
                         {formatSaudiTime(new Date())} <span style={{ fontSize: 9, color: '#94a3b8' }}>KSA</span>
                       </div>
                     </div>
@@ -1466,7 +1580,7 @@ export default function Reports({ isTodaySales = false }) {
                     <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
                       <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🧾 Total Orders</div>
                       <div style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
-                        {totalCount} <span style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>orders</span>
+                        {closingPreview?.total_orders !== undefined ? closingPreview.total_orders : totalCount} <span style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>orders</span>
                       </div>
                     </div>
 
@@ -1474,14 +1588,62 @@ export default function Reports({ isTodaySales = false }) {
                     <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
                       <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>💰 Total Sales</div>
                       <div style={{ fontSize: 12, fontWeight: 900, color: '#047857', marginTop: 1 }}>
-                        {CURRENCY}{totalSales.toFixed(2)}
+                        {CURRENCY}{(closingPreview?.total_sales !== undefined ? parseFloat(closingPreview.total_sales || 0) : totalSales).toFixed(2)}
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* 3. If Daily Closing: List of Shifts Included */}
+                {closingType === 'Daily' && (
+                  <div style={{
+                    background: '#ffffff',
+                    border: '1.5px solid #cbd5e1',
+                    borderRadius: 10,
+                    padding: '10px 12px'
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#1e3a8a', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>📋 Shifts in Daily Closing ({closingPreview?.shifts?.length || 0})</span>
+                      <span style={{ fontSize: 10, color: '#64748b' }}>From last daily closing</span>
+                    </div>
+
+                    {(!closingPreview?.shifts || closingPreview.shifts.length === 0) ? (
+                      <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '6px 0' }}>
+                        No separate shifts closed yet today
+                      </div>
+                    ) : (
+                      <div style={{ maxHeight: 110, overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
+                              <th style={{ padding: '2px 0' }}>Cashier</th>
+                              <th style={{ padding: '2px 0', textAlign: 'center' }}>Orders</th>
+                              <th style={{ padding: '2px 0', textAlign: 'right' }}>Shift Sale</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {closingPreview.shifts.map((s, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px dashed #f1f5f9' }}>
+                                <td style={{ padding: '3px 0', fontWeight: 700, color: '#1e293b' }}>
+                                  👤 {s.cashier_name}
+                                </td>
+                                <td style={{ padding: '3px 0', textAlign: 'center', color: '#64748b' }}>
+                                  {s.total_orders || '-'}
+                                </td>
+                                <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 800, color: '#047857' }}>
+                                  {CURRENCY}{parseFloat(s.total_sales || 0).toFixed(2)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* Right Column: Closing Type Selection & Remaining Cash */}
+              {/* Right Column: Closing Type Selection, Total Sale Display, Drawer Input & Difference */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
@@ -1535,63 +1697,180 @@ export default function Reports({ isTodaySales = false }) {
                   </div>
                 </div>
 
-                {/* Remaining Cash in Drawer input */}
-                <div style={{
-                  background: 'var(--surface-1)',
-                  border: '1px solid var(--surface-2)',
-                  borderRadius: 8,
-                  padding: '9px 10px'
-                }}>
-                  <label style={{
-                    display: 'block',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: 'var(--text-primary)',
-                    marginBottom: 4
-                  }}>
-                    Remaining Cash in Drawer (دراز میں رقم) ({CURRENCY})
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <span style={{
-                      position: 'absolute',
-                      left: 10,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      fontWeight: 700,
-                      color: 'var(--text-muted)',
-                      fontSize: 12
-                    }}>
-                      {CURRENCY}
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={closingRemainingCash}
-                      onChange={e => setClosingRemainingCash(e.target.value)}
-                      placeholder="0.00 (Optional)"
-                      style={{
-                        width: '100%',
-                        padding: '6px 8px 6px 38px',
-                        borderRadius: 6,
+                {/* Field 1: Total Sale Display */}
+                {(() => {
+                  const activeSales = closingPreview?.total_sales !== undefined 
+                    ? parseFloat(closingPreview.total_sales || 0) 
+                    : totalSales;
+                  const drawerVal = parseFloat(closingRemainingCash);
+                  const isDrawerFilled = closingRemainingCash.trim() !== '' && !isNaN(drawerVal);
+                  const diff = isDrawerFilled ? (drawerVal - activeSales) : 0;
+                  const hasDifference = isDrawerFilled && Math.abs(diff) >= 0.01;
+
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {/* Total Sale Card */}
+                      <div style={{
+                        background: '#f1f5f9',
+                        border: '1.5px solid #cbd5e1',
+                        borderRadius: 8,
+                        padding: '8px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                          Total Sale ({closingType === 'Daily' ? 'Daily' : 'Shift'} کل سیل):
+                        </span>
+                        <span style={{ fontSize: 16, fontWeight: 900, color: 'var(--primary)' }}>
+                          {CURRENCY}{activeSales.toFixed(2)}
+                        </span>
+                      </div>
+
+                      {/* Field 2: Amount in Drawer Input */}
+                      <div style={{
+                        background: 'var(--surface-1)',
                         border: '1.5px solid var(--surface-2)',
-                        background: '#ffffff',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: 'var(--text-primary)',
-                        outline: 'none',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-                </div>
+                        borderRadius: 8,
+                        padding: '9px 10px'
+                      }}>
+                        <label style={{
+                          display: 'block',
+                          fontSize: 11,
+                          fontWeight: 800,
+                          color: 'var(--text-primary)',
+                          marginBottom: 4
+                        }}>
+                          Amount in Drawer (دراز میں رقم) * ({CURRENCY})
+                        </label>
+                        <div style={{ position: 'relative' }}>
+                          <span style={{
+                            position: 'absolute',
+                            left: 10,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            fontWeight: 700,
+                            color: 'var(--text-muted)',
+                            fontSize: 12
+                          }}>
+                            {CURRENCY}
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={closingRemainingCash}
+                            onChange={e => setClosingRemainingCash(e.target.value)}
+                            placeholder="0.00 (Gin kar daraz ki raqam likhein)"
+                            required
+                            autoFocus
+                            style={{
+                              width: '100%',
+                              padding: '7px 8px 7px 38px',
+                              borderRadius: 6,
+                              border: '1.5px solid #94a3b8',
+                              background: '#ffffff',
+                              fontSize: 14,
+                              fontWeight: 800,
+                              color: 'var(--text-primary)',
+                              outline: 'none',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>
+                          Manual entry required. Must count drawer cash.
+                        </div>
+                      </div>
+
+                      {/* Field 3: Difference Display & Reason */}
+                      {isDrawerFilled && (
+                        <div>
+                          {hasDifference ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {/* Red Background, White Text Difference Alert with Exclamation mark */}
+                              <div style={{
+                                background: '#dc2626',
+                                color: '#ffffff',
+                                padding: '8px 12px',
+                                borderRadius: 6,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                fontWeight: 900,
+                                boxShadow: '0 2px 8px rgba(220, 38, 38, 0.35)',
+                                animation: 'fadeIn 0.2s ease-in'
+                              }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13 }}>
+                                  ⚠️ Difference!
+                                </span>
+                                <span style={{ fontSize: 14 }}>
+                                  {diff < 0 ? '-' : '+'}{CURRENCY}{Math.abs(diff).toFixed(2)}
+                                  <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 4, opacity: 0.9 }}>
+                                    ({diff < 0 ? 'Shortage / کمی' : 'Excess / زیادتی'})
+                                  </span>
+                                </span>
+                              </div>
+
+                              {/* Reason field (Mandatory) */}
+                              <div>
+                                <label style={{
+                                  display: 'block',
+                                  fontSize: 11,
+                                  fontWeight: 800,
+                                  color: '#b91c1c',
+                                  marginBottom: 3
+                                }}>
+                                  Reason for Difference (فرق کی وجہ) *
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={closingDifferenceReason}
+                                  onChange={e => setClosingDifferenceReason(e.target.value)}
+                                  placeholder="Difference kyun aaya? Reason darj karein (Mandatory)..."
+                                  style={{
+                                    width: '100%',
+                                    padding: '6px 8px',
+                                    borderRadius: 6,
+                                    border: '1.5px solid #ef4444',
+                                    background: '#ffffff',
+                                    fontSize: 12,
+                                    outline: 'none',
+                                    boxSizing: 'border-box',
+                                    resize: 'none'
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{
+                              background: '#ecfdf5',
+                              color: '#065f46',
+                              border: '1px solid #a7f3d0',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              fontSize: 11,
+                              fontWeight: 800,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between'
+                            }}>
+                              <span>✓ No Difference (Match!)</span>
+                              <span>{CURRENCY}0.00</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {closingType && (
                   <div style={{
                     background: closingType === 'Daily' ? '#faf5ff' : '#fff1f2',
                     border: `1px solid ${closingType === 'Daily' ? '#ddd6fe' : '#fca5a5'}`,
                     borderRadius: 6,
-                    padding: '6px 10px',
+                    padding: '5px 10px',
                     fontSize: 10,
                     color: closingType === 'Daily' ? '#6b21a8' : '#991b1b',
                     display: 'flex',
@@ -1606,85 +1885,106 @@ export default function Reports({ isTodaySales = false }) {
             </div>
 
             {/* Buttons Row - Compact, Centered text, Site-matched dark & brand palette */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 4 }}>
-              <button
-                type="button"
-                style={{
-                  padding: '6px 14px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 6,
-                  border: '1px solid #cbd5e1',
-                  background: '#f8fafc',
-                  color: '#475569',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  textAlign: 'center',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseOver={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#1e293b'; }}
-                onMouseOut={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#475569'; }}
-                onClick={() => { setShowClosingModal(false); setClosingType(null); }}
-                disabled={closingProcessing}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                style={{
-                  padding: '6px 16px',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  borderRadius: 6,
-                  border: '1px solid #0f172a',
-                  background: '#1e293b',
-                  color: '#ffffff',
-                  cursor: !closingType || closingProcessing ? 'not-allowed' : 'pointer',
-                  opacity: !closingType ? 0.45 : 1,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  textAlign: 'center',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseOver={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#0f172a'; }}
-                onMouseOut={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#1e293b'; }}
-                onClick={() => handleClosingConfirm(false)}
-                disabled={!closingType || closingProcessing}
-              >
-                {closingProcessing && closingProcessingType === 'just_close' ? 'Processing...' : 'Just Close'}
-              </button>
-              <button
-                type="button"
-                style={{
-                  padding: '6px 16px',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  borderRadius: 6,
-                  border: '1px solid #0a2428',
-                  background: '#103C43',
-                  color: '#ffffff',
-                  cursor: !closingType || closingProcessing ? 'not-allowed' : 'pointer',
-                  opacity: !closingType ? 0.45 : 1,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  textAlign: 'center',
-                  gap: 6,
-                  boxShadow: closingType ? '0 2px 8px rgba(16, 60, 67, 0.25)' : 'none',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseOver={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#0a2428'; }}
-                onMouseOut={e => { if (closingType && !closingProcessing) e.currentTarget.style.background = '#103C43'; }}
-                onClick={() => handleClosingConfirm(true)}
-                disabled={!closingType || closingProcessing}
-              >
-                <Printer size={13} color="#F4B400" />
-                <span>{closingProcessing && closingProcessingType === 'close_print' ? 'Processing...' : 'Close & Print Report'}</span>
-              </button>
-            </div>
+            {(() => {
+              const activeSales = closingPreview?.total_sales !== undefined 
+                ? parseFloat(closingPreview.total_sales || 0) 
+                : totalSales;
+              const drawerVal = parseFloat(closingRemainingCash);
+              const isDrawerFilled = closingRemainingCash.trim() !== '' && !isNaN(drawerVal);
+              const diff = isDrawerFilled ? (drawerVal - activeSales) : 0;
+              const hasDifference = isDrawerFilled && Math.abs(diff) >= 0.01;
+              const isButtonDisabled = !closingType || closingProcessing || !isDrawerFilled || (hasDifference && !closingDifferenceReason.trim());
+
+              return (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      background: '#f8fafc',
+                      color: '#475569',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseOver={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#1e293b'; }}
+                    onMouseOut={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#475569'; }}
+                    onClick={() => { setShowClosingModal(false); setClosingType(null); }}
+                    disabled={closingProcessing}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '6px 16px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      borderRadius: 6,
+                      border: '1px solid #0f172a',
+                      background: '#1e293b',
+                      color: '#ffffff',
+                      cursor: isButtonDisabled ? 'not-allowed' : 'pointer',
+                      opacity: isButtonDisabled ? 0.45 : 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseOver={e => { if (!isButtonDisabled) e.currentTarget.style.background = '#0f172a'; }}
+                    onMouseOut={e => { if (!isButtonDisabled) e.currentTarget.style.background = '#1e293b'; }}
+                    onClick={() => handleClosingConfirm(false)}
+                    disabled={isButtonDisabled}
+                    title={
+                      !isDrawerFilled ? 'Please enter Amount in Drawer' :
+                      (hasDifference && !closingDifferenceReason.trim()) ? 'Please enter reason for difference' : 'Confirm closing without printing'
+                    }
+                  >
+                    {closingProcessing && closingProcessingType === 'just_close' ? 'Processing...' : 'Just Close'}
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '6px 16px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      borderRadius: 6,
+                      border: '1px solid #0a2428',
+                      background: '#103C43',
+                      color: '#ffffff',
+                      cursor: isButtonDisabled ? 'not-allowed' : 'pointer',
+                      opacity: isButtonDisabled ? 0.45 : 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      gap: 6,
+                      boxShadow: !isButtonDisabled ? '0 2px 8px rgba(16, 60, 67, 0.25)' : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseOver={e => { if (!isButtonDisabled) e.currentTarget.style.background = '#0a2428'; }}
+                    onMouseOut={e => { if (!isButtonDisabled) e.currentTarget.style.background = '#103C43'; }}
+                    onClick={() => handleClosingConfirm(true)}
+                    disabled={isButtonDisabled}
+                    title={
+                      !isDrawerFilled ? 'Please enter Amount in Drawer' :
+                      (hasDifference && !closingDifferenceReason.trim()) ? 'Please enter reason for difference' : 'Confirm closing and print thermal receipt'
+                    }
+                  >
+                    <Printer size={13} color="#F4B400" />
+                    <span>{closingProcessing && closingProcessingType === 'close_print' ? 'Processing...' : 'Close & Print Report'}</span>
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

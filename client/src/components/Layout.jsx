@@ -110,14 +110,8 @@ export default function Layout() {
     return () => clearInterval(timer);
   }, []);
 
-  // Cashier 90-second auto-logout countdown timer
+  // Shift & Daily Closing countdown timer
   useEffect(() => {
-    const isCashier = user?.role?.trim().toLowerCase() === 'cashier';
-    if (!isCashier) {
-      setClosingCountdown(null);
-      return;
-    }
-
     const checkDeadline = () => {
       const stored = localStorage.getItem('cashier_closing_deadline');
       if (!stored) {
@@ -132,8 +126,13 @@ export default function Layout() {
       } else {
         localStorage.removeItem('cashier_closing_deadline');
         setClosingCountdown(null);
-        toast('Shift closed. Automatically logged out.', { icon: '⏱️' });
-        handleLogout();
+        const isCashier = user?.role?.trim().toLowerCase() === 'cashier';
+        if (isCashier) {
+          toast('Shift closed. Automatically logged out.', { icon: '⏱️' });
+          handleLogout();
+        } else {
+          toast.success('Closing completed.');
+        }
       }
     };
 
@@ -756,13 +755,28 @@ export default function Layout() {
                   fontSize: 15,
                   background: '#dc2626',
                   color: '#fff',
-                  padding: '2px 8px',
+                  padding: '3px 10px',
                   borderRadius: 6,
-                  letterSpacing: '0.5px'
+                  letterSpacing: '0.5px',
+                  animation: 'closingTimerBlink 0.9s ease-in-out infinite'
                 }}>
                   00:{String(closingCountdown).padStart(2, '0')}
                 </span>
               </div>
+              <style>{`
+                @keyframes closingTimerBlink {
+                  0%, 100% {
+                    opacity: 1;
+                    transform: scale(1);
+                    box-shadow: 0 0 0 rgba(220, 38, 38, 0);
+                  }
+                  50% {
+                    opacity: 0.2;
+                    transform: scale(1.08);
+                    box-shadow: 0 0 12px 3px rgba(220, 38, 38, 0.7);
+                  }
+                }
+              `}</style>
               <button
                 onClick={handleLogout}
                 style={{
