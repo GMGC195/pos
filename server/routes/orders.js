@@ -488,9 +488,31 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
     if (!(await checkBranchAccess(req, req.params.id))) {
       return res.status(403).json({ error: 'Access denied: Order belongs to another branch' });
     }
+    const isCompleted = (status === 'Completed' || status === 'Cash' || status === 'Card' || status === 'Online' || status === 'Credit');
+    let completedBy = null;
+    let completedAt = null;
+    let shiftId = null;
+
+    if (isCompleted) {
+      completedBy = req.user?.username || 'Cashier';
+      completedAt = new Date();
+      const activeShiftRes = await pool.query(
+        `SELECT id FROM cashier_shifts WHERE cashier_name = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+        [completedBy]
+      );
+      if (activeShiftRes.rows.length > 0) {
+        shiftId = activeShiftRes.rows[0].id;
+      }
+    }
+
     const result = await pool.query(
-      'UPDATE "orders" SET status=$1 WHERE id=$2 RETURNING *',
-      [status, req.params.id]
+      `UPDATE "orders" 
+       SET status = $1,
+           completed_by = CASE WHEN $3::text IS NOT NULL THEN COALESCE(completed_by, $3) ELSE completed_by END,
+           completed_at = CASE WHEN $4::timestamptz IS NOT NULL THEN COALESCE(completed_at, $4) ELSE completed_at END,
+           shift_id = CASE WHEN $5::int IS NOT NULL THEN COALESCE(shift_id, $5) ELSE shift_id END
+       WHERE id = $2 RETURNING *`,
+      [status, req.params.id, completedBy, completedAt, shiftId]
     );
     const updatedOrder = result.rows[0];
     if (req.io) req.io.emit('orderUpdated', updatedOrder);
@@ -1436,7 +1458,12 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
 
 // PUT update order
 router.put('/:id', authenticateToken, async (req, res) => {
-  const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments } = req.body;
+  const { 
+    items, subtotal, tax, grand_total, payment_method, 
+    customer_name, customer_phone, customer_address, discount, 
+    client_order_id, order_type, table_number, order_taker, comments,
+    edit_reason, reason, credit_customer_id, credit_payment_amount 
+  } = req.body;
   const client = await pool.connect();
   try {
     if (!(await checkBranchAccess(req, req.params.id))) {
@@ -1445,54 +1472,89 @@ router.put('/:id', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
 
     // Check if order exists and get existing items
-    const orderCheck = await client.query('SELECT status, edit_history FROM "orders" WHERE id = $1', [req.params.id]);
+    const orderCheck = await client.query('SELECT status, edit_history, edit_reason, completed_by, completed_at, shift_id, credit_customer_id FROM "orders" WHERE id = $1', [req.params.id]);
     if (orderCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Order not found' });
     }
 
     const existingOrder = orderCheck.rows[0];
-    const oldItemsRes = await client.query('SELECT item_name, qty FROM order_items WHERE order_id = $1', [req.params.id]);
+    const oldItemsRes = await client.query('SELECT item_name, qty, unit_price, item_id FROM order_items WHERE order_id = $1', [req.params.id]);
     const oldItems = oldItemsRes.rows;
 
-    // Compute Diff
+    // Compute Diff with unit prices and IDs
     const diff = [];
     const newItemsMap = {};
-    items.forEach(i => newItemsMap[i.name] = i.qty);
+    items.forEach(i => newItemsMap[i.name] = { qty: i.qty, price: parseFloat(i.price || i.unit_price) || 0, id: i.id || i.item_id });
     
     const oldItemsMap = {};
-    oldItems.forEach(i => oldItemsMap[i.item_name] = i.qty);
+    oldItems.forEach(i => oldItemsMap[i.item_name] = { qty: i.qty, price: parseFloat(i.unit_price) || 0, id: i.item_id });
 
     // Check for removed or decreased qty
     for (const oldName in oldItemsMap) {
-      const oldQty = oldItemsMap[oldName];
-      const newQty = newItemsMap[oldName] || 0;
+      const oldItem = oldItemsMap[oldName];
+      const newItem = newItemsMap[oldName];
+      const newQty = newItem ? newItem.qty : 0;
       if (newQty === 0) {
-        diff.push({ type: 'removed', name: oldName, qty: oldQty });
-      } else if (newQty < oldQty) {
-        diff.push({ type: 'decreased', name: oldName, diffQty: oldQty - newQty, oldQty, newQty });
-      } else if (newQty > oldQty) {
-        diff.push({ type: 'increased', name: oldName, diffQty: newQty - oldQty, oldQty, newQty });
+        diff.push({ type: 'removed', name: oldName, qty: oldItem.qty, unit_price: oldItem.price, item_id: oldItem.id });
+      } else if (newQty < oldItem.qty) {
+        diff.push({ type: 'decreased', name: oldName, diffQty: oldItem.qty - newQty, oldQty: oldItem.qty, newQty, unit_price: oldItem.price, item_id: oldItem.id });
+      } else if (newQty > oldItem.qty) {
+        diff.push({ type: 'increased', name: oldName, diffQty: newQty - oldItem.qty, oldQty: oldItem.qty, newQty, unit_price: newItem.price, item_id: newItem.id });
       }
     }
     // Check for newly added items
     for (const newName in newItemsMap) {
       if (!oldItemsMap[newName]) {
-        diff.push({ type: 'added', name: newName, qty: newItemsMap[newName] });
+        const newItem = newItemsMap[newName];
+        diff.push({ type: 'added', name: newName, qty: newItem.qty, unit_price: newItem.price, item_id: newItem.id });
       }
     }
 
     // Prepare edit history
+    const finalEditReason = (edit_reason || reason || '').trim();
     let editHistory = existingOrder.edit_history || [];
-    if (diff.length > 0) {
+    if (typeof editHistory === 'string') {
+      try { editHistory = JSON.parse(editHistory); } catch (e) { editHistory = []; }
+    }
+    if (!Array.isArray(editHistory)) editHistory = [];
+
+    const editorName = req.user?.username || req.user?.role || order_taker || 'Unknown User';
+    if (diff.length > 0 || finalEditReason) {
       editHistory.push({
         timestamp: new Date().toISOString(),
-        edited_by: req.user?.username || req.user?.role || 'Unknown User',
+        edited_by: editorName,
+        reason: finalEditReason,
         changes: diff
       });
     }
 
-    const status = payment_method === 'Hold' ? 'Hold' : 'Completed';
+    const status = (payment_method === 'Hold' || payment_method === 'Payment Pending' || payment_method === 'Payment Requested') ? payment_method : 'Completed';
+    const isCompleted = (status === 'Completed' || status === 'Cash' || status === 'Card' || status === 'Online' || status === 'Credit');
+
+    let completedBy = existingOrder.completed_by;
+    let completedAt = existingOrder.completed_at;
+    let shiftId = existingOrder.shift_id;
+
+    if (isCompleted) {
+      if (!completedBy || existingOrder.status !== 'Completed') {
+        completedBy = req.user?.username || order_taker || completedBy || 'Cashier';
+        completedAt = new Date();
+      }
+      if (!shiftId && completedBy) {
+        const activeShiftRes = await client.query(
+          `SELECT id FROM cashier_shifts WHERE cashier_name = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+          [completedBy]
+        );
+        if (activeShiftRes.rows.length > 0) {
+          shiftId = activeShiftRes.rows[0].id;
+        }
+      }
+    } else if (status === 'Hold') {
+      // If reverted to hold, reset completed markers
+      completedBy = null;
+      completedAt = null;
+    }
 
     // Update order details
     const orderResult = await client.query(
@@ -1503,9 +1565,23 @@ router.put('/:id', authenticateToken, async (req, res) => {
            order_type = $10, table_number = $11, order_taker = $12, comments = $13,
            is_edited = TRUE,
            edit_count = COALESCE(edit_count, 0) + 1,
-           edit_history = $14
-       WHERE id = $15 RETURNING *`,
-      [subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, order_type || null, table_number || null, order_taker || null, comments || null, JSON.stringify(editHistory), req.params.id]
+           edit_history = $14,
+           edit_reason = CASE WHEN $15::text IS NOT NULL AND $15::text != '' THEN $15::text ELSE edit_reason END,
+           completed_by = $16,
+           completed_at = $17,
+           shift_id = COALESCE($18, shift_id)
+       WHERE id = $19 RETURNING *`,
+      [
+        subtotal, tax, grand_total, status, 
+        customer_name || null, customer_phone || null, customer_address || null, discount || 0, 
+        client_order_id || null, order_type || null, table_number || null, order_taker || null, comments || null, 
+        JSON.stringify(editHistory), 
+        finalEditReason || null,
+        completedBy,
+        completedAt,
+        shiftId,
+        req.params.id
+      ]
     );
 
     // Replace order items: Delete existing and insert new
@@ -1525,6 +1601,41 @@ router.put('/:id', authenticateToken, async (req, res) => {
        WHERE order_id = $3`,
       [payment_method || 'Cash', grand_total, req.params.id]
     );
+
+    // Handle Credit customer logic if Credit
+    const targetCreditId = credit_customer_id || existingOrder.credit_customer_id;
+    if (payment_method === 'Credit' && targetCreditId) {
+      await client.query(
+        `UPDATE "orders" SET credit_customer_id = $1 WHERE id = $2`,
+        [targetCreditId, req.params.id]
+      );
+      if (existingOrder.status !== 'Completed') {
+        await client.query(
+          `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+          [targetCreditId, req.params.id, 'CREDIT_ORDER', grand_total]
+        );
+        let balanceChange = parseFloat(grand_total);
+        if (credit_payment_amount && parseFloat(credit_payment_amount) > 0) {
+          const paymentAmt = parseFloat(credit_payment_amount);
+          await client.query(
+            `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
+            [targetCreditId, req.params.id, 'PAYMENT', paymentAmt]
+          );
+          balanceChange -= paymentAmt;
+        }
+        await client.query(
+          `UPDATE credit_customers SET balance = balance + $1 WHERE id = $2`,
+          [balanceChange, targetCreditId]
+        );
+      }
+    }
+
+    // Deduct stock if order has become Completed
+    if (isCompleted && existingOrder.status !== 'Completed') {
+      const settingsRes = await client.query('SELECT low_stock_behavior FROM settings ORDER BY id ASC LIMIT 1');
+      const behavior = settingsRes.rows.length > 0 ? (settingsRes.rows[0].low_stock_behavior || 'block') : 'block';
+      await deductStock(req.params.id, client, behavior);
+    }
 
     await client.query('COMMIT');
     const updatedOrder = orderResult.rows[0];

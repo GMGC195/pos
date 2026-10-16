@@ -65,6 +65,11 @@ CREATE TABLE orders (
   cancel_reason TEXT,
   slip_number INTEGER,
   is_edited BOOLEAN DEFAULT FALSE,
+  edit_count INTEGER DEFAULT 0,
+  edit_reason TEXT,
+  edit_history JSONB DEFAULT '[]'::jsonb,
+  completed_by VARCHAR(150),
+  completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

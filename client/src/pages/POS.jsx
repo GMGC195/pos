@@ -241,6 +241,10 @@ export default function POS() {
   const [confirmCancelAction, setConfirmCancelAction] = useState(null)
   const [showKitchenModal, setShowKitchenModal] = useState(false)
 
+  // Edit Order Reason States
+  const [editReasonModal, setEditReasonModal] = useState(null)
+  const [editReason, setEditReason] = useState('')
+
   // Credit states
   const [creditCustomers, setCreditCustomers] = useState([])
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState('')
@@ -653,13 +657,17 @@ export default function POS() {
         return
       }
     }
+    if (editingOrderId) {
+      setConfirmModal(false);
+      setEditReasonModal({ method, shouldPrint, actionType });
+      setEditReason('');
+      return;
+    }
     executeOrder(method, shouldPrint, actionType)
   }
 
-  const executeOrder = async (method = paymentMethod, shouldPrint = true, actionType = null) => {
+  const executeOrder = async (method = paymentMethod, shouldPrint = true, actionType = null, orderEditReason = '') => {
     if (cart.length === 0) return
-    
-
     
     setProcessing(actionType || (shouldPrint ? 'print' : 'punch'))
     const finalDiscount = parseFloat(customerInfo.discount) || 0;
@@ -684,7 +692,8 @@ export default function POS() {
         credit_customer_id: method === 'Credit' ? selectedCreditCustomer : undefined,
         credit_payment_amount: method === 'Credit' ? creditPaymentAmount : undefined,
         branch: ['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) ? selectedBranch : undefined,
-        printerIp: localStorage.getItem('printMode') === 'cloud' ? (localStorage.getItem('printerIp') || '127.0.0.1') : undefined
+        printerIp: localStorage.getItem('printMode') === 'cloud' ? (localStorage.getItem('printerIp') || '127.0.0.1') : undefined,
+        edit_reason: orderEditReason || undefined
       }
 
       let res;
@@ -722,31 +731,33 @@ export default function POS() {
       }
 
       let diffData = null;
-      if (editingOrderId && method === 'Hold' && originalCart) {
+      if (editingOrderId && originalCart) {
         const added = [];
         const cancelled = [];
         
         cart.forEach(c => {
-          const orig = originalCart.find(o => o.cartId === c.cartId);
+          const cName = (c.name || '').trim().toLowerCase();
+          const orig = originalCart.find(o => (o.cartId && o.cartId === c.cartId) || (o.name || '').trim().toLowerCase() === cName);
           if (!orig) added.push({ ...c });
           else if (c.qty > orig.qty) added.push({ ...c, qty: c.qty - orig.qty });
         });
 
         originalCart.forEach(o => {
-          const curr = cart.find(c => c.cartId === o.cartId);
+          const oName = (o.name || '').trim().toLowerCase();
+          const curr = cart.find(c => (c.cartId && c.cartId === o.cartId) || (c.name || '').trim().toLowerCase() === oName);
           if (!curr) cancelled.push({ ...o });
           else if (o.qty > curr.qty) cancelled.push({ ...o, qty: o.qty - curr.qty });
         });
         
         if (added.length > 0 || cancelled.length > 0) {
-          diffData = { added, cancelled };
+          diffData = { added, cancelled, reason: orderEditReason };
         }
       }
 
       const orderId = res?.data?.order?.id || editingOrderId || 'N/A'
       const slipNumber = res?.data?.order?.slip_number || '-'
       const editCount = res?.data?.order?.edit_count || 0
-      const isFullReceipt = method !== 'Hold'
+      const isFullReceipt = editingOrderId ? false : (method !== 'Hold')
       if (isOnline) {
         toast.success(method === 'Hold' ? 'Order updated to Hold status!' : 'Order Placed!', { duration: 3000 })
         // Fetch auto-print settings dynamically to ensure we always have the latest setting without page refresh
@@ -802,14 +813,14 @@ export default function POS() {
       <div class="row">
         <span class="item-name">${index + 1}. ${item.name}</span>
         <span class="item-qty">${item.qty}</span>
-        <span class="item-price">${CURRENCY}${parseFloat(item.price * item.qty).toFixed(2)}</span>
+        <span class="item-price">${CURRENCY}${parseFloat((item.price || item.unit_price || 0) * item.qty).toFixed(2)}</span>
       </div>`).join('');
       
       itemRows += diffData.cancelled.map((item, index) => `
       <div class="row" style="text-decoration: line-through; color: #555;">
-        <span class="item-name">${diffData.added.length + index + 1}. ${item.name}</span>
+        <span class="item-name">${diffData.added.length + index + 1}. ${item.name} [CANCELLED]</span>
         <span class="item-qty">${item.qty}</span>
-        <span class="item-price">${CURRENCY}${parseFloat(item.price * item.qty).toFixed(2)}</span>
+        <span class="item-price">${CURRENCY}${parseFloat((item.price || item.unit_price || 0) * item.qty).toFixed(2)}</span>
       </div>`).join('');
     } else {
       itemRows = currentCart.map((item, index) => `
@@ -834,6 +845,8 @@ export default function POS() {
     else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
     else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
 
+    const editReasonHtml = diffData?.reason ? `<div style="font-size: 11px; margin: 2px 0; text-align: center; font-weight: bold; background: #eee; padding: 2px 4px; border-radius: 2px;">Edit Reason: ${diffData.reason}</div>` : '';
+
     const headerHtml = isFullReceipt ? `
     <div style="font-size: 16px; font-weight: normal; margin: 6px 0; text-align: center;">
       ${shortBranch} - ${currentInfo.orderType}
@@ -846,6 +859,7 @@ export default function POS() {
     <div style="margin: 10px 0; font-size: 16px; font-weight: bold;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
     </div>
+    ${editReasonHtml}
     <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
     ` : `
     <div style="font-size: 14px; font-weight: normal; margin: 2px 0; text-align: center;">
@@ -859,6 +873,7 @@ export default function POS() {
     <div style="margin: 2px 0; font-size: 14px; font-weight: bold;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
     </div>
+    ${editReasonHtml}
     <p class="sub" style="margin-bottom: 2px; font-size: 10px;">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
     `;
 
@@ -2180,6 +2195,77 @@ export default function POS() {
                   disabled={processingCancel}
                 >
                   {processingCancel ? 'Sending...' : 'Send Request'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Order Reason Modal */}
+      {editReasonModal && (
+        <div className="modal-overlay" style={{ zIndex: 99999 }} onClick={e => { if (e.target.classList.contains('modal-overlay')) setEditReasonModal(null) }}>
+          <div className="modal" style={{ maxWidth: 420 }}>
+            <div className="modal-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: 17, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>✏️</span> Reason for Editing Order #{editingOrderId}
+              </h3>
+              <button className="modal-close" onClick={() => setEditReasonModal(null)}>✕</button>
+            </div>
+            <div style={{ padding: 20 }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--text-secondary)' }}>
+                Please select or enter the reason for editing this order:
+              </p>
+              
+              {/* Preset Chips */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {['Added items', 'Cancelled items', 'Customer changed mind', 'Wrong item entered', 'Item portion/size change'].map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className="btn btn-sm"
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: 12,
+                      borderRadius: 16,
+                      border: editReason === preset ? '1px solid var(--primary)' : '1px solid var(--surface-2)',
+                      background: editReason === preset ? 'rgba(255,184,0,0.15)' : '#f8fafc',
+                      color: editReason === preset ? 'var(--primary)' : '#334155',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => setEditReason(preset)}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+
+              <textarea 
+                className="form-control"
+                style={{ width: '100%', height: 90, padding: 12, borderRadius: 8, border: '1px solid var(--surface-2)', marginBottom: 20, resize: 'none' }}
+                placeholder="Type edit reason here..."
+                value={editReason}
+                onChange={e => setEditReason(e.target.value)}
+                autoFocus
+              />
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setEditReasonModal(null)}>Back</button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ flex: 2 }} 
+                  disabled={!editReason.trim() || processing !== false}
+                  onClick={() => {
+                    if (!editReason.trim()) {
+                      toast.error('Please enter a reason for editing the order');
+                      return;
+                    }
+                    const { method, shouldPrint, actionType } = editReasonModal;
+                    const r = editReason.trim();
+                    setEditReasonModal(null);
+                    executeOrder(method, shouldPrint, actionType, r);
+                  }}
+                >
+                  Save & Update
                 </button>
               </div>
             </div>

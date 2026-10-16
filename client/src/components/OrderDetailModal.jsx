@@ -26,56 +26,103 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   const tableNum = order.table_number || (order.customer_address?.startsWith('Table ') ? order.customer_address.replace('Table ', '') : '');
 
   const taker = order.order_taker || 'Guest';
+  const completedBy = order.completed_by || (order.status === 'Completed' ? taker : null);
   const comment = order.comments || '';
+
   const metaRowParts = [];
   if (orderType === 'Dine-In' && tableNum) metaRowParts.push(`Table ${String(tableNum).replace(/^Table\s*/i, '')}`);
-  if (taker) metaRowParts.push(`By: ${taker}`);
+  if (taker) metaRowParts.push(`Placed: ${taker}`);
+  if (completedBy) metaRowParts.push(`Completed: ${completedBy}`);
   if (comment) metaRowParts.push(`Note: ${comment}`);
-  const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 12px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
+  const metaRow = metaRowParts.length > 0 ? `<div style="font-size: 11px; font-weight: bold; margin: 2px 0; text-align: center;">${metaRowParts.join(' | ')}</div>` : '';
+
+  // Parse edit history safely
+  let editHistory = [];
+  if (Array.isArray(order.edit_history)) {
+    editHistory = order.edit_history;
+  } else if (typeof order.edit_history === 'string') {
+    try { editHistory = JSON.parse(order.edit_history); } catch (e) { editHistory = []; }
+  }
+  const lastEdit = editHistory.length > 0 ? editHistory[editHistory.length - 1] : null;
+  const displayEditReason = (order.edit_reason || lastEdit?.reason || '').trim();
+
+  // Compile full items list (Active items + Cancelled items)
+  const fullItemsList = [];
+  const activeItems = (order.items || []).map(i => ({
+    name: i.item_name || i.name,
+    qty: i.qty,
+    price: parseFloat(i.unit_price || i.price || 0),
+    isNew: false,
+    isCancelled: false
+  }));
+
+  // Track items added during edits
+  const addedNames = new Set();
+  const cancelledItems = [];
+
+  editHistory.forEach(edit => {
+    if (Array.isArray(edit.changes)) {
+      edit.changes.forEach(change => {
+        if (change.type === 'added' || change.type === 'increased') {
+          addedNames.add((change.name || '').trim().toLowerCase());
+        } else if (change.type === 'removed' || change.type === 'decreased') {
+          const cancelQty = change.qty || change.diffQty || 0;
+          if (cancelQty > 0) {
+            cancelledItems.push({
+              name: change.name,
+              qty: cancelQty,
+              price: parseFloat(change.unit_price || change.price || 0),
+              isCancelled: true,
+              isNew: false
+            });
+          }
+        }
+      });
+    }
+  });
+
+  // Mark active items as new if added during an edit
+  activeItems.forEach(item => {
+    if (addedNames.has((item.name || '').trim().toLowerCase()) && (order.edit_count > 0 || editHistory.length > 0)) {
+      item.isNew = true;
+    }
+    fullItemsList.push(item);
+  });
+
+  // Append cancelled items to the full list
+  cancelledItems.forEach(item => {
+    fullItemsList.push(item);
+  });
 
   let itemRows = '';
-  let isDiffPrint = false;
-
-  if (order.edit_count > 0 && order.edit_history && order.edit_history.length > 0) {
-    const lastEdit = order.edit_history[order.edit_history.length - 1];
-    isDiffPrint = true;
-    let diffIdx = 1;
-
-    lastEdit.changes.forEach(change => {
-        let printQty = change.qty || change.diffQty || 0;
-        let printName = change.name;
-        let itemPrice = 0;
-        const foundItem = order.items.find(i => (i.item_name || i.name) === printName);
-        if (foundItem) itemPrice = parseFloat(foundItem.unit_price || foundItem.price) || 0;
-
-        if (change.type === 'added' || change.type === 'increased') {
-          itemRows += `
-            <div class="row">
-              <span class="item-name">${diffIdx++}. ${printName}</span>
-              <span class="item-qty">${printQty}</span>
-              <span class="item-price">${CURRENCY}${(itemPrice * printQty).toFixed(2)}</span>
-            </div>
-          `;
-        } else if (change.type === 'removed' || change.type === 'decreased') {
-          itemRows += `
-            <div class="row" style="text-decoration: line-through; color: #555;">
-              <span class="item-name">${diffIdx++}. ${printName}</span>
-              <span class="item-qty">${printQty}</span>
-              <span class="item-price">${CURRENCY}${(itemPrice * printQty).toFixed(2)}</span>
-            </div>
-          `;
-        }
-    });
-  }
-
-  if (!isDiffPrint) {
-    itemRows = order.items.map((item, index) => `
-      <div class="row">
-        <span class="item-name">${index + 1}. ${item.item_name || item.name}</span>
-        <span class="item-qty">${item.qty}</span>
-        <span class="item-price">${CURRENCY}${parseFloat((item.unit_price || item.price) * item.qty).toFixed(2)}</span>
-      </div>`).join('');
-  }
+  let idx = 1;
+  fullItemsList.forEach(item => {
+    if (item.isCancelled) {
+      itemRows += `
+        <div class="row" style="text-decoration: line-through; color: #dc2626; opacity: 0.85;">
+          <span class="item-name">${idx++}. ${item.name} <span style="font-size: 9px; font-weight: bold; background: #fee2e2; color: #991b1b; padding: 1px 4px; border-radius: 3px; text-decoration: none; display: inline-block;">[CANCELLED]</span></span>
+          <span class="item-qty">${item.qty}</span>
+          <span class="item-price">${CURRENCY}${(item.price * item.qty).toFixed(2)}</span>
+        </div>
+      `;
+    } else if (item.isNew) {
+      itemRows += `
+        <div class="row">
+          <span class="item-name">${idx++}. ${item.name} <span style="font-size: 9px; font-weight: bold; color: #15803d; background: #dcfce7; padding: 1px 4px; border-radius: 3px; display: inline-block;">+NEW</span></span>
+          <span class="item-qty">${item.qty}</span>
+          <span class="item-price">${CURRENCY}${(item.price * item.qty).toFixed(2)}</span>
+        </div>
+      `;
+    } else {
+      itemRows += `
+        <div class="row">
+          <span class="item-name">${idx++}. ${item.name}</span>
+          <span class="item-qty">${item.qty}</span>
+          <span class="item-price">${CURRENCY}${(item.price * item.qty).toFixed(2)}</span>
+        </div>
+      `;
+    }
+  });
 
   const effectiveBranch = order.branch || 'Branch 1';
   let shortBranch = effectiveBranch;
@@ -97,6 +144,7 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
     Order #${order.id} - ${order.edit_count > 0 ? `Edit ${(order.slip_number || '-')}${String.fromCharCode(64 + order.edit_count)}` : (order.slip_number || '-')}
   </div>
+  ${displayEditReason ? `<div style="font-size: 11px; font-weight: bold; margin: 2px 0; color: #1e3a8a; background: #f0fdf4; padding: 2px 4px; border-radius: 3px;">Edit Reason: ${displayEditReason}</div>` : ''}
   <p class="sub" style="margin-bottom: 2px; font-size: 10px;">${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
 </div>
 <div class="divider"></div>
@@ -108,7 +156,7 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
 <div class="divider"></div>
 ${itemRows}
 <div class="divider"></div>
-<div class="total-row"><span>Total Items</span><span>${order.items.reduce((s, c) => s + c.qty, 0)}</span></div>
+<div class="total-row"><span>Active Items</span><span>${(order.items || []).reduce((s, c) => s + c.qty, 0)}</span></div>
 <div class="total-row"><span>Subtotal</span><span>${CURRENCY}${parseFloat(order.subtotal).toFixed(2)}</span></div>
 ${parseFloat(order.discount || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${CURRENCY}${parseFloat(order.discount).toFixed(2)}</span></div>` : ''}
 <div class="total-row grand"><span>TOTAL</span><span>${CURRENCY}${parseFloat(order.grand_total).toFixed(2)}</span></div>
@@ -241,6 +289,37 @@ ${slipBody}
                 <span style={{ fontSize: '16px' }}>⚠️</span> Order Cancelled
               </div>
               <div><strong>Reason:</strong> {order.cancel_reason}</div>
+            </div>
+          )}
+          {(order.is_edited || displayEditReason || editHistory.length > 0) && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '12px 14px', borderRadius: '8px', marginBottom: '16px', color: '#1e40af', fontSize: '13px' }}>
+              <div style={{ fontWeight: 800, marginBottom: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '16px' }}>✏️</span> Order Edited {order.edit_count > 0 ? `(${order.edit_count}x)` : ''}
+                </span>
+                {lastEdit?.edited_by && (
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb' }}>
+                    By: {lastEdit.edited_by}
+                  </span>
+                )}
+              </div>
+              <div><strong>Reason:</strong> {displayEditReason || 'Order items updated'}</div>
+              {editHistory.length > 1 && (
+                <details style={{ marginTop: 8, fontSize: '12px', color: '#334155', cursor: 'pointer' }}>
+                  <summary style={{ fontWeight: 600, outline: 'none' }}>View full edit history ({editHistory.length} edits)</summary>
+                  <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {editHistory.map((h, i) => (
+                      <div key={i} style={{ background: 'white', padding: '6px 8px', borderRadius: 4, border: '1px solid #e2e8f0', fontSize: 11 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                          <span>Edit #{i + 1} by {h.edited_by || 'Staff'}</span>
+                          <span style={{ color: '#64748b' }}>{new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        {h.reason && <div style={{ color: '#1e293b', marginTop: 2 }}>Reason: {h.reason}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           )}
           {/* Thermal Style Receipt Content */}

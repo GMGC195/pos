@@ -1037,9 +1037,16 @@ export default function Reports({ isTodaySales = false }) {
                     <tr key={t.id} onClick={() => viewOrderDetail(t.order_id)} style={{ cursor: 'pointer' }} className="hover-row">
                       <td style={{ fontWeight: 800, color: 'var(--red)' }}>{(currentPage - 1) * pageSize + index + 1}</td>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span className="badge badge-info" style={{ fontWeight: 800 }}>Order #{t.order_id} / {t.slip_number}</span>
-                          {t.is_edited && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Edited</span>}
+                          {t.is_edited && (
+                            <span 
+                              style={{ fontSize: 10, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 5px', borderRadius: 4, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 2 }}
+                              title={t.edit_reason ? `Reason: ${t.edit_reason}` : 'Edited order'}
+                            >
+                              ✏️ Edited {t.edit_count > 0 ? `(${t.edit_count}x)` : ''}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>#{t.id}</td>
@@ -1048,7 +1055,7 @@ export default function Reports({ isTodaySales = false }) {
                         {t.order_placed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSaudiTime(t.order_placed_at)}</div>}
                       </td>
                       <td>
-                        <div style={{ fontWeight: 600 }}>{t.completed_by || '-'}</div>
+                        <div style={{ fontWeight: 600 }}>{t.completed_by || (t.order_status === 'Completed' ? (t.order_taker || 'Completed') : '-')}</div>
                         {t.completed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSaudiTime(t.completed_at)}</div>}
                       </td>
                       <td>{t.branch || '-'}</td>
