@@ -179,17 +179,21 @@ export default function TodayAttendance() {
     }
   }
 
-  const handleUpdateExistingSession = async (sessionId, inVal, outVal, reason) => {
+  const handleUpdateExistingSession = async (sessionId, inVal, outVal, reason, breakLogs = null) => {
     if (!reason || !reason.trim()) { toast.error('Reason is required'); return }
     setSavingSessionId(sessionId)
     try {
       const toISO = (v) => v ? new Date(v).toISOString() : null
-      await axios.post('/api/attendance/edit', {
+      const payload = {
         attendance_id: sessionId,
         new_check_in: toISO(inVal),
         new_check_out: toISO(outVal),
         reason
-      })
+      }
+      if (breakLogs !== null) {
+        payload.break_logs = breakLogs
+      }
+      await axios.post('/api/attendance/edit', payload)
       toast.success('Session updated!')
       loadEditSessions(editEmpId, editDate)
       loadTodayAttendance()
@@ -979,12 +983,48 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
   const toLocalTime = (iso) => {
     if (!iso) return ''
     const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
     const h = String(d.getHours()).padStart(2,'0'), mi = String(d.getMinutes()).padStart(2,'0')
     return `${h}:${mi}`
   }
   const [inVal, setInVal] = useState(() => toLocalTime(session.check_in))
   const [outVal, setOutVal] = useState(() => toLocalTime(session.check_out))
   const [reason, setReason] = useState('')
+
+  // Parse existing break sessions from session.break_logs
+  const [breaks, setBreaks] = useState(() => {
+    let list = []
+    if (Array.isArray(session.break_logs)) list = [...session.break_logs]
+    else if (typeof session.break_logs === 'string') {
+      try { list = JSON.parse(session.break_logs) } catch (e) {}
+    }
+    const parsed = list.map((b, i) => ({
+      id: `b_${Date.now()}_${i}`,
+      inVal: toLocalTime(b.break_in),
+      outVal: toLocalTime(b.break_out)
+    }))
+    // If currently on break and not yet in break_logs
+    if (session.on_break && session.break_start && !parsed.some(b => !b.outVal)) {
+      parsed.push({
+        id: `b_active_${Date.now()}`,
+        inVal: toLocalTime(session.break_start),
+        outVal: ''
+      })
+    }
+    return parsed
+  })
+
+  const handleAddBreak = () => {
+    setBreaks(prev => [...prev, { id: `b_${Date.now()}_${Math.random()}`, inVal: '', outVal: '' }])
+  }
+
+  const handleUpdateBreak = (id, field, val) => {
+    setBreaks(prev => prev.map(b => b.id === id ? { ...b, [field]: val } : b))
+  }
+
+  const handleRemoveBreak = (id) => {
+    setBreaks(prev => prev.filter(b => b.id !== id))
+  }
 
   const handleSave = () => {
     if (session.check_out && !outVal) {
@@ -1026,11 +1066,49 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
       }
     }
 
-    onSave(session.id, fullInStr, fullOutStr, reason)
+    // Process & validate break sessions
+    const formattedBreaks = []
+    for (let i = 0; i < breaks.length; i++) {
+      const b = breaks[i]
+      if (!b.inVal && !b.outVal) continue // skip completely empty
+      if (!b.inVal) {
+        toast.error(`Break #${i + 1} has Out time but is missing In time.`)
+        return
+      }
+      
+      let bInDate = new Date(baseDateIn)
+      const [bInH, bInM] = b.inVal.split(':').map(Number)
+      bInDate.setHours(bInH, bInM, 0, 0)
+      if (bInDate < new Date(fullInStr)) {
+        bInDate.setDate(bInDate.getDate() + 1)
+      }
+
+      let bOutDate = null
+      if (b.outVal) {
+        bOutDate = new Date(bInDate)
+        const [bOutH, bOutM] = b.outVal.split(':').map(Number)
+        bOutDate.setHours(bOutH, bOutM, 0, 0)
+        if (bOutDate < bInDate) {
+          bOutDate.setDate(bOutDate.getDate() + 1)
+        }
+      } else if (outVal) {
+        toast.error(`Break #${i + 1} must have an Out time because the session is checked out.`)
+        return
+      }
+
+      const durSecs = bOutDate ? Math.max(0, Math.floor((bOutDate.getTime() - bInDate.getTime()) / 1000)) : 0
+      formattedBreaks.push({
+        break_in: bInDate.toISOString(),
+        break_out: bOutDate ? bOutDate.toISOString() : null,
+        duration_seconds: durSecs
+      })
+    }
+
+    onSave(session.id, fullInStr, fullOutStr, reason, formattedBreaks)
   }
 
   return (
-    <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ background: 'var(--surface-1)', padding: 14, borderRadius: 10, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Session #{index + 1} — {session.status}</div>
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1046,6 +1124,93 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
           />
         </div>
       </div>
+
+      {/* Break Sessions Manager */}
+      <div style={{ 
+        background: 'var(--surface)', 
+        border: '1px solid var(--surface-3)', 
+        borderRadius: 8, 
+        padding: 10,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: 4 }}>
+            ☕ Break Sessions ({breaks.length})
+          </span>
+          <button
+            type="button"
+            onClick={handleAddBreak}
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'var(--primary)',
+              background: 'rgba(var(--primary-rgb), 0.1)',
+              border: '1px solid rgba(var(--primary-rgb), 0.2)',
+              borderRadius: 4,
+              padding: '3px 8px',
+              cursor: 'pointer'
+            }}
+          >
+            + Add Break
+          </button>
+        </div>
+
+        {breaks.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', padding: '4px 0' }}>
+            No breaks in this session. Click "+ Add Break" to add one.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {breaks.map((b, bIdx) => (
+              <div key={b.id} style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--surface-1)', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--surface-2)' }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', minWidth: 50 }}>
+                  Break #{bIdx + 1}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+                  <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>In:</span>
+                  <input
+                    type="time"
+                    lang="en-GB"
+                    value={b.inVal}
+                    onChange={e => handleUpdateBreak(b.id, 'inVal', e.target.value)}
+                    style={{ border: '1px solid var(--surface-3)', borderRadius: 4, padding: '3px 6px', fontSize: 11, background: 'var(--surface)', color: 'var(--text)', width: '100%' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+                  <span style={{ fontSize: 9, color: 'var(--red)', fontWeight: 700 }}>Out:</span>
+                  <input
+                    type="time"
+                    lang="en-GB"
+                    value={b.outVal}
+                    onChange={e => handleUpdateBreak(b.id, 'outVal', e.target.value)}
+                    style={{ border: '1px solid var(--surface-3)', borderRadius: 4, padding: '3px 6px', fontSize: 11, background: 'var(--surface)', color: 'var(--text)', width: '100%' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveBreak(b.id)}
+                  title="Delete Break"
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: 'none',
+                    color: 'var(--red)',
+                    cursor: 'pointer',
+                    borderRadius: 4,
+                    padding: '4px 7px',
+                    fontSize: 10,
+                    fontWeight: 800
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Reason for Edit <span style={{ color: 'var(--red)' }}>*</span></span>
         <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="Required reason..."

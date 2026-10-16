@@ -3,24 +3,25 @@ import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
 import { 
-  CircleDollarSign, 
+  TrendingUp, 
   Banknote, 
   CreditCard, 
   Clock, 
   Ban, 
   Undo2, 
-  Globe,
+  BookOpen,
+  HandCoins,
   Search, 
   Printer, 
   BarChart3, 
   ClipboardList, 
-  Lock,
-  Eye,
-  RefreshCw,
-  History,
-  ChevronRight,
-  X,
-  Filter
+  Lock, 
+  Eye, 
+  RefreshCw, 
+  History, 
+  ChevronRight, 
+  X, 
+  Filter 
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import OrderDetailModal from '../components/OrderDetailModal'
@@ -213,11 +214,11 @@ export default function Reports({ isTodaySales = false }) {
 
   const tiles = [
     { 
-      label: isShiftSaleView ? 'Your Shift Revenue' : 'Total Revenue', 
+      label: isShiftSaleView ? 'Your Shift Sale' : 'Total Sale', 
       val: `${CURRENCY}${totalSales.toFixed(2)}`, 
-      icon: <CircleDollarSign size={20} />, 
+      icon: <TrendingUp size={20} />, 
       color: '#E31837', 
-      bg: '#fff1f2', 
+      bg: 'transparent', 
       sub: `${totalCount} total transactions` 
     },
     { 
@@ -225,7 +226,7 @@ export default function Reports({ isTodaySales = false }) {
       val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, 
       icon: <Banknote size={20} />, 
       color: '#10b981', 
-      bg: '#ecfdf5', 
+      bg: 'transparent', 
       sub: `${cashRow?.count || 0} orders` 
     },
     { 
@@ -233,7 +234,7 @@ export default function Reports({ isTodaySales = false }) {
       val: `${CURRENCY}${cardTotal.toFixed(2)}`, 
       icon: <CreditCard size={20} />, 
       color: '#3b82f6', 
-      bg: '#eff6ff', 
+      bg: 'transparent', 
       sub: `${cardCount} orders` 
     },
     { 
@@ -241,21 +242,21 @@ export default function Reports({ isTodaySales = false }) {
       val: `${CURRENCY}${parseFloat(creditRow?.total || 0).toFixed(2)}`, 
       icon: <ClipboardList size={20} />, 
       color: '#8b5cf6', 
-      bg: '#f3e8ff', 
+      bg: 'transparent', 
       sub: `${creditRow?.count || 0} orders` 
     },
     { 
       label: 'Major Payment', 
       val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, 
-      icon: <Banknote size={20} />, 
+      icon: <HandCoins size={20} />, 
       color: '#14b8a6', 
-      bg: '#ccfbf1', 
+      bg: 'transparent', 
       sub: `Cash: ${CURRENCY}${(creditSummary.majorPaymentsCash || 0).toFixed(2)} | Card: ${CURRENCY}${(creditSummary.majorPaymentsCard || 0).toFixed(2)}` 
     }
   ]
 
   if (isAdminOrDev || isManagement) {
-    tiles.splice(4, 0, { label: 'Total Credit', val: `${CURRENCY}${(creditSummary.totalCredit || 0).toFixed(2)}`, icon: <Globe size={20} />, color: '#f59e0b', bg: '#fef3c7', sub: 'Total Khata Balance' })
+    tiles.splice(4, 0, { label: 'Total Credit', val: `${CURRENCY}${(creditSummary.totalCredit || 0).toFixed(2)}`, icon: <BookOpen size={20} />, color: '#f59e0b', bg: 'transparent', sub: 'Total Khata Balance' })
   }
   
   if (holdRow && parseInt(holdRow.count || 0) > 0) {
@@ -264,7 +265,7 @@ export default function Reports({ isTodaySales = false }) {
       val: `${CURRENCY}${parseFloat(holdRow.total || 0).toFixed(2)}`,
       icon: <Clock size={20} />,
       color: '#f59e0b',
-      bg: '#fef3c7',
+      bg: 'transparent',
       sub: `${holdRow.count} orders pending`
     })
   }
@@ -275,7 +276,7 @@ export default function Reports({ isTodaySales = false }) {
       val: `${CURRENCY}${parseFloat(cancelledRow.total || 0).toFixed(2)}`,
       icon: <Ban size={20} />,
       color: '#ef4444',
-      bg: '#fee2e2',
+      bg: 'transparent',
       sub: `${cancelledRow.count} orders cancelled`
     })
   }
@@ -286,7 +287,7 @@ export default function Reports({ isTodaySales = false }) {
       val: `${CURRENCY}${parseFloat(returnedRow.total || 0).toFixed(2)}`,
       icon: <Undo2 size={20} />,
       color: '#d97706',
-      bg: '#fcf8e3',
+      bg: 'transparent',
       sub: `${returnedRow.count} orders returned`
     })
   }
@@ -734,9 +735,9 @@ export default function Reports({ isTodaySales = false }) {
 
           return (
             <div key={t.label} className="summary-tile">
-              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start', gap: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', gap: 4 }}>
                 <p style={{ fontSize: 13, margin: 0, fontWeight: 700, color: 'var(--text-secondary)' }}>{t.label}</p>
-                <div className="tile-icon" style={{ background: t.bg, color: t.color }}>
+                <div className="tile-icon" style={{ background: 'transparent', color: 'var(--text-secondary)', width: 'auto', height: 'auto', padding: 0 }}>
                   {t.icon}
                 </div>
               </div>
@@ -760,7 +761,7 @@ export default function Reports({ isTodaySales = false }) {
         <div className="card" style={{ padding: 0, marginBottom: 24, background: '#f8fafc' }}>
           <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--surface-2)' }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--green)' }}>
-              <Banknote size={20} /> Major Payments Received Today
+              <HandCoins size={20} /> Major Payments Received Today
             </h3>
           </div>
           <div className="table-wrap">
@@ -801,7 +802,7 @@ export default function Reports({ isTodaySales = false }) {
               
               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
-                  <ClipboardList size={18} /> Transactions ({filteredTransactions.length})
+                  <ClipboardList size={18} /> Orders ({filteredTransactions.length})
                 </h3>
                 <select
                   value={statusFilter}
@@ -862,72 +863,89 @@ export default function Reports({ isTodaySales = false }) {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            {/* Row 1: Branches on Left + Action Icons on Right */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
+              {(isAdminOrDev || isManagement) ? (
+                <div style={{ display: 'inline-flex', background: 'var(--surface-2)', borderRadius: 6, padding: 2, alignItems: 'center', gap: 2 }}>
+                  {[
+                    { id: 'All', label: 'All' },
+                    { id: 'Branch 1', label: 'B1' },
+                    { id: 'Branch 2', label: 'B2' },
+                    { id: 'Branch 3', label: 'B3' }
+                  ].map(b => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => setBranch(b.id)}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: 'none',
+                        borderRadius: 5,
+                        background: branch === b.id ? 'var(--surface)' : 'transparent',
+                        color: branch === b.id ? 'var(--primary)' : 'var(--text-muted)',
+                        boxShadow: branch === b.id ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              ) : <div />}
+
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  onClick={load}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', fontSize: 12 }}
+                  title="Refresh Data"
+                >
+                  <RefreshCw size={13} className={loading ? 'spin' : ''} /> <span className="hide-mobile">Refresh</span>
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', fontSize: 12 }} title="Export PDF">
+                  <Printer size={13} /> <span className="hide-mobile">PDF</span>
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', fontSize: 12 }} title="Export Excel">
+                  <BarChart3 size={13} /> <span className="hide-mobile">Excel</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Row 2: Search Input on Left + Date Info & Clear on Right */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
               <input 
                 type="text" 
                 placeholder="Search Order ID..." 
                 value={search} 
                 onChange={e => setSearch(e.target.value)}
                 className="pos-search-input"
-                style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 14, flex: 1, minWidth: '120px' }}
+                style={{ padding: '6px 12px', border: '1px solid var(--surface-2)', borderRadius: 6, fontSize: 13, flex: 1, minWidth: '120px' }}
               />
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <button 
-                  className="btn btn-secondary btn-sm" 
-                  onClick={load}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }}
-                  title="Refresh Data"
-                >
-                  <RefreshCw size={14} className={loading ? 'spin' : ''} /> <span className="hide-mobile">Refresh</span>
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={exportPDF} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }} title="Export PDF">
-                  <Printer size={14} /> <span className="hide-mobile">PDF</span>
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', fontSize: 13 }} title="Export Excel">
-                  <BarChart3 size={14} /> <span className="hide-mobile">Excel</span>
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                  {isTodaySales && isCashier ? (activeShift ? `Shift: ${formatSaudiTime(activeShift.start_time)}` : 'Active Shift') : `${from} → ${to}`}
+                </span>
+                {(tableFilters.placedBy !== 'All' || tableFilters.completedBy !== 'All' || tableFilters.branch !== 'All' || tableFilters.type !== 'All' || statusFilter !== 'All' || search !== '') && (
+                  <button 
+                    className="btn btn-sm btn-secondary" 
+                    onClick={() => {
+                      setTableFilters({ placedBy: 'All', completedBy: 'All', branch: 'All', type: 'All' })
+                      setStatusFilter('All')
+                      setSearch('')
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '3px 8px' }}
+                    title="Clear All Filters"
+                  >
+                    <X size={12} /> Clear
+                  </button>
+                )}
               </div>
             </div>
 
-          </div>
-          {(isAdminOrDev || isManagement) && (
-            <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4, marginTop: 8 }}>
-              {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
-                <button
-                  key={b}
-                  onClick={() => setBranch(b)}
-                  style={{
-                    flex: '1 1 auto', padding: '8px 12px', fontSize: 13, fontWeight: 700, border: 'none', borderRadius: 6,
-                    background: branch === b ? 'var(--surface)' : 'transparent',
-                    color: branch === b ? 'var(--primary)' : 'var(--text-muted)',
-                    boxShadow: branch === b ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                    cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', textAlign: 'center',
-                    minWidth: '60px'
-                  }}
-                >
-                  <span className="hide-mobile">{b}</span>
-                  <span className="show-mobile">{b.startsWith('Branch') ? `B${b.split(' ')[1]}` : b}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginTop: (isAdminOrDev || isManagement) ? 4 : 0 }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              {isTodaySales && isCashier ? (activeShift ? `Shift started: ${formatSaudiTime(activeShift.start_time)} (KSA)` : 'Active Shift') : `${from} → ${to}`}
-            </span>
-            {(tableFilters.placedBy !== 'All' || tableFilters.completedBy !== 'All' || tableFilters.branch !== 'All' || tableFilters.type !== 'All' || statusFilter !== 'All' || search !== '') && (
-              <button 
-                className="btn btn-sm btn-secondary" 
-                onClick={() => {
-                  setTableFilters({ placedBy: 'All', completedBy: 'All', branch: 'All', type: 'All' })
-                  setStatusFilter('All')
-                  setSearch('')
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '4px 8px' }}
-              >
-                <X size={14} /> Clear Filters
-              </button>
-            )}
           </div>
         </div>
         <div className="table-wrap">
@@ -1036,12 +1054,14 @@ export default function Reports({ isTodaySales = false }) {
                 : paginatedTransactions.map((t, index) => (
                     <tr key={t.id} onClick={() => viewOrderDetail(t.order_id)} style={{ cursor: 'pointer' }} className="hover-row">
                       <td style={{ fontWeight: 800, color: 'var(--red)' }}>{(currentPage - 1) * pageSize + index + 1}</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <span className="badge badge-info" style={{ fontWeight: 800 }}>Order #{t.order_id} / {t.slip_number}</span>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 13, whiteSpace: 'nowrap' }}>
+                            {t.order_id}{t.slip_number ? ` / ${t.slip_number}` : ''}
+                          </span>
                           {t.is_edited && (
                             <span 
-                              style={{ fontSize: 10, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 5px', borderRadius: 4, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 2 }}
+                              style={{ fontSize: 10, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 5px', borderRadius: 4, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 2, whiteSpace: 'nowrap' }}
                               title={t.edit_reason ? `Reason: ${t.edit_reason}` : 'Edited order'}
                             >
                               ✏️ Edited {t.edit_count > 0 ? `(${t.edit_count}x)` : ''}
@@ -1049,49 +1069,93 @@ export default function Reports({ isTodaySales = false }) {
                           )}
                         </div>
                       </td>
-                      <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>#{t.id}</td>
-                      <td>
+                      <td style={{ fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>#{t.id}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: 600 }}>{t.order_taker || '-'}</div>
                         {t.order_placed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSaudiTime(t.order_placed_at)}</div>}
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: 600 }}>{t.completed_by || (t.order_status === 'Completed' ? (t.order_taker || 'Completed') : '-')}</div>
                         {t.completed_at && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSaudiTime(t.completed_at)}</div>}
                       </td>
-                      <td>{t.branch || '-'}</td>
-                      <td>{t.order_type || '-'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{t.branch || '-'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{t.order_type || '-'}</td>
                       <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.items}>
                         {t.items || '-'}
                       </td>
-                      <td style={{ fontWeight: 700, color: ['Cancelled', 'Returned'].includes(t.order_status) ? 'var(--text-muted)' : 'var(--red)', textDecoration: ['Cancelled', 'Returned'].includes(t.order_status) ? 'line-through' : 'none' }}>{CURRENCY}{parseFloat(t.amount).toFixed(2)}</td>
-                      <td>
-                        <span className={`badge ${t.order_status === 'Hold' ? 'badge-warning' : (['Cancelled', 'Returned'].includes(t.order_status) ? 'badge-danger' : 'badge-success')}`}>
+                      <td style={{ fontWeight: 700, color: ['Cancelled', 'Returned'].includes(t.order_status) ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: ['Cancelled', 'Returned'].includes(t.order_status) ? 'line-through' : 'none', whiteSpace: 'nowrap', background: 'transparent' }}>
+                        {CURRENCY}{parseFloat(t.amount).toFixed(2)}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <span 
+                          style={{ 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            gap: 5, 
+                            fontWeight: 600, 
+                            fontSize: 12, 
+                            color: t.order_status === 'Hold' ? '#b45309' : (['Cancelled', 'Returned'].includes(t.order_status) ? 'var(--red)' : '#10b981'),
+                            whiteSpace: 'nowrap',
+                            background: 'transparent'
+                          }}
+                        >
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', display: 'inline-block' }} />
                           {t.payment_method === t.order_status ? t.order_status : `${t.payment_method} - ${t.order_status}`}
                         </span>
                       </td>
-                      <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                      <td style={{ color: 'var(--text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
                         {formatSaudiDateTime(t.created_at)}
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         {(!['Cancelled', 'Returned'].includes(t.order_status)) && (
-                          <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
                             <button 
-                              className="btn btn-sm" 
-                              style={{ padding: '4px 8px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: 4, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                              type="button"
+                              style={{ 
+                                padding: '4px 6px', 
+                                background: 'transparent', 
+                                color: 'var(--red)', 
+                                border: 'none', 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center', 
+                                cursor: isManagement ? 'not-allowed' : 'pointer', 
+                                opacity: isManagement ? 0.4 : 0.85,
+                                borderRadius: 4,
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={e => { if (!isManagement) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'scale(1.15)'; } }}
+                              onMouseLeave={e => { if (!isManagement) { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.transform = 'scale(1)'; } }}
                               onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Cancelled', t.order_status) }}
                               disabled={isManagement}
-                              title="Cancel Order"
+                              title="Cancel"
+                              aria-label="Cancel"
                             >
-                              <Ban size={14} /> Cancel
+                              <Ban size={16} />
                             </button>
                             <button 
-                              className="btn btn-sm" 
-                              style={{ padding: '4px 8px', background: 'rgba(217, 119, 6, 0.1)', color: '#d97706', border: '1px solid rgba(217, 119, 6, 0.2)', display: 'flex', alignItems: 'center', gap: 4, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}
+                              type="button"
+                              style={{ 
+                                padding: '4px 6px', 
+                                background: 'transparent', 
+                                color: '#d97706', 
+                                border: 'none', 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center', 
+                                cursor: isManagement ? 'not-allowed' : 'pointer', 
+                                opacity: isManagement ? 0.4 : 0.85,
+                                borderRadius: 4,
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={e => { if (!isManagement) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'scale(1.15)'; } }}
+                              onMouseLeave={e => { if (!isManagement) { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.transform = 'scale(1)'; } }}
                               onClick={() => { if (!isManagement) onVoidButtonClick(t.order_id, 'Returned', t.order_status) }}
                               disabled={isManagement}
-                              title="Return Order"
+                              title="Return"
+                              aria-label="Return"
                             >
-                              <Undo2 size={14} /> Return
+                              <Undo2 size={16} />
                             </button>
                           </div>
                         )}
@@ -1101,7 +1165,7 @@ export default function Reports({ isTodaySales = false }) {
               }
               {!loading && filteredTransactions.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                  <td colSpan={12} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
                     {transactions.length === 0 ? 'No transactions found for selected date range.' : 'No order ID matches your search.'}
                   </td>
                 </tr>

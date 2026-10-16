@@ -271,7 +271,7 @@ router.get('/today', authenticateToken, async (req, res) => {
 
     // Fetch all today's attendance sessions
     const sessions = await pool.query(`
-      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, remarks, shift_start_time, shift_end_time, created_by, checked_out_by
+      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, break_logs, remarks, shift_start_time, shift_end_time, created_by, checked_out_by
       FROM employee_attendance
       WHERE date = CURRENT_DATE OR check_out IS NULL
       ORDER BY check_in ASC
@@ -575,11 +575,17 @@ router.post('/check-out', authenticateToken, async (req, res) => {
 
     const session = activeSession.rows[0];
     let totalBreakSecs = session.total_break_duration_seconds || 0;
+    let breakLogs = Array.isArray(session.break_logs) ? [...session.break_logs] : (typeof session.break_logs === 'string' ? JSON.parse(session.break_logs) : []);
     
     // If currently on break, end the break now
     if (session.on_break && session.break_start) {
       const breakDuration = Math.floor((Date.now() - new Date(session.break_start).getTime()) / 1000);
       totalBreakSecs += breakDuration;
+      breakLogs.push({
+        break_in: session.break_start,
+        break_out: new Date().toISOString(),
+        duration_seconds: breakDuration
+      });
     }
 
     // Fetch previous completed sessions for today to accumulate worked hours
@@ -632,8 +638,8 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     }
 
     const result = await pool.query(
-      'UPDATE employee_attendance SET check_out = $1, on_break = false, break_start = null, total_break_duration_seconds = $2, checked_out_by = $4 WHERE id = $3 RETURNING *',
-      [finalCheckoutTime, totalBreakSecs, session.id, req.user.username]
+      'UPDATE employee_attendance SET check_out = $1, on_break = false, break_start = null, total_break_duration_seconds = $2, checked_out_by = $4, break_logs = $5 WHERE id = $3 RETURNING *',
+      [finalCheckoutTime, totalBreakSecs, session.id, req.user.username, JSON.stringify(breakLogs)]
     );
 
     // If overtime occurred (or explicit overtime was requested) and reason was provided, log it as an Overtime Request for Admin
@@ -680,6 +686,13 @@ router.post('/bulk-end-break', authenticateToken, async (req, res) => {
       `UPDATE employee_attendance 
        SET on_break = false, 
            total_break_duration_seconds = COALESCE(total_break_duration_seconds, 0) + EXTRACT(EPOCH FROM (NOW() - break_start))::integer,
+           break_logs = COALESCE(break_logs, '[]'::jsonb) || jsonb_build_array(
+             jsonb_build_object(
+               'break_in', break_start,
+               'break_out', NOW(),
+               'duration_seconds', EXTRACT(EPOCH FROM (NOW() - break_start))::integer
+             )
+           ),
            break_start = null 
        WHERE check_out IS NULL AND on_break = true 
        RETURNING *`
@@ -710,10 +723,16 @@ router.post('/toggle-break', authenticateToken, async (req, res) => {
       // End break
       const breakDuration = Math.floor((Date.now() - new Date(session.break_start).getTime()) / 1000);
       const newTotalBreak = (session.total_break_duration_seconds || 0) + breakDuration;
+      const currentLogs = Array.isArray(session.break_logs) ? [...session.break_logs] : (typeof session.break_logs === 'string' ? JSON.parse(session.break_logs) : []);
+      currentLogs.push({
+        break_in: session.break_start,
+        break_out: new Date().toISOString(),
+        duration_seconds: breakDuration
+      });
 
       result = await pool.query(
-        'UPDATE employee_attendance SET on_break = false, break_start = null, total_break_duration_seconds = $1 WHERE id = $2 RETURNING *',
-        [newTotalBreak, session.id]
+        'UPDATE employee_attendance SET on_break = false, break_start = null, total_break_duration_seconds = $1, break_logs = $3 WHERE id = $2 RETURNING *',
+        [newTotalBreak, session.id, JSON.stringify(currentLogs)]
       );
     } else {
       // Start break
@@ -822,7 +841,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, ea.created_by, ea.checked_out_by, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch
+      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.break_logs, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, ea.created_by, ea.checked_out_by, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE 1=1
@@ -1108,7 +1127,7 @@ router.get('/employee-date', authenticateToken, async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, check_in, check_out, status, total_break_duration_seconds FROM employee_attendance WHERE employee_id = $1 AND TO_CHAR(date, 'YYYY-MM-DD') = $2 ORDER BY check_in ASC",
+      "SELECT id, check_in, check_out, status, on_break, break_start, total_break_duration_seconds, break_logs FROM employee_attendance WHERE employee_id = $1 AND TO_CHAR(date, 'YYYY-MM-DD') = $2 ORDER BY check_in ASC",
       [employee_id, date]
     );
     res.json(result.rows);
@@ -1120,16 +1139,17 @@ router.get('/employee-date', authenticateToken, async (req, res) => {
 // Update a specific attendance session
 router.put('/session/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { check_in, check_out } = req.body;
+  const { check_in, check_out, break_logs } = req.body;
   if (!check_in) {
     return res.status(400).json({ error: 'Check-in time is required' });
   }
 
   try {
-    const sessionRes = await pool.query('SELECT date FROM employee_attendance WHERE id = $1', [id]);
+    const sessionRes = await pool.query('SELECT employee_id, date FROM employee_attendance WHERE id = $1', [id]);
     if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Attendance log not found.' });
     
     const recordDate = sessionRes.rows[0].date;
+    const employee_id = sessionRes.rows[0].employee_id;
     const userRole = req.user.role?.toLowerCase();
     
     if (userRole === 'operator') {
@@ -1141,10 +1161,36 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
     }
 
-    const resDB = await pool.query(
-      'UPDATE employee_attendance SET check_in = $1, check_out = $2, checked_out_by = $4 WHERE id = $3 RETURNING *',
-      [check_in, check_out || null, id, req.user.username]
-    );
+    let totalBreakSecs = null;
+    let parsedBreakLogs = null;
+    if (break_logs !== undefined && break_logs !== null) {
+      parsedBreakLogs = Array.isArray(break_logs) ? break_logs : (typeof break_logs === 'string' ? JSON.parse(break_logs) : []);
+      totalBreakSecs = 0;
+      parsedBreakLogs.forEach(b => {
+        if (b.break_in && b.break_out) {
+          const dur = Math.max(0, Math.floor((new Date(b.break_out).getTime() - new Date(b.break_in).getTime()) / 1000));
+          b.duration_seconds = dur;
+          totalBreakSecs += dur;
+        } else if (b.duration_seconds) {
+          totalBreakSecs += Number(b.duration_seconds);
+        }
+      });
+    }
+
+    let resDB;
+    if (parsedBreakLogs !== null) {
+      const hasActiveBreak = parsedBreakLogs.length > 0 && !parsedBreakLogs[parsedBreakLogs.length - 1].break_out;
+      const activeBreakStart = hasActiveBreak ? parsedBreakLogs[parsedBreakLogs.length - 1].break_in : null;
+      resDB = await pool.query(
+        'UPDATE employee_attendance SET check_in = $1, check_out = $2, checked_out_by = $4, break_logs = $5, total_break_duration_seconds = $6, on_break = $7, break_start = $8 WHERE id = $3 RETURNING *',
+        [check_in, check_out || null, id, req.user.username, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
+      );
+    } else {
+      resDB = await pool.query(
+        'UPDATE employee_attendance SET check_in = $1, check_out = $2, checked_out_by = $4 WHERE id = $3 RETURNING *',
+        [check_in, check_out || null, id, req.user.username]
+      );
+    }
 
     res.json(resDB.rows[0]);
   } catch (err) {
@@ -1154,7 +1200,7 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
 
 // Create a new manual attendance session
 router.post('/session', authenticateToken, async (req, res) => {
-  const { employee_id, date, check_in, check_out, status } = req.body;
+  const { employee_id, date, check_in, check_out, status, break_logs } = req.body;
   if (!employee_id || !date || !check_in) {
     return res.status(400).json({ error: 'Employee ID, date, and check-in time are required' });
   }
@@ -1186,10 +1232,27 @@ router.post('/session', authenticateToken, async (req, res) => {
     return res.status(403).json({ error: 'Access denied: Only Admins can modify attendance.' });
   }
 
+  let totalBreakSecs = 0;
+  let parsedBreakLogs = [];
+  if (break_logs !== undefined && break_logs !== null) {
+    parsedBreakLogs = Array.isArray(break_logs) ? break_logs : (typeof break_logs === 'string' ? JSON.parse(break_logs) : []);
+    parsedBreakLogs.forEach(b => {
+      if (b.break_in && b.break_out) {
+        const dur = Math.max(0, Math.floor((new Date(b.break_out).getTime() - new Date(b.break_in).getTime()) / 1000));
+        b.duration_seconds = dur;
+        totalBreakSecs += dur;
+      } else if (b.duration_seconds) {
+        totalBreakSecs += Number(b.duration_seconds);
+      }
+    });
+  }
+  const hasActiveBreak = parsedBreakLogs.length > 0 && !parsedBreakLogs[parsedBreakLogs.length - 1].break_out;
+  const activeBreakStart = hasActiveBreak ? parsedBreakLogs[parsedBreakLogs.length - 1].break_in : null;
+
   try {
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by, remarks) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username, 'Manual']
+      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by, remarks, break_logs, total_break_duration_seconds, on_break, break_start) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username, 'Manual', JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1231,7 +1294,7 @@ router.delete('/session/:id', authenticateToken, async (req, res) => {
 
 // Edit attendance record and log it in audit history
 router.post('/edit', authenticateToken, async (req, res) => {
-  const { attendance_id, new_check_in, new_check_out, reason } = req.body;
+  const { attendance_id, new_check_in, new_check_out, reason, break_logs } = req.body;
   const edited_by = req.user.username;
 
   if (!attendance_id || !reason) {
@@ -1277,13 +1340,42 @@ router.post('/edit', authenticateToken, async (req, res) => {
       [attendance_id, employee_id, original_check_in, original_check_out, new_check_in || null, new_check_out || null, edited_by, reason]
     );
 
+    let totalBreakSecs = null;
+    let parsedBreakLogs = null;
+    if (break_logs !== undefined && break_logs !== null) {
+      parsedBreakLogs = Array.isArray(break_logs) ? break_logs : (typeof break_logs === 'string' ? JSON.parse(break_logs) : []);
+      totalBreakSecs = 0;
+      parsedBreakLogs.forEach(b => {
+        if (b.break_in && b.break_out) {
+          const dur = Math.max(0, Math.floor((new Date(b.break_out).getTime() - new Date(b.break_in).getTime()) / 1000));
+          b.duration_seconds = dur;
+          totalBreakSecs += dur;
+        } else if (b.duration_seconds) {
+          totalBreakSecs += Number(b.duration_seconds);
+        }
+      });
+    }
+
     // Update employee_attendance
-    await pool.query(
-      `UPDATE employee_attendance 
-       SET check_in = $1, check_out = $2, remarks = 'Edited' 
-       WHERE id = $3`,
-      [new_check_in || null, new_check_out || null, attendance_id]
-    );
+    if (parsedBreakLogs !== null) {
+      const hasActiveBreak = parsedBreakLogs.length > 0 && !parsedBreakLogs[parsedBreakLogs.length - 1].break_out;
+      const activeBreakStart = hasActiveBreak ? parsedBreakLogs[parsedBreakLogs.length - 1].break_in : null;
+      await pool.query(
+        `UPDATE employee_attendance 
+         SET check_in = $1, check_out = $2, remarks = 'Edited',
+             break_logs = $4, total_break_duration_seconds = $5,
+             on_break = $6, break_start = $7
+         WHERE id = $3`,
+        [new_check_in || null, new_check_out || null, attendance_id, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
+      );
+    } else {
+      await pool.query(
+        `UPDATE employee_attendance 
+         SET check_in = $1, check_out = $2, remarks = 'Edited' 
+         WHERE id = $3`,
+        [new_check_in || null, new_check_out || null, attendance_id]
+      );
+    }
 
     res.json({ message: 'Attendance record updated and logged successfully' });
   } catch (err) {

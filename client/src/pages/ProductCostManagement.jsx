@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Search, ChefHat, ArrowLeft, Tag, LayoutList, Pencil, Database, MinusCircle } from 'lucide-react'
+import { Plus, Trash2, Search, ChefHat, ArrowLeft, Tag, LayoutList, Pencil, Database, MinusCircle, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import axios from '../api'
 
@@ -23,6 +23,8 @@ export default function ProductCostManagement() {
 
   // Bulk Add Ingredients State
   const [selectedStocks, setSelectedStocks] = useState([]) // Array of stock objects with quantity_input
+  const [stockSearch, setStockSearch] = useState('')
+  const [stockUnitFilter, setStockUnitFilter] = useState('All')
 
 
   useEffect(() => {
@@ -53,6 +55,9 @@ export default function ProductCostManagement() {
   const handleOpenRecipe = async (item) => {
     setSelectedItem(item)
     setIngredientForm({ stock_id: '', quantity_input: '', size_label: '' })
+    setSelectedStocks([])
+    setStockSearch('')
+    setStockUnitFilter('All')
     await fetchRecipe(item.id)
   }
 
@@ -60,6 +65,9 @@ export default function ProductCostManagement() {
     setSelectedItem(null)
     setRecipeData({ ingredients: [], totalCost: 0, sizeCosts: {}, sizeOptions: [] })
     setSearch('')
+    setStockSearch('')
+    setStockUnitFilter('All')
+    setSelectedStocks([])
   }
 
   const fetchRecipe = async (itemId) => {
@@ -254,6 +262,14 @@ export default function ProductCostManagement() {
   if (selectedItem) {
     const grouped = groupedIngredients()
 
+    const availableStockUnits = ['All', ...Array.from(new Set(stockItems.map(s => s.unit?.trim()).filter(Boolean)))]
+
+    const filteredStockItems = stockItems.filter(stock => {
+      const matchesSearch = (stock.name || '').toLowerCase().includes(stockSearch.toLowerCase().trim())
+      const matchesUnit = stockUnitFilter === 'All' || (stock.unit?.trim() || '').toLowerCase() === stockUnitFilter.toLowerCase()
+      return matchesSearch && matchesUnit
+    })
+
     return (
       <div className="product-cost-detail">
         {/* Header */}
@@ -284,24 +300,95 @@ export default function ProductCostManagement() {
           
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
             {/* Checkbox List */}
-            <div style={{ flex: '1 1 300px', maxWidth: 400 }}>
-              <label style={{ display: 'block', fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Select Stock Ingredients</label>
+            <div style={{ flex: '1 1 300px', maxWidth: 420 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label style={{ fontWeight: 600, fontSize: 13, margin: 0 }}>Select Stock Ingredients</label>
+                {selectedStocks.length > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--red)', fontWeight: 700 }}>
+                    {selectedStocks.length} Selected
+                  </span>
+                )}
+              </div>
+
+              {/* Search Bar & Unit Filter */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input 
+                    type="text"
+                    placeholder="Search ingredients..."
+                    value={stockSearch}
+                    onChange={e => setStockSearch(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '7px 24px 7px 30px',
+                      fontSize: 12,
+                      borderRadius: 6,
+                      border: '1px solid var(--surface-2)',
+                      background: 'var(--surface)',
+                      outline: 'none'
+                    }}
+                  />
+                  {stockSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setStockSearch('')}
+                      style={{
+                        position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                        border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                        fontSize: 12, padding: 0, display: 'flex', alignItems: 'center'
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+
+                <select
+                  value={stockUnitFilter}
+                  onChange={e => setStockUnitFilter(e.target.value)}
+                  style={{
+                    padding: '7px 8px',
+                    fontSize: 12,
+                    borderRadius: 6,
+                    border: '1px solid var(--surface-2)',
+                    background: 'var(--surface)',
+                    outline: 'none',
+                    minWidth: 85,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="All">All Units</option>
+                  {availableStockUnits.filter(u => u !== 'All').map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+
               <div style={{ 
                 maxHeight: 250, overflowY: 'auto', border: '1px solid var(--surface-2)', 
-                borderRadius: 8, padding: 10, background: 'var(--surface)' 
+                borderRadius: 8, padding: 8, background: 'var(--surface)' 
               }}>
-                {stockItems.map(stock => (
-                  <label key={stock.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', cursor: 'pointer', borderRadius: 4, transition: 'background 0.2s', ':hover': { background: 'white' } }}>
-                    <input 
-                      type="checkbox" 
-                      style={{ width: 16, height: 16, accentColor: 'var(--red)', cursor: 'pointer' }}
-                      checked={selectedStocks.some(s => s.stock_id === stock.id)}
-                      onChange={() => toggleStockSelection(stock)}
-                    />
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{stock.name}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>SAR {Number(stock.price_per_unit).toFixed(2)} / {stock.unit}</span>
-                  </label>
-                ))}
+                {filteredStockItems.length === 0 ? (
+                  <div style={{ padding: '24px 10px', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
+                    No ingredients found
+                  </div>
+                ) : (
+                  filteredStockItems.map(stock => (
+                    <label key={stock.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', cursor: 'pointer', borderRadius: 4, transition: 'background 0.15s' }}>
+                      <input 
+                        type="checkbox" 
+                        style={{ width: 16, height: 16, accentColor: 'var(--red)', cursor: 'pointer' }}
+                        checked={selectedStocks.some(s => s.stock_id === stock.id)}
+                        onChange={() => toggleStockSelection(stock)}
+                      />
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{stock.name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                        SAR {Number(stock.price_per_unit).toFixed(2)} / {stock.unit}
+                      </span>
+                    </label>
+                  ))
+                )}
               </div>
             </div>
 

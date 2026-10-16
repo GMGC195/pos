@@ -513,6 +513,77 @@ export default function Layout() {
             .branch-full { display: inline !important; }
             .branch-short { display: none !important; }
           }
+          @media (max-width: 768px) {
+            .topbar {
+              padding: 0 12px !important;
+              gap: 8px !important;
+              height: 60px !important;
+            }
+            .hamburger-btn {
+              width: 36px !important;
+              height: 36px !important;
+              flex-shrink: 0 !important;
+            }
+            .topbar-title-wrap {
+              min-width: 0 !important;
+              flex: 1 1 auto !important;
+              overflow: hidden !important;
+            }
+            .page-title {
+              font-size: 14px !important;
+              font-weight: 700 !important;
+              line-height: 1.2 !important;
+              white-space: nowrap !important;
+              overflow: hidden !important;
+              text-overflow: ellipsis !important;
+            }
+            .page-subtitle {
+              margin-top: 1px !important;
+              line-height: 1.1 !important;
+            }
+            .topbar-date-desktop {
+              display: none !important;
+            }
+            .topbar-date-mobile {
+              display: flex !important;
+              align-items: center !important;
+              gap: 4px !important;
+              font-size: 10px !important;
+              white-space: nowrap !important;
+              overflow: hidden !important;
+              text-overflow: ellipsis !important;
+              color: var(--text-muted) !important;
+            }
+            .topbar-right {
+              gap: 6px !important;
+              flex-shrink: 0 !important;
+            }
+            .topbar-right .icon-btn {
+              width: 36px !important;
+              height: 36px !important;
+            }
+            .user-avatar {
+              width: 36px !important;
+              height: 36px !important;
+              font-size: 13px !important;
+            }
+          }
+          @media (min-width: 769px) {
+            .topbar-date-desktop {
+              display: flex !important;
+            }
+            .topbar-date-mobile {
+              display: none !important;
+            }
+          }
+          @media (max-width: 380px) {
+            .topbar-date-mobile {
+              font-size: 9px !important;
+            }
+            .page-title {
+              font-size: 13px !important;
+            }
+          }
         `}
       </style>
       {/* Mobile Sidebar Overlay */}
@@ -624,19 +695,27 @@ export default function Layout() {
       }}>
         {/* Topbar */}
         <header className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="topbar-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1, overflow: 'hidden' }}>
             <button 
               className="hamburger-btn"
               onClick={() => setIsSidebarOpen(true)}
+              aria-label="Open Navigation"
             >
               <Menu size={20} />
             </button>
-            <div>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <div className="page-title">{currentTitle}</div>
-              <div className="page-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                <span style={{ opacity: 0.5 }}>•</span>
-                <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
+              <div className="page-subtitle">
+                <div className="topbar-date-desktop" style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                  <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                  <span style={{ opacity: 0.5 }}>•</span>
+                  <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
+                </div>
+                <div className="topbar-date-mobile" style={{ display: 'none', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                  <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'short', day: 'numeric' })}</span>
+                  <span style={{ opacity: 0.5 }}>•</span>
+                  <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{liveKsaTime}</span>
+                </div>
               </div>
             </div>
           </div>
