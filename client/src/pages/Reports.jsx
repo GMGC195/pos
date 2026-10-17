@@ -499,7 +499,7 @@ export default function Reports({ isTodaySales = false }) {
     const diffVal = parseFloat(report.difference || 0)
     const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01
     const diffSign = diffVal < 0 ? '-' : '+'
-    const diffLabel = diffVal < 0 ? 'SHORTAGE / کمی' : 'EXCESS / زیادتی'
+    const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ'
 
     let shiftsArr = []
     if (report.closing_type === 'Daily') {
@@ -1807,7 +1807,7 @@ export default function Reports({ isTodaySales = false }) {
                                 <span style={{ fontSize: 14 }}>
                                   {diff < 0 ? '-' : '+'}{CURRENCY}{Math.abs(diff).toFixed(2)}
                                   <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 4, opacity: 0.9 }}>
-                                    ({diff < 0 ? 'Shortage / کمی' : 'Excess / زیادتی'})
+                                    ({diff < 0 ? 'Shortage / کم' : 'Excess / زیادہ'})
                                   </span>
                                 </span>
                               </div>

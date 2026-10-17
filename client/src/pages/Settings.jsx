@@ -18,7 +18,12 @@ import {
   MoreVertical,
   X,
   Store,
-  Plus
+  Plus,
+  ShieldAlert,
+  Layers,
+  LayoutGrid,
+  ListFilter,
+  Info
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -31,7 +36,47 @@ export default function Settings() {
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
   const [printerIp, setPrinterIp] = useState(localStorage.getItem('printerIp') || '127.0.0.1')
   const [lowStockBehavior, setLowStockBehavior] = useState('block')
+  const [stockViewMode, setStockViewMode] = useState(() => localStorage.getItem('pos_stock_view_mode') || 'cards')
   const [reportEmails, setReportEmails] = useState(['mr.caffee25@gmail.com'])
+
+  const stockOptions = [
+    {
+      value: 'block',
+      title: 'Block Order',
+      badge: 'Default',
+      badgeColor: '#dc2626',
+      badgeBg: 'rgba(239, 68, 68, 0.12)',
+      icon: ShieldAlert,
+      iconColor: '#dc2626',
+      iconBg: 'rgba(239, 68, 68, 0.12)',
+      desc: 'Stop order if ingredients are out of stock.',
+      detail: 'Strict inventory protection: orders cannot be placed if recipe ingredients are out of stock.'
+    },
+    {
+      value: 'allow_negative',
+      title: 'Allow Negative',
+      badge: 'Deficit',
+      badgeColor: '#d97706',
+      badgeBg: 'rgba(217, 119, 6, 0.12)',
+      icon: Layers,
+      iconColor: '#d97706',
+      iconBg: 'rgba(217, 119, 6, 0.12)',
+      desc: 'Allow order & deduct stock below zero.',
+      detail: 'Flexible tracking: orders proceed smoothly while stock counts track deficit below zero.'
+    },
+    {
+      value: 'ignore',
+      title: 'Ignore Stock',
+      badge: 'Bypass',
+      badgeColor: '#4f46e5',
+      badgeBg: 'rgba(79, 70, 229, 0.12)',
+      icon: EyeOff,
+      iconColor: '#4f46e5',
+      iconBg: 'rgba(79, 70, 229, 0.12)',
+      desc: 'Allow order without stock check or deduction.',
+      detail: 'Unrestricted checkout: stock verification and recipe ingredient deductions are completely bypassed.'
+    }
+  ]
   const [newEmailInput, setNewEmailInput] = useState('')
   const [emailInputError, setEmailInputError] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
@@ -489,62 +534,209 @@ export default function Settings() {
                   <p>Global settings for Point of Sale functionality</p>
                 </div>
               </div>
-              <div className="settings-form">
-                  <div className="form-group" style={{ maxWidth: 500 }}>
-                    <label>Insufficient Stock Behavior</label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
-                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: lowStockBehavior === 'block' ? '2px solid var(--primary)' : '2px solid transparent' }}>
-                        <input 
-                          type="radio" 
-                          name="lowStockBehavior" 
-                          value="block" 
-                          checked={lowStockBehavior === 'block'}
-                          onChange={() => setLowStockBehavior('block')}
-                          style={{ marginTop: '4px' }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 500 }}>Block Order (Default)</div>
-                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Prevent order placement if required ingredients are out of stock.</div>
-                        </div>
-                      </label>
 
-                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: lowStockBehavior === 'allow_negative' ? '2px solid var(--primary)' : '2px solid transparent' }}>
-                        <input 
-                          type="radio" 
-                          name="lowStockBehavior" 
-                          value="allow_negative" 
-                          checked={lowStockBehavior === 'allow_negative'}
-                          onChange={() => setLowStockBehavior('allow_negative')}
-                          style={{ marginTop: '4px' }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 500 }}>Allow Negative Stock</div>
-                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Allow order placement, and let the inventory quantity drop below zero.</div>
-                        </div>
+              {/* Informative Rule Context Banner */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+                padding: '12px 16px',
+                background: 'rgba(244, 180, 0, 0.08)',
+                border: '1px solid rgba(244, 180, 0, 0.25)',
+                borderRadius: '12px',
+                marginBottom: '20px'
+              }}>
+                <Info size={18} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '2px' }} />
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                  <strong style={{ color: 'var(--text-primary)', display: 'block', marginBottom: '2px' }}>
+                    Insufficient Inventory Rule
+                  </strong>
+                  Controls checkout behavior when an item or its recipe ingredients are depleted.
+                </div>
+              </div>
+
+              <div className="settings-form">
+                <div>
+                  {/* Option Heading with View Mode Pill Switcher */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '12px',
+                    flexWrap: 'wrap',
+                    gap: '10px'
+                  }}>
+                    <div>
+                      <label style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', display: 'block', margin: 0 }}>
+                        Insufficient Stock Behavior
                       </label>
-                      
-                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: lowStockBehavior === 'ignore' ? '2px solid var(--primary)' : '2px solid transparent' }}>
-                        <input 
-                          type="radio" 
-                          name="lowStockBehavior" 
-                          value="ignore" 
-                          checked={lowStockBehavior === 'ignore'}
-                          onChange={() => setLowStockBehavior('ignore')}
-                          style={{ marginTop: '4px' }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 500 }}>Ignore Stock Check</div>
-                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Allow order placement, but do not deduct any stock from the inventory.</div>
-                        </div>
-                      </label>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        Select how orders are handled when stock is depleted
+                      </span>
+                    </div>
+
+                    {/* View Switcher: Compact Cards Grid vs Dropdown */}
+                    <div style={{
+                      display: 'inline-flex',
+                      padding: '3px',
+                      background: 'var(--surface-2)',
+                      borderRadius: '8px',
+                      gap: '2px'
+                    }}>
+                      <button
+                        type="button"
+                        className={`pos-view-pill-btn ${stockViewMode === 'cards' ? 'active' : ''}`}
+                        onClick={() => {
+                          setStockViewMode('cards')
+                          localStorage.setItem('pos_stock_view_mode', 'cards')
+                        }}
+                      >
+                        <LayoutGrid size={13} /> Cards Grid
+                      </button>
+                      <button
+                        type="button"
+                        className={`pos-view-pill-btn ${stockViewMode === 'dropdown' ? 'active' : ''}`}
+                        onClick={() => {
+                          setStockViewMode('dropdown')
+                          localStorage.setItem('pos_stock_view_mode', 'dropdown')
+                        }}
+                      >
+                        <ListFilter size={13} /> Dropdown
+                      </button>
                     </div>
                   </div>
 
-                  <div style={{ marginTop: 24 }}>
-                    <button type="button" className="btn-save" onClick={saveSettings} disabled={savingSettings}>
-                      {savingSettings ? 'Saving...' : <><CheckCircle2 size={18} /> Save Global Settings</>}
-                    </button>
-                  </div>
+                  {/* Multi-Column Compact Cards View */}
+                  {stockViewMode === 'cards' && (
+                    <div className="pos-stock-grid">
+                      {stockOptions.map(opt => {
+                        const isSelected = lowStockBehavior === opt.value
+                        return (
+                          <div
+                            key={opt.value}
+                            onClick={() => setLowStockBehavior(opt.value)}
+                            className={`pos-stock-card ${isSelected ? 'selected' : ''}`}
+                          >
+                            {/* Radio Dot on the side */}
+                            <div style={{
+                              width: 16,
+                              height: 16,
+                              borderRadius: '50%',
+                              border: isSelected ? '5px solid var(--primary)' : '2px solid #cbd5e1',
+                              background: '#fff',
+                              flexShrink: 0,
+                              marginTop: '2px',
+                              transition: 'all 0.15s ease'
+                            }} />
+
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                                  {opt.title}
+                                </span>
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: 700,
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  background: opt.badgeBg,
+                                  color: opt.badgeColor,
+                                  flexShrink: 0
+                                }}>
+                                  {opt.badge}
+                                </span>
+                              </div>
+                              <p style={{
+                                fontSize: '11px',
+                                color: 'var(--text-secondary)',
+                                lineHeight: '1.35',
+                                margin: '3px 0 0 0'
+                              }}>
+                                {opt.desc}
+                              </p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Dropdown Menu View */}
+                  {stockViewMode === 'dropdown' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '520px' }}>
+                      <select
+                        value={lowStockBehavior}
+                        onChange={(e) => setLowStockBehavior(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '11px 14px',
+                          borderRadius: '10px',
+                          border: '1.5px solid var(--surface-2)',
+                          background: 'var(--surface)',
+                          fontSize: '13.5px',
+                          fontWeight: 600,
+                          color: 'var(--text-primary)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="block">Block Order (Default) — Stop checkout if out of stock</option>
+                        <option value="allow_negative">Allow Negative Stock — Allow checkout & deduct below zero</option>
+                        <option value="ignore">Ignore Stock Check — Allow checkout without stock checks</option>
+                      </select>
+
+                      {/* Active Preview Box */}
+                      {(() => {
+                        const activeOpt = stockOptions.find(o => o.value === lowStockBehavior) || stockOptions[0]
+                        const ActiveIcon = activeOpt.icon
+                        return (
+                          <div style={{
+                            padding: '12px 14px',
+                            borderRadius: '10px',
+                            background: 'rgba(244, 180, 0, 0.06)',
+                            border: '1.5px solid var(--primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px'
+                          }}>
+                            <div style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 8,
+                              background: activeOpt.iconBg,
+                              color: activeOpt.iconColor,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0
+                            }}>
+                              <ActiveIcon size={17} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                                <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{activeOpt.title}</strong>
+                                <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', background: activeOpt.badgeBg, color: activeOpt.badgeColor }}>
+                                  {activeOpt.badge}
+                                </span>
+                              </div>
+                              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4 }}>
+                                {activeOpt.detail}
+                              </p>
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                  <button type="button" className="btn-save" onClick={saveSettings} disabled={savingSettings}>
+                    {savingSettings ? 'Saving...' : <><CheckCircle2 size={18} /> Save Global Settings</>}
+                  </button>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Applies globally to all active POS registers and terminals.
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -1519,7 +1711,7 @@ export default function Settings() {
         }
 
         .input-with-icon input, 
-        .form-group input, 
+        .form-group input:not([type="radio"]):not([type="checkbox"]), 
         .form-group select {
           width: 100%;
           padding: 12px 42px 12px 42px;
@@ -1533,7 +1725,7 @@ export default function Settings() {
           display: block;
         }
 
-        .form-group input:not([readonly]):focus,
+        .form-group input:not([readonly]):not([type="radio"]):not([type="checkbox"]):focus,
         .form-group select:focus {
           border-color: var(--red);
           background: white;
@@ -1819,6 +2011,83 @@ export default function Settings() {
             overflow-x: hidden;
             width: 100%;
           }
+        }
+
+        /* POS Options Custom Styles */
+        .pos-stock-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+        }
+
+        @media (max-width: 900px) {
+          .pos-stock-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+
+        @media (max-width: 580px) {
+          .pos-stock-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .pos-stock-card {
+          display: flex;
+          align-items: flex-start;
+          gap: 9px;
+          padding: 10px 12px;
+          border-radius: 10px;
+          cursor: pointer;
+          background: var(--surface);
+          border: 1.5px solid var(--surface-2);
+          transition: all 0.15s ease;
+          user-select: none;
+          position: relative;
+          box-sizing: border-box;
+        }
+
+        .pos-stock-card:hover {
+          border-color: #cbd5e1;
+          background: #ffffff;
+          transform: translateY(-1px);
+          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .pos-stock-card.selected {
+          border-color: var(--primary) !important;
+          background: rgba(244, 180, 0, 0.06) !important;
+          box-shadow: 0 3px 12px rgba(244, 180, 0, 0.18) !important;
+        }
+
+        .pos-stock-card.selected:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 14px rgba(244, 180, 0, 0.22) !important;
+        }
+
+        .pos-view-pill-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 11px;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          border: none;
+          cursor: pointer;
+          background: transparent;
+          color: var(--text-muted);
+          transition: all 0.15s ease;
+        }
+
+        .pos-view-pill-btn:hover {
+          color: var(--text-primary);
+        }
+
+        .pos-view-pill-btn.active {
+          background: #ffffff;
+          color: var(--text-primary);
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
         }
       `}</style>
 

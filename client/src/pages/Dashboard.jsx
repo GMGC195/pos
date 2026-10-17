@@ -213,7 +213,7 @@ export default function Dashboard() {
         const diffVal = parseFloat(report.difference || 0);
         const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01;
         const diffSign = diffVal < 0 ? '-' : '+';
-        const diffLabel = diffVal < 0 ? 'SHORTAGE / کمی' : 'EXCESS / زیادتی';
+        const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ';
         if (!hasDiff) return '';
         return `
           <div style="background: #dc2626; color: #ffffff; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact;">

@@ -994,7 +994,7 @@ async function sendClosingEmail(report, closingType) {
     let differenceHtml = '';
     if (hasDiff) {
       const diffSign = diffVal < 0 ? '-' : '+';
-      const diffLabel = diffVal < 0 ? 'SHORTAGE / کمی' : 'EXCESS / زیادتی';
+      const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ';
       differenceHtml = `
         <div style="background-color: #dc2626; color: #ffffff; padding: 16px 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);">
           <div style="font-size: 22px; font-weight: 900; letter-spacing: 0.5px;">
