@@ -3,14 +3,11 @@ import axios from '../api'
 import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2, ArrowRight, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
+import { getSaudiTodayDate, getSaudiDateString, toSaudiTimeInput, saudiTimeToISO } from '../utils/timezone'
 
 const formatLocalDate = (date) => {
   if (!date) return ''
-  const d = new Date(date)
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return getSaudiDateString(date)
 }
 
 const formatHoursToText = (decimalHours) => {
@@ -196,25 +193,28 @@ export default function AttendanceReports() {
   const handleAddNewSession = async () => {
     if (!addCheckIn) { toast.error('Check-In time is required'); return }
     if (!addCheckOut) { toast.error('Check-Out time is required'); return }
-    const fullCheckIn = `${editDate}T${addCheckIn}`
-    let fullCheckOut = `${editDate}T${addCheckOut}`
     
-    // Auto-adjust next day if check-out time is earlier than check-in time (crossing midnight)
-    if (new Date(fullCheckOut) < new Date(fullCheckIn)) {
+    let outDate = editDate;
+    if (addCheckOut < addCheckIn) {
       const nextDay = new Date(editDate);
       nextDay.setDate(nextDay.getDate() + 1);
-      const nY = nextDay.getFullYear(), nMo = String(nextDay.getMonth()+1).padStart(2,'0'), nDy = String(nextDay.getDate()).padStart(2,'0');
-      fullCheckOut = `${nY}-${nMo}-${nDy}T${addCheckOut}`;
+      outDate = getSaudiDateString(nextDay);
     }
     
-    if (new Date(fullCheckOut) <= new Date(fullCheckIn)) { toast.error('Check-Out must be after Check-In'); return }
-    const toISO = (v) => v ? new Date(v).toISOString() : null
+    const checkInISO = saudiTimeToISO(editDate, addCheckIn);
+    const checkOutISO = saudiTimeToISO(outDate, addCheckOut);
+
+    if (new Date(checkOutISO) <= new Date(checkInISO)) { 
+      toast.error('Check-Out must be after Check-In'); 
+      return; 
+    }
+
     try {
       await axios.post('/api/attendance/session', {
         employee_id: editEmployeeId,
         date: editDate,
-        check_in: toISO(fullCheckIn),
-        check_out: toISO(fullCheckOut),
+        check_in: checkInISO,
+        check_out: checkOutISO,
         status: addStatus
       })
       toast.success('Session added!')
@@ -225,15 +225,14 @@ export default function AttendanceReports() {
     }
   }
 
-  const handleUpdateSession = async (sessionId, checkInStr, checkOutStr, reason, breakLogs = null) => {
+  const handleUpdateSession = async (sessionId, checkInISO, checkOutISO, reason, breakLogs = null) => {
     if (!reason || !reason.trim()) { toast.error('Reason is required'); return }
     setSavingSessionId(sessionId)
     try {
-      const toISO = (localStr) => localStr ? new Date(localStr).toISOString() : null;
       const payload = {
         attendance_id: sessionId,
-        new_check_in: toISO(checkInStr),
-        new_check_out: toISO(checkOutStr) || null,
+        new_check_in: checkInISO,
+        new_check_out: checkOutISO || null,
         reason
       };
       if (breakLogs !== null) {
@@ -1886,15 +1885,8 @@ export default function AttendanceReports() {
 }
 
 function SessionRow({ session, previousSession, nextSession, index, onSave, onDelete, saving }) {
-  const toLocalTime = (iso) => {
-    if (!iso) return ''
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return ''
-    const h = String(d.getHours()).padStart(2,'0'), mi = String(d.getMinutes()).padStart(2,'0')
-    return `${h}:${mi}`
-  }
-  const [inVal, setInVal] = useState(() => toLocalTime(session.check_in))
-  const [outVal, setOutVal] = useState(() => toLocalTime(session.check_out))
+  const [inVal, setInVal] = useState(() => toSaudiTimeInput(session.check_in))
+  const [outVal, setOutVal] = useState(() => toSaudiTimeInput(session.check_out))
   const [reason, setReason] = useState('')
   const [showAuditLogs, setShowAuditLogs] = useState(false)
 
@@ -1907,14 +1899,14 @@ function SessionRow({ session, previousSession, nextSession, index, onSave, onDe
     }
     const parsed = list.map((b, i) => ({
       id: `b_${Date.now()}_${i}`,
-      inVal: toLocalTime(b.break_in),
-      outVal: toLocalTime(b.break_out)
+      inVal: toSaudiTimeInput(b.break_in),
+      outVal: toSaudiTimeInput(b.break_out)
     }))
     // If currently on break and not yet in break_logs
     if (session.on_break && session.break_start && !parsed.some(b => !b.outVal)) {
       parsed.push({
         id: `b_active_${Date.now()}`,
-        inVal: toLocalTime(session.break_start),
+        inVal: toSaudiTimeInput(session.break_start),
         outVal: ''
       })
     }
@@ -1939,104 +1931,98 @@ function SessionRow({ session, previousSession, nextSession, index, onSave, onDe
       return;
     }
 
-    const baseDateIn = session.check_in ? new Date(session.check_in) : (session.date ? new Date(session.date) : new Date())
-    const yIn = baseDateIn.getFullYear(), moIn = String(baseDateIn.getMonth()+1).padStart(2,'0'), dyIn = String(baseDateIn.getDate()).padStart(2,'0')
-    const fullInStr = `${yIn}-${moIn}-${dyIn}T${inVal}`
+    const baseDateIn = getSaudiDateString(session.check_in || session.date || new Date());
+    const fullInISO = saudiTimeToISO(baseDateIn, inVal);
 
     if (previousSession && previousSession.check_out) {
-      if (new Date(fullInStr) <= new Date(previousSession.check_out)) {
+      if (new Date(fullInISO) <= new Date(previousSession.check_out)) {
         toast.error('Check-in time must be after previous session\'s check-out time.');
         return;
       }
     }
 
-    let fullOutStr = '';
+    let fullOutISO = null;
+    let baseDateOut = baseDateIn;
     if (outVal) {
-      let baseDateOut = new Date(baseDateIn); // ALWAYS baseline from Check-In Date
-      let yOut = baseDateOut.getFullYear(), moOut = String(baseDateOut.getMonth()+1).padStart(2,'0'), dyOut = String(baseDateOut.getDate()).padStart(2,'0');
-      fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
-      
-      // Auto-adjust next day if check-out time is earlier than check-in time (e.g., crossing midnight)
-      if (new Date(fullOutStr) < new Date(fullInStr)) {
-        baseDateOut.setDate(baseDateOut.getDate() + 1);
-        yOut = baseDateOut.getFullYear();
-        moOut = String(baseDateOut.getMonth()+1).padStart(2,'0');
-        dyOut = String(baseDateOut.getDate()).padStart(2,'0');
-        fullOutStr = `${yOut}-${moOut}-${dyOut}T${outVal}`;
+      if (outVal < inVal) {
+        const nextDay = new Date(baseDateIn);
+        nextDay.setDate(nextDay.getDate() + 1);
+        baseDateOut = getSaudiDateString(nextDay);
       }
-      
+      fullOutISO = saudiTimeToISO(baseDateOut, outVal);
+
       if (nextSession && nextSession.check_in) {
-        if (new Date(fullOutStr) >= new Date(nextSession.check_in)) {
+        if (new Date(fullOutISO) >= new Date(nextSession.check_in)) {
           toast.error('Check-out time must be before next session\'s check-in time.');
           return;
         }
       }
     }
 
-    const sessionInDate = new Date(fullInStr)
-    const sessionOutDate = fullOutStr ? new Date(fullOutStr) : null
+    const sessionInDate = new Date(fullInISO);
+    const sessionOutDate = fullOutISO ? new Date(fullOutISO) : null;
 
     // Process & validate break sessions
-    const formattedBreaks = []
+    const formattedBreaks = [];
     for (let i = 0; i < breaks.length; i++) {
-      const b = breaks[i]
-      if (!b.inVal && !b.outVal) continue // skip completely empty
+      const b = breaks[i];
+      if (!b.inVal && !b.outVal) continue; // skip completely empty
       if (!b.inVal) {
-        toast.error(`Break #${i + 1} has Out time but is missing In time.`)
-        return
+        toast.error(`Break #${i + 1} has Out time but is missing In time.`);
+        return;
       }
-      
-      let bInDate = new Date(baseDateIn)
-      const [bInH, bInM] = b.inVal.split(':').map(Number)
-      bInDate.setHours(bInH, bInM, 0, 0)
-      
-      // If session crosses midnight, adjust break date if break hour is past midnight
-      if (sessionOutDate && sessionOutDate > sessionInDate && sessionInDate.getDate() !== sessionOutDate.getDate()) {
-        if (bInH < sessionInDate.getHours()) {
-          bInDate.setDate(bInDate.getDate() + 1)
-        }
+
+      let breakDateIn = baseDateIn;
+      if (sessionOutDate && baseDateOut !== baseDateIn && b.inVal < inVal) {
+        breakDateIn = baseDateOut;
       }
+      const bInISO = saudiTimeToISO(breakDateIn, b.inVal);
+      const bInDate = new Date(bInISO);
 
       // Break must be within session Check-In and Check-Out
       if (bInDate < sessionInDate) {
-        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be before Check-In time (${inVal}).`)
-        return
+        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be before Check-In time (${inVal}).`);
+        return;
       }
       if (sessionOutDate && bInDate >= sessionOutDate) {
-        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be after Check-Out time (${outVal}).`)
-        return
+        toast.error(`Break #${i + 1} In time (${b.inVal}) cannot be after Check-Out time (${outVal}).`);
+        return;
       }
 
-      let bOutDate = null
+      let bOutISO = null;
+      let bOutDate = null;
       if (b.outVal) {
-        bOutDate = new Date(bInDate)
-        const [bOutH, bOutM] = b.outVal.split(':').map(Number)
-        bOutDate.setHours(bOutH, bOutM, 0, 0)
-        if (bOutDate <= bInDate) {
-          bOutDate.setDate(bOutDate.getDate() + 1)
+        let breakDateOut = breakDateIn;
+        if (b.outVal < b.inVal) {
+          const nextBD = new Date(breakDateIn);
+          nextBD.setDate(nextBD.getDate() + 1);
+          breakDateOut = getSaudiDateString(nextBD);
         }
+        bOutISO = saudiTimeToISO(breakDateOut, b.outVal);
+        bOutDate = new Date(bOutISO);
+
         if (bOutDate <= bInDate) {
-          toast.error(`Break #${i + 1} Out time must be after In time.`)
-          return
+          toast.error(`Break #${i + 1} Out time must be after In time.`);
+          return;
         }
         if (sessionOutDate && bOutDate > sessionOutDate) {
-          toast.error(`Break #${i + 1} Out time (${b.outVal}) cannot exceed session Check-Out time (${outVal}).`)
-          return
+          toast.error(`Break #${i + 1} Out time (${b.outVal}) cannot exceed session Check-Out time (${outVal}).`);
+          return;
         }
       } else if (outVal) {
-        toast.error(`Break #${i + 1} must have an Out time because the session is checked out.`)
-        return
+        toast.error(`Break #${i + 1} must have an Out time because the session is checked out.`);
+        return;
       }
 
-      const durSecs = bOutDate ? Math.max(0, Math.floor((bOutDate.getTime() - bInDate.getTime()) / 1000)) : 0
+      const durSecs = bOutDate ? Math.max(0, Math.floor((bOutDate.getTime() - bInDate.getTime()) / 1000)) : 0;
       formattedBreaks.push({
-        break_in: bInDate.toISOString(),
-        break_out: bOutDate ? bOutDate.toISOString() : null,
+        break_in: bInISO,
+        break_out: bOutISO,
         duration_seconds: durSecs
-      })
+      });
     }
 
-    onSave(session.id, fullInStr, fullOutStr, reason, formattedBreaks)
+    onSave(session.id, fullInISO, fullOutISO, reason, formattedBreaks);
   }
 
   return (

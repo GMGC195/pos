@@ -26,7 +26,42 @@ const autoCheckoutOldSessions = async (req, res, next) => {
 router.use(autoCheckoutOldSessions);
 
 // GET notifications for attendance (> 15 hours checked in)
-// Helper to verify Operator 24-hour edit limit based on shift start time
+// Helper: extract Saudi Arabia time & date components (Asia/Riyadh, UTC+3)
+function getSaudiComponents(dateObj = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Riyadh',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).formatToParts(dateObj);
+  const p = {};
+  parts.forEach(({ type, value }) => { p[type] = value; });
+  return {
+    year: p.year,
+    month: p.month,
+    day: p.day,
+    hours: parseInt(p.hour, 10),
+    minutes: parseInt(p.minute, 10),
+    seconds: parseInt(p.second, 10),
+    dateStr: `${p.year}-${p.month}-${p.day}`,
+    timeStr: `${p.hour}:${p.minute}`
+  };
+}
+
+function formatSaudiTimeDisplay(dateObj = new Date(), hour12 = true) {
+  return dateObj.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12
+  });
+}
+
+// Helper to verify Operator 24-hour edit limit based on shift start time (Saudi Time)
 async function verifyOperator24HourLimit(employee_id, recordDate, pool) {
   const empRes = await pool.query('SELECT working_hours FROM employees WHERE id = $1', [employee_id]);
   if (empRes.rows.length === 0) return { allowed: false, error: 'Employee not found.' };
@@ -45,8 +80,15 @@ async function verifyOperator24HourLimit(employee_id, recordDate, pool) {
   } else if (shift === 'R2') { startHour = 9; }
   else if (shift === 'R3') { startHour = 15; }
 
-  const shiftStartDateTime = new Date(recordDate);
-  shiftStartDateTime.setHours(startHour, startMin, 0, 0);
+  const saudiDateForRecord = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date(recordDate));
+  const startHourStr = String(startHour).padStart(2, '0');
+  const startMinStr = String(startMin).padStart(2, '0');
+  const shiftStartDateTime = new Date(`${saudiDateForRecord}T${startHourStr}:${startMinStr}:00+03:00`);
 
   const diffHours = (Date.now() - shiftStartDateTime.getTime()) / (1000 * 60 * 60);
   if (diffHours > 24) {
@@ -109,15 +151,29 @@ router.get('/notifications', authenticateToken, async (req, res) => {
         `SELECT r.id, e.name AS employee_name, r.created_at, r.request_type, r.reason
          FROM attendance_edit_requests r
          JOIN employees e ON r.employee_id = e.id
-         WHERE r.status = 'Pending' AND r.target_role IN ('Admin', 'Both')`
+         WHERE r.status = 'Pending' AND r.target_role IN ('Admin', 'Both')
+         ORDER BY r.created_at DESC`
       );
-      requestNotifs = requestsRes.rows.map(row => ({
-        id: `attendance-request-${row.id}`,
-        type: 'attendance_request',
-        request_type: row.request_type,
-        created_at: row.created_at,
-        message: row.request_type === 'Overtime' ? `Overtime request pending approval for ${row.employee_name}: ${row.reason}` : `Attendance correction request from ${row.employee_name} pending Admin approval.`
-      }));
+      requestNotifs = requestsRes.rows.map(row => {
+        let msg = '';
+        if (row.request_type === 'Early Check-In') {
+          const cleanReason = (row.reason || '').replace(/^Early Check-In\s*/i, '').trim();
+          msg = `${row.employee_name} checked in early ${cleanReason}`;
+        } else if (row.request_type === 'Overtime') {
+          msg = `Overtime request pending approval for ${row.employee_name}: ${row.reason}`;
+        } else {
+          msg = `Attendance correction request from ${row.employee_name} pending Admin approval.`;
+        }
+        return {
+          id: `attendance-request-${row.id}`,
+          type: 'attendance_request',
+          request_type: row.request_type,
+          created_at: row.created_at,
+          employee_name: row.employee_name,
+          reason: row.reason,
+          message: msg
+        };
+      });
     } else if (userRole === 'operator') {
       let userBranchStr = req.user.branch;
       if (!userBranchStr) {
@@ -128,22 +184,34 @@ router.get('/notifications', authenticateToken, async (req, res) => {
       let opQuery = `SELECT r.id, e.name AS employee_name, r.created_at, r.request_type, r.reason
          FROM attendance_edit_requests r
          JOIN employees e ON r.employee_id = e.id
-         WHERE r.status = 'Pending' AND r.target_role IN ('Operator', 'Both')`;
+         WHERE r.status = 'Pending' AND (r.target_role IN ('Operator', 'Both') OR r.request_type = 'Early Check-In')`;
       let opParams = [];
       if (userBranchStr) {
         opQuery += ` AND COALESCE(e.branch, '') = ANY($1)`;
         opParams.push(userBranchStr.split(',').map(s => s.trim()));
-      } else {
-        opQuery += ` AND 1=0`; // If operator has no branch, show no requests
       }
+      opQuery += ` ORDER BY r.created_at DESC`;
       const requestsRes = await pool.query(opQuery, opParams);
-      requestNotifs = requestsRes.rows.map(row => ({
-        id: `attendance-request-${row.id}`,
-        type: 'attendance_request',
-        request_type: row.request_type,
-        created_at: row.created_at,
-        message: row.request_type === 'Overtime' ? `Overtime request pending approval for ${row.employee_name}: ${row.reason}` : `Attendance correction request from ${row.employee_name} pending Operator approval.`
-      }));
+      requestNotifs = requestsRes.rows.map(row => {
+        let msg = '';
+        if (row.request_type === 'Early Check-In') {
+          const cleanReason = (row.reason || '').replace(/^Early Check-In\s*/i, '').trim();
+          msg = `${row.employee_name} checked in early ${cleanReason}`;
+        } else if (row.request_type === 'Overtime') {
+          msg = `Overtime request pending approval for ${row.employee_name}: ${row.reason}`;
+        } else {
+          msg = `Attendance correction request from ${row.employee_name} pending Operator approval.`;
+        }
+        return {
+          id: `attendance-request-${row.id}`,
+          type: 'attendance_request',
+          request_type: row.request_type,
+          created_at: row.created_at,
+          employee_name: row.employee_name,
+          reason: row.reason,
+          message: msg
+        };
+      });
     } else if (userRole === 'employee' && employeeId) {
       // 1. Approved requests
       const approvedRes = await pool.query(
@@ -234,9 +302,9 @@ const evaluateShiftStart = (shiftName, shiftsList) => {
     else if (shiftName === 'R3') startHour = 15;
   }
   
-  const now = new Date();
-  const currentHours = now.getHours();
-  const currentMins = now.getMinutes();
+  const saudi = getSaudiComponents();
+  const currentHours = saudi.hours;
+  const currentMins = saudi.minutes;
   
   return (currentHours > startHour) || (currentHours === startHour && currentMins >= startMin);
 };
@@ -383,10 +451,11 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Fetch employee shift details
-    const empRes = await pool.query('SELECT working_hours, shift_hours, shift, strict_attendance, custom_deduction_active, custom_deduction_rules FROM employees WHERE id = $1', [employee_id]);
+    const empRes = await pool.query('SELECT name, working_hours, shift_hours, shift, strict_attendance, custom_deduction_active, custom_deduction_rules FROM employees WHERE id = $1', [employee_id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
+    const empName = empRes.rows[0].name || 'Employee';
     const shift = empRes.rows[0].working_hours || 'R1';
     let shiftHours = parseFloat(empRes.rows[0].shift_hours || 12.0);
     const empShift = empRes.rows[0].shift || 'Day';
@@ -429,9 +498,9 @@ router.post('/check-in', authenticateToken, async (req, res) => {
         shiftHours = parseFloat(sd.hours);
       }
 
-      // For split shift: determine which segment the current time belongs to
-      const now = new Date();
-      const currentTotalMins = now.getHours() * 60 + now.getMinutes();
+      // For split shift: determine which segment the current time belongs to in Saudi Time
+      const saudiSplit = getSaudiComponents();
+      const currentTotalMins = saudiSplit.hours * 60 + saudiSplit.minutes;
 
       if (isSplitShift && shiftStartTime2) {
         const parseTime = (t) => {
@@ -473,72 +542,95 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     let checkInTime = new Date();
+    let isEarlyCurrent = false;
+    let earlyDiffMins = 0;
 
     if (priorChecks.rows.length > 0) {
       // If they already checked in today, keep the status of the first session of the day
       status = priorChecks.rows[0].status;
     } else {
-      // First check-in: Compare current time with shift threshold (15 mins grace period)
+      // First check-in: Compare current time with shift threshold in Saudi Arabia timezone (UTC+3)
       const now = new Date();
-      const currentHours = now.getHours();
-      const currentMins = now.getMinutes();
+      const saudi = getSaudiComponents(now);
+      const currentHours = saudi.hours;
+      const currentMins = saudi.minutes;
 
       const currentTotalMins = currentHours * 60 + currentMins;
       const startTotalMins = startHour * 60 + startMin;
       let timeDiff = currentTotalMins - startTotalMins;
-      if (timeDiff < -16 * 60) timeDiff += 24 * 60; // handle wrap around midnight (allow up to 8 hours late into the next day, otherwise treat as early for today's shift)
-      
-      // Early check-in restriction for employees, operators, cashiers, and order takers
-      const ur = req.user.role?.toLowerCase();
-      if ((ur === 'employee' || ur === 'operator' || ur === 'cashier' || ur === 'order taker') && timeDiff < -15) {
-        return res.status(403).json({ error: 'Your duty hours haven\'t started yet, you can just request check-in 15 minutes before.' });
-      }
+      if (timeDiff < -16 * 60) timeDiff += 24 * 60; // handle wrap around midnight
 
-      // If early check-in, set the checkInTime precisely to the shift start time
+      // Early check-in: duty hours haven't started yet
       if (timeDiff < 0) {
-        if ((ur === 'admin' || ur === 'developer') && req.body.early_checkin_decision === undefined) {
+        const startHourStr = String(startHour).padStart(2, '0');
+        const startMinStr = String(startMin).padStart(2, '0');
+        const shiftStartTimeSaudi = new Date(`${saudi.dateStr}T${startHourStr}:${startMinStr}:00+03:00`);
+        const shiftStartDisplay = formatSaudiTimeDisplay(shiftStartTimeSaudi, true);
+        const currentTimeDisplay = formatSaudiTimeDisplay(now, true);
+        earlyDiffMins = Math.abs(timeDiff);
+
+        if (req.body.early_checkin_decision === undefined) {
           return res.status(409).json({
             requires_early_decision: true,
-            message: 'You are checking in early. Do you want to use the Current Time or Shift Start Time?'
+            shift_start_time: shiftStartTime || `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`,
+            shift_start_display: shiftStartDisplay,
+            current_time: now.toISOString(),
+            current_time_display: currentTimeDisplay,
+            minutes_early: earlyDiffMins,
+            message: 'Employee is checking in before their shift starts.'
           });
         }
 
-        if ((ur === 'admin' || ur === 'developer') && req.body.early_checkin_decision === 'current') {
-          checkInTime = new Date();
-        } else {
-          checkInTime = new Date();
-          checkInTime.setHours(startHour, startMin, 0, 0);
-        }
-      }
-
-      let thresholdMins = startMin + 15;
-      let thresholdHour = startHour;
-      if (thresholdMins >= 60) {
-        thresholdHour += 1;
-        thresholdMins -= 60;
-      }
-      
-      if (currentHours > thresholdHour || (currentHours === thresholdHour && currentMins > thresholdMins)) {
-        status = 'Late';
-      }
-
-      let latenessMins = timeDiff;
-
-      // Apply penalty to checkInTime
-      if (customDeductionActive && Array.isArray(customDeductionRules) && customDeductionRules.length > 0 && latenessMins > 0) {
-        // Sort rules by late_minutes descending to find the highest applicable tier
-        const sortedRules = [...customDeductionRules].sort((a, b) => b.late_minutes - a.late_minutes);
-        const applicableRule = sortedRules.find(r => latenessMins >= r.late_minutes);
-        
-        if (applicableRule) {
-          const penalty = parseInt(applicableRule.value) || 0;
-          if (penalty > 0) {
-            checkInTime = new Date(now.getTime() + (penalty * 60000));
+        if (req.body.early_checkin_decision === 'current') {
+          const earlyReason = (req.body.early_checkin_reason || '').trim();
+          if (!earlyReason) {
+            return res.status(400).json({ error: 'Reason is required when checking in at current time before shift start.' });
           }
+          // The cashier selected Current Time: immediately log at the actual current check-in time
+          checkInTime = now;
+          status = 'Present';
+          isEarlyCurrent = true;
+        } else if (req.body.early_checkin_decision === 'shift') {
+          // The cashier selected Scheduled Duty Time: log at shift start time
+          const startHourStr = String(startHour).padStart(2, '0');
+          const startMinStr = String(startMin).padStart(2, '0');
+          checkInTime = new Date(`${saudi.dateStr}T${startHourStr}:${startMinStr}:00+03:00`);
+          status = 'Present';
+          isEarlyCurrent = false;
+        } else {
+          return res.status(400).json({ error: 'Invalid early check-in decision.' });
         }
-      } else if (strictAttendance && latenessMins >= 30) {
-        // Default strict attendance logic
-        checkInTime = new Date(now.getTime() + (latenessMins * 60000));
+      } else {
+        // Checked in at or after shift start - normal check-in
+        let thresholdMins = startMin + 15;
+        let thresholdHour = startHour;
+        if (thresholdMins >= 60) {
+          thresholdHour += 1;
+          thresholdMins -= 60;
+        }
+        
+        if (currentHours > thresholdHour || (currentHours === thresholdHour && currentMins > thresholdMins)) {
+          status = 'Late';
+        }
+
+        let latenessMins = timeDiff;
+
+        // Apply penalty to checkInTime
+        if (customDeductionActive && Array.isArray(customDeductionRules) && customDeductionRules.length > 0 && latenessMins > 0) {
+          // Sort rules by late_minutes descending to find the highest applicable tier
+          const sortedRules = [...customDeductionRules].sort((a, b) => b.late_minutes - a.late_minutes);
+          const applicableRule = sortedRules.find(r => latenessMins >= r.late_minutes);
+          
+          if (applicableRule) {
+            const penalty = parseInt(applicableRule.value) || 0;
+            if (penalty > 0) {
+              checkInTime = new Date(now.getTime() + (penalty * 60000));
+            }
+          }
+        } else if (strictAttendance && latenessMins >= 30) {
+          // Default strict attendance logic
+          checkInTime = new Date(now.getTime() + (latenessMins * 60000));
+        }
       }
     }
 
@@ -548,10 +640,37 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `You are only allowed to mark attendance for employees in Shift(s): ${req.user.shift}` });
     }
 
+    const remarks = isEarlyCurrent ? 'Early Check-In (Pending Admin Review)' : null;
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2) VALUES ($1, $11, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime, isSplitShift, shiftStartTime2, shiftEndTime2, checkInTime]
+      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2, remarks) VALUES ($1, $11, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10, $12) RETURNING *',
+      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime, isSplitShift, shiftStartTime2, shiftEndTime2, checkInTime, remarks]
     );
+
+    if (isEarlyCurrent) {
+      const earlyReason = (req.body.early_checkin_reason || '').trim();
+      const reqReason = `Early Check-In (${earlyDiffMins} min early, Shift: ${shiftStartTime || `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`}): ${earlyReason}`;
+
+      const insertedReq = await pool.query(
+        `INSERT INTO attendance_edit_requests 
+         (attendance_id, employee_id, requested_by_user_id, target_role, request_type, reason, status, requested_check_in) 
+         VALUES ($1, $2, $3, 'Admin', 'Early Check-In', $4, 'Pending', $5) RETURNING *`,
+        [result.rows[0].id, employee_id, req.user.id || null, reqReason, checkInTime]
+      );
+
+      if (req.io) {
+        req.io.emit('attendance_alert', {
+          id: `attendance-request-${insertedReq.rows[0].id}`,
+          type: 'attendance_request',
+          request_type: 'Early Check-In',
+          employee_id,
+          employee_name: empName,
+          reason: reqReason
+        });
+        req.io.emit('attendance_request', {
+          type: 'Early Check-In'
+        });
+      }
+    }
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1686,8 +1805,10 @@ router.get('/edit-requests', authenticateToken, async (req, res) => {
     const username = req.user.username;
 
     let query = `
-      SELECT r.*, e.name AS employee_name, e.employee_id AS employee_code, 
+      SELECT r.*, e.name AS employee_name, e.employee_id AS employee_code, e.branch AS employee_branch,
+             e.working_hours, e.shift,
              ea.check_in AS original_check_in, ea.check_out AS original_check_out, ea.date AS attendance_date,
+             ea.shift_start_time, ea.shift_name AS ea_shift_name,
              u.username AS requested_by_username
       FROM attendance_edit_requests r
       JOIN employees e ON r.employee_id = e.id
@@ -1816,11 +1937,18 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
           if (timeMatch) { startHour = parseInt(timeMatch[1], 10); startMin = parseInt(timeMatch[2], 10); }
         }
         const checkInDate = new Date(effectiveCheckIn);
-        const lateThreshold = new Date(checkInDate);
-        lateThreshold.setHours(startHour, startMin, 0, 0);
+        const saudiDateForCheckIn = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Riyadh',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(checkInDate);
+        const startHourStr = String(startHour).padStart(2, '0');
+        const startMinStr = String(startMin).padStart(2, '0');
+        const lateThreshold = new Date(`${saudiDateForCheckIn}T${startHourStr}:${startMinStr}:00+03:00`);
         const isLate = checkInDate > lateThreshold;
 
-        const attendanceDateStr = checkInDate.toLocaleDateString('en-CA'); // 'YYYY-MM-DD'
+        const attendanceDateStr = saudiDateForCheckIn;
 
         // Insert new check-in
         const newAtt = await pool.query(
@@ -1883,6 +2011,39 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
       res.json({ success: true, message: 'Request approved and attendance updated successfully.' });
     } else {
       // Reject
+      const { adjusted_check_in, admin_reason } = req.body;
+      if (request.request_type === 'Early Check-In' && adjusted_check_in && request.attendance_id) {
+        await pool.query(
+          `UPDATE employee_attendance SET check_in = $1, remarks = 'Early Check-In adjusted by admin' WHERE id = $2`,
+          [adjusted_check_in, request.attendance_id]
+        );
+
+        let finalReason = request.reason;
+        const saudiTimeDisplay = new Date(adjusted_check_in).toLocaleTimeString('en-US', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' });
+        const rejectNote = ` [Rejected & Adjusted to ${saudiTimeDisplay}${admin_reason ? ` - ${admin_reason}` : ''}]`;
+        finalReason += rejectNote;
+
+        await pool.query(
+          `UPDATE attendance_edit_requests SET status = 'Rejected', reason = $2 WHERE id = $1`,
+          [id, finalReason]
+        );
+
+        const saudiOrigTime = new Date(request.requested_check_in).toLocaleTimeString('en-US', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' });
+        await pool.query(
+          `INSERT INTO edited_attendance (attendance_id, employee_id, original_check_in, original_check_out, new_check_in, new_check_out, edited_by, reason)
+           VALUES ($1, $2, $3, null, $4, null, $5, $6)`,
+          [
+            request.attendance_id,
+            request.employee_id,
+            request.requested_check_in,
+            adjusted_check_in,
+            editorName,
+            `Early Check-In Rejected: Adjusted from ${saudiOrigTime} to ${saudiTimeDisplay}${admin_reason ? ` (${admin_reason})` : ''}`
+          ]
+        );
+        return res.json({ success: true, message: 'Early check-in rejected and check-in time adjusted successfully.' });
+      }
+
       await pool.query(
         `UPDATE attendance_edit_requests SET status = 'Rejected' WHERE id = $1`,
         [id]

@@ -101,3 +101,61 @@ export const getSaudiLiveTimeString = () => {
     hour12: true
   });
 };
+
+/**
+ * Formats a date/timestamp to Saudi Arabia 24-hour time string (e.g. "14:30" or "14:30:45")
+ */
+export const formatSaudiTime24 = (dateStr, showSeconds = false) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Riyadh',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: showSeconds ? '2-digit' : undefined,
+    hour12: false
+  });
+};
+
+/**
+ * Extracts 'YYYY-MM-DD' from a date or timestamp in Asia/Riyadh timezone.
+ */
+export const getSaudiDateString = (dateInput) => {
+  if (!dateInput) return getSaudiTodayDate();
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return getSaudiTodayDate();
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(d);
+};
+
+/**
+ * Formats an ISO string to 'HH:mm' for <input type="time"> inputs in Asia/Riyadh timezone.
+ */
+export const toSaudiTimeInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Riyadh',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+};
+
+/**
+ * Converts a Saudi date ('YYYY-MM-DD') and time ('HH:mm') into an ISO string anchored to +03:00.
+ * Guarantees zero timezone drift regardless of client or server timezone.
+ */
+export const saudiTimeToISO = (dateStr, timeStr) => {
+  if (!timeStr) return null;
+  const cleanTime = timeStr.trim().length === 5 ? `${timeStr.trim()}:00` : timeStr.trim();
+  const cleanDate = dateStr ? (dateStr.includes('T') ? dateStr.split('T')[0] : dateStr) : getSaudiTodayDate();
+  const isoWithOffset = `${cleanDate}T${cleanTime}+03:00`;
+  const d = new Date(isoWithOffset);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};

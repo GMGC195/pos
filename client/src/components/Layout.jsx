@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import axios from '../api'
 import toast from 'react-hot-toast'
 import StartShiftModal from './StartShiftModal'
+import { socket } from '../socket'
 import { getSaudiLiveTimeString } from '../utils/timezone'
 import {
   BRAND_NAME,
@@ -337,8 +338,26 @@ export default function Layout() {
   useEffect(() => {
     if (user) {
       fetchAlerts();
-      const interval = setInterval(fetchAlerts, 5 * 60 * 1000); // Refresh every 5 mins
-      return () => clearInterval(interval);
+      const interval = setInterval(fetchAlerts, 20 * 1000); // Check every 20s as fallback
+
+      const handleRefresh = () => {
+        fetchAlerts();
+      };
+
+      if (socket) {
+        socket.on('attendance_alert', handleRefresh);
+        socket.on('attendance_request', handleRefresh);
+      }
+      window.addEventListener('refresh-notifications', handleRefresh);
+
+      return () => {
+        clearInterval(interval);
+        if (socket) {
+          socket.off('attendance_alert', handleRefresh);
+          socket.off('attendance_request', handleRefresh);
+        }
+        window.removeEventListener('refresh-notifications', handleRefresh);
+      };
     }
   }, [user]);
 
@@ -806,7 +825,7 @@ export default function Layout() {
             {user && (
               <div className="notif-wrapper" style={{ position: 'relative' }}>
                 <button
-                  className={`icon-btn ${isNotifOpen ? 'active' : ''}`}
+                  className={`icon-btn ${alerts.filter(a => !a.read).length > 0 ? 'has-alerts' : ''} ${isNotifOpen ? 'active' : ''}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsProfileOpen(false);
@@ -815,7 +834,7 @@ export default function Layout() {
                   title="Notifications"
                 >
                   <Bell size={20} strokeWidth={2} />
-                  {hasNewAlerts && alerts.filter(a => !a.read).length > 0 && <span className="notif-badge">{alerts.filter(a => !a.read).length}</span>}
+                  {alerts.filter(a => !a.read).length > 0 && <span className="notif-badge">{alerts.filter(a => !a.read).length}</span>}
                 </button>
  
                 {isNotifOpen && (
@@ -853,7 +872,13 @@ export default function Layout() {
                               if (item.type === 'attendance_warning') {
                                 navigate('/today-attendance');
                               } else if (item.type === 'attendance_request') {
-                                navigate('/edited-logs');
+                                if (item.request_type === 'Early Check-In') {
+                                  navigate('/edited-logs?tab=early_checkin', { state: { tab: 'early_checkin' } });
+                                } else if (item.request_type === 'Overtime') {
+                                  navigate('/edited-logs?tab=overtime', { state: { tab: 'overtime' } });
+                                } else {
+                                  navigate('/edited-logs?tab=requests', { state: { tab: 'requests' } });
+                                }
                               } else {
                                 navigate('/stock-management');
                               }
@@ -870,20 +895,50 @@ export default function Layout() {
                             <div 
                               className="notif-item-icon" 
                               style={{ 
-                                backgroundColor: item.type === 'attendance_warning' ? 'rgba(255, 152, 0, 0.1)' : item.type === 'attendance_request' ? 'rgba(255, 193, 7, 0.1)' : item.type === 'expiry_alert' ? 'rgba(227, 24, 55, 0.1)' : undefined, 
-                                color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : item.type === 'expiry_alert' ? '#e31837' : undefined 
+                                backgroundColor: item.type === 'attendance_warning' 
+                                  ? 'rgba(255, 152, 0, 0.1)' 
+                                  : item.request_type === 'Early Check-In'
+                                    ? 'rgba(59, 130, 246, 0.12)'
+                                    : item.type === 'attendance_request' 
+                                      ? 'rgba(255, 193, 7, 0.1)' 
+                                      : item.type === 'expiry_alert' 
+                                        ? 'rgba(227, 24, 55, 0.1)' 
+                                        : undefined, 
+                                color: item.type === 'attendance_warning' 
+                                  ? '#ff9800' 
+                                  : item.request_type === 'Early Check-In'
+                                    ? '#2563eb'
+                                    : item.type === 'attendance_request' 
+                                      ? '#ffc107' 
+                                      : item.type === 'expiry_alert' 
+                                        ? '#e31837' 
+                                        : undefined 
                               }}
                             >
-                              {item.type === 'attendance_warning' ? <Clock size={18} /> : item.type === 'expiry_alert' ? <AlertTriangle size={18} /> : <AlertTriangle size={18} />}
+                              {item.type === 'attendance_warning' || item.request_type === 'Early Check-In' ? <Clock size={18} /> : item.type === 'expiry_alert' ? <AlertTriangle size={18} /> : <AlertTriangle size={18} />}
                             </div>
                             <div className="notif-item-content">
                               <span 
                                 className="notif-item-title" 
                                 style={{ 
-                                  color: item.type === 'attendance_warning' ? '#ff9800' : item.type === 'attendance_request' ? '#ffc107' : item.type === 'expiry_alert' ? '#e31837' : undefined 
+                                  color: item.type === 'attendance_warning' 
+                                    ? '#ff9800' 
+                                    : item.request_type === 'Early Check-In'
+                                      ? '#2563eb'
+                                      : item.type === 'attendance_request' 
+                                        ? '#ffc107' 
+                                        : item.type === 'expiry_alert' 
+                                          ? '#e31837' 
+                                          : undefined 
                                 }}
                               >
-                                {item.type === 'attendance_warning' ? 'Long Session Warning' : item.type === 'attendance_request' ? (item.request_type === 'Overtime' ? 'Overtime' : 'Correction Request') : item.type === 'expiry_alert' ? 'Document Expiry Alert' : `Low Stock: ${item.name}`}
+                                {item.type === 'attendance_warning' 
+                                  ? 'Long Session Warning' 
+                                  : item.type === 'attendance_request' 
+                                    ? (item.request_type === 'Early Check-In' ? 'Early Check-In Alert' : item.request_type === 'Overtime' ? 'Overtime Request' : 'Correction Request') 
+                                    : item.type === 'expiry_alert' 
+                                      ? 'Document Expiry Alert' 
+                                      : `Low Stock: ${item.name}`}
                               </span>
                               <span className="notif-item-desc">
                                 {item.type === 'attendance_warning' || item.type === 'attendance_request' || item.type === 'expiry_alert' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}

@@ -3,6 +3,7 @@ import axios from '../api'
 import { Fingerprint, Play, Square, Coffee, Check, Clock, User, AlertCircle, MoreVertical, X, Filter, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
+import { getSaudiTodayDate, getSaudiDateString, toSaudiTimeInput, saudiTimeToISO } from '../utils/timezone'
 
 
 
@@ -99,18 +100,29 @@ export default function AttendanceTracker() {
       return;
     }
     
-    const reqDate = new Date(requestTargetLog.date);
-    const logDateStr = `${reqDate.getFullYear()}-${String(reqDate.getMonth() + 1).padStart(2, '0')}-${String(reqDate.getDate()).padStart(2, '0')}`;
+    const logDateStr = getSaudiDateString(requestTargetLog?.date || requestTargetLog?.created_at || new Date());
     
-    const fullIn = requestedCheckIn ? new Date(`${logDateStr}T${requestedCheckIn}:00`) : null;
-    const fullOut = requestedCheckOut ? new Date(`${logDateStr}T${requestedCheckOut}:00`) : null;
+    let inISO = null;
+    if (requestedCheckIn) {
+      inISO = saudiTimeToISO(logDateStr, requestedCheckIn);
+    }
+    let outISO = null;
+    if (requestedCheckOut) {
+      let outDateStr = logDateStr;
+      if (requestedCheckIn && requestedCheckOut < requestedCheckIn) {
+        const nextDay = new Date(logDateStr);
+        nextDay.setDate(nextDay.getDate() + 1);
+        outDateStr = getSaudiDateString(nextDay);
+      }
+      outISO = saudiTimeToISO(outDateStr, requestedCheckOut);
+    }
     const now = new Date();
 
-    if (fullIn && fullIn > new Date(now.getTime() + 5 * 60000)) {
+    if (inISO && new Date(inISO) > new Date(now.getTime() + 5 * 60000)) {
       toast.error('Requested Check-In time cannot be in the future.');
       return;
     }
-    if (fullOut && fullOut > new Date(now.getTime() + 5 * 60000)) {
+    if (outISO && new Date(outISO) > new Date(now.getTime() + 5 * 60000)) {
       toast.error('Requested Check-Out time cannot be in the future.');
       return;
     }
@@ -119,8 +131,8 @@ export default function AttendanceTracker() {
     try {
       await axios.post('/api/attendance/edit-requests', {
         attendance_id: requestTargetLog?.id || null, // Allow null for new check-ins
-        requested_check_in: fullIn ? fullIn.toISOString() : null,
-        requested_check_out: fullOut ? fullOut.toISOString() : null,
+        requested_check_in: inISO,
+        requested_check_out: outISO,
         reason: isCheckInOut ? `Self ${requestTargetLog.request_type}` : requestReason,
         target_role: isCheckInOut ? 'Both' : requestTargetRole,
         request_type: requestTargetLog?.request_type || 'Edit' // Handle new types
@@ -189,6 +201,8 @@ export default function AttendanceTracker() {
   const earlyCheckInTTS = "Abhi aap ki duty ka waqt shuru nahi hua. Aap shift se sirf 15 minute pehlay check in kar saktay hain."
   const earlyCheckInWords = earlyCheckInText.split(' ')
   const [earlyCheckInModal, setEarlyCheckInModal] = useState(null)
+  const [earlyCheckInDecision, setEarlyCheckInDecision] = useState('shift')
+  const [earlyCheckInReason, setEarlyCheckInReason] = useState('')
   const [overtimeModal, setOvertimeModal] = useState(null)
   const [overtimeReason, setOvertimeReason] = useState('')
   const [overtimeWithSameTime, setOvertimeWithSameTime] = useState(true)
@@ -401,7 +415,17 @@ export default function AttendanceTracker() {
     } catch (err) {
       toast.dismiss()
       if (err?.response?.status === 409 && err?.response?.data?.requires_early_decision) {
-        setEarlyCheckInModal({ empId, name });
+        const d = err.response.data;
+        setEarlyCheckInModal({
+          empId,
+          name,
+          shiftStartTime: d.shift_start_time,
+          shiftStartDisplay: d.shift_start_display || d.shift_start_time,
+          currentTimeDisplay: d.current_time_display,
+          minutesEarly: d.minutes_early || 0
+        });
+        setEarlyCheckInDecision('shift');
+        setEarlyCheckInReason('');
         setPendingActions(prev => ({ ...prev, [actionKey]: false }));
         return;
       }
@@ -416,59 +440,38 @@ export default function AttendanceTracker() {
         toast.error('Offline Mode: Check-In saved locally (pending sync)', { duration: 2500 })
       } else {
         const errMsg = err?.response?.data?.error || '';
-        if (err?.response?.status === 403 && errMsg.includes('15 minutes')) {
-          if ('speechSynthesis' in window) {
-            const msg = new SpeechSynthesisUtterance(earlyCheckInTTS);
-            const voices = window.speechSynthesis.getVoices();
-            // Find a male Indian/Urdu voice (Hemant for Windows, Rishi for Mac)
-            let maleVoice = voices.find(v => 
-              v.name.includes('Rishi') || 
-              v.name.includes('Hemant') || 
-              (v.name.toLowerCase().includes('male') && (v.lang.includes('hi') || v.lang.includes('ur') || v.lang.includes('en-IN')))
-            );
-            if (!maleVoice) {
-              maleVoice = voices.find(v => v.lang.includes('hi')) || voices[0];
-            }
-            if (maleVoice) msg.voice = maleVoice;
-            msg.pitch = 0.6; // Deeper pitch to ensure it sounds like a male if fallback is female
-            msg.lang = 'hi-IN'; // Highly reliable for reading Roman text natively
-            
-            msg.onboundary = (event) => {
-              if (event.name === 'word') {
-                const textUpToBoundary = earlyCheckInTTS.substring(0, event.charIndex);
-                const wordIndex = textUpToBoundary.split(' ').length - 1;
-                setSpeechHighlightWord(wordIndex);
-              }
-            };
-            msg.onend = () => setSpeechHighlightWord(-1);
-            
-            window.speechSynthesis.cancel();
-            setSpeechHighlightWord(0);
-            window.speechSynthesis.speak(msg);
-          }
-          setShowEarlyWarning(true);
-          // Auto close after 8 seconds
-          setTimeout(() => setShowEarlyWarning(false), 8000);
-        } else {
-          toast.error(errMsg || 'Failed to check in', { duration: 2500 })
-        }
+        toast.error(errMsg || 'Failed to check in', { duration: 2500 });
       }
     } finally {
       setPendingActions(prev => ({ ...prev, [actionKey]: false }));
     }
   }
 
-  const proceedWithEarlyCheckIn = async (decision) => {
-    const { empId, name } = earlyCheckInModal;
-    setEarlyCheckInModal(null);
+  const proceedWithEarlyCheckIn = async () => {
+    if (!earlyCheckInModal) return;
+    const { empId, name, shiftStartDisplay } = earlyCheckInModal;
+    if (earlyCheckInDecision === 'current' && !earlyCheckInReason.trim()) {
+      toast.error('Reason is required when checking in at current time.');
+      return;
+    }
     const actionKey = `check-in-${empId}`;
     setPendingActions(prev => ({ ...prev, [actionKey]: true }));
+    setEarlyCheckInModal(null);
     try {
-      await axios.post('/api/attendance/check-in', { employee_id: empId, early_checkin_decision: decision })
-      await loadAttendance()
-      toast.success(`${name} Successfully Checked In!`, { duration: 2000 })
+      await axios.post('/api/attendance/check-in', { 
+        employee_id: empId, 
+        early_checkin_decision: earlyCheckInDecision,
+        early_checkin_reason: earlyCheckInDecision === 'current' ? earlyCheckInReason.trim() : undefined
+      });
+      await loadAttendance();
+      if (earlyCheckInDecision === 'current') {
+        toast.success(`${name} checked in at current time. Early check-in notification sent to Admin!`, { duration: 3000 });
+        window.dispatchEvent(new CustomEvent('refresh-notifications'));
+      } else {
+        toast.success(`${name} checked in at scheduled duty time (${shiftStartDisplay})!`, { duration: 2500 });
+      }
     } catch(err) {
-      toast.error(err?.response?.data?.error || 'Failed to check in', { duration: 2500 })
+      toast.error(err?.response?.data?.error || 'Failed to check in', { duration: 2500 });
     } finally {
       setPendingActions(prev => ({ ...prev, [actionKey]: false }));
     }
@@ -1540,7 +1543,7 @@ export default function AttendanceTracker() {
                          value={(() => {
                            if (!editingRequestTimeValue || !activeRequestModal.original_check_out) return '';
                            const d = new Date(activeRequestModal.original_check_out);
-                           const newOut = new Date(`${d.toISOString().split('T')[0]}T${editingRequestTimeValue}:00`);
+                           const dateStr = getSaudiDateString(d); const newOut = new Date(saudiTimeToISO(dateStr, editingRequestTimeValue));
                            const diff = newOut - d;
                            return Math.max(0, Math.floor(diff / 60000)).toString();
                          })()}
@@ -1549,7 +1552,7 @@ export default function AttendanceTracker() {
                            if (!isNaN(mins) && activeRequestModal.original_check_out) {
                              const d = new Date(activeRequestModal.original_check_out);
                              const newOut = new Date(d.getTime() + mins * 60000);
-                             setEditingRequestTimeValue(newOut.toTimeString().slice(0,5));
+                             setEditingRequestTimeValue(toSaudiTimeInput(newOut));
                            } else if (e.target.value === '') {
                              setEditingRequestTimeValue('');
                            }
@@ -1570,22 +1573,18 @@ export default function AttendanceTracker() {
                      <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
                        let overrideTime = null;
                        if (editingRequestTimeValue) {
-                         const baseDateIn = new Date(activeRequestModal.original_check_in || activeRequestModal.attendance_date || activeRequestModal.created_at);
-                         const y = baseDateIn.getFullYear();
-                         const mo = String(baseDateIn.getMonth() + 1).padStart(2, '0');
-                         const dy = String(baseDateIn.getDate()).padStart(2, '0');
-                         let fullTimeStr = `${y}-${mo}-${dy}T${editingRequestTimeValue}:00`;
-                         
+                         const baseDateIn = getSaudiDateString(activeRequestModal.original_check_in || activeRequestModal.attendance_date || activeRequestModal.created_at);
+                         let outDateStr = baseDateIn;
                          const isCheckOutOrOvertime = activeRequestModal.request_type === 'Check-Out' || activeRequestModal.request_type === 'Overtime';
-                         if (isCheckOutOrOvertime) {
-                           if (new Date(fullTimeStr) < baseDateIn) {
+                         if (isCheckOutOrOvertime && activeRequestModal.original_check_in) {
+                           const origInTime = toSaudiTimeInput(activeRequestModal.original_check_in);
+                           if (editingRequestTimeValue < origInTime) {
                              const nextDay = new Date(baseDateIn);
                              nextDay.setDate(nextDay.getDate() + 1);
-                             const nY = nextDay.getFullYear(), nMo = String(nextDay.getMonth()+1).padStart(2,'0'), nDy = String(nextDay.getDate()).padStart(2,'0');
-                             fullTimeStr = `${nY}-${nMo}-${nDy}T${editingRequestTimeValue}:00`;
+                             outDateStr = getSaudiDateString(nextDay);
                            }
                          }
-                         overrideTime = new Date(fullTimeStr).toISOString();
+                         overrideTime = saudiTimeToISO(outDateStr, editingRequestTimeValue);
                        }
                        const isCheckIn = activeRequestModal.request_type === 'Check-In';
                        const isCheckOutOrOvertime = activeRequestModal.request_type === 'Check-Out' || activeRequestModal.request_type === 'Overtime';
@@ -1748,36 +1747,148 @@ export default function AttendanceTracker() {
 
       {/* Early Check-In Prompt Modal */}
       {earlyCheckInModal && (
-        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999 }}>
-          <div className="modal-content" style={{ width: 450, padding: 24, borderRadius: 16, background: 'var(--surface)', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Early Check-In Options</h3>
-              <button onClick={() => setEarlyCheckInModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-                <X size={20} style={{ color: 'var(--text-muted)' }} />
+        <div className="early-checkin-overlay" onClick={() => setEarlyCheckInModal(null)}>
+          <div className="early-checkin-card" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="early-checkin-header">
+              <div>
+                <h3 className="early-checkin-title">
+                  <Clock size={22} color="var(--primary)" /> Early Check-In / وقت سے پہلے حاضری
+                </h3>
+                <div className="early-checkin-subtitle">
+                  <strong style={{ color: 'var(--text)' }}>{earlyCheckInModal.name}</strong> ({earlyCheckInModal.minutesEarly} منٹ پہلے / mins early)
+                </div>
+              </div>
+              <button onClick={() => setEarlyCheckInModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-muted)' }}>
+                <X size={22} />
               </button>
             </div>
             
-            <p style={{ margin: '0 0 20px 0', fontSize: 14, color: 'var(--text-muted)', lineHeight: '1.5' }}>
-              You are checking in <strong style={{ color: 'var(--text)' }}>{earlyCheckInModal.name}</strong> before their shift starts. How would you like to record the check-in time?
-            </p>
+            {/* Scrollable Body with custom scrollbar */}
+            <div className="early-checkin-body">
+              {/* Urdu & English Instructions Banner */}
+              <div className="early-checkin-banner">
+                <p className="early-checkin-banner-en">
+                  Employee arrived before scheduled shift start. Choose check-in time:
+                </p>
+                <p className="early-checkin-banner-ur">
+                  ملازم کی ڈیوٹی کا وقت ابھی شروع نہیں ہوا۔ آپ ڈیوٹی کے اصل وقت پر چیک اِن کرنا چاہتے ہیں یا ابھی کے وقت پر؟
+                </p>
+              </div>
 
-            <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
+              {/* Selection Options */}
+              <div className="early-checkin-options">
+                {/* Option 1: Scheduled Duty Time (Default) */}
+                <div 
+                  className="early-checkin-option"
+                  onClick={() => setEarlyCheckInDecision('shift')}
+                  style={{
+                    border: earlyCheckInDecision === 'shift' ? '2.5px solid var(--primary)' : '1.5px solid var(--surface-3)',
+                    background: earlyCheckInDecision === 'shift' ? 'rgba(var(--primary-rgb), 0.08)' : 'var(--surface-1)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <input 
+                        type="radio" 
+                        name="earlyOption" 
+                        id="optShift"
+                        checked={earlyCheckInDecision === 'shift'} 
+                        onChange={() => setEarlyCheckInDecision('shift')}
+                        style={{ cursor: 'pointer', accentColor: 'var(--primary)', width: 19, height: 19 }}
+                      />
+                      <div>
+                        <strong className="early-checkin-option-title" style={{ color: 'var(--text)' }}>
+                          Scheduled Duty Time (ڈیوٹی کا اصل وقت)
+                        </strong>
+                        <div className="early-checkin-option-sub" style={{ color: 'var(--text-muted)' }}>
+                          Log at: <span style={{ fontWeight: 700, color: 'var(--text)' }}>{earlyCheckInModal.shiftStartDisplay}</span> (کوئی وجہ درکار نہیں)
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 11, background: 'var(--surface-2)', padding: '3px 8px', borderRadius: 6, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 0.5 }}>
+                      DEFAULT
+                    </span>
+                  </div>
+                </div>
+
+                {/* Option 2: Current Time (Early Check-In) */}
+                <div 
+                  className="early-checkin-option"
+                  onClick={() => setEarlyCheckInDecision('current')}
+                  style={{
+                    border: earlyCheckInDecision === 'current' ? '2.5px solid #f59e0b' : '1.5px solid var(--surface-3)',
+                    background: earlyCheckInDecision === 'current' ? '#fffbeb' : 'var(--surface-1)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input 
+                      type="radio" 
+                      name="earlyOption" 
+                      id="optCurrent"
+                      checked={earlyCheckInDecision === 'current'} 
+                      onChange={() => setEarlyCheckInDecision('current')}
+                      style={{ cursor: 'pointer', accentColor: '#f59e0b', width: 19, height: 19 }}
+                    />
+                    <div>
+                      <strong className="early-checkin-option-title" style={{ color: earlyCheckInDecision === 'current' ? '#92400e' : 'var(--text)' }}>
+                        Current Time / ابھی کا وقت (Early Check-In)
+                      </strong>
+                      <div className="early-checkin-option-sub" style={{ color: earlyCheckInDecision === 'current' ? '#b45309' : 'var(--text-muted)' }}>
+                        Log at: <span style={{ fontWeight: 700 }}>{earlyCheckInModal.currentTimeDisplay}</span> ({earlyCheckInModal.minutesEarly} منٹ پہلے) • ایڈمن منظوری درکار ہے
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Mandatory Reason Field if Current Time is chosen */}
+              {earlyCheckInDecision === 'current' && (
+                <div style={{ animation: 'fadeIn 0.2s ease-out' }}>
+                  <label className="early-checkin-reason-label">
+                    Reason for Early Check-In (وقت سے پہلے آنے کی وجہ) * (Mandatory)
+                  </label>
+                  <textarea 
+                    rows={2}
+                    value={earlyCheckInReason}
+                    onChange={e => setEarlyCheckInReason(e.target.value)}
+                    placeholder="وجہ درج کریں..."
+                    className="early-checkin-textarea"
+                    autoFocus
+                  />
+                  {!earlyCheckInReason.trim() && (
+                    <span style={{ fontSize: 12, color: '#ef4444', marginTop: 4, display: 'block', fontWeight: 600 }}>
+                      ⚠️ Reason is required to submit early check-in.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Pinned Sticky Footer Actions */}
+            <div className="early-checkin-footer">
               <button 
-                className="btn btn-secondary"
-                onClick={() => proceedWithEarlyCheckIn('current')}
-                style={{ flex: 1, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                type="button" 
+                className="btn btn-secondary" 
+                onClick={() => setEarlyCheckInModal(null)}
+                style={{ fontWeight: 700 }}
               >
-                <span>Use Current Time</span>
-                <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.7 }}>Log exact time now</span>
+                Cancel
               </button>
-              
               <button 
+                type="button" 
                 className="btn btn-primary"
-                onClick={() => proceedWithEarlyCheckIn('shift')}
-                style={{ flex: 1, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                onClick={proceedWithEarlyCheckIn}
+                disabled={earlyCheckInDecision === 'current' && !earlyCheckInReason.trim()}
+                style={{
+                  fontWeight: 800,
+                  background: earlyCheckInDecision === 'current' ? '#d97706' : 'var(--primary)',
+                  borderColor: earlyCheckInDecision === 'current' ? '#d97706' : 'var(--primary)',
+                  cursor: (earlyCheckInDecision === 'current' && !earlyCheckInReason.trim()) ? 'not-allowed' : 'pointer',
+                  opacity: (earlyCheckInDecision === 'current' && !earlyCheckInReason.trim()) ? 0.5 : 1
+                }}
               >
-                <span>Use Shift Start Time</span>
-                <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>Log duty start time</span>
+                Confirm Check-In
               </button>
             </div>
           </div>

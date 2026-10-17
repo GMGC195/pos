@@ -3228,3 +3228,221 @@ tbody tr:hover td {
     justify-content: center !important;
   }
 }
+
+/* ===== EARLY CHECK-IN RESPONSIVE MODAL ===== */
+.early-checkin-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999999;
+  padding: 16px 12px;
+}
+
+.early-checkin-card {
+  width: 100%;
+  max-width: 580px;
+  max-height: min(92vh, 92dvh);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  animation: scaleUp 0.2s ease-out;
+}
+
+.early-checkin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--surface-2);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.early-checkin-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.early-checkin-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.early-checkin-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Custom Visible Scrollbar for Modal Body */
+.early-checkin-body::-webkit-scrollbar {
+  width: 6px;
+}
+.early-checkin-body::-webkit-scrollbar-track {
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+.early-checkin-body::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 6px;
+}
+
+.early-checkin-banner {
+  background: rgba(var(--primary-rgb), 0.08);
+  border: 1.5px solid rgba(var(--primary-rgb), 0.25);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.early-checkin-banner-en {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.early-checkin-banner-ur {
+  margin: 0;
+  font-size: 16px;
+  color: #b45309;
+  font-weight: 800;
+  line-height: 1.7;
+  direction: rtl;
+  text-align: right;
+}
+
+.early-checkin-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.early-checkin-option {
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.early-checkin-option-title {
+  font-size: 15px;
+  font-weight: 700;
+  display: block;
+}
+
+.early-checkin-option-sub {
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+.early-checkin-reason-label {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #b45309;
+  margin-bottom: 6px;
+}
+
+.early-checkin-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1.5px solid #f59e0b;
+  background: #ffffff;
+  color: #1e293b;
+  font-size: 14px;
+  line-height: 1.45;
+  outline: none;
+  resize: none;
+  box-sizing: border-box;
+}
+
+.early-checkin-footer {
+  padding: 12px 24px;
+  border-top: 1px solid var(--surface-2);
+  background: var(--surface);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+/* Mobile Responsiveness for Early Check-In Modal */
+@media (max-width: 640px) {
+  .early-checkin-overlay {
+    padding: 8px 6px !important;
+  }
+  .early-checkin-card {
+    max-height: 94dvh !important;
+    border-radius: 14px !important;
+  }
+  .early-checkin-header {
+    padding: 12px 14px 10px !important;
+  }
+  .early-checkin-title {
+    font-size: 16px !important;
+  }
+  .early-checkin-subtitle {
+    font-size: 12px !important;
+    margin-top: 2px !important;
+  }
+  .early-checkin-body {
+    padding: 12px 14px !important;
+    gap: 12px !important;
+  }
+  .early-checkin-banner {
+    padding: 10px 12px !important;
+  }
+  .early-checkin-banner-en {
+    font-size: 12px !important;
+    margin-bottom: 6px !important;
+  }
+  .early-checkin-banner-ur {
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+  }
+  .early-checkin-option {
+    padding: 10px 12px !important;
+  }
+  .early-checkin-option-title {
+    font-size: 13.5px !important;
+  }
+  .early-checkin-option-sub {
+    font-size: 11.5px !important;
+  }
+  .early-checkin-reason-label {
+    font-size: 12px !important;
+  }
+  .early-checkin-textarea {
+    font-size: 13px !important;
+    padding: 8px 10px !important;
+  }
+  .early-checkin-footer {
+    padding: 10px 14px !important;
+  }
+  .early-checkin-footer button {
+    padding: 9px 14px !important;
+    font-size: 13px !important;
+    flex: 1 !important;
+    justify-content: center !important;
+  }
+}
+

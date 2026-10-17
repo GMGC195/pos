@@ -320,7 +320,8 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
     await pool.query('ALTER TABLE attendance_edit_requests ADD COLUMN IF NOT EXISTS request_type VARCHAR(20) DEFAULT \'Edit\'');
 
     // Ensure employee_attendance has remarks column
-    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS remarks VARCHAR(100)');
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS remarks TEXT');
+    await pool.query('ALTER TABLE employee_attendance ALTER COLUMN remarks TYPE TEXT');
     // Add shift tracking columns
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_name VARCHAR(50)');
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS shift_hours NUMERIC(4, 2)');

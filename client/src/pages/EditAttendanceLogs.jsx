@@ -11,8 +11,23 @@ export default function EditAttendanceLogs() {
   
   const [activeTab, setActiveTab] = useState(() => {
     const params = new URLSearchParams(location.search)
-    return params.get('tab') || 'overtime'
+    const t = params.get('tab') || location.state?.tab
+    if (t === 'early' || t === 'early_checkin') return 'early_checkin'
+    if (t) return t
+    return 'early_checkin'
   })
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const t = params.get('tab') || location.state?.tab
+    if (t) {
+      if (t === 'early' || t === 'early_checkin') {
+        setActiveTab('early_checkin')
+      } else {
+        setActiveTab(t)
+      }
+    }
+  }, [location.search, location.state])
   const [logs, setLogs] = useState([])
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
@@ -57,6 +72,57 @@ export default function EditAttendanceLogs() {
   const [isEditingRequestTime, setIsEditingRequestTime] = useState(false)
   const [editingRequestTimeValue, setEditingRequestTimeValue] = useState('')
   const [editingOvertimeMinutes, setEditingOvertimeMinutes] = useState('')
+
+  // Reject Early Check-In Modal States
+  const [rejectEarlyModal, setRejectEarlyModal] = useState(null)
+  const [rejectOption, setRejectOption] = useState('shift')
+  const [rejectCustomTime, setRejectCustomTime] = useState('10:00')
+  const [rejectAdminReason, setRejectAdminReason] = useState('')
+
+  const handleOpenRejectEarly = (req) => {
+    setRejectEarlyModal(req)
+    setRejectOption('shift')
+    setRejectAdminReason('')
+    const shiftTime = req.shift_start_time || '10:00'
+    setRejectCustomTime(shiftTime)
+  }
+
+  const handleConfirmRejectEarly = () => {
+    if (!rejectEarlyModal) return
+    let targetTimeStr = rejectEarlyModal.shift_start_time || '10:00'
+    if (rejectOption === 'custom') {
+      if (!rejectCustomTime) {
+        toast.error('Please specify the custom check-in time.')
+        return
+      }
+      targetTimeStr = rejectCustomTime
+    }
+    
+    const baseDate = new Date(rejectEarlyModal.requested_check_in || rejectEarlyModal.attendance_date || Date.now())
+    const saudiDateStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Riyadh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(baseDate)
+
+    const cleanTime = targetTimeStr.length === 5 ? targetTimeStr : targetTimeStr.slice(0, 5)
+    const finalCheckIn = new Date(`${saudiDateStr}T${cleanTime}:00+03:00`).toISOString()
+
+    axios.post(`/api/attendance/edit-requests/${rejectEarlyModal.id}/action`, {
+      action: 'Reject',
+      adjusted_check_in: finalCheckIn,
+      admin_reason: rejectAdminReason.trim()
+    })
+      .then(res => {
+        toast.success(res.data.message || 'Early check-in rejected and adjusted successfully')
+        setRejectEarlyModal(null)
+        loadRequests()
+      })
+      .catch(err => {
+        toast.error(err.response?.data?.error || 'Failed to reject request')
+      })
+  }
 
   const handleRequestAction = (requestId, action, editedCheckIn = null, editedCheckOut = null) => {
     axios.post(`/api/attendance/edit-requests/${requestId}/action`, { action, edited_check_in: editedCheckIn, edited_check_out: editedCheckOut })
@@ -160,7 +226,23 @@ export default function EditAttendanceLogs() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '2px solid var(--surface-2)', marginBottom: 20, gap: 16 }}>
+      <div style={{ display: 'flex', borderBottom: '2px solid var(--surface-2)', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
+        <button 
+          onClick={() => { setActiveTab('early_checkin'); setPage(1); }}
+          style={{
+            padding: '10px 16px',
+            border: 'none',
+            background: 'transparent',
+            color: activeTab === 'early_checkin' ? 'var(--primary)' : 'var(--text-muted)',
+            borderBottom: activeTab === 'early_checkin' ? '3px solid var(--primary)' : '3px solid transparent',
+            fontWeight: 700,
+            fontSize: 14,
+            cursor: 'pointer',
+            marginBottom: -2
+          }}
+        >
+          Early Check-In ({requests.filter(r => r.request_type === 'Early Check-In' && r.status === 'Pending').length})
+        </button>
         <button 
           onClick={() => { setActiveTab('overtime'); setPage(1); }}
           style={{
@@ -207,7 +289,7 @@ export default function EditAttendanceLogs() {
             marginBottom: -2
           }}
         >
-          Pending Correction Requests ({requests.filter(r => r.request_type !== 'Overtime' && r.status === 'Pending').length})
+          Pending Correction Requests ({requests.filter(r => !['Overtime', 'Early Check-In'].includes(r.request_type) && r.status === 'Pending').length})
         </button>
       </div>
 
@@ -301,13 +383,15 @@ export default function EditAttendanceLogs() {
         (() => {
           const filteredReqs = activeTab === 'overtime' 
             ? requests.filter(r => r.request_type === 'Overtime')
-            : requests.filter(r => r.request_type !== 'Overtime');
+            : activeTab === 'early_checkin'
+              ? requests.filter(r => r.request_type === 'Early Check-In')
+              : requests.filter(r => !['Overtime', 'Early Check-In'].includes(r.request_type));
 
           return filteredReqs.length === 0 ? (
             <div className="card" style={{ padding: 40, textAlign: 'center' }}>
               <Clock size={48} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
-              <h3>No Pending {activeTab === 'overtime' ? 'Overtime' : 'Requests'}</h3>
-              <p style={{ color: 'var(--text-muted)' }}>There are no pending {activeTab === 'overtime' ? 'overtime' : 'attendance correction'} requests to review.</p>
+              <h3>No Pending {activeTab === 'overtime' ? 'Overtime' : activeTab === 'early_checkin' ? 'Early Check-In' : 'Requests'}</h3>
+              <p style={{ color: 'var(--text-muted)' }}>There are no pending {activeTab === 'overtime' ? 'overtime' : activeTab === 'early_checkin' ? 'early check-in' : 'attendance correction'} requests to review.</p>
             </div>
           ) : (
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -317,11 +401,15 @@ export default function EditAttendanceLogs() {
                   <tr style={{ background: 'var(--surface-1)' }}>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Code</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Employee Name</th>
-                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Requested By</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Marked By</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Type</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Date</th>
-                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Original In/Out</th>
-                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Requested In/Out</th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>
+                      {activeTab === 'early_checkin' ? 'Scheduled Shift Start' : 'Original In/Out'}
+                    </th>
+                    <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>
+                      {activeTab === 'early_checkin' ? 'Marked Check-In' : 'Requested In/Out'}
+                    </th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left' }}>Reason</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Status</th>
                     <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center' }}>Actions</th>
@@ -347,19 +435,31 @@ export default function EditAttendanceLogs() {
                         <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>
                           <span style={{ 
                             padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                            background: req.request_type === 'Overtime' ? 'rgba(139, 92, 246, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                            color: req.request_type === 'Overtime' ? '#8b5cf6' : '#3b82f6'
+                            background: req.request_type === 'Early Check-In' ? 'rgba(245, 158, 11, 0.1)' : req.request_type === 'Overtime' ? 'rgba(139, 92, 246, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                            color: req.request_type === 'Early Check-In' ? '#d97706' : req.request_type === 'Overtime' ? '#8b5cf6' : '#3b82f6'
                           }}>
                             {req.request_type || 'Edit'}
                           </span>
                         </td>
                         <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{logDate}</td>
                         <td style={{ padding: '12px 14px', fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>
-                          <div>In: {formatDateTime(req.original_check_in)}</div>
-                          <div>Out: {formatDateTime(req.original_check_out)}</div>
+                          {activeTab === 'early_checkin' ? (
+                            <div style={{ fontWeight: 700, color: 'var(--text)' }}>
+                              🕒 {req.shift_start_time || '--'}
+                            </div>
+                          ) : (
+                            <>
+                              <div>In: {formatDateTime(req.original_check_in)}</div>
+                              <div>Out: {formatDateTime(req.original_check_out)}</div>
+                            </>
+                          )}
                         </td>
                         <td style={{ padding: '12px 14px', fontSize: 12, textAlign: 'center', color: 'var(--green)', fontWeight: 600 }}>
-                          {req.request_type === 'Overtime' ? (
+                          {activeTab === 'early_checkin' ? (
+                            <div style={{ color: '#d97706', fontWeight: 700 }}>
+                              {formatDateTime(req.requested_check_in)}
+                            </div>
+                          ) : req.request_type === 'Overtime' ? (
                             <>
                               <div style={{ color: 'var(--text-muted)', fontWeight: 500 }}>--</div>
                               <div>Out: {formatDateTime(req.requested_check_out)}</div>
@@ -372,7 +472,7 @@ export default function EditAttendanceLogs() {
                           )}
                         </td>
                         <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 500 }}>
-                          {req.reason ? req.reason.replace(/\s*\[Approved.*?\]/, '') : ''}
+                          {req.reason ? req.reason.replace(/\s*\[(Approved|Rejected).*?\]/, '') : ''}
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           <span style={{ 
@@ -390,11 +490,35 @@ export default function EditAttendanceLogs() {
                               {req.reason.match(/\[(Approved.*?)\]/)[0]}
                             </div>
                           )}
+                          {req.status === 'Rejected' && req.reason && req.reason.match(/\[Rejected.*?\]/) && (
+                            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--red)', fontWeight: 600 }}>
+                              {req.reason.match(/\[(Rejected.*?)\]/)[0]}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           {req.status === 'Pending' ? (
                             <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-                              {user?.role?.toLowerCase() === 'operator' && isOlderThanYesterday ? (
+                              {req.request_type === 'Early Check-In' ? (
+                                <>
+                                  <button 
+                                    className="btn btn-primary" 
+                                    onClick={() => handleRequestAction(req.id, 'Approve')}
+                                    style={{ padding: '5px 12px', fontSize: 11, background: 'var(--green)', borderColor: 'var(--green)', fontWeight: 700 }}
+                                    title="Accept early check-in at marked time"
+                                  >
+                                    Accept
+                                  </button>
+                                  <button 
+                                    className="btn btn-secondary" 
+                                    onClick={() => handleOpenRejectEarly(req)}
+                                    style={{ padding: '5px 12px', fontSize: 11, color: 'var(--red)', borderColor: 'var(--red)', fontWeight: 700 }}
+                                    title="Reject and adjust check-in time"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : user?.role?.toLowerCase() === 'operator' && isOlderThanYesterday ? (
                                 <button 
                                   className="btn btn-primary" 
                                   onClick={() => {
@@ -432,15 +556,15 @@ export default function EditAttendanceLogs() {
                                   >
                                     Edit
                                   </button>
+                                  <button 
+                                    className="btn btn-secondary" 
+                                    onClick={() => handleRequestAction(req.id, 'Reject')}
+                                    style={{ padding: '4px 8px', fontSize: 11, color: 'var(--red)', borderColor: 'var(--red)' }}
+                                  >
+                                    Reject
+                                  </button>
                                 </>
                               )}
-                              <button 
-                                className="btn btn-secondary" 
-                                onClick={() => handleRequestAction(req.id, 'Reject')}
-                                style={{ padding: '4px 8px', fontSize: 11, color: 'var(--red)', borderColor: 'var(--red)' }}
-                              >
-                                Reject
-                              </button>
                             </div>
                           ) : (
                             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Processed</span>
@@ -581,10 +705,15 @@ export default function EditAttendanceLogs() {
                     overrideTime = new Date(baseDateOut.getTime() + mins * 60000).toISOString();
                   } else if (editingRequestTimeValue) {
                     const baseDateIn = new Date(activeRequestModal.original_check_in || activeRequestModal.attendance_date || activeRequestModal.created_at);
-                    const y = baseDateIn.getFullYear();
-                    const mo = String(baseDateIn.getMonth() + 1).padStart(2, '0');
-                    const dy = String(baseDateIn.getDate()).padStart(2, '0');
-                    let fullTimeStr = `${y}-${mo}-${dy}T${editingRequestTimeValue}:00`;
+                    const saudiDateStr = new Intl.DateTimeFormat('en-CA', {
+                      timeZone: 'Asia/Riyadh',
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit'
+                    }).format(baseDateIn);
+
+                    const cleanTime = editingRequestTimeValue.length === 5 ? editingRequestTimeValue : editingRequestTimeValue.slice(0, 5);
+                    let fullTimeStr = `${saudiDateStr}T${cleanTime}:00+03:00`;
                     
                     const isCheckIn = activeRequestModal.request_type === 'Check-In';
                     const isCheckOutOrOvertime = activeRequestModal.request_type === 'Check-Out' || activeRequestModal.request_type === 'Overtime';
@@ -593,8 +722,13 @@ export default function EditAttendanceLogs() {
                       if (new Date(fullTimeStr) < baseDateIn) {
                         const nextDay = new Date(baseDateIn);
                         nextDay.setDate(nextDay.getDate() + 1);
-                        const nY = nextDay.getFullYear(), nMo = String(nextDay.getMonth()+1).padStart(2,'0'), nDy = String(nextDay.getDate()).padStart(2,'0');
-                        fullTimeStr = `${nY}-${nMo}-${nDy}T${editingRequestTimeValue}:00`;
+                        const nextSaudiDate = new Intl.DateTimeFormat('en-CA', {
+                          timeZone: 'Asia/Riyadh',
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit'
+                        }).format(nextDay);
+                        fullTimeStr = `${nextSaudiDate}T${cleanTime}:00+03:00`;
                       }
                     }
                     overrideTime = new Date(fullTimeStr).toISOString();
@@ -614,6 +748,155 @@ export default function EditAttendanceLogs() {
                 }}>Save & Approve</button>
                 <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => { setActiveRequestModal(null); setIsEditingRequestTime(false); }}>Cancel</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Reject Early Check-In Modal for Admin */}
+      {rejectEarlyModal && (
+        <div 
+          onClick={() => setRejectEarlyModal(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: 16 }}
+        >
+          <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 480, padding: 24, borderRadius: 16, background: 'var(--surface)', boxShadow: '0 20px 40px rgba(0,0,0,0.3)', animation: 'scaleUp 0.2s ease-out' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div>
+                <h4 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--red)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <X size={20} /> Reject Early Check-In / حاضری مسترد
+                </h4>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+                  {rejectEarlyModal.employee_name} ({rejectEarlyModal.employee_code})
+                </div>
+              </div>
+              <button onClick={() => setRejectEarlyModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-muted)' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Request Summary */}
+            <div style={{ background: 'var(--surface-1)', border: '1px solid var(--surface-2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Marked By (Operator):</span>
+                <span style={{ fontWeight: 700 }}>{rejectEarlyModal.requested_by_username || 'Operator'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Logged Time:</span>
+                <span style={{ fontWeight: 700, color: '#d97706' }}>{formatDateTime(rejectEarlyModal.requested_check_in)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Scheduled Shift Start:</span>
+                <span style={{ fontWeight: 700, color: 'var(--text)' }}>{rejectEarlyModal.shift_start_time || '--'}</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>Operator's Reason:</span>
+                <div style={{ fontWeight: 600, color: 'var(--text)', marginTop: 2, background: 'var(--surface)', padding: '6px 8px', borderRadius: 6 }}>
+                  {rejectEarlyModal.reason ? rejectEarlyModal.reason.replace(/\s*\[.*?\]/g, '') : '--'}
+                </div>
+              </div>
+            </div>
+
+            {/* Question / Select Adjusted Check-In Time */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
+                Select Adjusted Check-In Time (ملازم کا درست وقت منتخب کریں):
+              </label>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Option 1: Scheduled Duty Start Time */}
+                <div 
+                  onClick={() => setRejectOption('shift')}
+                  style={{
+                    border: rejectOption === 'shift' ? '2px solid var(--primary)' : '1.5px solid var(--surface-2)',
+                    background: rejectOption === 'shift' ? 'rgba(var(--primary-rgb), 0.08)' : 'var(--surface)',
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: 0 }}>
+                    <input 
+                      type="radio" 
+                      name="rejectOpt" 
+                      checked={rejectOption === 'shift'} 
+                      onChange={() => setRejectOption('shift')}
+                      style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                      Reset to Scheduled Shift Time: <strong>{rejectEarlyModal.shift_start_time || '10:00'}</strong>
+                    </span>
+                  </label>
+                </div>
+
+                {/* Option 2: Custom Time */}
+                <div 
+                  onClick={() => setRejectOption('custom')}
+                  style={{
+                    border: rejectOption === 'custom' ? '2px solid var(--primary)' : '1.5px solid var(--surface-2)',
+                    background: rejectOption === 'custom' ? 'rgba(var(--primary-rgb), 0.08)' : 'var(--surface)',
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: 0, marginBottom: rejectOption === 'custom' ? 8 : 0 }}>
+                    <input 
+                      type="radio" 
+                      name="rejectOpt" 
+                      checked={rejectOption === 'custom'} 
+                      onChange={() => setRejectOption('custom')}
+                      style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                      Set Custom Check-In Time (اپنی مرضی کا وقت درج کریں)
+                    </span>
+                  </label>
+
+                  {rejectOption === 'custom' && (
+                    <div style={{ marginTop: 8, paddingLeft: 24 }}>
+                      <input 
+                        type="time" 
+                        value={rejectCustomTime} 
+                        onChange={e => setRejectCustomTime(e.target.value)}
+                        style={{ padding: '8px 12px', borderRadius: 8, border: '1.5px solid var(--surface-3)', background: 'var(--surface-1)', color: 'var(--text)', fontSize: 14, outline: 'none' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Optional Admin Note */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                Admin Note / Rejection Reason (اختیاری نوٹ):
+              </label>
+              <input 
+                type="text"
+                value={rejectAdminReason}
+                onChange={e => setRejectAdminReason(e.target.value)}
+                placeholder="مثلاً: جلدی آنے کی اجازت نہیں تھی..."
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                onClick={() => setRejectEarlyModal(null)}
+                style={{ padding: '9px 18px', fontSize: 13.5, fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary"
+                onClick={handleConfirmRejectEarly}
+                style={{ padding: '9px 20px', fontSize: 13.5, fontWeight: 700, background: 'var(--red)', borderColor: 'var(--red)' }}
+              >
+                Reject & Adjust Time
+              </button>
             </div>
           </div>
         </div>
