@@ -3106,3 +3106,125 @@ tbody tr:hover td {
 @media (min-width: 769px) {
   .show-mobile { display: none !important; }
 }
+
+/* ===== SHIFT & DAILY CLOSING MODAL RESPONSIVE ===== */
+.closing-modal-overlay {
+  padding: 20px;
+}
+
+.closing-modal-card {
+  max-width: 840px !important;
+  width: 95vw !important;
+  padding: 24px 28px !important;
+  max-height: 94vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.closing-modal-header {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin-bottom: 16px !important;
+}
+
+.closing-modal-header-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.closing-header-sep {
+  color: #cbd5e1;
+}
+
+.closing-header-warning {
+  color: #d97706;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.closing-modal-body {
+  display: grid !important;
+  grid-template-columns: 1.05fr 0.95fr !important;
+  gap: 18px !important;
+  margin-bottom: 20px !important;
+}
+
+.closing-total-sale-box {
+  background: #f1f5f9;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.closing-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+@media (max-width: 768px) {
+  .closing-modal-overlay {
+    padding: 8px !important;
+    align-items: center !important;
+  }
+  .closing-modal-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 14px 12px !important;
+    max-height: 96vh !important;
+    border-radius: 14px !important;
+  }
+  .closing-modal-header {
+    margin-bottom: 12px !important;
+  }
+  .closing-modal-header h3 {
+    font-size: 18px !important;
+  }
+  .closing-modal-header-desc {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 4px !important;
+    font-size: 12px !important;
+    margin-top: 4px !important;
+  }
+  .closing-header-sep {
+    display: none !important;
+  }
+  .closing-header-warning {
+    font-size: 11.5px !important;
+  }
+  .closing-modal-body {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+    margin-bottom: 14px !important;
+  }
+  .closing-modal-actions {
+    flex-direction: column-reverse !important;
+    gap: 8px !important;
+    width: 100% !important;
+    margin-top: 14px !important;
+  }
+  .closing-modal-actions button {
+    width: 100% !important;
+    padding: 12px 14px !important;
+    font-size: 14px !important;
+    justify-content: center !important;
+  }
+}

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pizza-shop-v3';
+const CACHE_NAME = 'pizza-shop-v5';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

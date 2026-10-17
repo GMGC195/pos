@@ -1469,99 +1469,101 @@ export default function Reports({ isTodaySales = false }) {
 
       {/* ── CLOSING MODAL ── */}
       {showClosingModal && (
-        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) { setShowClosingModal(false); setClosingType(null); } }}>
-          <div className="modal" style={{ maxWidth: 650, width: '95vw', padding: '20px 24px', maxHeight: '92vh', overflow: 'hidden' }}>
-            <div className="modal-header" style={{ marginBottom: 14 }}>
-              <div>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0, fontSize: 17 }}>
-                  <Lock size={18} color="var(--primary)" /> Shift & Daily Closing
+        <div className="modal-overlay closing-modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) { setShowClosingModal(false); setClosingType(null); } }}>
+          <div className="modal closing-modal-card">
+            <div className="modal-header closing-modal-header">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 10, margin: 0, fontSize: 20, fontWeight: 800 }}>
+                  <Lock size={22} color="var(--primary)" /> Shift & Daily Closing
                 </h3>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  Select closing type. <b>Hold orders</b> remain safe & unaffected.
-                </span>
+                <div className="closing-modal-header-desc">
+                  <span>Select closing type. <b>Hold orders</b> remain safe & unaffected.</span>
+                  <span className="closing-header-sep">•</span>
+                  <span className="closing-header-warning">
+                    <span>⚠️</span> Completed orders will be cleared & archived.
+                  </span>
+                </div>
               </div>
-              <button className="modal-close" onClick={() => { setShowClosingModal(false); setClosingType(null); }}>✕</button>
+              <button className="modal-close" onClick={() => { setShowClosingModal(false); setClosingType(null); }} style={{ fontSize: 20, width: 34, height: 34, flexShrink: 0 }}>✕</button>
             </div>
 
-            {/* 2-Column Grid Body */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.05fr 0.95fr', gap: 14, marginBottom: 16 }}>
+            {/* Grid Body - 2 Columns on desktop, 1 Column on mobile */}
+            <div className="closing-modal-body">
               {/* Left Column: Pending Orders + Shift Stats (Start time, Current time, Total Orders, Total Sales) */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {/* 1. Pending Orders Card */}
                 <div style={{
                   background: closingPendingInfo.totalPending > 0 ? '#fffbeb' : '#f8fafc',
                   border: `1.5px solid ${closingPendingInfo.totalPending > 0 ? '#fde68a' : '#e2e8f0'}`,
-                  borderRadius: 10,
-                  padding: '10px 12px'
+                  borderRadius: 12,
+                  padding: '12px 14px'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 15 }}>{closingPendingInfo.totalPending > 0 ? '⏳' : '✅'}</span>
-                      <strong style={{ fontSize: 12, color: closingPendingInfo.totalPending > 0 ? '#92400e' : '#334155' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>{closingPendingInfo.totalPending > 0 ? '⏳' : '✅'}</span>
+                      <strong style={{ fontSize: 13.5, color: closingPendingInfo.totalPending > 0 ? '#92400e' : '#334155' }}>
                         Pending / Hold Orders
                       </strong>
                     </div>
                     <span style={{
                       background: closingPendingInfo.totalPending > 0 ? '#f59e0b' : '#10b981',
                       color: '#fff',
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: 800,
-                      padding: '2px 7px',
+                      padding: '3px 9px',
                       borderRadius: 8
                     }}>
                       {closingPendingInfo.loading ? '...' : `${closingPendingInfo.totalPending} Orders`}
                     </span>
                   </div>
 
-
                   {/* 3 Breakdown Cards */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6, padding: '5px 2px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🛍️ Takeaway</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 8, padding: '7px 4px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>🛍️ Takeaway</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
                         {closingPendingInfo.loading ? '...' : closingPendingInfo.takeaway}
                       </div>
                     </div>
-                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6, padding: '5px 2px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🛵 Delivery</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 8, padding: '7px 4px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>🛵 Delivery</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
                         {closingPendingInfo.loading ? '...' : closingPendingInfo.delivery}
                       </div>
                     </div>
-                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 6, padding: '5px 2px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🍽️ Dine-In</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
+                    <div style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 8, padding: '7px 4px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>🍽️ Dine-In</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
                         {closingPendingInfo.loading ? '...' : closingPendingInfo.dineIn}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 2. Shift Stats Card (Start Time, Current Time, Total Orders, Total Sales) */}
                 {/* 2. Shift / Daily Stats Card */}
                 <div style={{
                   background: '#f8fafc',
                   border: '1px solid #e2e8f0',
-                  borderRadius: 10,
-                  padding: '10px 12px'
+                  borderRadius: 12,
+                  padding: '12px 14px'
                 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <Clock size={13} color="var(--primary)" /> 
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Clock size={15} color="var(--primary)" /> 
                       {closingType === 'Daily' ? 'Daily Summary (پورے دن کا خلاصہ)' : 'Shift Summary (موجودہ شفٹ)'}
                     </div>
                     {loadingClosingPreview && (
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Refreshing...</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Refreshing...</span>
                     )}
                   </div>
                   
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     {/* Shift / Daily Start Time */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>
                         {closingType === 'Daily' ? '📅 Daily Cycle Start' : '🕒 Shift Start'}
                       </div>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#1e293b', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#1e293b', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {closingType === 'Daily' 
                           ? (closingPreview?.login_time ? formatSaudiTime(closingPreview.login_time) + ' KSA' : '00:00 KSA')
                           : (closingPreview?.start_time || activeShift?.start_time ? formatSaudiTime(closingPreview?.start_time || activeShift.start_time) + ' KSA' : '-')}
@@ -1569,25 +1571,25 @@ export default function Reports({ isTodaySales = false }) {
                     </div>
 
                     {/* Current Time */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>⏰ Current Time</div>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', marginTop: 1 }}>
-                        {formatSaudiTime(new Date())} <span style={{ fontSize: 9, color: '#94a3b8' }}>KSA</span>
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>⏰ Current Time</div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', marginTop: 2 }}>
+                        {formatSaudiTime(new Date())} <span style={{ fontSize: 10, color: '#94a3b8' }}>KSA</span>
                       </div>
                     </div>
 
                     {/* Total Orders Punched */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>🧾 Total Orders</div>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', marginTop: 1 }}>
-                        {closingPreview?.total_orders !== undefined ? closingPreview.total_orders : totalCount} <span style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>orders</span>
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>🧾 Total Orders</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
+                        {closingPreview?.total_orders !== undefined ? closingPreview.total_orders : totalCount} <span style={{ fontSize: 11, color: '#64748b', fontWeight: 500 }}>orders</span>
                       </div>
                     </div>
 
                     {/* Total Sales */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px' }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>💰 Total Sales</div>
-                      <div style={{ fontSize: 12, fontWeight: 900, color: '#047857', marginTop: 1 }}>
+                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>💰 Total Sales</div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: '#047857', marginTop: 2 }}>
                         {CURRENCY}{(closingPreview?.total_sales !== undefined ? parseFloat(closingPreview.total_sales || 0) : totalSales).toFixed(2)}
                       </div>
                     </div>
@@ -1599,38 +1601,38 @@ export default function Reports({ isTodaySales = false }) {
                   <div style={{
                     background: '#ffffff',
                     border: '1.5px solid #cbd5e1',
-                    borderRadius: 10,
-                    padding: '10px 12px'
+                    borderRadius: 12,
+                    padding: '12px 14px'
                   }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: '#1e3a8a', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: '#1e3a8a', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <span>📋 Shifts in Daily Closing ({closingPreview?.shifts?.length || 0})</span>
-                      <span style={{ fontSize: 10, color: '#64748b' }}>From last daily closing</span>
+                      <span style={{ fontSize: 11, color: '#64748b' }}>From last daily closing</span>
                     </div>
 
                     {(!closingPreview?.shifts || closingPreview.shifts.length === 0) ? (
-                      <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '6px 0' }}>
+                      <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '10px 0' }}>
                         No separate shifts closed yet today
                       </div>
                     ) : (
-                      <div style={{ maxHeight: 110, overflowY: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                      <div style={{ maxHeight: 130, overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                           <thead>
                             <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
-                              <th style={{ padding: '2px 0' }}>Cashier</th>
-                              <th style={{ padding: '2px 0', textAlign: 'center' }}>Orders</th>
-                              <th style={{ padding: '2px 0', textAlign: 'right' }}>Shift Sale</th>
+                              <th style={{ padding: '4px 0' }}>Cashier</th>
+                              <th style={{ padding: '4px 0', textAlign: 'center' }}>Orders</th>
+                              <th style={{ padding: '4px 0', textAlign: 'right' }}>Shift Sale</th>
                             </tr>
                           </thead>
                           <tbody>
                             {closingPreview.shifts.map((s, idx) => (
                               <tr key={idx} style={{ borderBottom: '1px dashed #f1f5f9' }}>
-                                <td style={{ padding: '3px 0', fontWeight: 700, color: '#1e293b' }}>
+                                <td style={{ padding: '5px 0', fontWeight: 700, color: '#1e293b' }}>
                                   👤 {s.cashier_name}
                                 </td>
-                                <td style={{ padding: '3px 0', textAlign: 'center', color: '#64748b' }}>
+                                <td style={{ padding: '5px 0', textAlign: 'center', color: '#64748b' }}>
                                   {s.total_orders || '-'}
                                 </td>
-                                <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 800, color: '#047857' }}>
+                                <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 800, color: '#047857' }}>
                                   {CURRENCY}{parseFloat(s.total_sales || 0).toFixed(2)}
                                 </td>
                               </tr>
@@ -1644,31 +1646,32 @@ export default function Reports({ isTodaySales = false }) {
               </div>
 
               {/* Right Column: Closing Type Selection, Total Sale Display, Drawer Input & Difference */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, justifyContent: 'space-between' }}>
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
                     Select Closing Type
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     {/* Shift Close */}
                     <div
                       onClick={() => setClosingType('Shift')}
                       style={{
-                        border: closingType === 'Shift' ? '2px solid var(--primary)' : '1.5px solid var(--surface-2)',
-                        borderRadius: 10,
-                        padding: '10px 8px',
+                        border: closingType === 'Shift' ? '2.5px solid var(--primary)' : '1.5px solid var(--surface-2)',
+                        borderRadius: 12,
+                        padding: '14px 10px',
                         cursor: 'pointer',
                         background: closingType === 'Shift' ? 'rgba(227,24,55,0.06)' : 'white',
                         textAlign: 'center',
-                        transition: 'all 0.15s ease'
+                        transition: 'all 0.15s ease',
+                        boxShadow: closingType === 'Shift' ? '0 3px 12px rgba(227,24,55,0.15)' : 'none'
                       }}
                     >
-                      <div style={{ fontSize: 22, marginBottom: 2 }}>🔄</div>
-                      <div style={{ fontWeight: 800, fontSize: 13, color: closingType === 'Shift' ? 'var(--primary)' : 'var(--text-primary)' }}>
+                      <div style={{ fontSize: 26, marginBottom: 4 }}>🔄</div>
+                      <div style={{ fontWeight: 800, fontSize: 14.5, color: closingType === 'Shift' ? 'var(--primary)' : 'var(--text-primary)' }}>
                         Shift Close
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                         (X-Report)
                       </div>
                     </div>
@@ -1677,20 +1680,21 @@ export default function Reports({ isTodaySales = false }) {
                     <div
                       onClick={() => setClosingType('Daily')}
                       style={{
-                        border: closingType === 'Daily' ? '2px solid #7c3aed' : '1.5px solid var(--surface-2)',
-                        borderRadius: 10,
-                        padding: '10px 8px',
+                        border: closingType === 'Daily' ? '2.5px solid #7c3aed' : '1.5px solid var(--surface-2)',
+                        borderRadius: 12,
+                        padding: '14px 10px',
                         cursor: 'pointer',
                         background: closingType === 'Daily' ? 'rgba(124,58,237,0.06)' : 'white',
                         textAlign: 'center',
-                        transition: 'all 0.15s ease'
+                        transition: 'all 0.15s ease',
+                        boxShadow: closingType === 'Daily' ? '0 3px 12px rgba(124,58,237,0.15)' : 'none'
                       }}
                     >
-                      <div style={{ fontSize: 22, marginBottom: 2 }}>⚡</div>
-                      <div style={{ fontWeight: 800, fontSize: 13, color: closingType === 'Daily' ? '#7c3aed' : 'var(--text-primary)' }}>
+                      <div style={{ fontSize: 26, marginBottom: 4 }}>⚡</div>
+                      <div style={{ fontWeight: 800, fontSize: 14.5, color: closingType === 'Daily' ? '#7c3aed' : 'var(--text-primary)' }}>
                         Daily Close
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
                         (Z-Report)
                       </div>
                     </div>
@@ -1708,21 +1712,13 @@ export default function Reports({ isTodaySales = false }) {
                   const hasDifference = isDrawerFilled && Math.abs(diff) >= 0.01;
 
                   return (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {/* Total Sale Card */}
-                      <div style={{
-                        background: '#f1f5f9',
-                        border: '1.5px solid #cbd5e1',
-                        borderRadius: 8,
-                        padding: '8px 12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between'
-                      }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                      <div className="closing-total-sale-box">
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: '#475569' }}>
                           Total Sale ({closingType === 'Daily' ? 'Daily' : 'Shift'} کل سیل):
                         </span>
-                        <span style={{ fontSize: 16, fontWeight: 900, color: 'var(--primary)' }}>
+                        <span style={{ fontSize: 18, fontWeight: 900, color: 'var(--primary)' }}>
                           {CURRENCY}{activeSales.toFixed(2)}
                         </span>
                       </div>
@@ -1731,27 +1727,27 @@ export default function Reports({ isTodaySales = false }) {
                       <div style={{
                         background: 'var(--surface-1)',
                         border: '1.5px solid var(--surface-2)',
-                        borderRadius: 8,
-                        padding: '9px 10px'
+                        borderRadius: 10,
+                        padding: '12px 14px'
                       }}>
                         <label style={{
                           display: 'block',
-                          fontSize: 11,
+                          fontSize: 13,
                           fontWeight: 800,
                           color: 'var(--text-primary)',
-                          marginBottom: 4
+                          marginBottom: 6
                         }}>
                           Amount in Drawer (دراز میں رقم) * ({CURRENCY})
                         </label>
                         <div style={{ position: 'relative' }}>
                           <span style={{
                             position: 'absolute',
-                            left: 10,
+                            left: 12,
                             top: '50%',
                             transform: 'translateY(-50%)',
-                            fontWeight: 700,
+                            fontWeight: 800,
                             color: 'var(--text-muted)',
-                            fontSize: 12
+                            fontSize: 14
                           }}>
                             {CURRENCY}
                           </span>
@@ -1761,16 +1757,16 @@ export default function Reports({ isTodaySales = false }) {
                             min="0"
                             value={closingRemainingCash}
                             onChange={e => setClosingRemainingCash(e.target.value)}
-                            placeholder="0.00 (Gin kar daraz ki raqam likhein)"
+                            placeholder="0.00"
                             required
                             autoFocus
                             style={{
                               width: '100%',
-                              padding: '7px 8px 7px 38px',
-                              borderRadius: 6,
+                              padding: '10px 12px 10px 46px',
+                              borderRadius: 8,
                               border: '1.5px solid #94a3b8',
                               background: '#ffffff',
-                              fontSize: 14,
+                              fontSize: 16,
                               fontWeight: 800,
                               color: 'var(--text-primary)',
                               outline: 'none',
@@ -1778,7 +1774,7 @@ export default function Reports({ isTodaySales = false }) {
                             }}
                           />
                         </div>
-                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>
+                        <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4 }}>
                           Manual entry required. Must count drawer cash.
                         </div>
                       </div>
@@ -1787,13 +1783,13 @@ export default function Reports({ isTodaySales = false }) {
                       {isDrawerFilled && (
                         <div>
                           {hasDifference ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                               {/* Red Background, White Text Difference Alert with Exclamation mark */}
                               <div style={{
                                 background: '#dc2626',
                                 color: '#ffffff',
-                                padding: '8px 12px',
-                                borderRadius: 6,
+                                padding: '10px 14px',
+                                borderRadius: 8,
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
@@ -1801,12 +1797,12 @@ export default function Reports({ isTodaySales = false }) {
                                 boxShadow: '0 2px 8px rgba(220, 38, 38, 0.35)',
                                 animation: 'fadeIn 0.2s ease-in'
                               }}>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13 }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14.5 }}>
                                   ⚠️ Difference!
                                 </span>
-                                <span style={{ fontSize: 14 }}>
+                                <span style={{ fontSize: 15.5 }}>
                                   {diff < 0 ? '-' : '+'}{CURRENCY}{Math.abs(diff).toFixed(2)}
-                                  <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 4, opacity: 0.9 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 5, opacity: 0.9 }}>
                                     ({diff < 0 ? 'Shortage / کم' : 'Excess / زیادہ'})
                                   </span>
                                 </span>
@@ -1816,10 +1812,10 @@ export default function Reports({ isTodaySales = false }) {
                               <div>
                                 <label style={{
                                   display: 'block',
-                                  fontSize: 11,
+                                  fontSize: 12.5,
                                   fontWeight: 800,
                                   color: '#b91c1c',
-                                  marginBottom: 3
+                                  marginBottom: 4
                                 }}>
                                   Reason for Difference (فرق کی وجہ) *
                                 </label>
@@ -1827,14 +1823,14 @@ export default function Reports({ isTodaySales = false }) {
                                   rows={2}
                                   value={closingDifferenceReason}
                                   onChange={e => setClosingDifferenceReason(e.target.value)}
-                                  placeholder="Difference kyun aaya? Reason darj karein (Mandatory)..."
+                                  placeholder="Why difference"
                                   style={{
                                     width: '100%',
-                                    padding: '6px 8px',
-                                    borderRadius: 6,
+                                    padding: '8px 10px',
+                                    borderRadius: 8,
                                     border: '1.5px solid #ef4444',
                                     background: '#ffffff',
-                                    fontSize: 12,
+                                    fontSize: 13,
                                     outline: 'none',
                                     boxSizing: 'border-box',
                                     resize: 'none'
@@ -1847,9 +1843,9 @@ export default function Reports({ isTodaySales = false }) {
                               background: '#ecfdf5',
                               color: '#065f46',
                               border: '1px solid #a7f3d0',
-                              padding: '6px 10px',
-                              borderRadius: 6,
-                              fontSize: 11,
+                              padding: '8px 12px',
+                              borderRadius: 8,
+                              fontSize: 12.5,
                               fontWeight: 800,
                               display: 'flex',
                               alignItems: 'center',
@@ -1865,22 +1861,6 @@ export default function Reports({ isTodaySales = false }) {
                   );
                 })()}
 
-                {closingType && (
-                  <div style={{
-                    background: closingType === 'Daily' ? '#faf5ff' : '#fff1f2',
-                    border: `1px solid ${closingType === 'Daily' ? '#ddd6fe' : '#fca5a5'}`,
-                    borderRadius: 6,
-                    padding: '5px 10px',
-                    fontSize: 10,
-                    color: closingType === 'Daily' ? '#6b21a8' : '#991b1b',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5
-                  }}>
-                    <span>⚠️</span>
-                    <span>Completed orders will be cleared & archived.</span>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -1896,14 +1876,14 @@ export default function Reports({ isTodaySales = false }) {
               const isButtonDisabled = !closingType || closingProcessing || !isDrawerFilled || (hasDifference && !closingDifferenceReason.trim());
 
               return (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <div className="closing-modal-actions">
                   <button
                     type="button"
                     style={{
-                      padding: '6px 14px',
-                      fontSize: 12,
+                      padding: '9px 18px',
+                      fontSize: 13.5,
                       fontWeight: 600,
-                      borderRadius: 6,
+                      borderRadius: 8,
                       border: '1px solid #cbd5e1',
                       background: '#f8fafc',
                       color: '#475569',
@@ -1924,10 +1904,10 @@ export default function Reports({ isTodaySales = false }) {
                   <button
                     type="button"
                     style={{
-                      padding: '6px 16px',
-                      fontSize: 12,
+                      padding: '9px 20px',
+                      fontSize: 13.5,
                       fontWeight: 700,
-                      borderRadius: 6,
+                      borderRadius: 8,
                       border: '1px solid #0f172a',
                       background: '#1e293b',
                       color: '#ffffff',
@@ -1953,10 +1933,10 @@ export default function Reports({ isTodaySales = false }) {
                   <button
                     type="button"
                     style={{
-                      padding: '6px 16px',
-                      fontSize: 12,
+                      padding: '9px 22px',
+                      fontSize: 13.5,
                       fontWeight: 700,
-                      borderRadius: 6,
+                      borderRadius: 8,
                       border: '1px solid #0a2428',
                       background: '#103C43',
                       color: '#ffffff',
@@ -1966,7 +1946,7 @@ export default function Reports({ isTodaySales = false }) {
                       alignItems: 'center',
                       justifyContent: 'center',
                       textAlign: 'center',
-                      gap: 6,
+                      gap: 7,
                       boxShadow: !isButtonDisabled ? '0 2px 8px rgba(16, 60, 67, 0.25)' : 'none',
                       transition: 'all 0.15s ease'
                     }}
@@ -1979,7 +1959,7 @@ export default function Reports({ isTodaySales = false }) {
                       (hasDifference && !closingDifferenceReason.trim()) ? 'Please enter reason for difference' : 'Confirm closing and print thermal receipt'
                     }
                   >
-                    <Printer size={13} color="#F4B400" />
+                    <Printer size={16} color="#F4B400" />
                     <span>{closingProcessing && closingProcessingType === 'close_print' ? 'Processing...' : 'Close & Print Report'}</span>
                   </button>
                 </div>
