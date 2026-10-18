@@ -45,6 +45,11 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
     
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE');
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift_id INTEGER');
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0');
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_reason TEXT');
+    await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_history JSONB DEFAULT '[]'::jsonb");
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by VARCHAR(150)');
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ');
     
     // Ensure settings table and report_emails column exist
     await pool.query(`
