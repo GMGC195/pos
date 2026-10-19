@@ -137,6 +137,9 @@ async function returnStock(orderId, client) {
 
 // POST create order atomically
 router.post('/', authenticateToken, async (req, res) => {
+  if (req.user?.role?.trim().toLowerCase() === 'management') {
+    return res.status(403).json({ error: 'Management role is view-only. Placing orders is not allowed.' });
+  }
   const { items, subtotal, tax, grand_total, payment_method, customer_name, customer_phone, customer_address, discount, client_order_id, order_type, table_number, order_taker, comments, credit_customer_id, credit_payment_amount } = req.body;
   console.log(`[ORDER DEBUG] Order request received:`, { order_type, table_number, order_taker, itemCount: items?.length });
   const client = await pool.connect();
@@ -390,7 +393,7 @@ router.get('/closings', authenticateToken, async (req, res) => {
     
     // Determine the branch to filter by
     const role = req.user?.role?.trim().toLowerCase();
-    const isAdminRole = role === 'admin' || role === 'developer';
+    const isAdminRole = role === 'admin' || role === 'developer' || role === 'management';
     
     let branchFilter = null;
     if (isAdminRole) {
@@ -450,6 +453,145 @@ router.get('/closings', authenticateToken, async (req, res) => {
 
     res.json([...liveClosings, ...pastClosings]);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET closing preview stats and shifts breakdown for modal
+router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, res) => {
+  try {
+    let branch = req.query?.branch || req.user?.branch || 'Branch 1';
+    if (branch === 'All') branch = 'Branch 1';
+    const closingType = req.query?.type === 'Daily' ? 'Daily' : 'Shift';
+
+    if (closingType === 'Shift') {
+      const username = req.user.username;
+      const totals = await pool.query(`
+        SELECT 
+          COUNT(DISTINCT o.id) as total_orders, 
+          COALESCE(SUM(t.amount), 0) as total_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
+        FROM "orders" o
+        LEFT JOIN transactions t ON o.id = t.order_id
+        WHERE o.is_shift_closed = FALSE 
+          AND o.status IN ('Completed', 'Returned') 
+          AND o.branch = $1
+          AND o.completed_by = $2
+      `, [branch, username]);
+
+      const activeShiftRes = await pool.query(
+        `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+        [username, branch]
+      );
+      const activeShift = activeShiftRes.rows[0] || null;
+
+      return res.json({
+        success: true,
+        closing_type: 'Shift',
+        total_orders: parseInt(totals.rows[0]?.total_orders || 0, 10),
+        total_sales: parseFloat(totals.rows[0]?.total_sales || 0),
+        cash_sales: parseFloat(totals.rows[0]?.cash_sales || 0),
+        card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
+        credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
+        start_time: activeShift?.start_time || null,
+        opening_cash: parseFloat(activeShift?.opening_cash || 0)
+      });
+    } else {
+      // Daily Closing preview
+      const lastClosingRes = await pool.query(
+        `SELECT logout_time FROM shift_closings WHERE branch = $1 AND closing_type = 'Daily' ORDER BY logout_time DESC LIMIT 1`,
+        [branch]
+      );
+      let loginTime = new Date();
+      loginTime.setHours(0, 0, 0, 0);
+      if (lastClosingRes.rows.length > 0 && lastClosingRes.rows[0].logout_time) {
+        loginTime = new Date(lastClosingRes.rows[0].logout_time);
+      }
+
+      const totals = await pool.query(`
+        SELECT 
+          COUNT(DISTINCT o.id) as total_orders, 
+          COALESCE(SUM(t.amount), 0) as total_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
+        FROM "orders" o
+        LEFT JOIN transactions t ON o.id = t.order_id
+        WHERE o.is_daily_closed = FALSE 
+          AND o.status IN ('Completed', 'Returned') 
+          AND o.branch = $1
+      `, [branch]);
+
+      // Closed shifts in this daily cycle
+      const shiftsRes = await pool.query(`
+        SELECT cashier_name, total_sales, cash_sales, card_sales, credit_sales, total_orders, login_time, logout_time, closing_cash, difference, difference_reason
+        FROM shift_closings
+        WHERE branch = $1 AND closing_type = 'Shift' AND logout_time >= $2
+        ORDER BY logout_time ASC
+      `, [branch, loginTime]);
+
+      const shifts = shiftsRes.rows.map(s => ({
+        cashier_name: s.cashier_name,
+        total_sales: parseFloat(s.total_sales || 0),
+        cash_sales: parseFloat(s.cash_sales || 0),
+        card_sales: parseFloat(s.card_sales || 0),
+        credit_sales: parseFloat(s.credit_sales || 0),
+        total_orders: parseInt(s.total_orders || 0, 10),
+        login_time: s.login_time,
+        logout_time: s.logout_time,
+        closing_cash: s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash) : null,
+        difference: s.difference !== null && s.difference !== undefined ? parseFloat(s.difference) : null,
+        difference_reason: s.difference_reason || ''
+      }));
+
+      // Also check if any orders are unclosed by shift (e.g. active shift right now)
+      const unclosedShiftOrdersRes = await pool.query(`
+        SELECT 
+          o.completed_by as cashier_name, 
+          COUNT(DISTINCT o.id) as total_orders, 
+          COALESCE(SUM(t.amount), 0) as total_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
+          COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
+        FROM "orders" o
+        LEFT JOIN transactions t ON o.id = t.order_id
+        WHERE o.is_daily_closed = FALSE 
+          AND o.is_shift_closed = FALSE
+          AND o.status IN ('Completed', 'Returned')
+          AND o.branch = $1
+        GROUP BY o.completed_by
+      `, [branch]);
+
+      unclosedShiftOrdersRes.rows.forEach(u => {
+        shifts.push({
+          cashier_name: `${u.cashier_name} (Current)`,
+          total_sales: parseFloat(u.total_sales || 0),
+          cash_sales: parseFloat(u.cash_sales || 0),
+          card_sales: parseFloat(u.card_sales || 0),
+          credit_sales: parseFloat(u.credit_sales || 0),
+          total_orders: parseInt(u.total_orders || 0, 10),
+          closing_cash: null,
+          difference: null,
+          is_active: true
+        });
+      });
+
+      return res.json({
+        success: true,
+        closing_type: 'Daily',
+        login_time: loginTime,
+        total_orders: parseInt(totals.rows[0]?.total_orders || 0, 10),
+        total_sales: parseFloat(totals.rows[0]?.total_sales || 0),
+        cash_sales: parseFloat(totals.rows[0]?.cash_sales || 0),
+        card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
+        credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
+        shifts
+      });
+    }
+  } catch (err) {
+    console.error('Error in closing-preview:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -524,6 +666,9 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
 
 // PATCH pay held order
 router.patch('/:id/pay', authenticateToken, async (req, res) => {
+  if (req.user?.role?.trim().toLowerCase() === 'management') {
+    return res.status(403).json({ error: 'Management role is view-only. Paying held orders is not allowed.' });
+  }
   const { payment_method, credit_customer_id, credit_payment_amount, trigger_cloud_print } = req.body;
   if (!['Cash', 'Card', 'Online', 'Credit'].includes(payment_method)) {
     return res.status(400).json({ error: 'Invalid payment method' });
@@ -996,13 +1141,13 @@ async function sendClosingEmail(report, closingType) {
       const diffSign = diffVal < 0 ? '-' : '+';
       const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ';
       differenceHtml = `
-        <div style="background-color: #dc2626; color: #ffffff; padding: 16px 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);">
-          <div style="font-size: 22px; font-weight: 900; letter-spacing: 0.5px;">
+        <div style="background-color: #ffffff; border: 2px solid #dc2626; color: #111827; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; text-align: center;">
+          <div style="font-size: 20px; font-weight: 900; letter-spacing: 0.5px; color: #dc2626;">
             ⚠️ DIFFERENCE! ${diffSign}SAR ${Math.abs(diffVal).toFixed(2)} (${diffLabel})
           </div>
           ${report.difference_reason ? `
-            <div style="margin-top: 10px; font-size: 14px; background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px; text-align: left; line-height: 1.4;">
-              <strong>Reason:</strong> ${report.difference_reason}
+            <div style="margin-top: 10px; font-size: 14px; border-top: 1px dashed #d1d5db; padding-top: 8px; color: #374151; text-align: left; line-height: 1.4;">
+              <strong style="color: #111827;">Reason:</strong> ${report.difference_reason}
             </div>
           ` : ''}
         </div>
@@ -1018,36 +1163,124 @@ async function sendClosingEmail(report, closingType) {
         shiftsArr = report.shifts_summary;
       }
 
-      if (shiftsArr && shiftsArr.length > 0) {
-        shiftsHtml = `
-          <div style="background: #ffffff; border: 1.5px solid #2563eb; border-radius: 8px; overflow: hidden; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(37,99,235,0.08);">
-            <div style="background: #2563eb; color: #ffffff; font-weight: 800; font-size: 14px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
-              <span>📋 Shifts Breakdown in this Daily Closing</span>
-              <span style="font-size: 12px; opacity: 0.9;">${shiftsArr.length} Shift${shiftsArr.length > 1 ? 's' : ''}</span>
-            </div>
-            <div style="padding: 6px 12px; overflow-x: auto;">
-              <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #333;">
-                <thead>
-                  <tr style="border-bottom: 1.5px solid #e2e8f0; text-align: left; background: #f8fafc;">
-                    <th style="padding: 8px 10px;">Cashier Name</th>
-                    <th style="padding: 8px 10px; text-align: center;">Orders</th>
-                    <th style="padding: 8px 10px; text-align: right;">Total Sale</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${shiftsArr.map(s => `
-                    <tr style="border-bottom: 1px dashed #e2e8f0;">
-                      <td style="padding: 8px 10px; font-weight: 700; color: #1e293b;">👤 ${s.cashier_name}</td>
-                      <td style="padding: 8px 10px; text-align: center; color: #64748b;">${s.total_orders || '-'}</td>
-                      <td style="padding: 8px 10px; text-align: right; font-weight: 800; color: #047857;">SAR ${parseFloat(s.total_sales || 0).toFixed(2)}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        `;
+      const displayShifts = (shiftsArr && shiftsArr.length > 0) ? [...shiftsArr] : [{
+        cashier_name: report.cashier_name || 'Day',
+        total_sales: parseFloat(report.total_sales || 0),
+        cash_sales: parseFloat(report.cash_sales || 0),
+        card_sales: parseFloat(report.card_sales || 0),
+        closing_cash: parseFloat(report.closing_cash || 0),
+        difference: diffVal
+      }];
+
+      if (displayShifts.length === 1) {
+        displayShifts.push({
+          cashier_name: '',
+          total_sales: 0,
+          cash_sales: 0,
+          card_sales: 0,
+          closing_cash: null,
+          difference: null
+        });
       }
+
+      const getShiftLabel = (s, idx, totalCount) => {
+        if (totalCount === 2) return idx === 0 ? 'Day' : 'Night';
+        if (totalCount === 1) return 'Day';
+        return `Shift ${idx + 1}`;
+      };
+
+      const numCols = displayShifts.length;
+      const colHeaders = displayShifts.map((s, idx) => `
+        <th style="padding: 10px 14px; text-align: right; font-size: 13.5px; font-weight: 700; color: #1e293b;">
+          ${getShiftLabel(s, idx, numCols)}
+          <div style="font-size: 11px; font-weight: normal; color: #64748b;">${s.cashier_name || ''}</div>
+        </th>
+      `).join('');
+
+      const shiftTotalCells = displayShifts.map(s => `
+        <td style="padding: 9px 14px; text-align: right; color: #334155;">
+          ${parseFloat(s.total_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </td>
+      `).join('');
+
+      const shiftCardCells = displayShifts.map(s => `
+        <td style="padding: 9px 14px; text-align: right; color: #334155;">
+          ${parseFloat(s.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </td>
+      `).join('');
+
+      const shiftCashCells = displayShifts.map(s => `
+        <td style="padding: 9px 14px; text-align: right; color: #334155;">
+          ${parseFloat(s.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </td>
+      `).join('');
+
+      const shiftCountedCells = displayShifts.map(s => `
+        <td style="padding: 9px 14px; text-align: right; color: #334155;">
+          ${s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
+        </td>
+      `).join('');
+
+      const shiftDiffCells = displayShifts.map(s => {
+        if (s.difference === null || s.difference === undefined) return '<td style="padding: 9px 14px; text-align: right; color: #334155;">-</td>';
+        const d = parseFloat(s.difference || 0);
+        const sign = d < 0 ? '-' : (d > 0 ? '+' : '');
+        return `<td style="padding: 9px 14px; text-align: right; font-weight: 700; color: ${d < 0 ? '#b91c1c' : '#15803d'};">${sign}${Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`;
+      }).join('');
+
+      const totalSalesFormatted = parseFloat(report.total_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cardSalesFormatted = parseFloat(report.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cashSalesFormatted = parseFloat(report.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const countedCashFormatted = parseFloat(report.closing_cash || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const diffFormatted = `${diffVal < 0 ? '-' : (diffVal > 0 ? '+' : '')}${Math.abs(diffVal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+      shiftsHtml = `
+        <div style="margin-bottom: 24px;">
+          <h3 style="margin: 0 0 10px 0; font-size: 16px; font-weight: 800; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 6px;">
+            Daily summary: day + night
+          </h3>
+          <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; overflow-x: auto;">
+            <table style="width: 100%; min-width: 320px; border-collapse: collapse; font-size: 13.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+              <thead>
+                <tr style="background: #f1f5f9; border-bottom: 1.5px solid #cbd5e1;">
+                  <th style="padding: 10px 14px; text-align: left; font-weight: 700; color: #475569;"></th>
+                  ${colHeaders}
+                  <th style="padding: 10px 14px; text-align: right; font-weight: 900; color: #0f172a; font-size: 14px;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Total sales</td>
+                  ${shiftTotalCells}
+                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${totalSalesFormatted}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Card (to bank)</td>
+                  ${shiftCardCells}
+                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${cardSalesFormatted}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Cash sales</td>
+                  ${shiftCashCells}
+                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${cashSalesFormatted}</td>
+                </tr>
+                <tr style="border-bottom: 1.5px solid #cbd5e1;">
+                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Counted cash</td>
+                  ${shiftCountedCells}
+                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${countedCashFormatted}</td>
+                </tr>
+                <tr style="background: #f8fafc;">
+                  <td style="padding: 11px 14px; font-weight: 800; color: #991b1b;">Difference</td>
+                  ${shiftDiffCells}
+                  <td style="padding: 11px 14px; text-align: right; font-weight: 900; color: ${diffVal < 0 ? '#991b1b' : '#15803d'}; font-size: 15px;">
+                    ${diffFormatted}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
     }
 
     const htmlContent = `
@@ -1070,7 +1303,7 @@ async function sendClosingEmail(report, closingType) {
             <p style="margin: 4px 0;"><strong>Opening Drawer Cash:</strong> SAR ${parseFloat(report.opening_cash || 0).toFixed(2)}</p>
             <p style="margin: 4px 0;"><strong>Amount in Drawer (Closing Cash):</strong> SAR ${parseFloat(report.closing_cash || 0).toFixed(2)}</p>
             ${hasDiff ? `<p style="margin: 4px 0; color: #dc2626; font-weight: bold;"><strong>Difference:</strong> ${diffVal < 0 ? '-' : '+'}SAR ${Math.abs(diffVal).toFixed(2)}</p>` : ''}
-            ${hasDiff && report.difference_reason ? `<p style="margin: 4px 0; color: #dc2626;"><strong>Diff Reason:</strong> ${report.difference_reason}</p>` : ''}
+            ${hasDiff && report.difference_reason ? `<p style="margin: 4px 0; color: #374151;"><strong>Diff Reason:</strong> ${report.difference_reason}</p>` : ''}
             <p style="margin: 4px 0;"><strong>Active Time:</strong> ${report.total_active_time}</p>
             <p style="margin: 4px 0; font-size: 12px; color: #777;">${new Date(report.login_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} - ${new Date(report.logout_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} (KSA)</p>
           </div>
@@ -1220,130 +1453,7 @@ router.post('/cashier-shift/start', authenticateToken, isAdminOrCashier, async (
   }
 });
 
-// GET closing preview stats and shifts breakdown for modal
-router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, res) => {
-  try {
-    let branch = req.query?.branch || req.user?.branch || 'Branch 1';
-    if (branch === 'All') branch = 'Branch 1';
-    const closingType = req.query?.type === 'Daily' ? 'Daily' : 'Shift';
 
-    if (closingType === 'Shift') {
-      const username = req.user.username;
-      const totals = await pool.query(`
-        SELECT 
-          COUNT(DISTINCT o.id) as total_orders, 
-          COALESCE(SUM(t.amount), 0) as total_sales,
-          COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
-          COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
-          COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
-        FROM "orders" o
-        LEFT JOIN transactions t ON o.id = t.order_id
-        WHERE o.is_shift_closed = FALSE 
-          AND o.status IN ('Completed', 'Returned') 
-          AND o.branch = $1
-          AND o.completed_by = $2
-      `, [branch, username]);
-
-      const activeShiftRes = await pool.query(
-        `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
-        [username, branch]
-      );
-      const activeShift = activeShiftRes.rows[0] || null;
-
-      return res.json({
-        success: true,
-        closing_type: 'Shift',
-        total_orders: parseInt(totals.rows[0]?.total_orders || 0, 10),
-        total_sales: parseFloat(totals.rows[0]?.total_sales || 0),
-        cash_sales: parseFloat(totals.rows[0]?.cash_sales || 0),
-        card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
-        credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
-        start_time: activeShift?.start_time || null,
-        opening_cash: parseFloat(activeShift?.opening_cash || 0)
-      });
-    } else {
-      // Daily Closing preview
-      const lastClosingRes = await pool.query(
-        `SELECT logout_time FROM shift_closings WHERE branch = $1 AND closing_type = 'Daily' ORDER BY logout_time DESC LIMIT 1`,
-        [branch]
-      );
-      let loginTime = new Date();
-      loginTime.setHours(0, 0, 0, 0);
-      if (lastClosingRes.rows.length > 0 && lastClosingRes.rows[0].logout_time) {
-        loginTime = new Date(lastClosingRes.rows[0].logout_time);
-      }
-
-      const totals = await pool.query(`
-        SELECT 
-          COUNT(DISTINCT o.id) as total_orders, 
-          COALESCE(SUM(t.amount), 0) as total_sales,
-          COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
-          COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
-          COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
-        FROM "orders" o
-        LEFT JOIN transactions t ON o.id = t.order_id
-        WHERE o.is_daily_closed = FALSE 
-          AND o.status IN ('Completed', 'Returned') 
-          AND o.branch = $1
-      `, [branch]);
-
-      // Closed shifts in this daily cycle
-      const shiftsRes = await pool.query(`
-        SELECT cashier_name, total_sales, total_orders, login_time, logout_time, closing_cash, difference, difference_reason
-        FROM shift_closings
-        WHERE branch = $1 AND closing_type = 'Shift' AND logout_time >= $2
-        ORDER BY logout_time ASC
-      `, [branch, loginTime]);
-
-      const shifts = shiftsRes.rows.map(s => ({
-        cashier_name: s.cashier_name,
-        total_sales: parseFloat(s.total_sales || 0),
-        total_orders: parseInt(s.total_orders || 0, 10),
-        login_time: s.login_time,
-        logout_time: s.logout_time,
-        closing_cash: parseFloat(s.closing_cash || 0),
-        difference: parseFloat(s.difference || 0),
-        difference_reason: s.difference_reason || ''
-      }));
-
-      // Also check if any orders are unclosed by shift (e.g. active shift right now)
-      const unclosedShiftOrdersRes = await pool.query(`
-        SELECT o.completed_by as cashier_name, COUNT(DISTINCT o.id) as total_orders, COALESCE(SUM(t.amount), 0) as total_sales
-        FROM "orders" o
-        LEFT JOIN transactions t ON o.id = t.order_id
-        WHERE o.is_daily_closed = FALSE 
-          AND o.is_shift_closed = FALSE
-          AND o.status IN ('Completed', 'Returned')
-          AND o.branch = $1
-        GROUP BY o.completed_by
-      `, [branch]);
-
-      unclosedShiftOrdersRes.rows.forEach(u => {
-        shifts.push({
-          cashier_name: `${u.cashier_name} (Current)`,
-          total_sales: parseFloat(u.total_sales || 0),
-          total_orders: parseInt(u.total_orders || 0, 10),
-          is_active: true
-        });
-      });
-
-      return res.json({
-        success: true,
-        closing_type: 'Daily',
-        login_time: loginTime,
-        total_orders: parseInt(totals.rows[0]?.total_orders || 0, 10),
-        total_sales: parseFloat(totals.rows[0]?.total_sales || 0),
-        cash_sales: parseFloat(totals.rows[0]?.cash_sales || 0),
-        card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
-        credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
-        shifts
-      });
-    }
-  } catch (err) {
-    console.error('Error in closing-preview:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // POST shift closing
 router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res) => {
@@ -1446,11 +1556,10 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     });
 
     const closingCash = parseFloat(req.body?.remaining_cash ?? req.body?.closing_cash ?? 0) || 0;
-    const openingCash = parseFloat(activeShift?.opening_cash || 0) || 0;
     const totalSalesNum = parseFloat(totals.rows[0]?.total_sales || 0);
-    const difference = req.body?.difference !== undefined 
-      ? parseFloat(req.body.difference) 
-      : (closingCash - totalSalesNum);
+    const cardSalesNum = parseFloat(totals.rows[0]?.card_sales || 0);
+    // Difference = (Counted Drawer Cash + Card Sales) - Total Sales = Counted Drawer Cash - Cash Sales
+    const difference = (closingCash + cardSalesNum) - totalSalesNum;
     const differenceReason = (req.body?.difference_reason || '').trim();
 
     const insertRes = await client.query(`
@@ -1598,14 +1707,14 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
 
     const closingCash = parseFloat(req.body?.remaining_cash ?? req.body?.closing_cash ?? 0) || 0;
     const totalSalesNum = parseFloat(totals.rows[0]?.total_sales || 0);
-    const difference = req.body?.difference !== undefined 
-      ? parseFloat(req.body.difference) 
-      : (closingCash - totalSalesNum);
+    const cardSalesNum = parseFloat(totals.rows[0]?.card_sales || 0);
+    // Difference = (Counted Drawer Cash + Card Sales) - Total Sales = Counted Drawer Cash - Cash Sales
+    const difference = (closingCash + cardSalesNum) - totalSalesNum;
     const differenceReason = (req.body?.difference_reason || '').trim();
 
     // Query all closed shifts that occurred in this daily closing window
     const shiftsRes = await client.query(`
-      SELECT cashier_name, total_sales, total_orders, login_time, logout_time, closing_cash, difference, difference_reason
+      SELECT cashier_name, total_sales, cash_sales, card_sales, credit_sales, total_orders, login_time, logout_time, closing_cash, difference, difference_reason
       FROM shift_closings
       WHERE branch = $1 AND closing_type = 'Shift' AND logout_time >= $2
       ORDER BY logout_time ASC
@@ -1614,17 +1723,26 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     const shiftsList = shiftsRes.rows.map(s => ({
       cashier_name: s.cashier_name,
       total_sales: parseFloat(s.total_sales || 0),
+      cash_sales: parseFloat(s.cash_sales || 0),
+      card_sales: parseFloat(s.card_sales || 0),
+      credit_sales: parseFloat(s.credit_sales || 0),
       total_orders: parseInt(s.total_orders || 0, 10),
       login_time: s.login_time,
       logout_time: s.logout_time,
-      closing_cash: parseFloat(s.closing_cash || 0),
-      difference: parseFloat(s.difference || 0),
+      closing_cash: s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash) : null,
+      difference: s.difference !== null && s.difference !== undefined ? parseFloat(s.difference) : null,
       difference_reason: s.difference_reason || ''
     }));
 
     // Also include any active / unclosed shift orders
     const unclosedShiftOrdersRes = await client.query(`
-      SELECT o.completed_by as cashier_name, COUNT(DISTINCT o.id) as total_orders, COALESCE(SUM(t.amount), 0) as total_sales
+      SELECT 
+        o.completed_by as cashier_name, 
+        COUNT(DISTINCT o.id) as total_orders, 
+        COALESCE(SUM(t.amount), 0) as total_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE 0 END), 0) as cash_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Card' THEN t.amount ELSE 0 END), 0) as card_sales,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sales
       FROM "orders" o
       LEFT JOIN transactions t ON o.id = t.order_id
       WHERE o.is_daily_closed = FALSE 
@@ -1638,7 +1756,12 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       shiftsList.push({
         cashier_name: `${u.cashier_name} (Current)`,
         total_sales: parseFloat(u.total_sales || 0),
+        cash_sales: parseFloat(u.cash_sales || 0),
+        card_sales: parseFloat(u.card_sales || 0),
+        credit_sales: parseFloat(u.credit_sales || 0),
         total_orders: parseInt(u.total_orders || 0, 10),
+        closing_cash: null,
+        difference: null,
         is_active: true
       });
     });

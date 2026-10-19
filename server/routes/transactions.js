@@ -73,7 +73,7 @@ router.get('/', authenticateToken, async (req, res) => {
       query += ` AND o.branch = $${params.length}`;
     }
     if (req.query.unclosed_only === 'true') {
-      query += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
+      query += ` AND o.is_daily_closed = FALSE`;
     }
 
     if (!isAdminRole) {
@@ -162,7 +162,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
       whereClause += ` AND o.branch = $${params.length}`;
     }
     if (req.query.unclosed_only === 'true') {
-      whereClause += ` AND o.is_shift_closed = FALSE AND o.is_daily_closed = FALSE`;
+      whereClause += ` AND o.is_daily_closed = FALSE`;
     }
 
     if (!isAdminRole) {

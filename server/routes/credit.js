@@ -19,8 +19,8 @@ router.get('/', async (req, res) => {
     let query = 'SELECT * FROM credit_customers';
     let params = [];
     
-    // If not admin, they only see their own branch's customers
-    if (userRole !== 'admin' && userRole !== 'developer') {
+    // If not admin, developer, or management, they only see their own branch's customers
+    if (userRole !== 'admin' && userRole !== 'developer' && userRole !== 'management') {
       if (userBranch) {
         query += " WHERE available_branches @> $1::jsonb";
         // Convert comma-separated string to an array or just check if any match
@@ -32,10 +32,14 @@ router.get('/', async (req, res) => {
         query += " WHERE 1=0";
       }
     } else {
-      // If Admin and provided a specific branch filter (not 'All')
-      if (branchFilter && branchFilter !== 'All') {
+      // If Admin, Developer, or Management and provided a specific branch filter (not 'All')
+      const effectiveBranch = (branchFilter && branchFilter !== 'All') 
+        ? branchFilter 
+        : (userRole === 'management' && userBranch && userBranch !== 'All' ? userBranch.split(',')[0].trim() : null);
+        
+      if (effectiveBranch && effectiveBranch !== 'All') {
         query += " WHERE available_branches @> $1::jsonb";
-        params.push(JSON.stringify([branchFilter]));
+        params.push(JSON.stringify([effectiveBranch]));
       }
     }
 
@@ -66,10 +70,14 @@ router.get('/', async (req, res) => {
 
 // Add a new credit customer
 router.post('/', async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole === 'management') {
+    return res.status(403).json({ error: 'Management role has view-only access.' });
+  }
+
   const { name, phone, credit_limit, available_branches, reference, notes, discount_rules } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
 
-  const userRole = req.user?.role?.trim().toLowerCase();
   const userBranch = req.user?.branch;
 
   let finalBranches = available_branches || [];
@@ -135,10 +143,14 @@ router.post('/', async (req, res) => {
 
 // Update a credit customer
 router.put('/:id', async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole === 'management') {
+    return res.status(403).json({ error: 'Management role has view-only access.' });
+  }
+
   const { id } = req.params;
   const { name, phone, credit_limit, available_branches, reference, notes, discount_rules } = req.body;
 
-  const userRole = req.user?.role?.trim().toLowerCase();
   const userBranch = req.user?.branch;
 
   try {
@@ -201,6 +213,11 @@ router.put('/:id', async (req, res) => {
 
 // Delete a credit customer
 router.delete('/:id', async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole === 'management') {
+    return res.status(403).json({ error: 'Management role has view-only access.' });
+  }
+
   const { id } = req.params;
   try {
     const result = await pool.query('DELETE FROM credit_customers WHERE id = $1 RETURNING *', [id]);
@@ -249,6 +266,11 @@ router.get('/:id/history', async (req, res) => {
 
 // Add a payment (clear dues or add advance)
 router.post('/:id/payment', async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole === 'management') {
+    return res.status(403).json({ error: 'Management role has view-only access.' });
+  }
+
   const { id } = req.params;
   const { amount, action, cashier_name, payment_method } = req.body; 
   

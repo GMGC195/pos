@@ -608,6 +608,10 @@ export default function POS() {
   const total = subtotal + tax
 
   const addToCart = useCallback((item, sizeOpt = null) => {
+    if (isManagement) {
+      toast.error('Management role is view-only. Adding items is disabled.');
+      return;
+    }
     setShowCart(true)
     setCart(prev => {
       let cartId = item.id.toString()
@@ -630,9 +634,10 @@ export default function POS() {
     } else {
       setShowCart(true);
     }
-  }, [])
+  }, [isManagement])
 
   const updateQty = (cartId, delta) => {
+    if (isManagement) return;
     setCart(prev => prev
       .map(c => c.cartId === cartId ? { ...c, qty: c.qty + delta } : c)
       .filter(c => c.qty > 0)
@@ -1063,10 +1068,27 @@ export default function POS() {
 
   return (
     <>
+      {isManagement && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.08)',
+          borderBottom: '1px solid rgba(239, 68, 68, 0.25)',
+          padding: '8px 16px',
+          color: 'var(--red, #e31837)',
+          fontSize: '12px',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          zIndex: 50
+        }}>
+          <span>🔒 Management View-Only Mode: You can view items and active orders. Placing orders and changing items are strictly disabled.</span>
+        </div>
+      )}
       <div className="pos-layout">
         {/* Left: Products */}
         <div className="pos-left">
-          {['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) && (
+          {['admin', 'developer', 'management'].includes(user?.role?.trim().toLowerCase()) && (
             <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--surface-2)', background: 'white', position: 'sticky', top: 0, zIndex: 10 }}>
               <label style={{ fontWeight: 'bold', color: 'var(--text-secondary)', fontSize: 14 }}>Select Branch:</label>
               <select 
@@ -1138,14 +1160,18 @@ export default function POS() {
                       key={t.id}
                       onClick={() => {
                         if (isBooked) {
-                          if (user?.role?.trim().toLowerCase() === 'cashier') {
+                          if (isManagement) {
+                            setDetailOrder(activeOrder);
+                          } else if (user?.role?.trim().toLowerCase() === 'cashier') {
                             setPaymentMethod('Cash');
                             setQuickCompleteModal(activeOrder);
                           } else {
                             loadOrderForEdit(activeOrder.id);
                           }
                         } else {
-                          setCustomerInfo(prev => ({ ...prev, tableNumber: tableStr }));
+                          if (!isManagement) {
+                            setCustomerInfo(prev => ({ ...prev, tableNumber: tableStr }));
+                          }
                         }
                       }}
                       style={{
@@ -1156,7 +1182,7 @@ export default function POS() {
                         color: 'white',
                         fontWeight: 700,
                         fontSize: 14,
-                        cursor: 'pointer',
+                        cursor: isManagement && !isBooked ? 'not-allowed' : 'pointer',
                         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
                         display: 'flex',
                         flexDirection: 'column',
@@ -1355,7 +1381,7 @@ export default function POS() {
                           )}
                           {CURRENCY}{displayPrice.toFixed(2)}
                         </span>
-                        <button className="add-btn">+</button>
+                        <button className="add-btn" style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} disabled={isManagement}>+</button>
                       </div>
                     </div>
                   </div>
@@ -1550,18 +1576,18 @@ export default function POS() {
                     <p>{CURRENCY}{parseFloat(item.price).toFixed(2)} each</p>
                   </div>
                   <div className="qty-controls">
-                    <button className="qty-btn" onClick={() => updateQty(item.cartId, -1)}>−</button>
+                    <button className="qty-btn" disabled={isManagement} style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} onClick={() => updateQty(item.cartId, -1)}>−</button>
                     <span className="qty-num">{item.qty}</span>
-                    <button className="qty-btn" onClick={() => updateQty(item.cartId, +1)}>+</button>
+                    <button className="qty-btn" disabled={isManagement} style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} onClick={() => updateQty(item.cartId, +1)}>+</button>
                   </div>
                   <span className="item-total">{CURRENCY}{(item.price * item.qty).toFixed(2)}</span>
-                  <button className="remove-btn" onClick={() => updateQty(item.cartId, -item.qty)}>✕</button>
+                  <button className="remove-btn" disabled={isManagement} style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} onClick={() => updateQty(item.cartId, -item.qty)}>✕</button>
                 </div>
               ))
             }
             {cart.length > 0 && (
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
-                <button className="btn btn-sm btn-secondary" onClick={() => { clearCart(); setEditingOrderId(null); window.history.replaceState({}, '', '/pos'); }} style={{ gap: 4, padding: '4px 8px', fontSize: 12 }}>
+                <button className="btn btn-sm btn-secondary" disabled={isManagement} onClick={() => { if (!isManagement) { clearCart(); setEditingOrderId(null); window.history.replaceState({}, '', '/pos'); } }} style={{ gap: 4, padding: '4px 8px', fontSize: 12, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }}>
                   <Trash2 size={14} /> Clear Cart
                 </button>
               </div>

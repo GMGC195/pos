@@ -111,7 +111,9 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const isDeveloper = user?.role?.toLowerCase() === 'developer'
   const isAdmin = user?.role?.toLowerCase() === 'admin'
+  const isManagement = user?.role?.toLowerCase() === 'management'
   const isAdminOrDev = isDeveloper || isAdmin
+  const canViewPosAndReports = isAdminOrDev || isManagement
   
   const [dashboardView, setDashboardView] = useState(isDeveloper ? 'pos' : 'attendance')
 
@@ -176,10 +178,10 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    if (isAdminOrDev && dashboardView === 'reports') {
+    if (canViewPosAndReports && dashboardView === 'reports') {
       loadClosingHistory(historyFrom, historyTo, historyFilterBranch, historyFilterType, historyFilterUser)
     }
-  }, [dashboardView, historyFrom, historyTo, historyFilterBranch, historyFilterType, historyFilterUser])
+  }, [dashboardView, historyFrom, historyTo, historyFilterBranch, historyFilterType, historyFilterUser, canViewPosAndReports])
 
   const printClosingReport = (report) => {
     const fmtTime = (ts) => ts ? formatSaudiTime(ts) : '-'
@@ -188,6 +190,73 @@ export default function Dashboard() {
     try {
       items = Array.isArray(report.items_summary) ? report.items_summary : JSON.parse(report.items_summary || '[]')
     } catch (e) { items = [] }
+
+    // Top 5 selling items
+    let allFlat = []
+    items.forEach(cat => {
+      if (cat.items && Array.isArray(cat.items)) {
+        cat.items.forEach(it => {
+          allFlat.push({
+            name: it.name,
+            qty: parseInt(it.qty, 10) || 0,
+            totalPrice: parseFloat(it.amount !== undefined ? it.amount : (it.price * it.qty) || 0)
+          })
+        })
+      }
+    })
+    let sortedTop5 = []
+    if (allFlat.length > 0) {
+      const grouped = {}
+      allFlat.forEach(it => {
+        if (!grouped[it.name]) grouped[it.name] = { name: it.name, qty: 0, totalPrice: 0 }
+        grouped[it.name].qty += it.qty
+        grouped[it.name].totalPrice += it.totalPrice
+      })
+      sortedTop5 = Object.values(grouped).sort((a, b) => b.qty - a.qty).slice(0, 5)
+    }
+
+    // Top items by 2-hour intervals
+    let intervalsObj = {}
+    try {
+      intervalsObj = typeof report.interval_items === 'string'
+        ? JSON.parse(report.interval_items || '{}')
+        : (report.interval_items || {})
+    } catch(e) { intervalsObj = {} }
+
+    let intervalRows = []
+    if (intervalsObj && Object.keys(intervalsObj).length > 0 && report.login_time) {
+      const loginDate = new Date(report.login_time)
+      let maxIndex = 0
+      for (const key of Object.keys(intervalsObj)) {
+        if (parseInt(key) > maxIndex) maxIndex = parseInt(key)
+      }
+      for (let i = 0; i <= maxIndex; i++) {
+        const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000)
+        const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000)
+        const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const itemsInBlock = intervalsObj[i] || []
+        intervalRows.push({
+          timeWindow: `${startTimeStr} - ${endTimeStr}`,
+          items: itemsInBlock
+        })
+      }
+    }
+
+    const diffVal = parseFloat(report.difference || 0)
+    const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01
+    const diffSign = diffVal < 0 ? '-' : '+'
+    const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ'
+
+    let shiftsArr = []
+    if (report.closing_type === 'Daily') {
+      if (typeof report.shifts_summary === 'string') {
+        try { shiftsArr = JSON.parse(report.shifts_summary) } catch(e) { shiftsArr = [] }
+      } else if (Array.isArray(report.shifts_summary)) {
+        shiftsArr = report.shifts_summary
+      }
+    }
+
     const printWindow = window.open('', '', 'width=500,height=700')
     const html = `
       <html><head><title>${report.closing_type} Closing Report</title>
@@ -209,54 +278,90 @@ export default function Dashboard() {
       <h2>${report.closing_type === 'Daily' ? '⚡ DAILY CLOSING REPORT' : '🔄 SHIFT CLOSING REPORT'}</h2>
       <p class="center" style="color:#666;font-size:12px;margin:0 0 10px">${fmtDate(report.login_time)}</p>
 
-      ${(() => {
-        const diffVal = parseFloat(report.difference || 0);
-        const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01;
-        const diffSign = diffVal < 0 ? '-' : '+';
-        const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ';
-        if (!hasDiff) return '';
-        return `
-          <div style="background: #dc2626; color: #ffffff; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
-            <div style="font-size: 14px; letter-spacing: 0.5px;">⚠️ DIFFERENCE!</div>
-            <div style="font-size: 16px; margin: 2px 0;">${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
-            ${report.difference_reason ? `<div style="font-size: 11px; margin-top: 4px; background: rgba(0,0,0,0.25); padding: 3px 6px; border-radius: 3px; text-align: left; font-weight: normal;">Reason: ${report.difference_reason}</div>` : ''}
-          </div>
-        `;
-      })()}
+      ${hasDiff ? `
+        <div style="border: 2px solid #111; color: #111; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold;">
+          <div style="font-size: 14px; letter-spacing: 0.5px;">⚠️ DIFFERENCE!</div>
+          <div style="font-size: 16px; margin: 2px 0;">${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
+          ${report.difference_reason ? `<div style="font-size: 11px; margin-top: 5px; border-top: 1px dashed #666; padding-top: 4px; text-align: left; font-weight: normal; color: #111;">Reason: ${report.difference_reason}</div>` : ''}
+        </div>
+      ` : ''}
 
-      ${(() => {
-        if (report.closing_type !== 'Daily') return '';
-        let shiftsArr = [];
-        if (typeof report.shifts_summary === 'string') {
-          try { shiftsArr = JSON.parse(report.shifts_summary); } catch (e) { shiftsArr = []; }
-        } else if (Array.isArray(report.shifts_summary)) {
-          shiftsArr = report.shifts_summary;
+      ${report.closing_type === 'Daily' ? (() => {
+        const displayShifts = (shiftsArr && shiftsArr.length > 0) ? [...shiftsArr] : [{
+          cashier_name: report.cashier_name || 'Day',
+          total_sales: parseFloat(report.total_sales || 0),
+          cash_sales: parseFloat(report.cash_sales || 0),
+          card_sales: parseFloat(report.card_sales || 0),
+          closing_cash: parseFloat(report.closing_cash || 0),
+          difference: diffVal
+        }];
+        if (displayShifts.length === 1) {
+          displayShifts.push({
+            cashier_name: '',
+            total_sales: 0,
+            cash_sales: 0,
+            card_sales: 0,
+            closing_cash: null,
+            difference: null
+          });
         }
-        if (!shiftsArr || shiftsArr.length === 0) return '';
+        const numCols = displayShifts.length;
+        const getLabel = (s, idx) => {
+          if (numCols === 2) return idx === 0 ? 'Day' : 'Night';
+          if (numCols === 1) return 'Day';
+          return `S${idx + 1}`;
+        };
+
         return `
-          <div style="background: #f8fafc; border: 1px dashed #64748b; border-radius: 4px; padding: 6px 8px; margin: 8px 0;">
-            <p style="font-weight:bold; margin: 0 0 4px; font-size: 11px; text-transform: uppercase;">📋 Shifts in Daily Closing:</p>
+          <div style="border: 1.5px solid #111; border-radius: 4px; padding: 6px 8px; margin: 8px 0;">
+            <p style="font-weight:bold; margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; text-align: center;">
+              DAILY SUMMARY: DAY + NIGHT
+            </p>
             <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 0;">
               <thead>
-                <tr style="border-bottom: 1px solid #ccc; text-align: left;">
-                  <th style="padding: 2px 0;">Cashier</th>
-                  <th style="padding: 2px 0; text-align: center;">Orders</th>
-                  <th style="padding: 2px 0; text-align: right;">Total Sale</th>
+                <tr style="border-bottom: 1.5px solid #111;">
+                  <th style="padding: 3px 0; text-align: left;"></th>
+                  ${displayShifts.map((s, idx) => `<th style="padding: 3px 2px; text-align: right;">${getLabel(s, idx)}</th>`).join('')}
+                  <th style="padding: 3px 0; text-align: right; font-weight: bold;">Total</th>
                 </tr>
               </thead>
               <tbody>
-                ${shiftsArr.map(s => `
-                  <tr style="border-bottom: 1px dashed #eee;">
-                    <td style="padding: 2px 0;">👤 ${s.cashier_name}</td>
-                    <td style="padding: 2px 0; text-align: center;">${s.total_orders || '-'}</td>
-                    <td style="padding: 2px 0; text-align: right; font-weight: bold;">${CURRENCY}${parseFloat(s.total_sales || 0).toFixed(2)}</td>
-                  </tr>
-                `).join('')}
+                <tr style="border-bottom: 1px dashed #ddd;">
+                  <td style="padding: 3px 0; font-weight: bold;">Total sales</td>
+                  ${displayShifts.map(s => `<td style="padding: 3px 2px; text-align: right;">${parseFloat(s.total_sales || 0).toFixed(2)}</td>`).join('')}
+                  <td style="padding: 3px 0; text-align: right; font-weight: bold;">${parseFloat(report.total_sales || 0).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom: 1px dashed #ddd;">
+                  <td style="padding: 3px 0;">Card (bank)</td>
+                  ${displayShifts.map(s => `<td style="padding: 3px 2px; text-align: right;">${parseFloat(s.card_sales || 0).toFixed(2)}</td>`).join('')}
+                  <td style="padding: 3px 0; text-align: right; font-weight: bold;">${parseFloat(report.card_sales || 0).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom: 1px dashed #ddd;">
+                  <td style="padding: 3px 0;">Cash sales</td>
+                  ${displayShifts.map(s => `<td style="padding: 3px 2px; text-align: right;">${parseFloat(s.cash_sales || 0).toFixed(2)}</td>`).join('')}
+                  <td style="padding: 3px 0; text-align: right; font-weight: bold;">${parseFloat(report.cash_sales || 0).toFixed(2)}</td>
+                </tr>
+                <tr style="border-bottom: 1px dashed #ddd;">
+                  <td style="padding: 3px 0;">Counted cash</td>
+                  ${displayShifts.map(s => `<td style="padding: 3px 2px; text-align: right;">${s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash).toFixed(2) : '-'}</td>`).join('')}
+                  <td style="padding: 3px 0; text-align: right; font-weight: bold;">${parseFloat(report.closing_cash || 0).toFixed(2)}</td>
+                </tr>
+                <tr style="border-top: 1.5px solid #111;">
+                  <td style="padding: 4px 0; font-weight: bold; color: #b91c1c;">Difference</td>
+                  ${displayShifts.map(s => {
+                    if (s.difference === null || s.difference === undefined) return '<td style="padding: 4px 2px; text-align: right;">-</td>';
+                    const d = parseFloat(s.difference);
+                    return `<td style="padding: 4px 2px; text-align: right; font-weight: bold; color: ${d < 0 ? '#b91c1c' : '#15803d'};">${d < 0 ? '-' : ''}${Math.abs(d).toFixed(2)}</td>`;
+                  }).join('')}
+                  <td style="padding: 4px 0; text-align: right; font-weight: bold; font-size: 12px; color: ${diffVal < 0 ? '#b91c1c' : '#15803d'};">
+                    ${diffVal < 0 ? '-' : (diffVal > 0 ? '+' : '')}${Math.abs(diffVal).toFixed(2)}
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
         `;
-      })()}
+      })() : ''}
 
       <div class="divider"></div>
       <div class="row"><span class="label">Cashier:</span><span class="bold">${report.cashier_name}</span></div>
@@ -273,17 +378,13 @@ export default function Dashboard() {
       <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
       <div class="divider"></div>
       <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
-      <div class="row"><span class="label">Remaining Drawer Cash:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
-      ${(() => {
-        const diffVal = parseFloat(report.difference || 0);
-        const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01;
-        if (!hasDiff) return '';
-        const diffSign = diffVal < 0 ? '-' : '+';
-        return `
-          <div class="row" style="color: #dc2626; font-weight: bold;"><span class="label" style="color: #dc2626;">Difference:</span><span>${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)}</span></div>
-          ${report.difference_reason ? `<div class="row" style="font-size: 11px;"><span class="label">Diff Reason:</span><span>${report.difference_reason}</span></div>` : ''}
-        `;
-      })()}
+      <div class="row"><span class="label">Amount in Drawer (Counted):</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
+      <div class="row"><span class="label">Card Sales (in Bank):</span><span class="bold" style="color: #2563eb;">+ ${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
+      <div class="row"><span class="label">Total Accounted:</span><span class="bold">= ${CURRENCY}${(parseFloat(report.closing_cash || 0) + parseFloat(report.card_sales || 0)).toFixed(2)}</span></div>
+      ${hasDiff ? `
+        <div class="row" style="font-weight: bold; color: #b91c1c;"><span class="label" style="color: #b91c1c; font-weight: bold;">Difference:</span><span>${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)}</span></div>
+        ${report.difference_reason ? `<div class="row" style="font-size: 11px;"><span class="label">Diff Reason:</span><span>${report.difference_reason}</span></div>` : ''}
+      ` : ''}
       <div class="divider"></div>
       <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
       <table>
@@ -298,6 +399,7 @@ export default function Dashboard() {
           `).join('')}
         </tbody>
       </table>
+
       <div class="divider"></div>
       <p class="center" style="font-size:11px;color:#888;margin-top:12px">Generated: ${formatSaudiDateTime(new Date())}</p>
     </body></html>`
@@ -341,8 +443,8 @@ export default function Dashboard() {
       return;
     }
 
-    // Only fetch sales stats if the user is a developer or admin
-    if (isAdminOrDev) {
+    // Fetch sales stats if user is developer, admin, or management
+    if (canViewPosAndReports) {
       const statsParams = { branch: salesSelectedBranch }
       if (salesSelectedClosing !== 'current') {
         statsParams.closing_id = salesSelectedClosing
@@ -388,7 +490,7 @@ export default function Dashboard() {
   }
 
   const loadTopItems = () => {
-    if (!isAdminOrDev) return;
+    if (!canViewPosAndReports) return;
     axios.get('/api/stats/top-items', { params: { branch: salesSelectedBranch, from_date: topItemsFromDate, to_date: topItemsToDate } })
       .then(r => setTopItemsData(r.data))
       .catch(() => setTopItemsData([]))
@@ -396,7 +498,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadTopItems()
-  }, [salesSelectedBranch, topItemsFromDate, topItemsToDate, isAdminOrDev])
+  }, [salesSelectedBranch, topItemsFromDate, topItemsToDate, canViewPosAndReports])
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -424,10 +526,10 @@ export default function Dashboard() {
         socket.off('orderUpdated', handleOrderEvent)
       }
     }
-  }, [user, navigate, isAdminOrDev, salesSelectedBranch, salesSelectedClosing])
+  }, [user, navigate, isAdminOrDev, canViewPosAndReports, salesSelectedBranch, salesSelectedClosing])
 
   const exportExcel = async () => {
-    if (!isAdminOrDev) return
+    if (!canViewPosAndReports) return
     const XLSX = await import('xlsx')
     const data = [
       { Metric: "Today Total Sale", Value: stats?.totalSale || 0 },
@@ -446,7 +548,7 @@ export default function Dashboard() {
   }
 
   const exportPDF = () => {
-    if (!isAdminOrDev) return
+    if (!canViewPosAndReports) return
     const printWindow = window.open('', '', 'width=800,height=600');
     const html = `
       <html>
@@ -532,8 +634,8 @@ export default function Dashboard() {
     }
   }
 
-  // --- DEVELOPER DASHBOARD VIEW ---
-  if (isAdminOrDev && dashboardView === 'pos') {
+  // --- DEVELOPER & MANAGEMENT DASHBOARD VIEW ---
+  if (canViewPosAndReports && dashboardView === 'pos') {
     return (
       <>
         {/* POS Header with Toggle */}
@@ -543,7 +645,7 @@ export default function Dashboard() {
             <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: 13 }}>Sales & Point of Sale Dashboard</p>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {isAdminOrDev && (
+            {canViewPosAndReports && (
               <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4 }}>
                 <button 
                   onClick={() => setDashboardView('attendance')}
@@ -580,7 +682,7 @@ export default function Dashboard() {
                 </button>
               </div>
             )}
-            {isAdminOrDev && dashboardView === 'pos' && (
+            {canViewPosAndReports && dashboardView === 'pos' && (
               <>
                 <select
                   value={salesSelectedBranch}
@@ -727,7 +829,13 @@ export default function Dashboard() {
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}><Receipt size={20} /> Today's Summary</h3>
-              <span className="badge badge-success">Live</span>
+              {salesSelectedClosing === 'current' ? (
+                <span className="badge badge-success">Live</span>
+              ) : (
+                <span className="badge" style={{ background: '#7c3aed', color: '#fff' }}>
+                  {pastClosings.find(c => String(c.id) === String(salesSelectedClosing))?.closing_type || 'Closed'} Report
+                </span>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -785,7 +893,7 @@ export default function Dashboard() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1.25 }}>
                     {item.label}
                   </div>
-                  {item.isTarget && (
+                  {item.isTarget && !isManagement && (
                     <button
                       onClick={(e) => { e.stopPropagation(); openTargetModal(); }}
                       title="Edit Target Revenue"
@@ -817,6 +925,213 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
+
+        {/* Selected Closing Breakdown & Top Sales Section */}
+        {salesSelectedClosing !== 'current' && (() => {
+          const selectedClosingObj = pastClosings.find(c => String(c.id) === String(salesSelectedClosing));
+          if (!selectedClosingObj) return null;
+
+          return (
+            <div className="card" style={{ marginTop: 20, padding: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>{selectedClosingObj.closing_type === 'Daily' ? '⚡' : '🔄'}</span>
+                    <span>{selectedClosingObj.closing_type} Closing — {selectedClosingObj.cashier_name}</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>({selectedClosingObj.branch})</span>
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                    {formatSaudiDate(selectedClosingObj.login_time)} · Active: {selectedClosingObj.total_active_time} · Orders: {selectedClosingObj.total_orders}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => printClosingReport(selectedClosingObj)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Printer size={14} /> Print Receipt
+                  </button>
+                  <button 
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      setSelectedHistoryReport(selectedClosingObj);
+                      setDashboardView('reports');
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <FileText size={14} /> Open Full Report
+                  </button>
+                </div>
+              </div>
+
+              {/* Difference Banner */}
+              {(() => {
+                const diffVal = parseFloat(selectedClosingObj.difference || 0);
+                if (isNaN(diffVal) || Math.abs(diffVal) < 0.01) return null;
+                const diffSign = diffVal < 0 ? '-' : '+';
+                const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ';
+                return (
+                  <div style={{
+                    backgroundColor: '#ffffff',
+                    border: '2px solid #dc2626',
+                    color: '#111827',
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: 16, fontWeight: 900, color: '#dc2626' }}>
+                      ⚠️ DIFFERENCE! {diffSign}{CURRENCY}{Math.abs(diffVal).toFixed(2)} ({diffLabel})
+                    </div>
+                    {selectedClosingObj.difference_reason && (
+                      <div style={{ marginTop: 6, fontSize: 13, borderTop: '1px dashed #d1d5db', paddingTop: 6, color: '#374151', textAlign: 'left' }}>
+                        <strong>Reason:</strong> {selectedClosingObj.difference_reason}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Top Items by 2-Hour Intervals */}
+              {(() => {
+                let intervalsObj = {};
+                try {
+                  intervalsObj = typeof selectedClosingObj.interval_items === 'string'
+                    ? JSON.parse(selectedClosingObj.interval_items || '{}')
+                    : (selectedClosingObj.interval_items || {});
+                } catch(e) { intervalsObj = {}; }
+
+                if (intervalsObj && Object.keys(intervalsObj).length > 0) {
+                  const loginDate = new Date(selectedClosingObj.login_time);
+                  let maxIndex = 0;
+                  for (const key of Object.keys(intervalsObj)) {
+                    if (parseInt(key) > maxIndex) maxIndex = parseInt(key);
+                  }
+
+                  const intervalRows = [];
+                  for (let i = 0; i <= maxIndex; i++) {
+                    const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000);
+                    const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000);
+                    const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const itemsInBlock = intervalsObj[i] || [];
+
+                    intervalRows.push({
+                      timeWindow: `${startTimeStr} - ${endTimeStr}`,
+                      items: itemsInBlock
+                    });
+                  }
+
+                  return (
+                    <div style={{ marginBottom: 20 }}>
+                      <h4 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                        🕒 Top Items by 2-Hour Intervals
+                      </h4>
+                      <div style={{ background: 'var(--surface-2, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', borderRadius: 8, overflowX: 'auto' }}>
+                        <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ background: 'var(--surface, #ffffff)', borderBottom: '1px solid var(--border, #e2e8f0)', textAlign: 'left' }}>
+                              <th style={{ padding: '10px 12px', width: '35%' }}>Time</th>
+                              <th style={{ padding: '10px 12px', width: '65%' }}>Top Items (Qty)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {intervalRows.map((row, rIdx) => (
+                              <tr key={rIdx} style={{ borderBottom: '1px solid var(--border, #f1f5f9)' }}>
+                                <td style={{ padding: '8px 12px', fontWeight: 'bold', verticalAlign: 'top' }}>
+                                  {row.timeWindow}
+                                </td>
+                                <td style={{ padding: '8px 12px' }}>
+                                  {row.items.length > 0 ? (
+                                    row.items.map((it, itIdx) => (
+                                      <div key={itIdx} style={{ marginBottom: 3 }}>
+                                        {it.name} <strong>({it.qty})</strong>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    '-'
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Top 5 Selling Items */}
+              {(() => {
+                let items = [];
+                try {
+                  items = Array.isArray(selectedClosingObj.items_summary) 
+                    ? selectedClosingObj.items_summary 
+                    : JSON.parse(selectedClosingObj.items_summary || '[]');
+                } catch(e) { items = []; }
+
+                let allFlat = [];
+                items.forEach(cat => {
+                  if (cat.items && Array.isArray(cat.items)) {
+                    cat.items.forEach(it => {
+                      allFlat.push({
+                        name: it.name,
+                        qty: parseInt(it.qty, 10) || 0,
+                        totalPrice: parseFloat(it.amount !== undefined ? it.amount : (it.price * it.qty) || 0)
+                      });
+                    });
+                  }
+                });
+
+                if (allFlat.length > 0) {
+                  const grouped = {};
+                  allFlat.forEach(it => {
+                    if (!grouped[it.name]) grouped[it.name] = { name: it.name, qty: 0, totalPrice: 0 };
+                    grouped[it.name].qty += it.qty;
+                    grouped[it.name].totalPrice += it.totalPrice;
+                  });
+
+                  const sorted = Object.values(grouped).sort((a, b) => b.qty - a.qty).slice(0, 5);
+
+                  return (
+                    <div>
+                      <h4 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                        🏆 Top 5 Selling Items
+                      </h4>
+                      <div style={{ background: 'var(--surface-2, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', borderRadius: 8, overflowX: 'auto' }}>
+                        <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ background: 'rgba(227, 24, 55, 0.08)', borderBottom: '1px solid rgba(227, 24, 55, 0.2)', textAlign: 'left', color: '#E31837' }}>
+                              <th style={{ padding: '10px 12px', width: '15%' }}>#</th>
+                              <th style={{ padding: '10px 12px', width: '45%' }}>Item</th>
+                              <th style={{ padding: '10px 12px', textAlign: 'center', width: '15%' }}>Qty</th>
+                              <th style={{ padding: '10px 12px', textAlign: 'right', width: '25%' }}>Rev</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sorted.map((it, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid var(--border, #f1f5f9)' }}>
+                                <td style={{ padding: '8px 12px', fontWeight: 'bold' }}>#{idx + 1}</td>
+                                <td style={{ padding: '8px 12px' }}>{it.name}</td>
+                                <td style={{ padding: '8px 12px', textAlign: 'center' }}><strong>{it.qty}</strong></td>
+                                <td style={{ padding: '8px 12px', textAlign: 'right' }}>{CURRENCY}{it.totalPrice.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+          );
+        })()}
 
         {/* Target Revenue Edit Modal */}
         {showTargetModal && (
@@ -919,7 +1234,7 @@ export default function Dashboard() {
   }
 
   // --- REPORTS DASHBOARD VIEW (SHIFT & DAILY CLOSINGS) ---
-  if (isAdminOrDev && dashboardView === 'reports') {
+  if (canViewPosAndReports && dashboardView === 'reports') {
     const filteredHistory = closingHistory.filter(c => {
       if (historyFilterBranch !== 'All' && c.branch !== historyFilterBranch) return false;
       if (historyFilterType !== 'All' && c.closing_type !== historyFilterType) return false;
@@ -1147,6 +1462,180 @@ export default function Dashboard() {
               </div>
 
               <div style={{ padding: 24 }}>
+                {/* Difference Alert Banner */}
+                {(() => {
+                  const diffVal = parseFloat(selectedHistoryReport.difference || 0);
+                  if (isNaN(diffVal) || Math.abs(diffVal) < 0.01) return null;
+                  const diffSign = diffVal < 0 ? '-' : '+';
+                  const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ';
+                  return (
+                    <div style={{
+                      backgroundColor: '#ffffff',
+                      border: '2px solid #dc2626',
+                      color: '#111827',
+                      padding: '12px 16px',
+                      borderRadius: 8,
+                      marginBottom: 16,
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: 17, fontWeight: 900, color: '#dc2626' }}>
+                        ⚠️ DIFFERENCE! {diffSign}{CURRENCY}{Math.abs(diffVal).toFixed(2)} ({diffLabel})
+                      </div>
+                      {selectedHistoryReport.difference_reason && (
+                        <div style={{ marginTop: 6, fontSize: 13, borderTop: '1px dashed #d1d5db', paddingTop: 6, color: '#374151', textAlign: 'left' }}>
+                          <strong>Reason:</strong> {selectedHistoryReport.difference_reason}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Daily Summary: Day + Night Table (Comparative Layout) */}
+                {selectedHistoryReport.closing_type === 'Daily' && (() => {
+                  let shiftsArr = [];
+                  try {
+                    shiftsArr = Array.isArray(selectedHistoryReport.shifts_summary)
+                      ? selectedHistoryReport.shifts_summary
+                      : JSON.parse(selectedHistoryReport.shifts_summary || '[]');
+                  } catch(e) { shiftsArr = []; }
+
+                  const diffVal = parseFloat(selectedHistoryReport.difference || 0);
+                  const displayShifts = shiftsArr.length > 0 ? [...shiftsArr] : [{
+                    cashier_name: selectedHistoryReport.cashier_name || 'Day',
+                    total_sales: parseFloat(selectedHistoryReport.total_sales || 0),
+                    cash_sales: parseFloat(selectedHistoryReport.cash_sales || 0),
+                    card_sales: parseFloat(selectedHistoryReport.card_sales || 0),
+                    closing_cash: parseFloat(selectedHistoryReport.closing_cash || 0),
+                    difference: diffVal
+                  }];
+                  if (displayShifts.length === 1) {
+                    displayShifts.push({
+                      cashier_name: '',
+                      total_sales: 0,
+                      cash_sales: 0,
+                      card_sales: 0,
+                      closing_cash: null,
+                      difference: null
+                    });
+                  }
+                  const numCols = displayShifts.length;
+                  const getColLabel = (s, idx) => {
+                    if (numCols === 2) return idx === 0 ? 'Day' : 'Night';
+                    if (numCols === 1) return 'Day';
+                    return `Shift ${idx + 1}`;
+                  };
+
+                  return (
+                    <div style={{
+                      background: '#ffffff',
+                      border: '1.5px solid #cbd5e1',
+                      borderRadius: 8,
+                      overflow: 'hidden',
+                      marginBottom: 20,
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                    }}>
+                      <div style={{
+                        background: '#f8fafc',
+                        padding: '10px 14px',
+                        borderBottom: '1.5px solid #cbd5e1',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <strong style={{ fontSize: 14, color: '#0f172a' }}>
+                          Daily summary: day + night
+                        </strong>
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569' }}>
+                              <th style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700 }}></th>
+                              {displayShifts.map((s, idx) => (
+                                <th key={idx} style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 800, color: '#1e293b' }}>
+                                  {getColLabel(s, idx)}
+                                  <div style={{ fontSize: 11, fontWeight: 500, color: '#64748b' }}>{s.cashier_name}</div>
+                                </th>
+                              ))}
+                              <th style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Total sales</td>
+                              {displayShifts.map((s, idx) => (
+                                <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
+                                  {parseFloat(s.total_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              ))}
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                                {parseFloat(selectedHistoryReport.total_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Card (to bank)</td>
+                              {displayShifts.map((s, idx) => (
+                                <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
+                                  {parseFloat(s.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              ))}
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                                {parseFloat(selectedHistoryReport.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Cash sales</td>
+                              {displayShifts.map((s, idx) => (
+                                <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
+                                  {parseFloat(s.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              ))}
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                                {parseFloat(selectedHistoryReport.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
+                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Counted cash</td>
+                              {displayShifts.map((s, idx) => (
+                                <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
+                                  {s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
+                                </td>
+                              ))}
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                                {parseFloat(selectedHistoryReport.closing_cash || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            <tr style={{ background: '#f8fafc' }}>
+                              <td style={{ padding: '9px 12px', fontWeight: 800, color: '#991b1b' }}>Difference</td>
+                              {displayShifts.map((s, idx) => {
+                                if (s.difference === null || s.difference === undefined) {
+                                  return <td key={idx} style={{ padding: '9px 10px', textAlign: 'right', color: '#64748b' }}>-</td>;
+                                }
+                                const d = parseFloat(s.difference);
+                                return (
+                                  <td key={idx} style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: d < 0 ? '#991b1b' : '#15803d' }}>
+                                    {d < 0 ? '-' : ''}{Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                );
+                              })}
+                              <td style={{
+                                padding: '9px 12px',
+                                textAlign: 'right',
+                                fontWeight: 900,
+                                fontSize: 14,
+                                color: diffVal < 0 ? '#991b1b' : '#15803d'
+                              }}>
+                                {diffVal < 0 ? '-' : (diffVal > 0 ? '+' : '')}{Math.abs(diffVal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Summary Card */}
                 <div style={{ background: 'white', padding: 16, borderRadius: 8, border: '1px solid #eaeaea', marginBottom: 20 }}>
                   <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Cashier:</strong> {selectedHistoryReport.cashier_name}</p>
                   <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Total Orders:</strong> {selectedHistoryReport.total_orders}</p>
@@ -1156,14 +1645,17 @@ export default function Dashboard() {
                   <p style={{ margin: '4px 0', paddingLeft: 12, fontSize: 13, color: '#555' }}>↳ Credit Sales: {CURRENCY}{parseFloat(selectedHistoryReport.credit_sales || 0).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Major Payments:</strong> {CURRENCY}{parseFloat(selectedHistoryReport.major_payments || 0).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Opening Drawer Cash:</strong> {CURRENCY}{parseFloat(selectedHistoryReport.opening_cash || 0).toFixed(2)}</p>
-                  <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Remaining Drawer Cash:</strong> {CURRENCY}{parseFloat(selectedHistoryReport.closing_cash || 0).toFixed(2)}</p>
+                  <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Amount in Drawer (Counted Cash):</strong> {CURRENCY}{parseFloat(selectedHistoryReport.closing_cash || 0).toFixed(2)}</p>
+                  <p style={{ margin: '4px 0', fontSize: 14, color: '#2563eb' }}><strong>Card Sales (in Bank):</strong> + {CURRENCY}{parseFloat(selectedHistoryReport.card_sales || 0).toFixed(2)}</p>
+                  <p style={{ margin: '4px 0', fontSize: 14, color: '#0f172a' }}><strong>Total Accounted:</strong> = {CURRENCY}{(parseFloat(selectedHistoryReport.closing_cash || 0) + parseFloat(selectedHistoryReport.card_sales || 0)).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Active Time:</strong> {selectedHistoryReport.total_active_time}</p>
                   <p style={{ margin: '4px 0', fontSize: 12, color: '#777' }}>
                     {formatSaudiDateTime(selectedHistoryReport.login_time)} — {formatSaudiDateTime(selectedHistoryReport.logout_time)} (KSA)
                   </p>
                 </div>
 
-                <h3 style={{ marginTop: 20, borderBottom: '2px solid #eaeaea', paddingBottom: 8, color: '#333', fontSize: 15 }}>
+                {/* Items Sold by Category */}
+                <h3 style={{ marginTop: 24, borderBottom: '2px solid #eaeaea', paddingBottom: 8, color: '#333', fontSize: 16 }}>
                   Items Sold by Category
                 </h3>
                 {(() => {
@@ -1175,27 +1667,181 @@ export default function Dashboard() {
                   } catch(e) { items = []; }
 
                   if (!items || items.length === 0) {
-                    return <p style={{ textAlign: 'center', color: '#999', padding: 15 }}>No items recorded</p>;
+                    return <p style={{ textAlign: 'center', color: '#999', padding: 20 }}>No items recorded</p>;
                   }
 
                   return items.map((cat, idx) => (
-                    <div key={idx} style={{ marginBottom: 16, background: '#fff', border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
-                      <div style={{ background: '#f1f5f9', padding: '8px 12px', fontWeight: 'bold', fontSize: 13, borderBottom: '1px solid #ddd' }}>
-                        {cat.category}
+                    <div key={idx} style={{ marginBottom: 20, background: '#fff', border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
+                      <div style={{ background: '#f8f9fa', fontWeight: 'bold', fontSize: 15, color: '#111', padding: '10px 15px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>{cat.category}</span>
+                        <span style={{ color: '#E31837', fontSize: 14 }}>
+                          {CURRENCY}{parseFloat(cat.amount || 0).toFixed(2)} ({cat.qty} items)
+                        </span>
                       </div>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                        <tbody>
-                          {(cat.items || []).map((it, iIdx) => (
-                            <tr key={iIdx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '8px 12px' }}>{it.name}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'center', width: 60 }}>{it.qty}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', width: 90 }}>{CURRENCY}{parseFloat(it.price || 0).toFixed(2)}</td>
+                      <div style={{ padding: '0 10px', overflowX: 'auto' }}>
+                        <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', margin: '10px 0', fontSize: 13, color: '#555', tableLayout: 'fixed', wordWrap: 'break-word' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #eee', textAlign: 'left' }}>
+                              <th style={{ padding: '8px 4px', width: '40%' }}>Item</th>
+                              <th style={{ padding: '8px 4px', textAlign: 'center', width: '15%' }}>Qty</th>
+                              <th style={{ padding: '8px 4px', textAlign: 'right', width: '22%' }}>Price</th>
+                              <th style={{ padding: '8px 4px', textAlign: 'right', width: '23%' }}>Total</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {cat.items && Array.isArray(cat.items) && cat.items.map((it, itemIdx) => {
+                              const unitPrice = parseFloat((it.amount !== undefined ? it.amount : (it.price * it.qty)) / (it.qty || 1)).toFixed(2);
+                              const totalPrice = parseFloat(it.amount !== undefined ? it.amount : (it.price * it.qty) || 0).toFixed(2);
+                              return (
+                                <tr key={itemIdx} style={{ borderBottom: '1px dashed #f0f0f0' }}>
+                                  <td style={{ padding: '6px 4px' }}>{it.name}</td>
+                                  <td style={{ padding: '6px 4px', textAlign: 'center' }}><strong>{it.qty}</strong></td>
+                                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{CURRENCY}{unitPrice}</td>
+                                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{CURRENCY}{totalPrice}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   ));
+                })()}
+
+                {/* Top Items by 2-Hour Intervals */}
+                {(() => {
+                  let intervalsObj = {};
+                  try {
+                    intervalsObj = typeof selectedHistoryReport.interval_items === 'string'
+                      ? JSON.parse(selectedHistoryReport.interval_items || '{}')
+                      : (selectedHistoryReport.interval_items || {});
+                  } catch(e) { intervalsObj = {}; }
+
+                  if (intervalsObj && Object.keys(intervalsObj).length > 0) {
+                    const loginDate = new Date(selectedHistoryReport.login_time);
+                    let maxIndex = 0;
+                    for (const key of Object.keys(intervalsObj)) {
+                      if (parseInt(key) > maxIndex) maxIndex = parseInt(key);
+                    }
+
+                    const intervalRows = [];
+                    for (let i = 0; i <= maxIndex; i++) {
+                      const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000);
+                      const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000);
+                      const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const itemsInBlock = intervalsObj[i] || [];
+
+                      intervalRows.push({
+                        timeWindow: `${startTimeStr} - ${endTimeStr}`,
+                        items: itemsInBlock
+                      });
+                    }
+
+                    return (
+                      <>
+                        <h3 style={{ marginTop: 30, borderBottom: '2px solid #eaeaea', paddingBottom: 8, color: '#333', fontSize: 16 }}>
+                          Top Items by 2-Hour Intervals
+                        </h3>
+                        <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: 6, overflowX: 'auto', marginBottom: 20 }}>
+                          <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', fontSize: 13, color: '#555', tableLayout: 'fixed', wordWrap: 'break-word' }}>
+                            <thead>
+                              <tr style={{ background: '#f8f9fa', borderBottom: '1px solid #eee', textAlign: 'left', color: '#111' }}>
+                                <th style={{ padding: '10px 8px', width: '35%' }}>Time</th>
+                                <th style={{ padding: '10px 8px', width: '65%' }}>Top Items (Qty)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intervalRows.map((row, rIdx) => (
+                                <tr key={rIdx} style={{ borderBottom: '1px solid #eee' }}>
+                                  <td style={{ padding: '8px 15px', fontWeight: 'bold', borderRight: '1px solid #eee', verticalAlign: 'top' }}>
+                                    {row.timeWindow}
+                                  </td>
+                                  <td style={{ padding: '8px 15px' }}>
+                                    {row.items.length > 0 ? (
+                                      row.items.map((it, itIdx) => (
+                                        <div key={itIdx} style={{ marginBottom: 4, paddingBottom: 4, borderBottom: itIdx === row.items.length - 1 ? 'none' : '1px dashed #f0f0f0' }}>
+                                          {it.name} <strong>({it.qty})</strong>
+                                        </div>
+                                      ))
+                                    ) : (
+                                      '-'
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Top 5 Selling Items */}
+                {(() => {
+                  let items = [];
+                  try {
+                    items = Array.isArray(selectedHistoryReport.items_summary) 
+                      ? selectedHistoryReport.items_summary 
+                      : JSON.parse(selectedHistoryReport.items_summary || '[]');
+                  } catch(e) { items = []; }
+
+                  let allFlat = [];
+                  items.forEach(cat => {
+                    if (cat.items && Array.isArray(cat.items)) {
+                      cat.items.forEach(it => {
+                        allFlat.push({
+                          name: it.name,
+                          qty: parseInt(it.qty, 10) || 0,
+                          totalPrice: parseFloat(it.amount !== undefined ? it.amount : (it.price * it.qty) || 0)
+                        });
+                      });
+                    }
+                  });
+
+                  if (allFlat.length > 0) {
+                    const grouped = {};
+                    allFlat.forEach(it => {
+                      if (!grouped[it.name]) grouped[it.name] = { name: it.name, qty: 0, totalPrice: 0 };
+                      grouped[it.name].qty += it.qty;
+                      grouped[it.name].totalPrice += it.totalPrice;
+                    });
+
+                    const sorted = Object.values(grouped).sort((a, b) => b.qty - a.qty).slice(0, 5);
+
+                    return (
+                      <>
+                        <h3 style={{ marginTop: 30, borderBottom: '2px solid #eaeaea', paddingBottom: 8, color: '#333', fontSize: 16 }}>
+                          Top 5 Selling Items
+                        </h3>
+                        <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: 6, overflowX: 'auto' }}>
+                          <table style={{ width: '100%', minWidth: 250, borderCollapse: 'collapse', fontSize: 13, color: '#555', tableLayout: 'fixed', wordWrap: 'break-word' }}>
+                            <thead>
+                              <tr style={{ background: '#fff3f4', borderBottom: '1px solid #ffccd0', textAlign: 'left', color: '#E31837' }}>
+                                <th style={{ padding: '10px 8px', width: '15%' }}>#</th>
+                                <th style={{ padding: '10px 8px', width: '45%' }}>Item</th>
+                                <th style={{ padding: '10px 8px', textAlign: 'center', width: '15%' }}>Qty</th>
+                                <th style={{ padding: '10px 8px', textAlign: 'right', width: '25%' }}>Rev</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sorted.map((it, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                  <td style={{ padding: '8px 15px', fontWeight: 'bold' }}>#{idx + 1}</td>
+                                  <td style={{ padding: '8px 15px' }}>{it.name}</td>
+                                  <td style={{ padding: '8px 15px', textAlign: 'center' }}><strong>{it.qty}</strong></td>
+                                  <td style={{ padding: '8px 15px', textAlign: 'right' }}>{CURRENCY}{it.totalPrice.toFixed(2)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    );
+                  }
+                  return null;
                 })()}
               </div>
             </div>
@@ -1792,7 +2438,7 @@ export default function Dashboard() {
           <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: 13 }}>Restaurant Attendance & Operations Dashboard</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {isAdminOrDev && (
+          {canViewPosAndReports && (
             <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4 }}>
               <button 
                 onClick={() => setDashboardView('attendance')}

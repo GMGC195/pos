@@ -8,6 +8,7 @@ import OrderDetailModal from '../components/OrderDetailModal'
 
 export default function CancelRequests() {
   const { user } = useAuth()
+  const isManagement = user?.role?.trim().toLowerCase() === 'management'
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState(null)
@@ -132,23 +133,25 @@ export default function CancelRequests() {
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
-                            {order.status === 'Completed' && !['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) ? (
+                            {order.status === 'Completed' && !['admin', 'developer'].includes(user?.role?.trim().toLowerCase()) && !isManagement ? (
                               <span className="badge badge-warning" style={{ fontSize: 11, padding: '4px 8px' }}>Request Pending (Admin Approval Required)</span>
                             ) : (
                               <>
                                 <button 
                                   className="btn btn-success btn-sm" 
-                                  style={{ padding: '6px 12px' }}
-                                  onClick={() => handleAction(order.id, 'approve')}
-                                  disabled={processingId === order.id}
+                                  style={{ padding: '6px 12px', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.4 : 1 }}
+                                  onClick={() => { if (!isManagement) handleAction(order.id, 'approve'); }}
+                                  disabled={processingId === order.id || isManagement}
+                                  title={isManagement ? 'Management view-only' : 'Approve Cancellation'}
                                 >
                                   Approve
                                 </button>
                                 <button 
                                   className="btn btn-secondary btn-sm" 
-                                  style={{ padding: '6px 12px', color: 'var(--red)' }}
-                                  onClick={() => handleAction(order.id, 'reject')}
-                                  disabled={processingId === order.id}
+                                  style={{ padding: '6px 12px', color: 'var(--red)', cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.4 : 1 }}
+                                  onClick={() => { if (!isManagement) handleAction(order.id, 'reject'); }}
+                                  disabled={processingId === order.id || isManagement}
+                                  title={isManagement ? 'Management view-only' : 'Reject Cancellation'}
                                 >
                                   Reject
                                 </button>

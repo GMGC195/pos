@@ -485,6 +485,11 @@ router.get('/:id/documents', authenticateToken, async (req, res) => {
 
 // POST upload document for an employee
 router.post('/:id/documents', authenticateToken, upload.array('documents', 10), async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole === 'management') {
+    return res.status(403).json({ error: 'Management role has view-only access.' });
+  }
+
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No files uploaded' });
   }
@@ -518,6 +523,11 @@ router.post('/:id/documents', authenticateToken, upload.array('documents', 10), 
 
 // PUT update a document
 router.put('/documents/:doc_id', authenticateToken, upload.single('documents'), async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole === 'management') {
+    return res.status(403).json({ error: 'Management role has view-only access.' });
+  }
+
   const { documentName, documentType, documentNumber, note } = req.body;
   const doc_id = req.params.doc_id;
 
@@ -563,6 +573,11 @@ router.put('/documents/:doc_id', authenticateToken, upload.single('documents'), 
 
 // DELETE a document
 router.delete('/documents/:doc_id', authenticateToken, async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole === 'management') {
+    return res.status(403).json({ error: 'Management role has view-only access.' });
+  }
+
   try {
     const docRes = await pool.query('SELECT * FROM employee_documents WHERE id = $1', [req.params.doc_id]);
     if (docRes.rows.length === 0) return res.status(404).json({ error: 'Document not found' });

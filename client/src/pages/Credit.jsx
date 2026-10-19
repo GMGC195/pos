@@ -51,6 +51,7 @@ const MultiSelectDropdown = ({ options, selectedIds, onChange, placeholder, styl
 export default function Credit() {
   const { user } = useAuth();
   const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || user?.role?.trim().toLowerCase() === 'developer';
+  const isManagement = user?.role?.trim().toLowerCase() === 'management';
   
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +103,7 @@ export default function Credit() {
   const fetchCustomers = async () => {
     setLoading(true);
     try {
-      const url = isAdmin && branchFilter !== 'All' 
+      const url = (isAdmin || isManagement) && branchFilter !== 'All' 
         ? `/api/credit?branch=${encodeURIComponent(branchFilter)}` 
         : '/api/credit';
       const res = await axios.get(url);
@@ -327,7 +328,7 @@ export default function Credit() {
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: 'var(--text)' }}>Credit Customers</h2>
         
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          {isAdmin && (
+          {(isAdmin || isManagement) && (
             <select 
               value={branchFilter}
               onChange={e => setBranchFilter(e.target.value)}
@@ -340,15 +341,17 @@ export default function Credit() {
             </select>
           )}
 
-          <button
-            onClick={openAddModal}
-            style={{
-              background: 'var(--primary)', color: '#fff', border: 'none', padding: '10px 16px',
-              borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600
-            }}
-          >
-            <Plus size={18} /> Add Customer
-          </button>
+          {!isManagement && (
+            <button
+              onClick={openAddModal}
+              style={{
+                background: 'var(--primary)', color: '#fff', border: 'none', padding: '10px 16px',
+                borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600
+              }}
+            >
+              <Plus size={18} /> Add Customer
+            </button>
+          )}
         </div>
       </div>
 
@@ -396,12 +399,25 @@ export default function Credit() {
                         <button onClick={(e) => { e.stopPropagation(); openLedger(c); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 6 }} title="Ledger">
                           <FileText size={18} />
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); openEditModal(c); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6 }} title="Edit">
-                          <Edit size={18} />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: 6 }} title="Delete">
-                          <Trash2 size={18} />
-                        </button>
+                        {isManagement ? (
+                          <>
+                            <button disabled style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'not-allowed', opacity: 0.4, padding: 6 }} title="Management view-only">
+                              <Edit size={18} />
+                            </button>
+                            <button disabled style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'not-allowed', opacity: 0.4, padding: 6 }} title="Management view-only">
+                              <Trash2 size={18} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={(e) => { e.stopPropagation(); openEditModal(c); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6 }} title="Edit">
+                              <Edit size={18} />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: 6 }} title="Delete">
+                              <Trash2 size={18} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -572,6 +588,10 @@ export default function Credit() {
                     {saving ? 'Saving...' : 'Save Discount Rules'}
                   </button>
                 </div>
+              </div>
+            ) : isManagement ? (
+              <div style={{ background: 'rgba(59, 130, 246, 0.08)', padding: '10px 16px', borderRadius: 8, marginBottom: 16, border: '1px solid rgba(59, 130, 246, 0.2)', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
+                👁️ Management View-Only: Recording payments or adjusting dues is disabled.
               </div>
             ) : (
               <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20, padding: 16, background: 'var(--surface-2)', borderRadius: 8 }}>

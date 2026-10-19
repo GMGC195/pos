@@ -2,8 +2,11 @@ import React, { useState, useEffect } from 'react'
 import { X, Upload, Trash2, FileText, Image as ImageIcon, Download, MoreVertical, Edit2, Eye } from 'lucide-react'
 import axios from '../api'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function EmployeeDocumentsModal({ employee, onClose }) {
+  const { user } = useAuth()
+  const isManagement = user?.role?.trim().toLowerCase() === 'management'
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -171,79 +174,81 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
         
         <div className="modal-scroll-container" style={{ padding: 24, overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Upload Section */}
-          <div style={{ background: 'var(--surface-1)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Upload New Document(s)</h4>
-            </div>
-            <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Document Type</label>
-                  <select 
-                    value={documentType}
-                    onChange={e => setDocumentType(e.target.value)}
-                    style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
-                  >
-                    <option value="CNIC">CNIC</option>
-                    <option value="Passport">Passport</option>
-                    <option value="Visa">Visa</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                {documentType === 'Other' && (
+          {!isManagement && (
+            <div style={{ background: 'var(--surface-1)', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Upload New Document(s)</h4>
+              </div>
+              <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ gridTemplateColumns: '1fr 1fr', gap: 12, display: 'grid' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Custom Document Name</label>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Document Type</label>
+                    <select 
+                      value={documentType}
+                      onChange={e => setDocumentType(e.target.value)}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                    >
+                      <option value="CNIC">CNIC</option>
+                      <option value="Passport">Passport</option>
+                      <option value="Visa">Visa</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  {documentType === 'Other' && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Custom Document Name</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. Contract"
+                        value={documentName}
+                        onChange={e => setDocumentName(e.target.value)}
+                        style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                      />
+                    </div>
+                  )}
+                  <div style={{ gridColumn: documentType === 'Other' ? '1 / -1' : 'auto' }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>CNIC / Document Number (Optional)</label>
                     <input 
                       type="text" 
-                      placeholder="e.g. Contract"
-                      value={documentName}
-                      onChange={e => setDocumentName(e.target.value)}
+                      placeholder="Enter document number"
+                      value={documentNumber}
+                      onChange={e => setDocumentNumber(e.target.value)}
                       style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
                     />
                   </div>
-                )}
-                <div style={{ gridColumn: documentType === 'Other' ? '1 / -1' : 'auto' }}>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>CNIC / Document Number (Optional)</label>
-                  <input 
-                    type="text" 
-                    placeholder="Enter document number"
-                    value={documentNumber}
-                    onChange={e => setDocumentNumber(e.target.value)}
-                    style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Note (Optional)</label>
+                  <textarea 
+                    rows="2"
+                    placeholder="Additional details..."
+                    value={note}
+                    onChange={e => setNote(e.target.value)}
+                    style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', resize: 'vertical' }}
                   />
                 </div>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Note (Optional)</label>
-                <textarea 
-                  rows="2"
-                  placeholder="Additional details..."
-                  value={note}
-                  onChange={e => setNote(e.target.value)}
-                  style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none', resize: 'vertical' }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select File(s) (Max 10, images/pdfs)</label>
-                <input 
-                  id="file-upload-input"
-                  type="file" 
-                  multiple
-                  accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
-                  onChange={handleFileChange}
-                  style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
-                />
-              </div>
-              <button 
-                type="submit" 
-                className="btn btn-primary" 
-                disabled={uploading || files.length === 0}
-                style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 8 }}
-              >
-                <Upload size={16} /> {uploading ? 'Uploading...' : 'Upload Document(s)'}
-              </button>
-            </form>
-          </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Select File(s) (Max 10, images/pdfs)</label>
+                  <input 
+                    id="file-upload-input"
+                    type="file" 
+                    multiple
+                    accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
+                    onChange={handleFileChange}
+                    style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '8px 10px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                  />
+                </div>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={uploading || files.length === 0}
+                  style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 8 }}
+                >
+                  <Upload size={16} /> {uploading ? 'Uploading...' : 'Upload Document(s)'}
+                </button>
+              </form>
+            </div>
+          )}
 
           {/* Documents List */}
           <div>
@@ -273,21 +278,23 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                           {doc.document_name}
                         </span>
                       </div>
-                      <div style={{ position: 'relative' }}>
-                        <button onClick={() => setMenuOpenFor(menuOpenFor === doc.id ? null : doc.id)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
-                          <MoreVertical size={14} />
-                        </button>
-                        {menuOpenFor === doc.id && (
-                          <div style={{ position: 'absolute', top: 24, right: 0, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 6, boxShadow: 'var(--shadow)', padding: 4, zIndex: 10, width: 120 }}>
-                            <button onClick={() => handleEditClick(doc)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, textAlign: 'left', borderRadius: 4 }}>
-                              <Edit2 size={12} /> Edit
-                            </button>
-                            <button onClick={() => { setMenuOpenFor(null); handleDelete(doc.id) }} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, textAlign: 'left', color: 'var(--red)', borderRadius: 4 }}>
-                              <Trash2 size={12} /> Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      {!isManagement && (
+                        <div style={{ position: 'relative' }}>
+                          <button onClick={() => setMenuOpenFor(menuOpenFor === doc.id ? null : doc.id)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                            <MoreVertical size={14} />
+                          </button>
+                          {menuOpenFor === doc.id && (
+                            <div style={{ position: 'absolute', top: 24, right: 0, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 6, boxShadow: 'var(--shadow)', padding: 4, zIndex: 10, width: 120 }}>
+                              <button onClick={() => handleEditClick(doc)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, textAlign: 'left', borderRadius: 4 }}>
+                                <Edit2 size={12} /> Edit
+                              </button>
+                              <button onClick={() => { setMenuOpenFor(null); handleDelete(doc.id) }} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, textAlign: 'left', color: 'var(--red)', borderRadius: 4 }}>
+                                <Trash2 size={12} /> Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     {doc.document_type && (
                       <div style={{ display: 'inline-block', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, width: 'fit-content' }}>

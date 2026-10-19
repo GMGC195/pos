@@ -25,6 +25,7 @@ export default function HoldPayments() {
   const { user } = useAuth()
   const role = user?.role?.trim().toLowerCase()
   const isAdmin = role === 'admin' || role === 'developer'
+  const isManagement = role === 'management'
 
   const loadHeldOrders = () => {
     setLoading(true)
@@ -185,7 +186,7 @@ export default function HoldPayments() {
                 />
               </div>
             </div>
-            {isAdmin && (
+            {(isAdmin || isManagement) && (
               <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 4, alignItems: 'center', gap: 4 }}>
                 {['All', 'Branch 1', 'Branch 2', 'Branch 3'].map(b => (
                   <button
@@ -262,53 +263,84 @@ export default function HoldPayments() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-                          {role !== 'order taker' && (
-                            <button 
-                              className="btn btn-success btn-sm" 
-                              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px' }}
-                              onClick={() => handlePay(o.id, 'Cash')}
-                            >
-                              <Banknote size={14} /> Pay Cash
-                            </button>
-                          )}
-                          {role !== 'order taker' && (
-                            <button 
-                              className="btn btn-secondary btn-sm"
-                              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px', color: '#3b82f6', borderColor: '#3b82f6' }}
-                              onClick={() => handlePay(o.id, 'Card')}
-                              title="Pay Card"
-                            >
-                              <CreditCard size={14} /> Pay Card
-                            </button>
-                          )}
-                          
-                          <button 
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: '6px 8px' }}
-                            onClick={() => handleEdit(o.id)}
-                            title="Edit Order"
-                          >
-                            <Pencil size={16} color="var(--text-secondary)" />
-                          </button>
+                          {isManagement ? (
+                            <>
+                              <button 
+                                className="btn btn-success btn-sm" 
+                                style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px', cursor: 'not-allowed', opacity: 0.5 }}
+                                disabled
+                                title="Management view-only"
+                              >
+                                <Banknote size={14} /> Pay Cash
+                              </button>
+                              <button 
+                                className="btn btn-secondary btn-sm"
+                                style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px', color: '#3b82f6', borderColor: '#3b82f6', cursor: 'not-allowed', opacity: 0.5 }}
+                                disabled
+                                title="Management view-only"
+                              >
+                                <CreditCard size={14} /> Pay Card
+                              </button>
+                              <button 
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '6px 8px', cursor: 'not-allowed', opacity: 0.5 }}
+                                disabled
+                                title="Management view-only"
+                              >
+                                <Pencil size={16} color="var(--text-secondary)" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {role !== 'order taker' && (
+                                <button 
+                                  className="btn btn-success btn-sm" 
+                                  style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px' }}
+                                  onClick={() => handlePay(o.id, 'Cash')}
+                                >
+                                  <Banknote size={14} /> Pay Cash
+                                </button>
+                              )}
+                              {role !== 'order taker' && (
+                                <button 
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px', color: '#3b82f6', borderColor: '#3b82f6' }}
+                                  onClick={() => handlePay(o.id, 'Card')}
+                                  title="Pay Card"
+                                >
+                                  <CreditCard size={14} /> Pay Card
+                                </button>
+                              )}
+                              
+                              <button 
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '6px 8px' }}
+                                onClick={() => handleEdit(o.id)}
+                                title="Edit Order"
+                              >
+                                <Pencil size={16} color="var(--text-secondary)" />
+                              </button>
 
-                          {isAdmin || role === 'cashier' ? (
-                            <button 
-                              className="btn btn-secondary btn-sm"
-                              style={{ padding: '6px 8px', borderColor: 'var(--red)' }}
-                              onClick={() => handleCancel(o.id)}
-                              title="Cancel Order"
-                            >
-                              <Ban size={16} color="var(--red)" />
-                            </button>
-                          ) : !o.cancel_requested && (
-                            <button 
-                              className="btn btn-secondary btn-sm"
-                              style={{ padding: '6px 8px', borderColor: 'var(--orange)' }}
-                              onClick={() => { setCancelOrderTarget(o.id); setShowCancelModal(true); }}
-                              title="Request Cancel"
-                            >
-                              <Ban size={16} color="var(--orange)" />
-                            </button>
+                              {isAdmin || role === 'cashier' ? (
+                                <button 
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: '6px 8px', borderColor: 'var(--red)' }}
+                                  onClick={() => handleCancel(o.id)}
+                                  title="Cancel Order"
+                                >
+                                  <Ban size={16} color="var(--red)" />
+                                </button>
+                              ) : !o.cancel_requested && (
+                                <button 
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: '6px 8px', borderColor: 'var(--orange)' }}
+                                  onClick={() => { setCancelOrderTarget(o.id); setShowCancelModal(true); }}
+                                  title="Request Cancel"
+                                >
+                                  <Ban size={16} color="var(--orange)" />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>

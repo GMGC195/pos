@@ -8,8 +8,8 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     let { branch, closing_id } = req.query;
     const role = req.user.role?.trim().toLowerCase();
-    const isAdmin = role === 'admin' || role === 'developer';
-    if (!isAdmin) {
+    const isPrivileged = role === 'admin' || role === 'developer' || role === 'management';
+    if (!isPrivileged) {
       if (!req.user?.branch || req.user.branch === 'All') {
         return res.json({
           totalSale: 0,

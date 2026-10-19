@@ -76,13 +76,13 @@ export default function App() {
                 } />
 
                 {/* Developer-only routes */}
-                <Route path="/pos"             element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker', 'Cashier']}><POS /></ProtectedRoute>} />
+                <Route path="/pos"             element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier']}><POS /></ProtectedRoute>} />
                 <Route path="/inventory"       element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker', 'Cashier']}><Inventory /></ProtectedRoute>} />
-                <Route path="/hold-payments"   element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Order Taker', 'Cashier']}><HoldPayments /></ProtectedRoute>} />
-                <Route path="/today-sales"     element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Cashier']}><Reports isTodaySales={true} /></ProtectedRoute>} />
+                <Route path="/hold-payments"   element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier']}><HoldPayments /></ProtectedRoute>} />
+                <Route path="/today-sales"     element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Cashier']}><Reports isTodaySales={true} /></ProtectedRoute>} />
                 <Route path="/sales-item"      element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management']}><SalesItem /></ProtectedRoute>} />
                 <Route path="/reports"         element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management']}><Reports isTodaySales={false} /></ProtectedRoute>} />
-                <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Cashier']}><CancelRequests /></ProtectedRoute>} />
+                <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Cashier']}><CancelRequests /></ProtectedRoute>} />
                 <Route path="/credit"          element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier']}><Credit /></ProtectedRoute>} />
                 <Route path="/stock-management" element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><StockManagement /></ProtectedRoute>} />
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><ProductCostManagement /></ProtectedRoute>} />
