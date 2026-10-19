@@ -1514,6 +1514,14 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       [req.user.username, branch]
     );
     const activeShift = activeShiftRes.rows[0] || null;
+    let openingCash = parseFloat(req.body?.opening_cash || activeShift?.opening_cash || 0) || 0;
+    if (!openingCash && !activeShift) {
+      const lastShiftRes = await client.query(
+        `SELECT opening_cash FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 ORDER BY id DESC LIMIT 1`,
+        [req.user.username, branch]
+      );
+      openingCash = parseFloat(lastShiftRes.rows[0]?.opening_cash || 0) || 0;
+    }
 
     let loginTime = activeShift ? new Date(activeShift.start_time) : new Date();
     if (!activeShift) {

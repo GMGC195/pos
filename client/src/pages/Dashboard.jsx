@@ -280,7 +280,7 @@ export default function Dashboard() {
 
       ${hasDiff ? `
         <div style="border: 2px solid #111; color: #111; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold;">
-          <div style="font-size: 14px; letter-spacing: 0.5px;">⚠️ DIFFERENCE!</div>
+          <div style="font-size: 14px; letter-spacing: 0.5px;">DIFFERENCE:</div>
           <div style="font-size: 16px; margin: 2px 0;">${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
           ${report.difference_reason ? `<div style="font-size: 11px; margin-top: 5px; border-top: 1px dashed #666; padding-top: 4px; text-align: left; font-weight: normal; color: #111;">Reason: ${report.difference_reason}</div>` : ''}
         </div>
@@ -983,7 +983,7 @@ export default function Dashboard() {
                     textAlign: 'center'
                   }}>
                     <div style={{ fontSize: 16, fontWeight: 900, color: '#dc2626' }}>
-                      ⚠️ DIFFERENCE! {diffSign}{CURRENCY}{Math.abs(diffVal).toFixed(2)} ({diffLabel})
+                      Difference: {diffSign}{CURRENCY}{Math.abs(diffVal).toFixed(2)} ({diffLabel})
                     </div>
                     {selectedClosingObj.difference_reason && (
                       <div style={{ marginTop: 6, fontSize: 13, borderTop: '1px dashed #d1d5db', paddingTop: 6, color: '#374151', textAlign: 'left' }}>
@@ -1478,8 +1478,8 @@ export default function Dashboard() {
                       marginBottom: 16,
                       textAlign: 'center'
                     }}>
-                      <div style={{ fontSize: 17, fontWeight: 900, color: '#dc2626' }}>
-                        ⚠️ DIFFERENCE! {diffSign}{CURRENCY}{Math.abs(diffVal).toFixed(2)} ({diffLabel})
+                      <div style={{ fontSize: 16, fontWeight: 900, color: '#dc2626' }}>
+                        Difference: {diffSign}{CURRENCY}{Math.abs(diffVal).toFixed(2)} ({diffLabel})
                       </div>
                       {selectedHistoryReport.difference_reason && (
                         <div style={{ marginTop: 6, fontSize: 13, borderTop: '1px dashed #d1d5db', paddingTop: 6, color: '#374151', textAlign: 'left' }}>

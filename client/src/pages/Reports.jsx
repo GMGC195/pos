@@ -185,9 +185,11 @@ export default function Reports({ isTodaySales = false }) {
   // Fetch live closing preview and shifts breakdown when Closing Modal is opened or type changed
   useEffect(() => {
     if (showClosingModal) {
-      const typeToUse = closingType || (isCashier ? 'Shift' : 'Daily')
-      if (!closingType) setClosingType(typeToUse)
       const targetBranch = branch === 'All' ? (user?.branch || 'Branch 1') : branch
+      const hadJustClosedShift = sessionStorage.getItem('just_closed_shift_' + targetBranch) === 'true'
+      const defaultType = hadJustClosedShift ? 'Daily' : 'Shift'
+      const typeToUse = closingType || defaultType
+      if (!closingType) setClosingType(typeToUse)
       setLoadingClosingPreview(true)
       axios.get('/api/orders/closing-preview', { params: { branch: targetBranch, type: typeToUse } })
         .then(res => {
@@ -533,7 +535,7 @@ export default function Reports({ isTodaySales = false }) {
 
         ${hasDiff ? `
           <div style="border: 2px solid #111; color: #111; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold;">
-            <div style="font-size: 14px; letter-spacing: 0.5px;">⚠️ DIFFERENCE!</div>
+            <div style="font-size: 14px; letter-spacing: 0.5px;">DIFFERENCE:</div>
             <div style="font-size: 16px; margin: 2px 0;">${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
             ${report.difference_reason ? `<div style="font-size: 11px; margin-top: 5px; border-top: 1px dashed #666; padding-top: 4px; text-align: left; font-weight: normal; color: #111;">Reason: ${report.difference_reason}</div>` : ''}
           </div>
@@ -699,6 +701,11 @@ export default function Reports({ isTodaySales = false }) {
         difference_reason: closingDifferenceReason.trim()
       })
       toast.success(`${closingType} closing complete!`)
+      if (closingType === 'Shift') {
+        sessionStorage.setItem('just_closed_shift_' + targetBranch, 'true')
+      } else {
+        sessionStorage.removeItem('just_closed_shift_' + targetBranch)
+      }
       setShowClosingModal(false)
       setClosingType(null)
       setClosingRemainingCash('')
@@ -1533,12 +1540,17 @@ export default function Reports({ isTodaySales = false }) {
           <div className="modal closing-modal-card">
             <div className="modal-header closing-modal-header">
               <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: 10, margin: 0, fontSize: 20, fontWeight: 800 }}>
-                  <Lock size={22} color="var(--primary)" /> Shift & Daily Closing
-                  <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0, fontSize: 18, fontWeight: 800 }}>
+                    <Lock size={20} color="var(--primary)" /> Shift & Daily Closing
+                  </h3>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
                     Branch: {branch === 'All' ? (user?.branch || 'Branch 1') : branch}
                   </span>
-                </h3>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    ⏰ Current: {formatSaudiTime(new Date())} <span style={{ fontSize: 9.5, opacity: 0.8 }}>KSA</span>
+                  </span>
+                </div>
                 <div className="closing-modal-header-desc">
                   <span>Select closing type. <b>Hold orders</b> remain safe & unaffected.</span>
                   <span className="closing-header-sep">•</span>
@@ -1603,61 +1615,48 @@ export default function Reports({ isTodaySales = false }) {
                   </div>
                 </div>
 
-                {/* 2. Shift / Daily Stats Card */}
-                <div style={{
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 12,
-                  padding: '12px 14px'
-                }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Clock size={15} color="var(--primary)" /> 
-                      {closingType === 'Daily' ? 'Daily Summary (پورے دن کا خلاصہ)' : 'Shift Summary (موجودہ شفٹ)'}
-                    </div>
-                    {loadingClosingPreview && (
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Refreshing...</span>
-                    )}
-                  </div>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    {/* Shift / Daily Start Time */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
-                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>
-                        {closingType === 'Daily' ? '📅 Daily Cycle Start' : '🕒 Shift Start'}
+                {/* 2. Shift Stats Card (Only shown for Shift Closing; for Daily Closing, stats are merged directly into the Daily Summary table header) */}
+                {closingType === 'Shift' && (
+                  <div style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 12,
+                    padding: '10px 12px'
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Clock size={14} color="var(--primary)" /> 
+                        Shift Summary (موجودہ شفٹ)
                       </div>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: '#1e293b', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {closingType === 'Daily' 
-                          ? (closingPreview?.login_time ? formatSaudiTime(closingPreview.login_time) + ' KSA' : '00:00 KSA')
-                          : (closingPreview?.start_time || activeShift?.start_time ? formatSaudiTime(closingPreview?.start_time || activeShift.start_time) + ' KSA' : '-')}
-                      </div>
+                      {loadingClosingPreview && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Refreshing...</span>
+                      )}
                     </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 8px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>🕒 Shift Start</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
+                          {closingPreview?.start_time || activeShift?.start_time ? formatSaudiTime(closingPreview?.start_time || activeShift.start_time) + ' KSA' : '-'}
+                        </div>
+                      </div>
 
-                    {/* Current Time */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
-                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>⏰ Current Time</div>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', marginTop: 2 }}>
-                        {formatSaudiTime(new Date())} <span style={{ fontSize: 10, color: '#94a3b8' }}>KSA</span>
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 8px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>🧾 Orders</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
+                          {loadingClosingPreview ? '...' : (closingPreview?.total_orders !== undefined ? closingPreview.total_orders : totalCount)}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Total Orders Punched */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
-                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>🧾 Total Orders</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
-                        {loadingClosingPreview ? '...' : (closingPreview?.total_orders !== undefined ? closingPreview.total_orders : totalCount)} <span style={{ fontSize: 11, color: '#64748b', fontWeight: 500 }}>orders</span>
-                      </div>
-                    </div>
-
-                    {/* Total Sales */}
-                    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
-                      <div style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>💰 Total Sales</div>
-                      <div style={{ fontSize: 14, fontWeight: 900, color: '#047857', marginTop: 2 }}>
-                        {loadingClosingPreview ? '...' : `${CURRENCY}${(closingPreview?.total_sales !== undefined ? parseFloat(closingPreview.total_sales || 0) : totalSales).toFixed(2)}`}
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 8px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>💰 Shift Sales</div>
+                        <div style={{ fontSize: 13, fontWeight: 900, color: '#047857', marginTop: 2 }}>
+                          {loadingClosingPreview ? '...' : `${CURRENCY}${(closingPreview?.total_sales !== undefined ? parseFloat(closingPreview.total_sales || 0) : totalSales).toFixed(2)}`}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* 3. If Daily Closing: Daily Summary Day + Night Table (Screenshot Layout) */}
                 {closingType === 'Daily' && (() => {
@@ -1710,18 +1709,31 @@ export default function Reports({ isTodaySales = false }) {
                     }}>
                       <div style={{
                         background: '#f8fafc',
-                        padding: '10px 14px',
+                        padding: '8px 12px',
                         borderBottom: '1.5px solid #cbd5e1',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between'
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        flexWrap: 'wrap'
                       }}>
-                        <strong style={{ fontSize: 13.5, color: '#0f172a' }}>
-                          Daily summary: day + night
-                        </strong>
-                        <span style={{ fontSize: 11, color: '#64748b' }}>
-                          {displayShifts.length} {displayShifts.length === 1 ? 'Shift' : 'Shifts'}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <strong style={{ fontSize: 13, color: '#0f172a' }}>
+                            Daily summary: day + night
+                          </strong>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 6px', borderRadius: 5, background: '#e2e8f0', color: '#475569' }}>
+                            {displayShifts.length} Shifts
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#475569', fontWeight: 600 }}>
+                          <span style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '2px 7px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            📅 Cycle Start: <strong style={{ color: '#0f172a' }}>{closingPreview?.login_time ? formatSaudiTime(closingPreview.login_time) + ' KSA' : '00:00 KSA'}</strong>
+                          </span>
+                          <span style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '2px 7px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            🧾 Orders: <strong style={{ color: '#0f172a' }}>{loadingClosingPreview ? '...' : (closingPreview?.total_orders !== undefined ? closingPreview.total_orders : totalCount)}</strong>
+                          </span>
+                        </div>
                       </div>
 
                       <div style={{ overflowX: 'auto' }}>
@@ -1899,99 +1911,99 @@ export default function Reports({ isTodaySales = false }) {
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {/* Total Sale Card */}
-                      <div className="closing-total-sale-box" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                      <div className="closing-total-sale-box" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '8px 12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 700, color: '#475569' }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>
                             Total Sale ({closingType === 'Daily' ? 'Daily' : 'Shift'} کل سیل):
                           </span>
-                          <span style={{ fontSize: 18, fontWeight: 900, color: 'var(--primary)' }}>
+                          <span style={{ fontSize: 17, fontWeight: 900, color: 'var(--primary)' }}>
                             {loadingClosingPreview ? '...' : `${CURRENCY}${activeSales.toFixed(2)}`}
                           </span>
                         </div>
-                        {/* Breakdown directly below Total Sale */}
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%' }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '3px 8px', borderRadius: 6, border: '1px solid #a7f3d0' }}>
-                            💵 Cash Sale: {CURRENCY}{activeCashSales.toFixed(2)}
+                        {/* Breakdown directly below Total Sale: No icons, no bg, no border, no 'Sale', one row */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', fontSize: 12, fontWeight: 700 }}>
+                          <span style={{ color: '#047857' }}>
+                            Cash: {CURRENCY}{activeCashSales.toFixed(2)}
                           </span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: 6, border: '1px solid #bfdbfe' }}>
-                            💳 Card Sale: {CURRENCY}{activeCardSales.toFixed(2)}
+                          <span style={{ color: '#cbd5e1' }}>•</span>
+                          <span style={{ color: '#2563eb' }}>
+                            Card: {CURRENCY}{activeCardSales.toFixed(2)}
                           </span>
                         </div>
                       </div>
 
-                      {/* Field 2: Amount in Drawer Input */}
+                      {/* Field 2: Amount in Drawer Input + Inline Card and Total */}
                       <div style={{
                         background: 'var(--surface-1)',
                         border: '1.5px solid var(--surface-2)',
-                        borderRadius: 10,
-                        padding: '12px 14px'
+                        borderRadius: 9,
+                        padding: '9px 12px'
                       }}>
                         <label style={{
                           display: 'block',
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: 800,
                           color: 'var(--text-primary)',
-                          marginBottom: 6
+                          marginBottom: 5
                         }}>
-                          Amount in Drawer (دراز میں رقم) * ({CURRENCY})
+                          Amount in Drawer (دراز میں رقم) + Card * ({CURRENCY})
                         </label>
-                        <div style={{ position: 'relative' }}>
-                          <span style={{
-                            position: 'absolute',
-                            left: 12,
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            fontWeight: 800,
-                            color: 'var(--text-muted)',
-                            fontSize: 14
-                          }}>
-                            {CURRENCY}
-                          </span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={closingRemainingCash}
-                            onChange={e => setClosingRemainingCash(e.target.value)}
-                            placeholder="0.00"
-                            required
-                            autoFocus
-                            style={{
-                              width: '100%',
-                              padding: '10px 12px 10px 46px',
-                              borderRadius: 8,
-                              border: '1.5px solid #94a3b8',
-                              background: '#ffffff',
-                              fontSize: 16,
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ position: 'relative', flex: '0 0 115px' }}>
+                            <span style={{
+                              position: 'absolute',
+                              left: 8,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
                               fontWeight: 800,
-                              color: 'var(--text-primary)',
-                              outline: 'none',
-                              boxSizing: 'border-box'
-                            }}
-                          />
-                        </div>
-                        {/* Real-time Accounted Formula Banner */}
-                        <div style={{
-                          marginTop: 6,
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          color: '#334155',
-                          background: '#f8fafc',
-                          padding: '6px 10px',
-                          borderRadius: 6,
-                          border: '1px solid #e2e8f0',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          flexWrap: 'wrap',
-                          gap: 4
-                        }}>
-                          <span>
-                            Counted Cash: {CURRENCY}{isDrawerFilled ? drawerVal.toFixed(2) : '0.00'} + Card (to bank): {CURRENCY}{activeCardSales.toFixed(2)}
-                          </span>
-                          <span style={{ color: '#0f172a', fontWeight: 900 }}>
-                            = Accounted: {CURRENCY}{((isDrawerFilled ? drawerVal : 0) + activeCardSales).toFixed(2)}
-                          </span>
+                              color: 'var(--text-muted)',
+                              fontSize: 12
+                            }}>
+                              {CURRENCY}
+                            </span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={closingRemainingCash}
+                              onChange={e => setClosingRemainingCash(e.target.value)}
+                              placeholder="0.00"
+                              required
+                              autoFocus
+                              style={{
+                                width: '100%',
+                                padding: '6px 8px 6px 36px',
+                                borderRadius: 6,
+                                border: '1.5px solid #94a3b8',
+                                background: '#ffffff',
+                                fontSize: 14.5,
+                                fontWeight: 800,
+                                color: 'var(--text-primary)',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                              }}
+                            />
+                          </div>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: '#334155',
+                            flex: 1,
+                            minWidth: 0,
+                            flexWrap: 'nowrap'
+                          }}>
+                            <span style={{ color: '#64748b', fontSize: 13, fontWeight: 900 }}>+</span>
+                            <span style={{ color: '#2563eb', whiteSpace: 'nowrap' }}>
+                              Card: <strong style={{ color: '#1e40af' }}>{CURRENCY}{activeCardSales.toFixed(2)}</strong>
+                            </span>
+                            <span style={{ color: '#64748b', fontSize: 13, fontWeight: 900 }}>=</span>
+                            <span style={{ color: '#0f172a', fontWeight: 900, whiteSpace: 'nowrap' }}>
+                              {CURRENCY}{((isDrawerFilled ? drawerVal : 0) + activeCardSales).toFixed(2)}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -1999,57 +2011,54 @@ export default function Reports({ isTodaySales = false }) {
                       {isDrawerFilled && (
                         <div>
                           {hasDifference ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                              {/* Red Background, White Text Difference Alert with Exclamation mark */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {/* Compact Red Difference Alert */}
                               <div style={{
                                 background: '#dc2626',
                                 color: '#ffffff',
-                                padding: '10px 14px',
-                                borderRadius: 8,
+                                padding: '6px 12px',
+                                borderRadius: 7,
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
-                                fontWeight: 900,
-                                boxShadow: '0 2px 8px rgba(220, 38, 38, 0.35)',
-                                animation: 'fadeIn 0.2s ease-in'
+                                fontWeight: 900
                               }}>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14.5 }}>
-                                  ⚠️ Difference!
+                                <span style={{ fontSize: 13, fontWeight: 800 }}>
+                                  Difference:
                                 </span>
-                                <span style={{ fontSize: 15.5 }}>
+                                <span style={{ fontSize: 14 }}>
                                   {diff < 0 ? '-' : '+'}{CURRENCY}{Math.abs(diff).toFixed(2)}
-                                  <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 5, opacity: 0.9 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 4, opacity: 0.9 }}>
                                     ({diff < 0 ? 'Shortage / کم' : 'Excess / زیادہ'})
                                   </span>
                                 </span>
                               </div>
 
-                              {/* Reason field (Optional) */}
+                              {/* Reason field (Optional) - Single line compact */}
                               <div>
                                 <label style={{
                                   display: 'block',
-                                  fontSize: 12.5,
+                                  fontSize: 11.5,
                                   fontWeight: 700,
                                   color: '#334155',
-                                  marginBottom: 4
+                                  marginBottom: 3
                                 }}>
                                   Reason for Difference / فرق کی وجہ <span style={{ fontWeight: 500, color: '#64748b' }}>(Optional / اختیاری)</span>
                                 </label>
-                                <textarea
-                                  rows={2}
+                                <input
+                                  type="text"
                                   value={closingDifferenceReason}
                                   onChange={e => setClosingDifferenceReason(e.target.value)}
                                   placeholder="Reason for difference (optional) / فرق کی وجہ"
                                   style={{
                                     width: '100%',
-                                    padding: '8px 10px',
-                                    borderRadius: 8,
+                                    padding: '5px 8px',
+                                    borderRadius: 6,
                                     border: '1px solid #cbd5e1',
                                     background: '#ffffff',
-                                    fontSize: 13,
+                                    fontSize: 12,
                                     outline: 'none',
-                                    boxSizing: 'border-box',
-                                    resize: 'none'
+                                    boxSizing: 'border-box'
                                   }}
                                 />
                               </div>
@@ -2059,16 +2068,13 @@ export default function Reports({ isTodaySales = false }) {
                               background: '#ecfdf5',
                               color: '#065f46',
                               border: '1px solid #a7f3d0',
-                              padding: '8px 12px',
-                              borderRadius: 8,
-                              fontSize: 12.5,
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              fontSize: 12,
                               fontWeight: 800,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between'
+                              textAlign: 'center'
                             }}>
-                              <span>✓ Perfect Match! (حساب بالکل برابر ہے)</span>
-                              <span>{CURRENCY}0.00</span>
+                              ✓ Perfect Match! (حساب بالکل برابر ہے) {CURRENCY}0.00
                             </div>
                           )}
                         </div>
@@ -2309,8 +2315,8 @@ export default function Reports({ isTodaySales = false }) {
                           marginBottom: 16,
                           textAlign: 'center'
                         }}>
-                          <div style={{ fontSize: 17, fontWeight: 900, color: '#dc2626' }}>
-                            ⚠️ DIFFERENCE! {diffSign}SAR {Math.abs(diffVal).toFixed(2)} ({diffLabel})
+                          <div style={{ fontSize: 16, fontWeight: 900, color: '#dc2626' }}>
+                            Difference: {diffSign}SAR {Math.abs(diffVal).toFixed(2)} ({diffLabel})
                           </div>
                           {selectedHistoryReport.difference_reason && (
                             <div style={{ marginTop: 6, fontSize: 13, borderTop: '1px dashed #d1d5db', paddingTop: 6, color: '#374151', textAlign: 'left' }}>

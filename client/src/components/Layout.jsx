@@ -47,7 +47,7 @@ const navGroups = [
     items: [
       { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management', 'Operator'] },
       { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
-      { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Hold Payment', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
+      { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Live Orders', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
       { to: '/credit', icon: <BookOpen size={18} strokeWidth={2.2} />, label: 'Credit (Khata)', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
@@ -371,7 +371,7 @@ export default function Layout() {
     '/': 'Dashboard Overview',
     '/pos': 'Order Taking',
     '/inventory': 'Add Item',
-    '/hold-payments': 'Hold Payment Queue',
+    '/hold-payments': 'Live Orders',
     '/today-sales': "Today Sale Analysis",
     '/sales-item': 'Sales Item & Revenue Report',
     '/reports': 'Reports & Analytics',

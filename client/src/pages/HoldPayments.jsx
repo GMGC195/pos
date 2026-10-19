@@ -172,7 +172,7 @@ export default function HoldPayments() {
           <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Clock size={16} /> Held Orders List
+                <Clock size={16} /> Live Order List & Pending Payments
               </h3>
               <div style={{ position: 'relative' }}>
                 <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -353,7 +353,7 @@ export default function HoldPayments() {
                     {orders.length === 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
                         <Sparkles size={48} color="var(--surface-2)" />
-                        <p>No held payments found. All clear!</p>
+                        <p>No live orders or pending payments found. All clear!</p>
                       </div>
                     ) : 'No order ID matches your search.'}
                   </td>
