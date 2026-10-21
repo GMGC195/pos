@@ -331,37 +331,51 @@ export default function Dashboard() {
         </div>
 
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, background: '#f8fafc' }}></th>
+                <th style={{ padding: '8px 8px', textAlign: 'left', fontWeight: 700, background: '#f8fafc' }}></th>
                 
                 {/* Night Columns Header (Cool Indigo / Night Theme) */}
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#e0e7ff', color: '#312e81', borderLeft: '2px solid #cbd5e1' }}>
-                  🌙 Night<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#4338ca' }}>System</span>
-                  {compData.nightCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#6366f1' }}>{compData.nightCashier}</div>}
+                <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 800, background: '#e0e7ff', color: '#312e81', borderLeft: '2px solid #cbd5e1', whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, whiteSpace: 'nowrap' }}>
+                    <span>🌙</span> <span>Night</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#4338ca', whiteSpace: 'nowrap' }}>System</div>
+                  {compData.nightCashier && <div style={{ fontSize: 9.5, fontWeight: 600, color: '#6366f1', whiteSpace: 'nowrap' }}>{compData.nightCashier}</div>}
                 </th>
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#e0e7ff', color: '#1e1b4b' }}>
-                  🌙 Night<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#312e81' }}>Actual</span>
-                  {compData.nightCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#6366f1' }}>{compData.nightCashier}</div>}
+                <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 800, background: '#e0e7ff', color: '#1e1b4b', whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, whiteSpace: 'nowrap' }}>
+                    <span>🌙</span> <span>Night</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#312e81', whiteSpace: 'nowrap' }}>Actual</div>
+                  {compData.nightCashier && <div style={{ fontSize: 9.5, fontWeight: 600, color: '#6366f1', whiteSpace: 'nowrap' }}>{compData.nightCashier}</div>}
                 </th>
 
                 {/* Day Columns Header (Warm Amber / Daylight Theme) */}
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#fef3c7', color: '#92400e', borderLeft: '2px solid #fed7aa' }}>
-                  ☀️ Day<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#b45309' }}>System</span>
-                  {compData.dayCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#d97706' }}>{compData.dayCashier}</div>}
+                <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 800, background: '#fef3c7', color: '#92400e', borderLeft: '2px solid #fed7aa', whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, whiteSpace: 'nowrap' }}>
+                    <span>☀️</span> <span>Day</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#b45309', whiteSpace: 'nowrap' }}>System</div>
+                  {compData.dayCashier && <div style={{ fontSize: 9.5, fontWeight: 600, color: '#d97706', whiteSpace: 'nowrap' }}>{compData.dayCashier}</div>}
                 </th>
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#fef3c7', color: '#78350f' }}>
-                  ☀️ Day<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#92400e' }}>Actual</span>
-                  {compData.dayCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#d97706' }}>{compData.dayCashier}</div>}
+                <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 800, background: '#fef3c7', color: '#78350f', whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, whiteSpace: 'nowrap' }}>
+                    <span>☀️</span> <span>Day</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#92400e', whiteSpace: 'nowrap' }}>Actual</div>
+                  {compData.dayCashier && <div style={{ fontSize: 9.5, fontWeight: 600, color: '#d97706', whiteSpace: 'nowrap' }}>{compData.dayCashier}</div>}
                 </th>
 
                 {/* Total Columns Header (Slate Summary Theme) */}
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 900, background: '#f1f5f9', color: '#0f172a', borderLeft: '2px solid #cbd5e1' }}>
-                  Total<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>System</span>
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 900, background: '#f1f5f9', color: '#0f172a', borderLeft: '2px solid #cbd5e1', whiteSpace: 'nowrap' }}>
+                  <div style={{ whiteSpace: 'nowrap' }}>Total</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', whiteSpace: 'nowrap' }}>System</div>
                 </th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 900, background: '#f1f5f9', color: '#0f172a' }}>
-                  Total<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>Actual</span>
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 900, background: '#f1f5f9', color: '#0f172a', whiteSpace: 'nowrap' }}>
+                  <div style={{ whiteSpace: 'nowrap' }}>Total</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', whiteSpace: 'nowrap' }}>Actual</div>
                 </th>
               </tr>
             </thead>

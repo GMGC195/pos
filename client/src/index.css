@@ -3113,9 +3113,9 @@ tbody tr:hover td {
 }
 
 .closing-modal-card {
-  max-width: 900px !important;
-  width: 95vw !important;
-  padding: 16px 20px !important;
+  max-width: 990px !important;
+  width: 96vw !important;
+  padding: 18px 22px !important;
   max-height: 94vh !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
@@ -3154,8 +3154,8 @@ tbody tr:hover td {
 
 .closing-modal-body {
   display: grid !important;
-  grid-template-columns: 1.05fr 0.95fr !important;
-  gap: 16px !important;
+  grid-template-columns: 1.15fr 0.85fr !important;
+  gap: 18px !important;
   margin-bottom: 14px !important;
 }
 

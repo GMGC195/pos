@@ -404,8 +404,18 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       LEFT JOIN employee_working_hours es ON e.working_hours = es.name
       WHERE ea.employee_id = e.id AND ea.shift_name IS NULL
     `);
-    // Ensure employee_attendance has created_by column
+    // Ensure employee_attendance has created_by and branch column
     await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS created_by VARCHAR(150)');
+    await pool.query('ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS branch VARCHAR(100)');
+    try {
+      await pool.query(`
+        UPDATE employee_attendance ea
+        SET branch = COALESCE(e.branch, 'Branch 1')
+        FROM employees e
+        WHERE ea.employee_id = e.id AND (ea.branch IS NULL OR ea.branch = '')
+      `);
+    } catch (e) {}
+
     // Ensure users has shift and branch column
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS shift VARCHAR(50)');
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS branch VARCHAR(100)');
@@ -801,9 +811,36 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-server.listen(PORT, () => {
-  console.log(`🍕 Pizza Shop Server running on http://localhost:${PORT}`);
-  initCron();
+let listenAttempts = 0;
+const MAX_LISTEN_RETRIES = 10;
+
+function startListening() {
+  server.listen(PORT, () => {
+    console.log(`🍕 Pizza Shop Server running on http://localhost:${PORT}`);
+    initCron();
+  });
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    listenAttempts++;
+    if (listenAttempts <= MAX_LISTEN_RETRIES) {
+      console.warn(`⚠️ Port ${PORT} is currently in use, retrying in 1.5s... (attempt ${listenAttempts}/${MAX_LISTEN_RETRIES})`);
+      setTimeout(() => {
+        try { server.close(); } catch (_) {}
+        startListening();
+      }, 1500);
+      return;
+    }
+    console.error(`❌ Port ${PORT} is still in use after ${MAX_LISTEN_RETRIES} retries.`);
+    console.error(`👉 PowerShell mein yeh command run karein: Stop-Process -Id (Get-NetTCPConnection -LocalPort ${PORT}).OwningProcess -Force`);
+    process.exit(1);
+  } else {
+    console.error('❌ Server error:', err);
+    process.exit(1);
+  }
 });
+
+startListening();
 
 

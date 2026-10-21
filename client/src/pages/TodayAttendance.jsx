@@ -35,6 +35,15 @@ const formatLocalDate = (date) => {
   return getSaudiDateString(date);
 }
 
+const formatBranchCode = (br) => {
+  if (!br) return 'R1';
+  const s = String(br).toUpperCase().trim();
+  if (s.includes('1') || s === 'R1') return 'R1';
+  if (s.includes('2') || s === 'R2') return 'R2';
+  if (s.includes('3') || s === 'R3') return 'R3';
+  return s;
+};
+
 export default function TodayAttendance() {
   const { user } = useAuth()
   const [employees, setEmployees] = useState([])
@@ -63,6 +72,7 @@ export default function TodayAttendance() {
   // Add-new-session form
   const [newCheckIn, setNewCheckIn] = useState('')
   const [newCheckOut, setNewCheckOut] = useState('')
+  const [newBranch, setNewBranch] = useState('R1')
   const [newStatus, setNewStatus] = useState('Present')
 
   // Quick-edit (reason) from row button
@@ -114,6 +124,7 @@ export default function TodayAttendance() {
     setEditSessions([])
     setNewCheckIn('')
     setNewCheckOut('')
+    setNewBranch('R1')
     setNewStatus('Present')
     setEditReason('')
     setSelectedSessionId('')
@@ -169,6 +180,7 @@ export default function TodayAttendance() {
         date: editDate,
         check_in: checkInISO,
         check_out: checkOutISO,
+        branch: newBranch,
         status: newStatus
       })
       toast.success('Session added!')
@@ -179,7 +191,7 @@ export default function TodayAttendance() {
     }
   }
 
-  const handleUpdateExistingSession = async (sessionId, inValISO, outValISO, reason, breakLogs = null) => {
+  const handleUpdateExistingSession = async (sessionId, inValISO, outValISO, reason, breakLogs = null, branch = null) => {
     if (!reason || !reason.trim()) { toast.error('Reason is required'); return }
     setSavingSessionId(sessionId)
     try {
@@ -191,6 +203,9 @@ export default function TodayAttendance() {
       }
       if (breakLogs !== null) {
         payload.break_logs = breakLogs
+      }
+      if (branch !== null) {
+        payload.branch = branch
       }
       await axios.post('/api/attendance/edit', payload)
       toast.success('Session updated!')
@@ -622,10 +637,25 @@ export default function TodayAttendance() {
                        </td>
                        <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>
                          {(() => {
-                           const b = emp.branch || 'R1';
+                           const rawBranch = (sessions.length > 0 && sessions[0].branch) ? sessions[0].branch : (emp.branch || 'R1');
+                           const b = formatBranchCode(rawBranch);
                            const sVal = String(emp.new_shift || emp.shift || 'Day').toLowerCase();
                            const suffix = sVal.includes('night') || sVal.includes('n') ? 'N' : 'D';
-                           return `${b}-${suffix}`;
+                           return (
+                             <span style={{
+                               display: 'inline-flex',
+                               alignItems: 'center',
+                               gap: 4,
+                               padding: '2px 7px',
+                               borderRadius: 4,
+                               background: 'rgba(var(--primary-rgb), 0.1)',
+                               color: 'var(--primary)',
+                               fontWeight: 750,
+                               fontSize: 12
+                             }}>
+                               {b}-{suffix}
+                             </span>
+                           );
                          })()}
                        </td>
                       
@@ -639,8 +669,19 @@ export default function TodayAttendance() {
                               const tag = isEdited ? <span style={{color: '#3B82F6', fontSize: 10, fontWeight: 700}}>(E)</span> : isManual ? <span style={{color: '#8B5CF6', fontSize: 10, fontWeight: 700}}>(M)</span> : null;
                               const valColor = isEdited ? '#3B82F6' : isManual ? '#8B5CF6' : 'var(--green)';
                               return (
-                                <div key={idx} style={{ color: valColor, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                                  In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} {tag}
+                                <div key={idx} style={{ color: valColor, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                                  <span>In: {new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                                  {tag}
+                                  <span style={{
+                                    fontSize: '9px',
+                                    fontWeight: 800,
+                                    padding: '1px 3px',
+                                    borderRadius: '3px',
+                                    background: 'var(--surface-2)',
+                                    color: 'var(--text-muted)'
+                                  }}>
+                                    {formatBranchCode(s.branch || emp.branch)}
+                                  </span>
                                 </div>
                               );
                             })}
@@ -688,41 +729,102 @@ export default function TodayAttendance() {
                       </td>
 
                       <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                        {sessions.length === 0 ? (
-                          emp.calculated_status === 'Absent' ? (
-                            <span style={{ color: 'var(--red)', background: 'rgba(255, 69, 58, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-                              Absent
+                        {(() => {
+                          const totalHours = parseFloat(emp.total_hours_today || 0);
+                          const isCheckedOut = sessions.length > 0 && (!emp.attendance_id || emp.check_out);
+                          const isOnlyOT = isCheckedOut && totalHours > 0 && totalHours < 6;
+
+                          if (sessions.length === 0) {
+                            return emp.calculated_status === 'Absent' ? (
+                              <span style={{ color: 'var(--red)', background: 'rgba(255, 69, 58, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+                                Absent
+                              </span>
+                            ) : (
+                              <span style={{ color: '#F59E0B', background: 'rgba(245, 158, 11, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+                                Pending
+                              </span>
+                            );
+                          }
+                          if (isOnlyOT) {
+                            return (
+                              <span style={{ color: '#8B5CF6', background: 'rgba(139, 92, 246, 0.12)', border: '1px solid rgba(139, 92, 246, 0.3)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                                Only Overtime
+                              </span>
+                            );
+                          }
+                          if (!emp.attendance_id || emp.check_out) {
+                            return (
+                              <span style={{ color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+                                Checked Out
+                              </span>
+                            );
+                          }
+                          return (
+                            <span style={{ 
+                              color: emp.on_break ? 'var(--primary)' : 'var(--green)', 
+                              background: emp.on_break ? 'rgba(var(--primary-rgb), 0.1)' : 'rgba(34, 197, 94, 0.1)', 
+                              padding: '3px 8px', 
+                              borderRadius: 6, 
+                              fontSize: 11, 
+                              fontWeight: 600 
+                            }}>
+                              {emp.on_break ? 'On Break' : emp.attendance_status === 'Late' ? 'Late' : 'Present'}
                             </span>
-                          ) : (
-                            <span style={{ color: '#F59E0B', background: 'rgba(245, 158, 11, 0.1)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-                              Pending
-                            </span>
-                          )
-                        ) : !emp.attendance_id || emp.check_out ? (
-                          <span style={{ color: 'var(--text-muted)', background: 'var(--surface-3)', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-                            Checked Out
-                          </span>
-                        ) : (
-                          <span style={{ 
-                            color: emp.on_break ? 'var(--primary)' : 'var(--green)', 
-                            background: emp.on_break ? 'rgba(var(--primary-rgb), 0.1)' : 'rgba(34, 197, 94, 0.1)', 
-                            padding: '3px 8px', 
-                            borderRadius: 6, 
-                            fontSize: 11, 
-                            fontWeight: 600 
-                          }}>
-                            {emp.on_break ? 'On Break' : emp.attendance_status === 'Late' ? 'Late' : 'Present'}
-                          </span>
-                        )}
+                          );
+                        })()}
                       </td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--green)', textAlign: 'center' }}>
-                        {decimalHoursToText(Math.min(parseFloat(emp.shift_hours) || 12.0, parseFloat(emp.total_hours_today || 0)))}
+                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, textAlign: 'center' }}>
+                        {(() => {
+                          const totalHours = parseFloat(emp.total_hours_today || 0);
+                          const isCheckedOut = sessions.length > 0 && (!emp.attendance_id || emp.check_out);
+                          const isOnlyOT = isCheckedOut && totalHours > 0 && totalHours < 6;
+                          const dutyHours = isOnlyOT ? 0 : Math.min(parseFloat(emp.shift_hours) || 12.0, totalHours);
+                          const dayBranch = formatBranchCode((sessions.length > 0 && sessions[0].branch) ? sessions[0].branch : emp.branch);
+
+                          return (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                              <span style={{ color: isOnlyOT ? '#8B5CF6' : 'var(--green)' }}>
+                                {isOnlyOT ? '0 min' : decimalHoursToText(dutyHours)}
+                              </span>
+                              <span style={{
+                                fontSize: '9px',
+                                fontWeight: 800,
+                                padding: '1px 4px',
+                                borderRadius: '3px',
+                                background: isOnlyOT ? 'rgba(139, 92, 246, 0.15)' : 'rgba(var(--primary-rgb), 0.12)',
+                                color: isOnlyOT ? '#8B5CF6' : 'var(--primary)',
+                                border: isOnlyOT ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(var(--primary-rgb), 0.25)',
+                                lineHeight: 1.1
+                              }}>
+                                {dayBranch}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
                         {formatBreakTime(emp.total_break_seconds_today || 0)}
                       </td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--primary)', textAlign: 'center' }}>
-                        {decimalHoursToText(Math.max(0, parseFloat(emp.total_hours_today || 0) - (parseFloat(emp.shift_hours) || 12.0)))}
+                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, textAlign: 'center' }}>
+                        {(() => {
+                          const totalHours = parseFloat(emp.total_hours_today || 0);
+                          const isCheckedOut = sessions.length > 0 && (!emp.attendance_id || emp.check_out);
+                          const isOnlyOT = isCheckedOut && totalHours > 0 && totalHours < 6;
+                          const otHours = isOnlyOT ? totalHours : Math.max(0, totalHours - (parseFloat(emp.shift_hours) || 12.0));
+
+                          return (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                              <span style={{ color: isOnlyOT ? '#8B5CF6' : 'var(--primary)' }}>
+                                {decimalHoursToText(otHours)}
+                              </span>
+                              {isOnlyOT && (
+                                <span style={{ fontSize: 9, fontWeight: 800, color: '#8B5CF6', background: 'rgba(139, 92, 246, 0.12)', padding: '1px 5px', borderRadius: 4 }}>
+                                  Only OT (&lt;6h)
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       {['admin', 'operator', 'developer'].includes(user?.role?.toLowerCase()) && (
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
@@ -910,6 +1012,16 @@ export default function TodayAttendance() {
                         />
                       </div>
                       <div>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Branch</label>
+                        <select value={newBranch} onChange={e => setNewBranch(e.target.value)}
+                          style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13 }}
+                        >
+                          <option value="R1">R1</option>
+                          <option value="R2">R2</option>
+                          <option value="R3">R3</option>
+                        </select>
+                      </div>
+                      <div>
                         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Status</label>
                         <select value={newStatus} onChange={e => setNewStatus(e.target.value)}
                           style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1.5px solid var(--surface-2)', borderRadius: 8, outline: 'none', fontSize: 13 }}
@@ -981,6 +1093,7 @@ export default function TodayAttendance() {
 function EditSessionRow({ session, previousSession, nextSession, index, saving, onSave, onDelete }) {
   const [inVal, setInVal] = useState(() => toSaudiTimeInput(session.check_in))
   const [outVal, setOutVal] = useState(() => toSaudiTimeInput(session.check_out))
+  const [branchVal, setBranchVal] = useState(() => formatBranchCode(session.branch || 'R1'))
   const [reason, setReason] = useState('')
   const [showAuditLogs, setShowAuditLogs] = useState(false)
 
@@ -1116,7 +1229,7 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
       });
     }
 
-    onSave(session.id, fullInISO, fullOutISO, reason, formattedBreaks);
+    onSave(session.id, fullInISO, fullOutISO, reason, formattedBreaks, branchVal);
   }
 
   return (
@@ -1257,6 +1370,16 @@ function EditSessionRow({ session, previousSession, nextSession, index, saving, 
           <input type="time" lang="en-GB" value={outVal} onChange={e => setOutVal(e.target.value)}
             style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '6px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)' }}
           />
+        </div>
+        <div style={{ width: 85, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Branch</span>
+          <select value={branchVal} onChange={e => setBranchVal(e.target.value)}
+            style={{ border: '1px solid var(--surface-3)', borderRadius: 6, padding: '5px 8px', fontSize: 12, background: 'var(--surface)', color: 'var(--text)', height: 31 }}
+          >
+            <option value="R1">R1</option>
+            <option value="R2">R2</option>
+            <option value="R3">R3</option>
+          </select>
         </div>
       </div>
 

@@ -309,6 +309,9 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       const empLogs = logsMap[emp.id] || {};
       const todayStr = new Date().toISOString().split('T')[0];
 
+      let onlyOvertimeDays = 0;
+      let onlyOvertimeMinutes = 0;
+
       // Loop through each day of the month to run calculations
       for (let day = 1; day <= totalDaysInMonth; day++) {
         const dayStr = `${month}-${String(day).padStart(2, '0')}`;
@@ -333,16 +336,24 @@ router.get('/calculate', authenticateToken, async (req, res) => {
               unpaidLeaves++;
             }
           } else {
-            presents++;
+            let dayWorkedMinutes = 0;
             daySessions.forEach(s => {
               if (s.check_in && s.check_out) {
                 const inTime = new Date(s.check_in).getTime();
                 const outTime = new Date(s.check_out).getTime();
                 const breakTime = (s.total_break_duration_seconds || 0) * 1000;
                 const workedMinutes = Math.max(0, (outTime - inTime - breakTime)) / (1000 * 60);
-                totalActualMinutes += workedMinutes;
+                dayWorkedMinutes += workedMinutes;
               }
             });
+
+            if (dayWorkedMinutes >= 6 * 60) {
+              presents++;
+              totalActualMinutes += dayWorkedMinutes;
+            } else if (dayWorkedMinutes > 0) {
+              onlyOvertimeDays++;
+              onlyOvertimeMinutes += dayWorkedMinutes;
+            }
           }
         } else {
           // No record means absent for past days
@@ -366,13 +377,17 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       let totalOvertimeHours = 0;
 
       if (totalActualMinutes > expectedMonthlyMinutes) {
-        const overtimeMinutes = totalActualMinutes - expectedMonthlyMinutes;
+        const overtimeMinutes = (totalActualMinutes - expectedMonthlyMinutes) + onlyOvertimeMinutes;
         totalOvertimeHours = overtimeMinutes / 60;
         overtimePay = overtimeMinutes * perMinuteRate;
         earnedSalary = baseSalary; // Max out regular earned salary
         deductions = 0;
       } else {
         deductions = baseSalary - earnedSalary;
+        if (onlyOvertimeMinutes > 0) {
+          totalOvertimeHours = onlyOvertimeMinutes / 60;
+          overtimePay = onlyOvertimeMinutes * perMinuteRate;
+        }
       }
       
       const advanceBalance = emp.advance_balance ? parseFloat(emp.advance_balance) : 0;
@@ -415,6 +430,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         allowed_leaves: allowedLeaves,
         presents,
         absents,
+        only_overtime_days: onlyOvertimeDays,
         holidays,
         leaves: leavesCount,
         paid_leaves: paidLeaves,

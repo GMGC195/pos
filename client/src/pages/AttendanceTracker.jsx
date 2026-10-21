@@ -778,22 +778,34 @@ export default function AttendanceTracker() {
           {/* Skeleton loading and stats dashboard */}
           <div style={{ opacity: personalLoading ? 0.6 : 1, transition: 'opacity 0.2s' }}>
             {/* Stats Dashboard */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
-                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Days Present</span>
-                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 40, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--green)' }}>{personalStats?.days_present || 0}</span>}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 24 }}>
+                  <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Days Present (≥6h)</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 40, borderRadius: 4 }}></div> : <span style={{ fontSize: 24, fontWeight: 900, color: 'var(--green)' }}>{personalStats?.days_present || 0}</span>}
                   </div>
-                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Days Late</span>
-                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 40, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--red)' }}>{personalStats?.days_late || 0}</span>}
+                  <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#8B5CF6' }}>OOT Days (&lt;6h)</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 40, borderRadius: 4 }}></div> : <span style={{ fontSize: 24, fontWeight: 900, color: '#8B5CF6' }}>{personalStats?.only_overtime_days || 0}</span>}
                   </div>
-                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Total Hours Worked</span>
-                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{personalStats?.total_hours ? decimalHoursToText(personalStats.total_hours) : '0 min'}</span>}
+                  <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Days Late</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 40, borderRadius: 4 }}></div> : <span style={{ fontSize: 24, fontWeight: 900, color: 'var(--red)' }}>{personalStats?.days_late || 0}</span>}
                   </div>
-                  <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Overtime Hours</span>
-                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 28, fontWeight: 900, color: '#ff9800' }}>{personalStats?.overtime ? decimalHoursToText(personalStats.overtime) : '0 min'}</span>}
+                  <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Total Hours Worked</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 24, fontWeight: 900, color: 'var(--primary)' }}>{personalStats?.total_hours ? decimalHoursToText(personalStats.total_hours) : '0 min'}</span>}
+                  </div>
+                  <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#8B5CF6' }}>Only OT (&lt;6h)</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 24, fontWeight: 900, color: '#8B5CF6' }}>{personalStats?.only_overtime_hours ? decimalHoursToText(personalStats.only_overtime_hours) : '0 min'}</span>}
+                  </div>
+                  <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)' }}>Other OT</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 24, fontWeight: 900, color: 'var(--green)' }}>{personalStats?.other_overtime_hours ? decimalHoursToText(personalStats.other_overtime_hours) : '0 min'}</span>}
+                  </div>
+                  <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Total Overtime</span>
+                    {personalLoading && !personalStats ? <div className="skeleton" style={{ height: 32, width: 80, borderRadius: 4 }}></div> : <span style={{ fontSize: 24, fontWeight: 900, color: '#ff9800' }}>{personalStats?.overtime ? decimalHoursToText(personalStats.overtime) : '0 min'}</span>}
                   </div>
                 </div>
 
@@ -909,15 +921,24 @@ export default function AttendanceTracker() {
                             const breakText = log.total_break_duration_seconds ? `${Math.round(log.total_break_duration_seconds / 60)} min` : '--';
                             
                             let durationHours = '--';
+                            let workedHoursNum = 0;
                             if (log.check_in && log.check_out) {
                               const ms = new Date(log.check_out).getTime() - new Date(log.check_in).getTime();
                               const breaks = (log.total_break_duration_seconds || 0) * 1000;
-                              durationHours = `${Math.max(0, (ms - breaks) / (1000 * 60 * 60)).toFixed(2)} hrs`;
+                              workedHoursNum = Math.max(0, (ms - breaks) / (1000 * 60 * 60));
+                              durationHours = `${workedHoursNum.toFixed(2)} hrs`;
                             }
+                            const isCheckedOut = Boolean(log.check_in && log.check_out);
+                            const isOnlyOT = isCheckedOut && workedHoursNum > 0 && workedHoursNum < 6;
   
                             let statusColor = 'var(--text)';
                             let statusBg = 'var(--surface-2)';
-                            if (log.status === 'Present') {
+                            let statusLabel = log.isDummyToday ? 'Not Checked In' : log.status;
+                            if (isOnlyOT) {
+                              statusColor = '#8B5CF6';
+                              statusBg = 'rgba(139, 92, 246, 0.12)';
+                              statusLabel = 'Only Overtime';
+                            } else if (log.status === 'Present') {
                               statusColor = 'var(--green)';
                               statusBg = 'rgba(16, 185, 129, 0.1)';
                             } else if (log.status === 'Late') {
@@ -935,13 +956,33 @@ export default function AttendanceTracker() {
 
                             return (
                               <tr key={log.id} style={{ background: rowBg, borderBottom: '1px solid var(--surface-2)' }}>
-                                <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{formattedDate}</td>
+                                <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                    <span>{formattedDate}</span>
+                                    {log.branch && (
+                                      <span style={{
+                                        fontSize: '9px',
+                                        fontWeight: 800,
+                                        padding: '1px 5px',
+                                        borderRadius: '3px',
+                                        background: 'rgba(var(--primary-rgb), 0.1)',
+                                        color: 'var(--primary)',
+                                        border: '1px solid rgba(var(--primary-rgb), 0.25)'
+                                      }}>
+                                        {log.branch.includes('1') || log.branch === 'R1' ? 'R1' : log.branch.includes('2') || log.branch === 'R2' ? 'R2' : 'R3'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkInTime}</td>
                                 <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{checkOutTime}</td>
                                 <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center' }}>{breakText}</td>
-                                <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>{durationHours}</td>
+                                <td style={{ padding: '12px 14px', fontSize: 13, textAlign: 'center', fontWeight: 600, color: isOnlyOT ? '#8B5CF6' : 'var(--text)' }}>
+                                  {durationHours}
+                                  {isOnlyOT && <div style={{ fontSize: 10, color: '#8B5CF6' }}>Only OT (&lt;6h)</div>}
+                                </td>
                                 <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                                  <span style={{ color: statusColor, background: statusBg, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{log.isDummyToday ? 'Not Checked In' : log.status}</span>
+                                  <span style={{ color: statusColor, background: statusBg, padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{statusLabel}</span>
                                 </td>
                                 <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--text-muted)' }}>{log.remarks || '--'}</td>
                                 <td style={{ padding: '12px 14px', textAlign: 'center', display: 'flex', gap: 6, justifyContent: 'center' }}>

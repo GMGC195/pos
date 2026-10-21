@@ -339,7 +339,7 @@ router.get('/today', authenticateToken, async (req, res) => {
 
     // Fetch all today's attendance sessions
     const sessions = await pool.query(`
-      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, break_logs, remarks, shift_start_time, shift_end_time, created_by, checked_out_by
+      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, break_logs, remarks, shift_start_time, shift_end_time, created_by, checked_out_by, branch
       FROM employee_attendance
       WHERE date = CURRENT_DATE OR check_out IS NULL
       ORDER BY check_in ASC
@@ -451,7 +451,7 @@ router.post('/check-in', authenticateToken, async (req, res) => {
     }
 
     // Fetch employee shift details
-    const empRes = await pool.query('SELECT name, working_hours, shift_hours, shift, strict_attendance, custom_deduction_active, custom_deduction_rules FROM employees WHERE id = $1', [employee_id]);
+    const empRes = await pool.query('SELECT name, working_hours, shift_hours, shift, strict_attendance, custom_deduction_active, custom_deduction_rules, branch FROM employees WHERE id = $1', [employee_id]);
     if (empRes.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found.' });
     }
@@ -640,10 +640,11 @@ router.post('/check-in', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `You are only allowed to mark attendance for employees in Shift(s): ${req.user.shift}` });
     }
 
+    const sessionBranch = req.body.branch || req.user.branch || empRes.rows[0].branch || 'Branch 1';
     const remarks = isEarlyCurrent ? 'Early Check-In (Pending Admin Review)' : null;
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2, remarks) VALUES ($1, $11, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10, $12) RETURNING *',
-      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime, isSplitShift, shiftStartTime2, shiftEndTime2, checkInTime, remarks]
+      'INSERT INTO employee_attendance (employee_id, check_in, status, date, created_by, shift_name, shift_hours, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2, remarks, branch) VALUES ($1, $11, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10, $12, $13) RETURNING *',
+      [employee_id, status, req.user.username, shift, shiftHours, shiftStartTime, shiftEndTime, isSplitShift, shiftStartTime2, shiftEndTime2, checkInTime, remarks, sessionBranch]
     );
 
     if (isEarlyCurrent) {
@@ -960,7 +961,7 @@ router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.break_logs, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, ea.created_by, ea.checked_out_by, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch
+      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.break_logs, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, ea.created_by, ea.checked_out_by, COALESCE(ea.branch, e.branch, 'Branch 1') as branch, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch as emp_master_branch
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE 1=1
@@ -1250,6 +1251,7 @@ router.get('/employee-date', authenticateToken, async (req, res) => {
         ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, 
         ea.break_start, ea.total_break_duration_seconds, ea.break_logs,
         ea.created_by, ea.checked_out_by, ea.created_at, ea.remarks,
+        COALESCE(ea.branch, (SELECT branch FROM employees WHERE id = ea.employee_id), 'Branch 1') as branch,
         COALESCE(
           (
             SELECT json_agg(
@@ -1283,7 +1285,7 @@ router.get('/employee-date', authenticateToken, async (req, res) => {
 // Update a specific attendance session
 router.put('/session/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { check_in, check_out, break_logs } = req.body;
+  const { check_in, check_out, break_logs, branch } = req.body;
   if (!check_in) {
     return res.status(400).json({ error: 'Check-in time is required' });
   }
@@ -1326,13 +1328,19 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
       const hasActiveBreak = parsedBreakLogs.length > 0 && !parsedBreakLogs[parsedBreakLogs.length - 1].break_out;
       const activeBreakStart = hasActiveBreak ? parsedBreakLogs[parsedBreakLogs.length - 1].break_in : null;
       resDB = await pool.query(
-        'UPDATE employee_attendance SET check_in = $1, check_out = $2, checked_out_by = $4, break_logs = $5, total_break_duration_seconds = $6, on_break = $7, break_start = $8 WHERE id = $3 RETURNING *',
-        [check_in, check_out || null, id, req.user.username, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
+        `UPDATE employee_attendance 
+         SET check_in = $1, check_out = $2, checked_out_by = $4, break_logs = $5, total_break_duration_seconds = $6, on_break = $7, break_start = $8,
+             branch = CASE WHEN $9::varchar IS NOT NULL THEN $9::varchar ELSE branch END
+         WHERE id = $3 RETURNING *`,
+        [check_in, check_out || null, id, req.user.username, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart, branch || null]
       );
     } else {
       resDB = await pool.query(
-        'UPDATE employee_attendance SET check_in = $1, check_out = $2, checked_out_by = $4 WHERE id = $3 RETURNING *',
-        [check_in, check_out || null, id, req.user.username]
+        `UPDATE employee_attendance 
+         SET check_in = $1, check_out = $2, checked_out_by = $4,
+             branch = CASE WHEN $5::varchar IS NOT NULL THEN $5::varchar ELSE branch END
+         WHERE id = $3 RETURNING *`,
+        [check_in, check_out || null, id, req.user.username, branch || null]
       );
     }
 
@@ -1344,7 +1352,7 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
 
 // Create a new manual attendance session
 router.post('/session', authenticateToken, async (req, res) => {
-  const { employee_id, date, check_in, check_out, status, break_logs } = req.body;
+  const { employee_id, date, check_in, check_out, status, break_logs, branch } = req.body;
   if (!employee_id || !date || !check_in) {
     return res.status(400).json({ error: 'Employee ID, date, and check-in time are required' });
   }
@@ -1415,9 +1423,14 @@ router.post('/session', authenticateToken, async (req, res) => {
   const checkedOutBy = check_out ? req.user.username : null;
 
   try {
+    let sessionBranch = branch;
+    if (!sessionBranch) {
+      const empResB = await pool.query('SELECT branch FROM employees WHERE id = $1', [employee_id]);
+      sessionBranch = empResB.rows[0]?.branch || 'Branch 1';
+    }
     const result = await pool.query(
-      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by, checked_out_by, remarks, break_logs, total_break_duration_seconds, on_break, break_start) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *',
-      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username, checkedOutBy, 'Manual', JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart]
+      'INSERT INTO employee_attendance (employee_id, date, check_in, check_out, status, created_by, checked_out_by, remarks, break_logs, total_break_duration_seconds, on_break, break_start, branch) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *',
+      [employee_id, date, check_in, check_out || null, status || 'Present', req.user.username, checkedOutBy, 'Manual', JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart, sessionBranch]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1459,7 +1472,7 @@ router.delete('/session/:id', authenticateToken, async (req, res) => {
 
 // Edit attendance record and log it in audit history
 router.post('/edit', authenticateToken, async (req, res) => {
-  const { attendance_id, new_check_in, new_check_out, reason, break_logs } = req.body;
+  const { attendance_id, new_check_in, new_check_out, reason, break_logs, branch } = req.body;
   const edited_by = req.user.username;
 
   if (!attendance_id || !reason) {
@@ -1551,17 +1564,19 @@ router.post('/edit', authenticateToken, async (req, res) => {
          SET check_in = $1, check_out = $2, remarks = 'Edited',
              checked_out_by = CASE WHEN $8::varchar IS NOT NULL THEN $8::varchar ELSE checked_out_by END,
              break_logs = $4, total_break_duration_seconds = $5,
-             on_break = $6, break_start = $7
+             on_break = $6, break_start = $7,
+             branch = CASE WHEN $9::varchar IS NOT NULL THEN $9::varchar ELSE branch END
          WHERE id = $3`,
-        [new_check_in || null, new_check_out || null, attendance_id, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart, setCheckedOutBy]
+        [new_check_in || null, new_check_out || null, attendance_id, JSON.stringify(parsedBreakLogs), totalBreakSecs, hasActiveBreak, activeBreakStart, setCheckedOutBy, branch || null]
       );
     } else {
       await pool.query(
         `UPDATE employee_attendance 
          SET check_in = $1, check_out = $2, remarks = 'Edited',
-             checked_out_by = CASE WHEN $4::varchar IS NOT NULL THEN $4::varchar ELSE checked_out_by END
+             checked_out_by = CASE WHEN $4::varchar IS NOT NULL THEN $4::varchar ELSE checked_out_by END,
+             branch = CASE WHEN $5::varchar IS NOT NULL THEN $5::varchar ELSE branch END
          WHERE id = $3`,
-        [new_check_in || null, new_check_out || null, attendance_id, setCheckedOutBy]
+        [new_check_in || null, new_check_out || null, attendance_id, setCheckedOutBy, branch || null]
       );
     }
 
@@ -1691,29 +1706,49 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
     
     // Calculate stats
     const totalDays = logsRes.rows.length;
-    const daysPresent = new Set(logsRes.rows.filter(log => log.status === 'Present' || log.status === 'Late').map(log => log.date.toISOString().split('T')[0])).size;
-    const daysLate = new Set(logsRes.rows.filter(log => log.status === 'Late').map(log => log.date.toISOString().split('T')[0])).size;
-    
-    let totalHours = 0;
-    let expectedHours = 0;
-    let processedDates = new Set();
-    
+    const dayMap = {};
     logsRes.rows.forEach(log => {
       const dateStr = log.date.toISOString().split('T')[0];
-      if ((log.status === 'Present' || log.status === 'Late') && !processedDates.has(dateStr)) {
-        processedDates.add(dateStr);
-        expectedHours += parseFloat(log.shift_hours || employee.shift_hours || 12.0);
-      }
-
-      const checkInTime = new Date(log.check_in).getTime();
-      const checkOutTime = log.check_out ? new Date(log.check_out).getTime() : new Date().getTime();
-      const breakSecs = log.total_break_duration_seconds || 0;
-      const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
-      totalHours += Math.max(0, sessionMs / (1000 * 60 * 60));
+      if (!dayMap[dateStr]) dayMap[dateStr] = [];
+      dayMap[dateStr].push(log);
     });
-    
-    const overtime = Math.max(0, totalHours - expectedHours);
-    
+
+    let daysPresent = 0;
+    let daysLate = 0;
+    let onlyOvertimeDays = 0;
+    let totalDutyHours = 0;
+    let onlyOvertimeHours = 0;
+    let otherOvertimeHours = 0;
+
+    Object.keys(dayMap).forEach(dateStr => {
+      const dayLogs = dayMap[dateStr];
+      const mainLog = dayLogs[0];
+      if (mainLog.status === 'Holiday' || mainLog.status === 'Leave') return;
+
+      let dayWorkedHours = 0;
+      dayLogs.forEach(log => {
+        const checkInTime = new Date(log.check_in).getTime();
+        const checkOutTime = log.check_out ? new Date(log.check_out).getTime() : new Date().getTime();
+        const breakSecs = log.total_break_duration_seconds || 0;
+        const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
+        dayWorkedHours += Math.max(0, sessionMs / (1000 * 60 * 60));
+      });
+
+      const shiftHours = parseFloat(mainLog.shift_hours || employee.shift_hours || 12.0);
+
+      if (dayWorkedHours >= 6.0) {
+        daysPresent++;
+        if (dayLogs.some(l => l.status === 'Late')) daysLate++;
+        totalDutyHours += Math.min(shiftHours, dayWorkedHours);
+        otherOvertimeHours += Math.max(0, dayWorkedHours - shiftHours);
+      } else if (dayWorkedHours > 0) {
+        onlyOvertimeDays++;
+        onlyOvertimeHours += dayWorkedHours;
+      }
+    });
+
+    const totalOvertime = onlyOvertimeHours + otherOvertimeHours;
+
     // Fetch pending requests for this employee
     const reqsRes = await pool.query(
       `SELECT * FROM attendance_edit_requests 
@@ -1729,8 +1764,11 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
       position: employee.position,
       days_present: daysPresent,
       days_late: daysLate,
-      total_hours: parseFloat(totalHours.toFixed(2)),
-      overtime: parseFloat(overtime.toFixed(2)),
+      only_overtime_days: onlyOvertimeDays,
+      total_hours: parseFloat(totalDutyHours.toFixed(2)),
+      only_overtime_hours: parseFloat(onlyOvertimeHours.toFixed(2)),
+      other_overtime_hours: parseFloat(otherOvertimeHours.toFixed(2)),
+      overtime: parseFloat(totalOvertime.toFixed(2)),
       monthly_logs: logsRes.rows,
       pending_requests: reqsRes.rows
     });
