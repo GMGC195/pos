@@ -71,7 +71,10 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_number VARCHAR(100)',
       'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS note TEXT',
       'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS file_path TEXT',
-      'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS expiry_date DATE'
+      'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS expiry_date DATE',
+      'ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS closing_card NUMERIC(10, 2) DEFAULT 0',
+      'ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS card_difference NUMERIC(10, 2) DEFAULT 0',
+      'ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS cash_difference NUMERIC(10, 2) DEFAULT 0'
     ];
 
     for (const sq of safeStartupQueries) {

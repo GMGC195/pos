@@ -54,7 +54,10 @@ async function runLatestMigrations() {
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by VARCHAR(150);');
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;');
     await client.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS report_emails JSONB DEFAULT '[\"mr.caffee25@gmail.com\"]'::jsonb;");
-    console.log('✅ orders and settings columns verified.');
+    await client.query('ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS closing_card NUMERIC(10, 2) DEFAULT 0;');
+    await client.query('ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS card_difference NUMERIC(10, 2) DEFAULT 0;');
+    await client.query('ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS cash_difference NUMERIC(10, 2) DEFAULT 0;');
+    console.log('✅ orders, settings, and shift_closings columns verified.');
 
     await client.query('COMMIT');
     console.log('\n🎉 ALL LATEST DATABASE MIGRATIONS COMPLETED SUCCESSFULLY!');

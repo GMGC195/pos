@@ -499,6 +499,14 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
       );
       const activeShift = activeShiftRes.rows[0] || null;
 
+      const majorPaymentsRes = await pool.query(`
+        SELECT COALESCE(SUM(amount), 0) as total
+        FROM credit_transactions
+        WHERE type = 'PAYMENT' ${isAdminRole ? '' : 'AND cashier_name = $1'}
+          AND created_at >= $${isAdminRole ? 1 : 2}
+      `, isAdminRole ? [activeShift?.start_time || new Date(0)] : [username, activeShift?.start_time || new Date(0)]);
+      const majorPayments = parseFloat(majorPaymentsRes.rows[0]?.total || 0);
+
       return res.json({
         success: true,
         closing_type: 'Shift',
@@ -507,6 +515,7 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         cash_sales: parseFloat(totals.rows[0]?.cash_sales || 0),
         card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
         credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
+        major_payments: majorPayments,
         start_time: activeShift?.start_time || null,
         opening_cash: parseFloat(activeShift?.opening_cash || 0)
       });
@@ -538,7 +547,7 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
 
       // Closed shifts in this daily cycle
       const shiftsRes = await pool.query(`
-        SELECT cashier_name, total_sales, cash_sales, card_sales, credit_sales, total_orders, login_time, logout_time, closing_cash, difference, difference_reason
+        SELECT cashier_name, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, login_time, logout_time, closing_cash, closing_card, difference, difference_reason, cash_difference, card_difference
         FROM shift_closings
         WHERE branch = $1 AND closing_type = 'Shift' AND logout_time >= $2
         ORDER BY logout_time ASC
@@ -550,10 +559,14 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         cash_sales: parseFloat(s.cash_sales || 0),
         card_sales: parseFloat(s.card_sales || 0),
         credit_sales: parseFloat(s.credit_sales || 0),
+        major_payments: parseFloat(s.major_payments || 0),
         total_orders: parseInt(s.total_orders || 0, 10),
         login_time: s.login_time,
         logout_time: s.logout_time,
         closing_cash: s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash) : null,
+        closing_card: s.closing_card !== null && s.closing_card !== undefined ? parseFloat(s.closing_card) : null,
+        cash_difference: s.cash_difference !== null && s.cash_difference !== undefined ? parseFloat(s.cash_difference) : null,
+        card_difference: s.card_difference !== null && s.card_difference !== undefined ? parseFloat(s.card_difference) : null,
         difference: s.difference !== null && s.difference !== undefined ? parseFloat(s.difference) : null,
         difference_reason: s.difference_reason || ''
       }));
@@ -583,12 +596,23 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
           cash_sales: parseFloat(u.cash_sales || 0),
           card_sales: parseFloat(u.card_sales || 0),
           credit_sales: parseFloat(u.credit_sales || 0),
+          major_payments: 0,
           total_orders: parseInt(u.total_orders || 0, 10),
           closing_cash: null,
+          closing_card: null,
+          cash_difference: null,
+          card_difference: null,
           difference: null,
           is_active: true
         });
       });
+
+      const dailyMajorPaymentsRes = await pool.query(`
+        SELECT COALESCE(SUM(amount), 0) as total
+        FROM credit_transactions
+        WHERE type = 'PAYMENT' AND created_at >= $1
+      `, [loginTime]);
+      const dailyMajorPayments = parseFloat(dailyMajorPaymentsRes.rows[0]?.total || 0);
 
       return res.json({
         success: true,
@@ -599,6 +623,7 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         cash_sales: parseFloat(totals.rows[0]?.cash_sales || 0),
         card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
         credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
+        major_payments: dailyMajorPayments,
         shifts
       });
     }
@@ -1175,131 +1200,168 @@ async function sendClosingEmail(report, closingType) {
         shiftsArr = report.shifts_summary;
       }
 
-      const displayShifts = (shiftsArr && shiftsArr.length > 0) ? [...shiftsArr] : [{
-        cashier_name: report.cashier_name || 'Day',
-        total_sales: parseFloat(report.total_sales || 0),
-        cash_sales: parseFloat(report.cash_sales || 0),
-        card_sales: parseFloat(report.card_sales || 0),
-        closing_cash: parseFloat(report.closing_cash || 0),
-        difference: diffVal
-      }];
+      const night = shiftsArr[0] || null;
+      const day = shiftsArr[1] || null;
 
-      if (displayShifts.length === 1) {
-        displayShifts.push({
-          cashier_name: '',
-          total_sales: 0,
-          cash_sales: 0,
-          card_sales: 0,
-          closing_cash: null,
-          difference: null
-        });
-      }
+      const nightCashier = night?.cashier_name || '';
+      const dayCashier = day?.cashier_name || '';
 
-      const getShiftLabel = (s, idx, totalCount) => {
-        if (totalCount === 2) return idx === 0 ? 'Day' : 'Night';
-        if (totalCount === 1) return 'Day';
-        return `Shift ${idx + 1}`;
+      const nightSysCash = parseFloat(night?.cash_sales || 0);
+      const nightActCash = night?.closing_cash !== null && night?.closing_cash !== undefined 
+        ? parseFloat(night.closing_cash) 
+        : (night ? nightSysCash : 0);
+
+      const nightSysCard = parseFloat(night?.card_sales || 0);
+      const nightActCard = night?.closing_card !== null && night?.closing_card !== undefined 
+        ? parseFloat(night.closing_card) 
+        : (night ? nightSysCard : 0);
+
+      const nightSysCredit = parseFloat(night?.credit_sales || 0);
+      const nightActCredit = nightSysCredit;
+
+      const nightSysMajor = parseFloat(night?.major_payments || 0);
+      const nightActMajor = nightSysMajor;
+
+      const nightCashDiff = nightActCash - nightSysCash;
+      const nightCardDiff = nightActCard - nightSysCard;
+      const nightDiff = night ? (night.difference !== null && night.difference !== undefined ? parseFloat(night.difference) : (nightCashDiff + nightCardDiff)) : 0;
+
+      // Day
+      const daySysCash = parseFloat(day?.cash_sales || 0);
+      const dayActCash = day?.closing_cash !== null && day?.closing_cash !== undefined 
+        ? parseFloat(day.closing_cash) 
+        : (day ? daySysCash : 0);
+
+      const daySysCard = parseFloat(day?.card_sales || 0);
+      const dayActCard = day?.closing_card !== null && day?.closing_card !== undefined 
+        ? parseFloat(day.closing_card) 
+        : (day ? daySysCard : 0);
+
+      const daySysCredit = parseFloat(day?.credit_sales || 0);
+      const dayActCredit = daySysCredit;
+
+      const daySysMajor = parseFloat(day?.major_payments || 0);
+      const dayActMajor = daySysMajor;
+
+      const dayCashDiff = dayActCash - daySysCash;
+      const dayCardDiff = dayActCard - daySysCard;
+      const dayDiff = day ? (day.difference !== null && day.difference !== undefined ? parseFloat(day.difference) : (dayCashDiff + dayCardDiff)) : 0;
+
+      // Totals
+      const totalSysCash = nightSysCash + daySysCash;
+      const totalActCash = nightActCash + dayActCash;
+
+      const totalSysCard = nightSysCard + daySysCard;
+      const totalActCard = nightActCard + dayActCard;
+
+      const totalSysCredit = nightSysCredit + daySysCredit;
+      const totalActCredit = nightActCredit + dayActCredit;
+
+      const totalSysMajor = nightSysMajor + daySysMajor;
+      const totalActMajor = nightActMajor + dayActMajor;
+
+      const totalCashDiff = totalActCash - totalSysCash;
+      const totalCardDiff = totalActCard - totalSysCard;
+      const totalDiffVal = totalCashDiff + totalCardDiff;
+
+      const fmtDiff = (d) => {
+        if (d === null || d === undefined || isNaN(d) || Math.abs(d) < 0.005) return '0.00';
+        return d > 0 ? `+${d.toFixed(2)}` : d.toFixed(2);
       };
-
-      const numCols = displayShifts.length;
-      const colHeaders = displayShifts.map((s, idx) => `
-        <th style="padding: 10px 14px; text-align: right; font-size: 13.5px; font-weight: 700; color: #1e293b;">
-          ${getShiftLabel(s, idx, numCols)}
-          <div style="font-size: 11px; font-weight: normal; color: #64748b;">${s.cashier_name || ''}</div>
-        </th>
-      `).join('');
-
-      const shiftTotalCells = displayShifts.map(s => `
-        <td style="padding: 9px 14px; text-align: right; color: #334155;">
-          ${parseFloat(s.total_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </td>
-      `).join('');
-
-      const shiftCardCells = displayShifts.map(s => `
-        <td style="padding: 9px 14px; text-align: right; color: #334155;">
-          ${parseFloat(s.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </td>
-      `).join('');
-
-      const shiftCashCells = displayShifts.map(s => `
-        <td style="padding: 9px 14px; text-align: right; color: #334155;">
-          ${parseFloat(s.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </td>
-      `).join('');
-
-      const shiftCountedCells = displayShifts.map(s => {
-        if (s.closing_cash === null || s.closing_cash === undefined) return '<td style="padding: 9px 14px; text-align: right; color: #334155;">-</td>';
-        const cVal = parseFloat(s.closing_cash || 0);
-        const cardVal = parseFloat(s.card_sales || 0);
-        const sVal = cVal + cardVal;
-        return `
-          <td style="padding: 9px 14px; text-align: right; color: #334155;">
-            <div>${cVal.toFixed(2)} + ${cardVal.toFixed(2)}</div>
-            <div style="font-size: 11px; color: #64748b; font-weight: 700;">(= ${sVal.toFixed(2)})</div>
-          </td>
-        `;
-      }).join('');
-
-      const shiftDiffCells = displayShifts.map(s => {
-        if (s.difference === null || s.difference === undefined) return '<td style="padding: 9px 14px; text-align: right; color: #334155;">-</td>';
-        const d = parseFloat(s.difference || 0);
-        const sign = d < 0 ? '-' : (d > 0 ? '+' : '');
-        return `<td style="padding: 9px 14px; text-align: right; font-weight: 700; color: ${d < 0 ? '#b91c1c' : '#15803d'};">${sign}${Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`;
-      }).join('');
-
-      const totalSalesFormatted = parseFloat(report.total_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const cardSalesFormatted = parseFloat(report.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const cashSalesFormatted = parseFloat(report.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const totalCashNum = parseFloat(report.closing_cash || 0);
-      const totalCardNum = parseFloat(report.card_sales || 0);
-      const grandCounted = totalCashNum + totalCardNum;
-      const countedCashFormatted = `<div>${totalCashNum.toFixed(2)} + ${totalCardNum.toFixed(2)}</div><div style="font-size: 11px; color: #0f172a; font-weight: 900;">(= ${grandCounted.toFixed(2)})</div>`;
-      const diffFormatted = `${diffVal < 0 ? '-' : (diffVal > 0 ? '+' : '')}${Math.abs(diffVal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
       shiftsHtml = `
         <div style="margin-bottom: 24px;">
-          <h3 style="margin: 0 0 10px 0; font-size: 16px; font-weight: 800; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 6px;">
+          <h3 style="margin: 0 0 10px 0; font-size: 15px; font-weight: 800; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 6px;">
             Daily summary: day + night
           </h3>
           <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; overflow-x: auto;">
-            <table style="width: 100%; min-width: 320px; border-collapse: collapse; font-size: 13.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            <table style="width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
               <thead>
-                <tr style="background: #f1f5f9; border-bottom: 1.5px solid #cbd5e1;">
-                  <th style="padding: 10px 14px; text-align: left; font-weight: 700; color: #475569;"></th>
-                  ${colHeaders}
-                  <th style="padding: 10px 14px; text-align: right; font-weight: 900; color: #0f172a; font-size: 14px;">Total</th>
+                <tr style="background: #f8fafc; border-bottom: 1.5px solid #cbd5e1;">
+                  <th style="padding: 10px 12px; text-align: left; font-weight: 700; color: #475569;"></th>
+                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
+                    Night<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">System</span>
+                    ${nightCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${nightCashier}</div>` : ''}
+                  </th>
+                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
+                    Night<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">Actual</span>
+                    ${nightCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${nightCashier}</div>` : ''}
+                  </th>
+                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
+                    Day<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">System</span>
+                    ${dayCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${dayCashier}</div>` : ''}
+                  </th>
+                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
+                    Day<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">Actual</span>
+                    ${dayCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${dayCashier}</div>` : ''}
+                  </th>
+                  <th style="padding: 10px 12px; text-align: right; font-weight: 900; color: #0f172a; font-size: 13.5px;">
+                    Total<br><span style="font-weight: 700; font-size: 11px; color: #64748b;">System</span>
+                  </th>
+                  <th style="padding: 10px 12px; text-align: right; font-weight: 900; color: #0f172a; font-size: 13.5px;">
+                    Total<br><span style="font-weight: 700; font-size: 11px; color: #64748b;">Actual</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Total sales</td>
-                  ${shiftTotalCells}
-                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${totalSalesFormatted}</td>
+                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Cash sale</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysCash.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${nightActCash.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysCash.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${dayActCash.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysCash.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActCash.toFixed(2)}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Cash sales</td>
-                  ${shiftCashCells}
-                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${cashSalesFormatted}</td>
+                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Card / Bank sale</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysCard.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${nightActCard.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysCard.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${dayActCard.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysCard.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActCard.toFixed(2)}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Card (to bank)</td>
-                  ${shiftCardCells}
-                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${cardSalesFormatted}</td>
+                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Credit sale</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysCredit.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightActCredit.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysCredit.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${dayActCredit.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysCredit.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActCredit.toFixed(2)}</td>
                 </tr>
                 <tr style="border-bottom: 1.5px solid #cbd5e1;">
-                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Counted cash</td>
-                  ${shiftCountedCells}
-                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${countedCashFormatted}</td>
+                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Major Payments</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysMajor.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightActMajor.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysMajor.toFixed(2)}</td>
+                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${dayActMajor.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysMajor.toFixed(2)}</td>
+                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActMajor.toFixed(2)}</td>
                 </tr>
-                <tr style="background: #f8fafc;">
-                  <td style="padding: 11px 14px; font-weight: 800; color: #991b1b;">Difference</td>
-                  ${shiftDiffCells}
-                  <td style="padding: 11px 14px; text-align: right; font-weight: 900; color: ${diffVal < 0 ? '#991b1b' : '#15803d'}; font-size: 15px;">
-                    ${diffFormatted}
+                <tr style="background: #f8fafc; font-weight: 800;">
+                  <td style="padding: 10px 12px; color: #0f172a;">Difference</td>
+                  <td style="padding: 10px 10px; text-align: right;"></td>
+                  <td style="padding: 10px 10px; text-align: right; color: ${nightDiff < 0 ? '#b91c1c' : (nightDiff > 0 ? '#15803d' : '#0f172a')};">
+                    ${fmtDiff(nightDiff)}
+                  </td>
+                  <td style="padding: 10px 10px; text-align: right;"></td>
+                  <td style="padding: 10px 10px; text-align: right; color: ${dayDiff < 0 ? '#b91c1c' : (dayDiff > 0 ? '#15803d' : '#0f172a')};">
+                    ${fmtDiff(dayDiff)}
+                  </td>
+                  <td style="padding: 10px 12px; text-align: right;"></td>
+                  <td style="padding: 10px 12px; text-align: right; font-size: 14px; color: ${totalDiffVal < 0 ? '#b91c1c' : (totalDiffVal > 0 ? '#15803d' : '#0f172a')};">
+                    ${fmtDiff(totalDiffVal)}
                   </td>
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div style="margin-top: 6px; font-size: 11.5px; color: #64748b; font-weight: 600; text-align: right;">
+            Cash Diff: <strong style="color: ${totalCashDiff < 0 ? '#b91c1c' : '#047857'}">${fmtDiff(totalCashDiff)}</strong> &nbsp;|&nbsp; 
+            Card Diff: <strong style="color: ${totalCardDiff < 0 ? '#b91c1c' : '#2563eb'}">${fmtDiff(totalCardDiff)}</strong> &nbsp;|&nbsp; 
+            Total Diff: <strong style="color: ${totalDiffVal < 0 ? '#b91c1c' : '#0f172a'}">${fmtDiff(totalDiffVal)}</strong>
           </div>
         </div>
       `;
@@ -1602,15 +1664,24 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     });
 
     const closingCash = parseFloat(req.body?.remaining_cash ?? req.body?.closing_cash ?? 0) || 0;
+    const closingCard = parseFloat(req.body?.remaining_card ?? req.body?.closing_card ?? 0) || 0;
     const totalSalesNum = parseFloat(totals.rows[0]?.total_sales || 0);
+    const cashSalesNum = parseFloat(totals.rows[0]?.cash_sales || 0);
     const cardSalesNum = parseFloat(totals.rows[0]?.card_sales || 0);
-    // Difference = (Counted Drawer Cash + Card Sales) - Total Sales = Counted Drawer Cash - Cash Sales
-    const difference = (closingCash + cardSalesNum) - totalSalesNum;
+    
+    const cashDifference = closingCash - cashSalesNum;
+    const cardDifference = closingCard - cardSalesNum;
+    const difference = cashDifference + cardDifference;
     const differenceReason = (req.body?.difference_reason || '').trim();
 
     const insertRes = await client.query(`
-      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type, closing_cash, opening_cash, interval_items, difference, difference_reason)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Shift', $14, $15, $16, $17, $18)
+      INSERT INTO shift_closings (
+        cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, 
+        total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, 
+        items_summary, closing_type, closing_cash, closing_card, opening_cash, 
+        interval_items, difference, cash_difference, card_difference, difference_reason
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Shift', $14, $15, $16, $17, $18, $19, $20, $21)
       RETURNING *
     `, [
       req.user.id,
@@ -1627,9 +1698,12 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       totals.rows[0].total_orders,
       JSON.stringify(itemsResult.rows),
       closingCash,
+      closingCard,
       openingCash,
       JSON.stringify(intervals),
       difference,
+      cashDifference,
+      cardDifference,
       differenceReason
     ]);
     insertRes.rows[0].interval_items = intervals;
@@ -1760,15 +1834,19 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     });
 
     const closingCash = parseFloat(req.body?.remaining_cash ?? req.body?.closing_cash ?? 0) || 0;
+    const closingCard = parseFloat(req.body?.remaining_card ?? req.body?.closing_card ?? 0) || 0;
     const totalSalesNum = parseFloat(totals.rows[0]?.total_sales || 0);
+    const cashSalesNum = parseFloat(totals.rows[0]?.cash_sales || 0);
     const cardSalesNum = parseFloat(totals.rows[0]?.card_sales || 0);
-    // Difference = (Counted Drawer Cash + Card Sales) - Total Sales = Counted Drawer Cash - Cash Sales
-    const difference = (closingCash + cardSalesNum) - totalSalesNum;
+    
+    const cashDifference = closingCash - cashSalesNum;
+    const cardDifference = closingCard - cardSalesNum;
+    const difference = cashDifference + cardDifference;
     const differenceReason = (req.body?.difference_reason || '').trim();
 
     // Query all closed shifts that occurred in this daily closing window
     const shiftsRes = await client.query(`
-      SELECT cashier_name, total_sales, cash_sales, card_sales, credit_sales, total_orders, login_time, logout_time, closing_cash, difference, difference_reason
+      SELECT cashier_name, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, login_time, logout_time, closing_cash, closing_card, difference, difference_reason, cash_difference, card_difference
       FROM shift_closings
       WHERE branch = $1 AND closing_type = 'Shift' AND logout_time >= $2
       ORDER BY logout_time ASC
@@ -1780,10 +1858,14 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       cash_sales: parseFloat(s.cash_sales || 0),
       card_sales: parseFloat(s.card_sales || 0),
       credit_sales: parseFloat(s.credit_sales || 0),
+      major_payments: parseFloat(s.major_payments || 0),
       total_orders: parseInt(s.total_orders || 0, 10),
       login_time: s.login_time,
       logout_time: s.logout_time,
       closing_cash: s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash) : null,
+      closing_card: s.closing_card !== null && s.closing_card !== undefined ? parseFloat(s.closing_card) : null,
+      cash_difference: s.cash_difference !== null && s.cash_difference !== undefined ? parseFloat(s.cash_difference) : (s.closing_cash !== null ? parseFloat(s.closing_cash) - parseFloat(s.cash_sales || 0) : null),
+      card_difference: s.card_difference !== null && s.card_difference !== undefined ? parseFloat(s.card_difference) : (s.closing_card !== null ? parseFloat(s.closing_card) - parseFloat(s.card_sales || 0) : null),
       difference: s.difference !== null && s.difference !== undefined ? parseFloat(s.difference) : null,
       difference_reason: s.difference_reason || ''
     }));
@@ -1813,8 +1895,12 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
         cash_sales: parseFloat(u.cash_sales || 0),
         card_sales: parseFloat(u.card_sales || 0),
         credit_sales: parseFloat(u.credit_sales || 0),
+        major_payments: 0,
         total_orders: parseInt(u.total_orders || 0, 10),
         closing_cash: null,
+        closing_card: null,
+        cash_difference: null,
+        card_difference: null,
         difference: null,
         is_active: true
       });
@@ -1828,8 +1914,13 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     const openingCash = parseFloat(shiftRes.rows[0]?.opening_cash || 0) || 0;
 
     const insertRes = await client.query(`
-      INSERT INTO shift_closings (cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, items_summary, closing_type, closing_cash, opening_cash, interval_items, difference, difference_reason, shifts_summary)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Daily', $14, $15, $16, $17, $18, $19)
+      INSERT INTO shift_closings (
+        cashier_id, cashier_name, branch, login_time, logout_time, total_active_time, 
+        total_sales, cash_sales, card_sales, credit_sales, major_payments, total_orders, 
+        items_summary, closing_type, closing_cash, closing_card, opening_cash, 
+        interval_items, difference, cash_difference, card_difference, difference_reason, shifts_summary
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Daily', $14, $15, $16, $17, $18, $19, $20, $21, $22)
       RETURNING *
     `, [
       req.user.id,
@@ -1846,9 +1937,12 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       totals.rows[0].total_orders,
       JSON.stringify(itemsResult.rows),
       closingCash,
+      closingCard,
       openingCash,
       JSON.stringify(intervals),
       difference,
+      cashDifference,
+      cardDifference,
       differenceReason,
       JSON.stringify(shiftsList)
     ]);
