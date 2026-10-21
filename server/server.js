@@ -50,7 +50,37 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
     await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_history JSONB DEFAULT '[]'::jsonb");
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by VARCHAR(150)');
     await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_documents (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        document_name VARCHAR(255) NOT NULL,
+        document_type VARCHAR(50),
+        document_number VARCHAR(100),
+        note TEXT,
+        file_url TEXT,
+        file_path TEXT,
+        expiry_date DATE,
+        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_type VARCHAR(50)');
+    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_number VARCHAR(100)');
+    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS note TEXT');
+    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS file_path TEXT');
     await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS expiry_date DATE');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        message TEXT,
+        type VARCHAR(50),
+        target_roles JSONB DEFAULT '[]'::jsonb,
+        target_users JSONB DEFAULT '[]'::jsonb,
+        is_read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
     await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_users JSONB DEFAULT '[]'::jsonb");
     await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_roles JSONB DEFAULT '[]'::jsonb");
     
