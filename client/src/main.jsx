@@ -38,6 +38,15 @@ if ('serviceWorker' in navigator) {
         })
         .catch(err => console.log('SW Error:', err));
     });
+
+    // Auto-reload when new SW takes over so user gets latest bundle immediately
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
   } else {
     // In dev mode, unregister any active service worker to prevent stale dev bundle caching
     navigator.serviceWorker.getRegistrations().then(registrations => {

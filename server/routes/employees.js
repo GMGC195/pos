@@ -473,12 +473,34 @@ router.delete('/working-hours/list/:id', authenticateToken, async (req, res) => 
 // GET documents for an employee
 router.get('/:id/documents', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
+    const result = await pool.queryWithRetry(
       'SELECT * FROM employee_documents WHERE employee_id = $1 ORDER BY uploaded_at DESC',
       [req.params.id]
     );
     res.json(result.rows);
   } catch (err) {
+    console.error('Error fetching employee documents:', err.message);
+    if (err.message && err.message.includes('does not exist')) {
+      try {
+        await pool.queryWithRetry(`
+          CREATE TABLE IF NOT EXISTS employee_documents (
+            id SERIAL PRIMARY KEY,
+            employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+            document_name VARCHAR(255) NOT NULL,
+            document_type VARCHAR(50),
+            document_number VARCHAR(100),
+            note TEXT,
+            file_url TEXT,
+            file_path TEXT,
+            expiry_date DATE,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        return res.json([]);
+      } catch (createErr) {
+        return res.status(500).json({ error: createErr.message });
+      }
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -503,7 +525,7 @@ router.post('/:id/documents', authenticateToken, upload.array('documents', 10), 
       const doc_name = documentName || file.originalname;
       const file_path = `/uploads/documents/${file.filename}`;
       
-      const result = await pool.query(
+      const result = await pool.queryWithRetry(
         `INSERT INTO employee_documents 
           (employee_id, document_name, file_path, document_type, document_number, note, expiry_date) 
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
@@ -540,7 +562,7 @@ router.put('/documents/:doc_id', authenticateToken, upload.single('documents'), 
   const doc_id = req.params.doc_id;
 
   try {
-    const docRes = await pool.query('SELECT * FROM employee_documents WHERE id = $1', [doc_id]);
+    const docRes = await pool.queryWithRetry('SELECT * FROM employee_documents WHERE id = $1', [doc_id]);
     if (docRes.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
     const existingDoc = docRes.rows[0];
 
@@ -559,7 +581,7 @@ router.put('/documents/:doc_id', authenticateToken, upload.single('documents'), 
 
     const finalExpiryDate = expiryDate !== undefined ? (expiryDate || null) : existingDoc.expiry_date;
 
-    const result = await pool.query(
+    const result = await pool.queryWithRetry(
       `UPDATE employee_documents 
        SET document_name = $1, file_path = $2, document_type = $3, document_number = $4, note = $5, expiry_date = $6
        WHERE id = $7 RETURNING *`,

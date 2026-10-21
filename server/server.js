@@ -41,17 +41,21 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
   await runWithStartupRetry(async () => {
   try {
     // Make timezone permanent for the DB user (fixes Hostinger / Neon pooling timezone drops)
-    await pool.query("ALTER ROLE current_user SET timezone TO 'Asia/Riyadh'");
+    try {
+      await pool.query("ALTER ROLE current_user SET timezone TO 'Asia/Riyadh'");
+    } catch (tzErr) {
+      // Non-fatal if DB user lacks ALTER ROLE permission
+    }
     
-    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE');
-    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift_id INTEGER');
-    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0');
-    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_reason TEXT');
-    await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_history JSONB DEFAULT '[]'::jsonb");
-    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by VARCHAR(150)');
-    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ');
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS employee_documents (
+    const safeStartupQueries = [
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_order_id UUID UNIQUE',
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift_id INTEGER',
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_count INTEGER DEFAULT 0',
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_reason TEXT',
+      "ALTER TABLE orders ADD COLUMN IF NOT EXISTS edit_history JSONB DEFAULT '[]'::jsonb",
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by VARCHAR(150)',
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ',
+      `CREATE TABLE IF NOT EXISTS employee_documents (
         id SERIAL PRIMARY KEY,
         employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
         document_name VARCHAR(255) NOT NULL,
@@ -62,13 +66,21 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         file_path TEXT,
         expiry_date DATE,
         uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_type VARCHAR(50)');
-    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_number VARCHAR(100)');
-    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS note TEXT');
-    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS file_path TEXT');
-    await pool.query('ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS expiry_date DATE');
+      )`,
+      'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_type VARCHAR(50)',
+      'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_number VARCHAR(100)',
+      'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS note TEXT',
+      'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS file_path TEXT',
+      'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS expiry_date DATE'
+    ];
+
+    for (const sq of safeStartupQueries) {
+      try {
+        await pool.query(sq);
+      } catch (sqErr) {
+        console.warn('Startup query notice:', sqErr.message);
+      }
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS notifications (

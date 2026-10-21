@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pizza-shop-v10';
+const CACHE_NAME = 'pizza-shop-v11';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -20,6 +20,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
           if (cacheName !== CACHE_NAME) {
+            console.log('[SW] Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
