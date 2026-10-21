@@ -466,6 +466,16 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
 
     if (closingType === 'Shift') {
       const username = req.user.username;
+      const role = req.user.role?.trim().toLowerCase();
+      const isAdminRole = role === 'admin' || role === 'developer';
+
+      let userCondition = 'AND (o.completed_by = $2 OR (o.completed_by IS NULL AND o.order_taker = $2))';
+      let queryParams = [branch, username];
+      if (isAdminRole) {
+        userCondition = '';
+        queryParams = [branch];
+      }
+
       const totals = await pool.query(`
         SELECT 
           COUNT(DISTINCT o.id) as total_orders, 
@@ -478,12 +488,14 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         WHERE o.is_shift_closed = FALSE 
           AND o.status IN ('Completed', 'Returned') 
           AND o.branch = $1
-          AND o.completed_by = $2
-      `, [branch, username]);
+          ${userCondition}
+      `, queryParams);
 
       const activeShiftRes = await pool.query(
-        `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
-        [username, branch]
+        isAdminRole
+          ? `SELECT * FROM cashier_shifts WHERE branch = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`
+          : `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+        isAdminRole ? [branch] : [username, branch]
       );
       const activeShift = activeShiftRes.rows[0] || null;
 
@@ -1143,7 +1155,7 @@ async function sendClosingEmail(report, closingType) {
       differenceHtml = `
         <div style="background-color: #ffffff; border: 2px solid #dc2626; color: #111827; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; text-align: center;">
           <div style="font-size: 20px; font-weight: 900; letter-spacing: 0.5px; color: #dc2626;">
-            ⚠️ DIFFERENCE! ${diffSign}SAR ${Math.abs(diffVal).toFixed(2)} (${diffLabel})
+            DIFFERENCE: ${diffSign}SAR ${Math.abs(diffVal).toFixed(2)} (${diffLabel})
           </div>
           ${report.difference_reason ? `
             <div style="margin-top: 10px; font-size: 14px; border-top: 1px dashed #d1d5db; padding-top: 8px; color: #374151; text-align: left; line-height: 1.4;">
@@ -1215,11 +1227,18 @@ async function sendClosingEmail(report, closingType) {
         </td>
       `).join('');
 
-      const shiftCountedCells = displayShifts.map(s => `
-        <td style="padding: 9px 14px; text-align: right; color: #334155;">
-          ${s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
-        </td>
-      `).join('');
+      const shiftCountedCells = displayShifts.map(s => {
+        if (s.closing_cash === null || s.closing_cash === undefined) return '<td style="padding: 9px 14px; text-align: right; color: #334155;">-</td>';
+        const cVal = parseFloat(s.closing_cash || 0);
+        const cardVal = parseFloat(s.card_sales || 0);
+        const sVal = cVal + cardVal;
+        return `
+          <td style="padding: 9px 14px; text-align: right; color: #334155;">
+            <div>${cVal.toFixed(2)} + ${cardVal.toFixed(2)}</div>
+            <div style="font-size: 11px; color: #64748b; font-weight: 700;">(= ${sVal.toFixed(2)})</div>
+          </td>
+        `;
+      }).join('');
 
       const shiftDiffCells = displayShifts.map(s => {
         if (s.difference === null || s.difference === undefined) return '<td style="padding: 9px 14px; text-align: right; color: #334155;">-</td>';
@@ -1231,7 +1250,10 @@ async function sendClosingEmail(report, closingType) {
       const totalSalesFormatted = parseFloat(report.total_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const cardSalesFormatted = parseFloat(report.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const cashSalesFormatted = parseFloat(report.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const countedCashFormatted = parseFloat(report.closing_cash || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const totalCashNum = parseFloat(report.closing_cash || 0);
+      const totalCardNum = parseFloat(report.card_sales || 0);
+      const grandCounted = totalCashNum + totalCardNum;
+      const countedCashFormatted = `<div>${totalCashNum.toFixed(2)} + ${totalCardNum.toFixed(2)}</div><div style="font-size: 11px; color: #0f172a; font-weight: 900;">(= ${grandCounted.toFixed(2)})</div>`;
       const diffFormatted = `${diffVal < 0 ? '-' : (diffVal > 0 ? '+' : '')}${Math.abs(diffVal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
       shiftsHtml = `
@@ -1255,14 +1277,14 @@ async function sendClosingEmail(report, closingType) {
                   <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${totalSalesFormatted}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Card (to bank)</td>
-                  ${shiftCardCells}
-                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${cardSalesFormatted}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
                   <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Cash sales</td>
                   ${shiftCashCells}
                   <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${cashSalesFormatted}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Card (to bank)</td>
+                  ${shiftCardCells}
+                  <td style="padding: 9px 14px; text-align: right; font-weight: 900; color: #0f172a;">${cardSalesFormatted}</td>
                 </tr>
                 <tr style="border-bottom: 1.5px solid #cbd5e1;">
                   <td style="padding: 9px 14px; font-weight: 500; color: #1e293b;">Counted cash</td>
@@ -1468,6 +1490,13 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     }
     if (branch === 'All') branch = 'Branch 1';
     
+    let userCond = 'AND (o.completed_by = $2 OR (o.completed_by IS NULL AND o.order_taker = $2))';
+    let queryParams = [branch, req.user.username];
+    if (isAdminRole) {
+      userCond = '';
+      queryParams = [branch];
+    }
+    
     const totals = await client.query(`
       SELECT 
         COUNT(DISTINCT o.id) as total_orders, 
@@ -1480,8 +1509,8 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       WHERE o.is_shift_closed = FALSE 
         AND o.status IN ('Completed', 'Returned') 
         AND o.branch = $1
-        AND o.completed_by = $2
-    `, [branch, req.user.username]);
+        ${userCond}
+    `, queryParams);
 
     const itemsResult = await client.query(`
       SELECT 
@@ -1500,32 +1529,41 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
         FROM order_items oi
         JOIN items i ON oi.item_id = i.id
         JOIN orders o ON oi.order_id = o.id
-        WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 AND o.completed_by = $2
+        WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 ${userCond}
         GROUP BY i.category_id, i.name
       ) grouped_items
       JOIN categories c ON grouped_items.category_id = c.id
       GROUP BY c.name
       ORDER BY amount DESC
-    `, [branch, req.user.username]);
+    `, queryParams);
 
     // Fetch active shift record if exists
     const activeShiftRes = await client.query(
-      `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
-      [req.user.username, branch]
+      isAdminRole
+        ? `SELECT * FROM cashier_shifts WHERE branch = $1 AND status = 'Open' ORDER BY id DESC LIMIT 1`
+        : `SELECT * FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 AND status = 'Open' ORDER BY id DESC LIMIT 1`,
+      isAdminRole ? [branch] : [req.user.username, branch]
     );
     const activeShift = activeShiftRes.rows[0] || null;
     let openingCash = parseFloat(req.body?.opening_cash || activeShift?.opening_cash || 0) || 0;
     if (!openingCash && !activeShift) {
       const lastShiftRes = await client.query(
-        `SELECT opening_cash FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 ORDER BY id DESC LIMIT 1`,
-        [req.user.username, branch]
+        isAdminRole
+          ? `SELECT opening_cash FROM cashier_shifts WHERE branch = $1 ORDER BY id DESC LIMIT 1`
+          : `SELECT opening_cash FROM cashier_shifts WHERE cashier_name = $1 AND branch = $2 ORDER BY id DESC LIMIT 1`,
+        isAdminRole ? [branch] : [req.user.username, branch]
       );
       openingCash = parseFloat(lastShiftRes.rows[0]?.opening_cash || 0) || 0;
     }
 
     let loginTime = activeShift ? new Date(activeShift.start_time) : new Date();
     if (!activeShift) {
-      const firstOrderRes = await client.query(`SELECT MIN(created_at) as first_order_time FROM "orders" WHERE is_shift_closed = FALSE AND branch = $1 AND completed_by = $2`, [branch, req.user.username]);
+      const firstOrderRes = await client.query(
+        isAdminRole
+          ? `SELECT MIN(created_at) as first_order_time FROM "orders" WHERE is_shift_closed = FALSE AND branch = $1`
+          : `SELECT MIN(created_at) as first_order_time FROM "orders" WHERE is_shift_closed = FALSE AND branch = $1 AND (completed_by = $2 OR (completed_by IS NULL AND order_taker = $2))`,
+        isAdminRole ? [branch] : [branch, req.user.username]
+      );
       if (firstOrderRes.rows.length > 0 && firstOrderRes.rows[0].first_order_time) {
         loginTime = new Date(firstOrderRes.rows[0].first_order_time);
       }
@@ -1551,10 +1589,10 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       FROM order_items oi
       JOIN items i ON oi.item_id = i.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 AND o.completed_by = $3
+      WHERE o.is_shift_closed = FALSE AND o.status IN ('Completed', 'Returned') AND o.branch = $1 ${isAdminRole ? '' : 'AND (o.completed_by = $3 OR (o.completed_by IS NULL AND o.order_taker = $3))'}
       GROUP BY block_idx, i.name
       ORDER BY block_idx, qty DESC
-    `, [branch, loginTime, req.user.username]);
+    `, isAdminRole ? [branch, loginTime] : [branch, loginTime, req.user.username]);
     
     const intervals = {};
     intervalItemsRes.rows.forEach(r => {
@@ -1596,11 +1634,19 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     ]);
     insertRes.rows[0].interval_items = intervals;
 
-    await client.query(`
-      UPDATE "orders" 
-      SET is_shift_closed = TRUE 
-      WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1 AND completed_by = $2
-    `, [branch, req.user.username]);
+    if (isAdminRole) {
+      await client.query(`
+        UPDATE "orders" 
+        SET is_shift_closed = TRUE 
+        WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1
+      `, [branch]);
+    } else {
+      await client.query(`
+        UPDATE "orders" 
+        SET is_shift_closed = TRUE 
+        WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1 AND (completed_by = $2 OR (completed_by IS NULL AND order_taker = $2))
+      `, [branch, req.user.username]);
+    }
     
     if (activeShift) {
       await client.query(

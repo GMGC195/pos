@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Upload, Trash2, FileText, Image as ImageIcon, Download, MoreVertical, Edit2, Eye } from 'lucide-react'
+import { X, Upload, Trash2, FileText, Image as ImageIcon, Download, MoreVertical, Edit2, Eye, Calendar, AlertCircle } from 'lucide-react'
 import axios from '../api'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
@@ -14,6 +14,7 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
   const [documentName, setDocumentName] = useState('')
   const [documentType, setDocumentType] = useState('CNIC')
   const [documentNumber, setDocumentNumber] = useState('')
+  const [expiryDate, setExpiryDate] = useState('')
   const [note, setNote] = useState('')
   const [editingDoc, setEditingDoc] = useState(null)
   const [viewingDoc, setViewingDoc] = useState(null)
@@ -53,7 +54,7 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
 
   const handleUpload = async (e) => {
     e.preventDefault()
-    if (files.length === 0) {
+    if (!editingDoc && files.length === 0) {
       toast.error('Please select files to upload')
       return
     }
@@ -63,6 +64,7 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
     formData.append('documentName', documentName || 'Document')
     formData.append('documentType', documentType)
     formData.append('documentNumber', documentNumber)
+    formData.append('expiryDate', expiryDate || '')
     formData.append('note', note)
     files.forEach(file => {
       formData.append('documents', file)
@@ -84,10 +86,12 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
       setDocumentName('')
       setDocumentType('CNIC')
       setDocumentNumber('')
+      setExpiryDate('')
       setNote('')
       setEditingDoc(null)
-      // clear the file input
-      document.getElementById('file-upload-input').value = ''
+      // clear the file input if present
+      const fileInput = document.getElementById('file-upload-input')
+      if (fileInput) fileInput.value = ''
       loadDocuments()
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to upload documents')
@@ -113,8 +117,6 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
   }
 
   const downloadFile = (fileUrl, originalName) => {
-    // We can just open the url in a new tab to view/download
-    // Assumes backend serves files statically
     let baseUrl = 'http://localhost:5000';
     try {
       if (import.meta && import.meta.env && import.meta.env.VITE_API_URL) {
@@ -151,18 +153,138 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
     setDocumentName(doc.document_name || '')
     setDocumentType(doc.document_type || 'Other')
     setDocumentNumber(doc.document_number || '')
+    setExpiryDate(doc.expiry_date ? doc.expiry_date.split('T')[0] : '')
     setNote(doc.note || '')
     setMenuOpenFor(null)
   }
 
+  // Helper for rendering expiry status badge
+  const renderExpiryBadge = (expDate) => {
+    if (!expDate) {
+      return (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          No Expiry Date
+        </div>
+      )
+    }
 
+    const exp = new Date(expDate)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    exp.setHours(0, 0, 0, 0)
+    const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24))
+    const formattedDate = new Date(expDate).toLocaleDateString()
+
+    if (diffDays < 0) {
+      return (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '2px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          background: 'rgba(239, 68, 68, 0.1)',
+          color: '#dc2626',
+          border: '1px solid rgba(239, 68, 68, 0.25)',
+          width: 'fit-content'
+        }}>
+          <AlertCircle size={12} />
+          <span>Expired ({Math.abs(diffDays)}d ago)</span>
+        </div>
+      )
+    }
+
+    if (diffDays === 0) {
+      return (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '2px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          background: 'rgba(239, 68, 68, 0.1)',
+          color: '#dc2626',
+          border: '1px solid rgba(239, 68, 68, 0.25)',
+          width: 'fit-content'
+        }}>
+          <AlertCircle size={12} />
+          <span>Expires Today</span>
+        </div>
+      )
+    }
+
+    if (diffDays <= 7) {
+      return (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '2px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          background: 'rgba(239, 68, 68, 0.1)',
+          color: '#dc2626',
+          border: '1px solid rgba(239, 68, 68, 0.25)',
+          width: 'fit-content'
+        }}>
+          <Calendar size={12} />
+          <span>Expires in {diffDays}d ({formattedDate})</span>
+        </div>
+      )
+    }
+
+    if (diffDays <= 30) {
+      return (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '2px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          background: 'rgba(245, 158, 11, 0.1)',
+          color: '#d97706',
+          border: '1px solid rgba(245, 158, 11, 0.25)',
+          width: 'fit-content'
+        }}>
+          <Calendar size={12} />
+          <span>Expires in {diffDays}d ({formattedDate})</span>
+        </div>
+      )
+    }
+
+    return (
+      <div style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '2px 8px',
+        borderRadius: 6,
+        fontSize: 11,
+        fontWeight: 600,
+        background: 'rgba(59, 130, 246, 0.08)',
+        color: '#2563eb',
+        border: '1px solid rgba(59, 130, 246, 0.2)',
+        width: 'fit-content'
+      }}>
+        <Calendar size={12} />
+        <span>Expires: {formattedDate}</span>
+      </div>
+    )
+  }
 
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
     }}>
-      <div className="card" style={{ width: '100%', maxWidth: 700, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 750, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--surface-2)', flexShrink: 0 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
             Documents for {employee?.name}
@@ -191,6 +313,10 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                       <option value="CNIC">CNIC</option>
                       <option value="Passport">Passport</option>
                       <option value="Visa">Visa</option>
+                      <option value="Iqama">Iqama</option>
+                      <option value="Baladiya Card">Baladiya Card</option>
+                      <option value="Insurance">Insurance</option>
+                      <option value="Contract">Contract</option>
                       <option value="Other">Other</option>
                     </select>
                   </div>
@@ -199,13 +325,24 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                       <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Custom Document Name</label>
                       <input 
                         type="text" 
-                        placeholder="e.g. Contract"
+                        placeholder="e.g. Health Certificate"
                         value={documentName}
                         onChange={e => setDocumentName(e.target.value)}
                         style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
                       />
                     </div>
                   )}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
+                      Expiry Date (Optional)
+                    </label>
+                    <input 
+                      type="date" 
+                      value={expiryDate}
+                      onChange={e => setExpiryDate(e.target.value)}
+                      style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
                   <div style={{ gridColumn: documentType === 'Other' ? '1 / -1' : 'auto' }}>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>CNIC / Document Number (Optional)</label>
                     <input 
@@ -260,7 +397,7 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                 No documents uploaded yet.
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 16 }}>
                 {documents.map(doc => (
                   <div key={doc.id} style={{ 
                     border: '1px solid var(--surface-2)', 
@@ -296,22 +433,29 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                         </div>
                       )}
                     </div>
-                    {doc.document_type && (
-                      <div style={{ display: 'inline-block', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, width: 'fit-content' }}>
-                        {doc.document_type}
-                      </div>
-                    )}
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                      {doc.document_type && (
+                        <div style={{ display: 'inline-block', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, width: 'fit-content' }}>
+                          {doc.document_type}
+                        </div>
+                      )}
+                      {renderExpiryBadge(doc.expiry_date)}
+                    </div>
+
                     {(doc.document_number || doc.note) && (
                       <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
                         {doc.document_number && <div style={{ marginBottom: 4 }}><strong style={{ color: 'var(--text-primary)' }}>ID:</strong> {doc.document_number}</div>}
                         {doc.note && <div><strong style={{ color: 'var(--text-primary)' }}>Note:</strong> {doc.note}</div>}
                       </div>
                     )}
+                    {doc.original_filename && (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {doc.original_filename}
+                      </div>
+                    )}
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {doc.original_filename}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {(doc.file_size / 1024).toFixed(1)} KB • {new Date(doc.uploaded_at).toLocaleDateString()}
+                      {doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB • ` : ''}{new Date(doc.uploaded_at).toLocaleDateString()}
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
                       <button 
@@ -352,16 +496,17 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13 }}>
                     <div><strong>Type:</strong> {viewingDoc.document_type || 'N/A'}</div>
                     <div><strong>ID Number:</strong> {viewingDoc.document_number || 'N/A'}</div>
-                    <div style={{ gridColumn: '1 / -1' }}><strong>Notes:</strong> {viewingDoc.note || 'None'}</div>
+                    <div><strong>Expiry Date:</strong> {viewingDoc.expiry_date ? new Date(viewingDoc.expiry_date).toLocaleDateString() : 'None'}</div>
                     <div><strong>Uploaded:</strong> {new Date(viewingDoc.uploaded_at).toLocaleString()}</div>
-                    <div><strong>Size:</strong> {(viewingDoc.file_size / 1024).toFixed(1)} KB</div>
+                    {viewingDoc.file_size && <div><strong>Size:</strong> {(viewingDoc.file_size / 1024).toFixed(1)} KB</div>}
+                    <div style={{ gridColumn: '1 / -1' }}><strong>Notes:</strong> {viewingDoc.note || 'None'}</div>
                   </div>
                   <button className="btn btn-primary" onClick={() => downloadFile(viewingDoc.file_path, viewingDoc.original_filename)} style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Download size={16} /> Download File
                   </button>
                 </div>
                 <div style={{ background: 'white', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)', minHeight: 400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {viewingDoc.mime_type?.startsWith('image/') ? (
+                  {viewingDoc.file_path?.match(/\.(jpeg|jpg|png|gif|webp)$/i) || viewingDoc.mime_type?.startsWith('image/') ? (
                     <img src={getFileUrl(viewingDoc.file_path)} alt="Document" style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }} />
                   ) : (
                     <iframe src={getFileUrl(viewingDoc.file_path)} title="Document Viewer" style={{ width: '100%', height: '60vh', border: 'none' }} />
@@ -378,19 +523,19 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
           <div className="card" style={{ width: '100%', maxWidth: 900, maxHeight: '95vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white' }}>
               <h3 style={{ margin: 0, fontSize: 16 }}>Edit Document: {editingDoc.document_name}</h3>
-              <button onClick={() => { setEditingDoc(null); setFiles([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
+              <button onClick={() => { setEditingDoc(null); setFiles([]); setExpiryDate(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20} /></button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 24, background: 'var(--surface-1)' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
                 {/* Left Side: Preview */}
                 <div style={{ background: 'white', padding: 16, borderRadius: 8, border: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
                   <h4 style={{ margin: '0 0 12px 0', fontSize: 14, alignSelf: 'flex-start' }}>Current File Preview</h4>
-                  {editingDoc.mime_type?.startsWith('image/') ? (
+                  {editingDoc.file_path?.match(/\.(jpeg|jpg|png|gif|webp)$/i) || editingDoc.mime_type?.startsWith('image/') ? (
                     <img src={getFileUrl(editingDoc.file_path)} alt="Preview" style={{ maxWidth: '100%', maxHeight: 300, objectFit: 'contain' }} />
                   ) : (
                     <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                       <FileText size={48} style={{ margin: '0 auto 12px' }} />
-                      <div>PDF Document</div>
+                      <div>Document File</div>
                       <a href={getFileUrl(editingDoc.file_path)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--primary)', marginTop: 8, display: 'inline-block' }}>Open in new tab</a>
                     </div>
                   )}
@@ -408,6 +553,10 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                         <option value="CNIC">CNIC</option>
                         <option value="Passport">Passport</option>
                         <option value="Visa">Visa</option>
+                        <option value="Iqama">Iqama</option>
+                        <option value="Baladiya Card">Baladiya Card</option>
+                        <option value="Insurance">Insurance</option>
+                        <option value="Contract">Contract</option>
                         <option value="Other">Other</option>
                       </select>
                     </div>
@@ -422,6 +571,17 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
                         />
                       </div>
                     )}
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
+                        Expiry Date (Optional)
+                      </label>
+                      <input 
+                        type="date" 
+                        value={expiryDate}
+                        onChange={e => setExpiryDate(e.target.value)}
+                        style={{ width: '100%', border: '1px solid var(--surface-2)', borderRadius: 8, padding: '10px 12px', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                      />
+                    </div>
                     <div>
                       <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>CNIC / Document Number (Optional)</label>
                       <input 

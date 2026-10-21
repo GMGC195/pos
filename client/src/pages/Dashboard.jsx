@@ -1573,17 +1573,6 @@ export default function Dashboard() {
                               </td>
                             </tr>
                             <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Card (to bank)</td>
-                              {displayShifts.map((s, idx) => (
-                                <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
-                                  {parseFloat(s.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              ))}
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
-                                {parseFloat(selectedHistoryReport.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-                            <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                               <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Cash sales</td>
                               {displayShifts.map((s, idx) => (
                                 <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
@@ -1594,15 +1583,45 @@ export default function Dashboard() {
                                 {parseFloat(selectedHistoryReport.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
                             </tr>
-                            <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
-                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Counted cash</td>
+                            <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Card (to bank)</td>
                               {displayShifts.map((s, idx) => (
                                 <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
-                                  {s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
+                                  {parseFloat(s.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
                               ))}
                               <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
-                                {parseFloat(selectedHistoryReport.closing_cash || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {parseFloat(selectedHistoryReport.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
+                              <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Counted cash</td>
+                              {displayShifts.map((s, idx) => {
+                                if (s.closing_cash === null || s.closing_cash === undefined) {
+                                  return <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>-</td>;
+                                }
+                                const cVal = parseFloat(s.closing_cash || 0);
+                                const cardVal = parseFloat(s.card_sales || 0);
+                                const sumVal = cVal + cardVal;
+                                return (
+                                  <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
+                                    <div style={{ fontWeight: 600 }}>{cVal.toFixed(2)} + {cardVal.toFixed(2)}</div>
+                                    <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700 }}>(= {sumVal.toFixed(2)})</div>
+                                  </td>
+                                );
+                              })}
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                                {(() => {
+                                  const cVal = parseFloat(selectedHistoryReport.closing_cash || 0);
+                                  const cardVal = parseFloat(selectedHistoryReport.card_sales || 0);
+                                  const grandVal = cVal + cardVal;
+                                  return (
+                                    <div>
+                                      <div>{cVal.toFixed(2)} + {cardVal.toFixed(2)}</div>
+                                      <div style={{ fontSize: 10.5, color: '#0f172a', fontWeight: 900 }}>(= {grandVal.toFixed(2)})</div>
+                                    </div>
+                                  );
+                                })()}
                               </td>
                             </tr>
                             <tr style={{ background: '#f8fafc' }}>

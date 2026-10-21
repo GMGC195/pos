@@ -186,15 +186,18 @@ export default function Reports({ isTodaySales = false }) {
   useEffect(() => {
     if (showClosingModal) {
       const targetBranch = branch === 'All' ? (user?.branch || 'Branch 1') : branch
-      const hadJustClosedShift = sessionStorage.getItem('just_closed_shift_' + targetBranch) === 'true'
-      const defaultType = hadJustClosedShift ? 'Daily' : 'Shift'
-      const typeToUse = closingType || defaultType
-      if (!closingType) setClosingType(typeToUse)
+      const typeToUse = closingType || 'Shift'
+      if (!closingType) setClosingType('Shift')
       setLoadingClosingPreview(true)
       axios.get('/api/orders/closing-preview', { params: { branch: targetBranch, type: typeToUse } })
         .then(res => {
           if (res.data?.success) {
             setClosingPreview(res.data)
+            // If Daily closing, auto-prefill remaining cash from sum of closed shifts' closing_cash if empty
+            if (typeToUse === 'Daily' && res.data.shifts?.length > 0) {
+              const closedCashSum = res.data.shifts.reduce((acc, s) => acc + (parseFloat(s.closing_cash) || 0), 0)
+              setClosingRemainingCash(prev => (prev === '' ? closedCashSum.toFixed(2) : prev))
+            }
           }
         })
         .catch(err => {
@@ -701,11 +704,7 @@ export default function Reports({ isTodaySales = false }) {
         difference_reason: closingDifferenceReason.trim()
       })
       toast.success(`${closingType} closing complete!`)
-      if (closingType === 'Shift') {
-        sessionStorage.setItem('just_closed_shift_' + targetBranch, 'true')
-      } else {
-        sessionStorage.removeItem('just_closed_shift_' + targetBranch)
-      }
+      sessionStorage.removeItem('just_closed_shift_' + targetBranch)
       setShowClosingModal(false)
       setClosingType(null)
       setClosingRemainingCash('')
@@ -1672,7 +1671,10 @@ export default function Reports({ isTodaySales = false }) {
                     : (parseFloat(cardRow?.total || 0) + parseFloat(onlineRow?.total || 0));
                   const drawerValNum = parseFloat(closingRemainingCash);
                   const isDrawerFilledNum = closingRemainingCash.trim() !== '' && !isNaN(drawerValNum);
-                  const dailyDiff = isDrawerFilledNum ? ((drawerValNum + activeCardSalesVal) - activeSalesVal) : 0;
+                  const totalClosedShiftsCash = shiftsArr.reduce((acc, s) => acc + (parseFloat(s.closing_cash) || 0), 0);
+                  const effectiveDrawerCash = isDrawerFilledNum ? drawerValNum : totalClosedShiftsCash;
+                  const grandCountedCash = effectiveDrawerCash + activeCardSalesVal;
+                  const dailyDiff = grandCountedCash - activeSalesVal;
 
                   const displayShifts = shiftsArr.length > 0 ? [...shiftsArr] : [{
                     cashier_name: user?.username || 'Day',
@@ -1764,6 +1766,19 @@ export default function Reports({ isTodaySales = false }) {
                               </td>
                             </tr>
 
+                            {/* Cash sales (Moved above Card) */}
+                            <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '7px 10px', color: '#334155', fontWeight: 600 }}>Cash sales</td>
+                              {displayShifts.map((s, idx) => (
+                                <td key={idx} style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>
+                                  {parseFloat(s.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              ))}
+                              <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                                {activeCashSalesVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+
                             {/* Card (to bank) */}
                             <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                               <td style={{ padding: '7px 10px', color: '#334155', fontWeight: 600 }}>Card (to bank)</td>
@@ -1777,29 +1792,34 @@ export default function Reports({ isTodaySales = false }) {
                               </td>
                             </tr>
 
-                            {/* Cash sales */}
-                            <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '7px 10px', color: '#334155', fontWeight: 600 }}>Cash sales</td>
-                              {displayShifts.map((s, idx) => (
-                                <td key={idx} style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>
-                                  {parseFloat(s.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              ))}
-                              <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
-                                {activeCashSalesVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-
-                            {/* Counted cash */}
+                            {/* Counted cash (Cash + Card) */}
                             <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
                               <td style={{ padding: '7px 10px', color: '#334155', fontWeight: 600 }}>Counted cash</td>
-                              {displayShifts.map((s, idx) => (
-                                <td key={idx} style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>
-                                  {s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
-                                </td>
-                              ))}
+                              {displayShifts.map((s, idx) => {
+                                if (s.closing_cash === null || s.closing_cash === undefined) {
+                                  return (
+                                    <td key={idx} style={{ padding: '7px 8px', textAlign: 'right', color: '#64748b' }}>
+                                      -
+                                    </td>
+                                  );
+                                }
+                                const cVal = parseFloat(s.closing_cash || 0);
+                                const cardVal = parseFloat(s.card_sales || 0);
+                                const sumVal = cVal + cardVal;
+                                return (
+                                  <td key={idx} style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>
+                                    <div style={{ fontWeight: 600 }}>{cVal.toFixed(2)} + {cardVal.toFixed(2)}</div>
+                                    <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700 }}>
+                                      (= {sumVal.toFixed(2)})
+                                    </div>
+                                  </td>
+                                );
+                              })}
                               <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
-                                {isDrawerFilledNum ? drawerValNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
+                                <div>{effectiveDrawerCash.toFixed(2)} + {activeCardSalesVal.toFixed(2)}</div>
+                                <div style={{ fontSize: 10.5, color: '#0f172a', fontWeight: 900 }}>
+                                  (= {grandCountedCash.toFixed(2)})
+                                </div>
                               </td>
                             </tr>
 
@@ -1812,8 +1832,8 @@ export default function Reports({ isTodaySales = false }) {
                                 }
                                 const d = parseFloat(s.difference);
                                 return (
-                                  <td key={idx} style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: d < 0 ? '#991b1b' : '#15803d' }}>
-                                    {d < 0 ? '-' : ''}{Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  <td key={idx} style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: d < 0 ? '#991b1b' : (d > 0 ? '#15803d' : '#334155') }}>
+                                    {d < 0 ? '-' : (d > 0 ? '+' : '')}{Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </td>
                                 );
                               })}
@@ -1822,9 +1842,9 @@ export default function Reports({ isTodaySales = false }) {
                                 textAlign: 'right',
                                 fontWeight: 900,
                                 fontSize: 13.5,
-                                color: isDrawerFilledNum ? (dailyDiff < 0 ? '#991b1b' : '#15803d') : '#64748b'
+                                color: dailyDiff < 0 ? '#991b1b' : (dailyDiff > 0 ? '#15803d' : '#0f172a')
                               }}>
-                                {isDrawerFilledNum ? `${dailyDiff < 0 ? '-' : (dailyDiff > 0 ? '+' : '')}${Math.abs(dailyDiff).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                                {`${dailyDiff < 0 ? '-' : (dailyDiff > 0 ? '+' : '')}${Math.abs(dailyDiff).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                               </td>
                             </tr>
                           </tbody>
@@ -2410,17 +2430,6 @@ export default function Reports({ isTodaySales = false }) {
                                   </td>
                                 </tr>
                                 <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                  <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Card (to bank)</td>
-                                  {displayShifts.map((s, idx) => (
-                                    <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
-                                      {parseFloat(s.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                  ))}
-                                  <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
-                                    {parseFloat(selectedHistoryReport.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </td>
-                                </tr>
-                                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                                   <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Cash sales</td>
                                   {displayShifts.map((s, idx) => (
                                     <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
@@ -2431,15 +2440,45 @@ export default function Reports({ isTodaySales = false }) {
                                     {parseFloat(selectedHistoryReport.cash_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </td>
                                 </tr>
-                                <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
-                                  <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Counted cash</td>
+                                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Card (to bank)</td>
                                   {displayShifts.map((s, idx) => (
                                     <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
-                                      {s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
+                                      {parseFloat(s.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                   ))}
                                   <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
-                                    {parseFloat(selectedHistoryReport.closing_cash || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {parseFloat(selectedHistoryReport.card_sales || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                                <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
+                                  <td style={{ padding: '8px 12px', color: '#334155', fontWeight: 600 }}>Counted cash</td>
+                                  {displayShifts.map((s, idx) => {
+                                    if (s.closing_cash === null || s.closing_cash === undefined) {
+                                      return <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>-</td>;
+                                    }
+                                    const cVal = parseFloat(s.closing_cash || 0);
+                                    const cardVal = parseFloat(s.card_sales || 0);
+                                    const sumVal = cVal + cardVal;
+                                    return (
+                                      <td key={idx} style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>
+                                        <div style={{ fontWeight: 600 }}>{cVal.toFixed(2)} + {cardVal.toFixed(2)}</div>
+                                        <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700 }}>(= {sumVal.toFixed(2)})</div>
+                                      </td>
+                                    );
+                                  })}
+                                  <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                                    {(() => {
+                                      const cVal = parseFloat(selectedHistoryReport.closing_cash || 0);
+                                      const cardVal = parseFloat(selectedHistoryReport.card_sales || 0);
+                                      const grandVal = cVal + cardVal;
+                                      return (
+                                        <div>
+                                          <div>{cVal.toFixed(2)} + {cardVal.toFixed(2)}</div>
+                                          <div style={{ fontSize: 10.5, color: '#0f172a', fontWeight: 900 }}>(= {grandVal.toFixed(2)})</div>
+                                        </div>
+                                      );
+                                    })()}
                                   </td>
                                 </tr>
                                 <tr style={{ background: '#f8fafc' }}>

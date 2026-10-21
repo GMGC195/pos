@@ -494,7 +494,7 @@ router.post('/:id/documents', authenticateToken, upload.array('documents', 10), 
     return res.status(400).json({ error: 'No files uploaded' });
   }
 
-  const { documentName, documentType, documentNumber, note } = req.body;
+  const { documentName, documentType, documentNumber, note, expiryDate } = req.body;
   const employee_id = req.params.id;
 
   try {
@@ -505,9 +505,17 @@ router.post('/:id/documents', authenticateToken, upload.array('documents', 10), 
       
       const result = await pool.query(
         `INSERT INTO employee_documents 
-          (employee_id, document_name, file_path, document_type, document_number, note) 
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [employee_id, doc_name, file_path, documentType || 'Other', documentNumber || null, note || null]
+          (employee_id, document_name, file_path, document_type, document_number, note, expiry_date) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [
+          employee_id, 
+          doc_name, 
+          file_path, 
+          documentType || 'Other', 
+          documentNumber || null, 
+          note || null,
+          expiryDate ? expiryDate : null
+        ]
       );
       uploadedDocs.push(result.rows[0]);
     }
@@ -528,7 +536,7 @@ router.put('/documents/:doc_id', authenticateToken, upload.single('documents'), 
     return res.status(403).json({ error: 'Management role has view-only access.' });
   }
 
-  const { documentName, documentType, documentNumber, note } = req.body;
+  const { documentName, documentType, documentNumber, note, expiryDate } = req.body;
   const doc_id = req.params.doc_id;
 
   try {
@@ -549,16 +557,19 @@ router.put('/documents/:doc_id', authenticateToken, upload.single('documents'), 
       } catch (e) {}
     }
 
+    const finalExpiryDate = expiryDate !== undefined ? (expiryDate || null) : existingDoc.expiry_date;
+
     const result = await pool.query(
       `UPDATE employee_documents 
-       SET document_name = $1, file_path = $2, document_type = $3, document_number = $4, note = $5
-       WHERE id = $6 RETURNING *`,
+       SET document_name = $1, file_path = $2, document_type = $3, document_number = $4, note = $5, expiry_date = $6
+       WHERE id = $7 RETURNING *`,
       [
         newDocName, 
         newFilePath, 
         documentType || existingDoc.document_type, 
         documentNumber || existingDoc.document_number, 
         note || existingDoc.note, 
+        finalExpiryDate,
         doc_id
       ]
     );
