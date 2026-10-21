@@ -230,12 +230,26 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     `;
     let paymentsParams = [];
     
+    const isUnclosedOnly = req.query.unclosed_only === 'true';
+
     if (role === 'cashier' && cashierShiftStartTime) {
       paymentsParams.push(req.user.username);
-      paymentsQuery += ` AND ct.cashier_name = $${paymentsParams.length}`;
+      paymentsQuery += ` AND (ct.cashier_name = $${paymentsParams.length} OR ct.cashier_name IS NULL)`;
       paymentsQuery += ` AND ct.is_shift_closed = FALSE`;
+      paymentsParams.push(cashierShiftStartTime);
+      paymentsQuery += ` AND ct.created_at >= $${paymentsParams.length}`;
       if (req.user?.branch) {
         paymentsParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
+        paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
+      }
+    } else if (isUnclosedOnly) {
+      paymentsQuery += ` AND ct.is_shift_closed = FALSE`;
+      if (from) {
+        paymentsParams.push(from);
+        paymentsQuery += ` AND ct.created_at >= ($${paymentsParams.length} || ' 00:00:00+03')::timestamptz`;
+      }
+      if (branch && branch !== 'All') {
+        paymentsParams.push(JSON.stringify([branch]));
         paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
       }
     } else {
@@ -273,10 +287,22 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     let listParams = [];
     if (role === 'cashier' && cashierShiftStartTime) {
       listParams.push(req.user.username);
-      paymentsListQuery += ` AND ct.cashier_name = $${listParams.length}`;
+      paymentsListQuery += ` AND (ct.cashier_name = $${listParams.length} OR ct.cashier_name IS NULL)`;
       paymentsListQuery += ` AND ct.is_shift_closed = FALSE`;
+      listParams.push(cashierShiftStartTime);
+      paymentsListQuery += ` AND ct.created_at >= $${listParams.length}`;
       if (req.user?.branch) {
         listParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
+        paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
+      }
+    } else if (isUnclosedOnly) {
+      paymentsListQuery += ` AND ct.is_shift_closed = FALSE`;
+      if (from) {
+        listParams.push(from);
+        paymentsListQuery += ` AND ct.created_at >= ($${listParams.length} || ' 00:00:00+03')::timestamptz`;
+      }
+      if (branch && branch !== 'All') {
+        listParams.push(JSON.stringify([branch]));
         paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;
       }
     } else {

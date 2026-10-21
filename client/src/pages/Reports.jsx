@@ -105,7 +105,7 @@ export default function Reports({ isTodaySales = false }) {
     Promise.all([
       axios.get('/api/transactions', { params: { from, to, branch, unclosed_only: isTodaySales } }),
       axios.get('/api/transactions/summary', { params: { from, to, branch, unclosed_only: isTodaySales } }),
-      axios.get('/api/transactions/credit-summary', { params: { from, to, branch } })
+      axios.get('/api/transactions/credit-summary', { params: { from, to, branch, unclosed_only: isTodaySales } })
     ])
       .then(([txRes, sumRes, credRes]) => {
         setTransactions(txRes.data)
@@ -667,28 +667,34 @@ export default function Reports({ isTodaySales = false }) {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569' }}>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700 }}></th>
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, color: '#1e293b' }}>
-                  Night<br/><span style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>System</span>
-                  {compData.nightCashier && <div style={{ fontSize: 10, fontWeight: 500, color: '#94a3b8' }}>{compData.nightCashier}</div>}
+              <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, background: '#f8fafc' }}></th>
+                
+                {/* Night Columns Header (Cool Indigo / Night Theme) */}
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#e0e7ff', color: '#312e81', borderLeft: '2px solid #cbd5e1' }}>
+                  🌙 Night<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#4338ca' }}>System</span>
+                  {compData.nightCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#6366f1' }}>{compData.nightCashier}</div>}
                 </th>
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, color: '#1e293b' }}>
-                  Night<br/><span style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>Actual</span>
-                  {compData.nightCashier && <div style={{ fontSize: 10, fontWeight: 500, color: '#94a3b8' }}>{compData.nightCashier}</div>}
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#e0e7ff', color: '#1e1b4b' }}>
+                  🌙 Night<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#312e81' }}>Actual</span>
+                  {compData.nightCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#6366f1' }}>{compData.nightCashier}</div>}
                 </th>
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, color: '#1e293b' }}>
-                  Day<br/><span style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>System</span>
-                  {compData.dayCashier && <div style={{ fontSize: 10, fontWeight: 500, color: '#94a3b8' }}>{compData.dayCashier}</div>}
+
+                {/* Day Columns Header (Warm Amber / Daylight Theme) */}
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#fef3c7', color: '#92400e', borderLeft: '2px solid #fed7aa' }}>
+                  ☀️ Day<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#b45309' }}>System</span>
+                  {compData.dayCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#d97706' }}>{compData.dayCashier}</div>}
                 </th>
-                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, color: '#1e293b' }}>
-                  Day<br/><span style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>Actual</span>
-                  {compData.dayCashier && <div style={{ fontSize: 10, fontWeight: 500, color: '#94a3b8' }}>{compData.dayCashier}</div>}
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 800, background: '#fef3c7', color: '#78350f' }}>
+                  ☀️ Day<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#92400e' }}>Actual</span>
+                  {compData.dayCashier && <div style={{ fontSize: 10, fontWeight: 600, color: '#d97706' }}>{compData.dayCashier}</div>}
                 </th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+
+                {/* Total Columns Header (Slate Summary Theme) */}
+                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 900, background: '#f1f5f9', color: '#0f172a', borderLeft: '2px solid #cbd5e1' }}>
                   Total<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>System</span>
                 </th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 900, background: '#f1f5f9', color: '#0f172a' }}>
                   Total<br/><span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>Actual</span>
                 </th>
               </tr>
@@ -696,61 +702,61 @@ export default function Reports({ isTodaySales = false }) {
             <tbody>
               {/* Cash sale */}
               <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700 }}>Cash sale</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.nightSysCash)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', fontWeight: 600 }}>{fmt(compData.nightActCash)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.daySysCash)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', fontWeight: 600 }}>{fmt(compData.dayActCash)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>{fmt(compData.totalSysCash)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>{fmt(compData.totalActCash)}</td>
+                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700, background: '#ffffff' }}>Cash sale</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#f5f7ff', borderLeft: '2px solid #e0e7ff' }}>{fmt(compData.nightSysCash)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', fontWeight: 600, background: '#f5f7ff' }}>{fmt(compData.nightActCash)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#fffdf5', borderLeft: '2px solid #fed7aa' }}>{fmt(compData.daySysCash)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', fontWeight: 600, background: '#fffdf5' }}>{fmt(compData.dayActCash)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a', background: '#f8fafc', borderLeft: '2px solid #cbd5e1' }}>{fmt(compData.totalSysCash)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a', background: '#f8fafc' }}>{fmt(compData.totalActCash)}</td>
               </tr>
 
               {/* Card / Bank sale */}
               <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700 }}>Card / Bank sale</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.nightSysCard)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', fontWeight: 600 }}>{fmt(compData.nightActCard)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.daySysCard)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', fontWeight: 600 }}>{fmt(compData.dayActCard)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>{fmt(compData.totalSysCard)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>{fmt(compData.totalActCard)}</td>
+                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700, background: '#ffffff' }}>Card / Bank sale</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#f5f7ff', borderLeft: '2px solid #e0e7ff' }}>{fmt(compData.nightSysCard)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', fontWeight: 600, background: '#f5f7ff' }}>{fmt(compData.nightActCard)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#fffdf5', borderLeft: '2px solid #fed7aa' }}>{fmt(compData.daySysCard)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', fontWeight: 600, background: '#fffdf5' }}>{fmt(compData.dayActCard)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a', background: '#f8fafc', borderLeft: '2px solid #cbd5e1' }}>{fmt(compData.totalSysCard)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a', background: '#f8fafc' }}>{fmt(compData.totalActCard)}</td>
               </tr>
 
               {/* Credit sale */}
               <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700 }}>Credit sale</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.nightSysCredit)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.nightActCredit)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.daySysCredit)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.dayActCredit)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>{fmt(compData.totalSysCredit)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>{fmt(compData.totalActCredit)}</td>
+                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700, background: '#ffffff' }}>Credit sale</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#f5f7ff', borderLeft: '2px solid #e0e7ff' }}>{fmt(compData.nightSysCredit)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', background: '#f5f7ff' }}>{fmt(compData.nightActCredit)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#fffdf5', borderLeft: '2px solid #fed7aa' }}>{fmt(compData.daySysCredit)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', background: '#fffdf5' }}>{fmt(compData.dayActCredit)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a', background: '#f8fafc', borderLeft: '2px solid #cbd5e1' }}>{fmt(compData.totalSysCredit)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a', background: '#f8fafc' }}>{fmt(compData.totalActCredit)}</td>
               </tr>
 
               {/* Major Payments */}
               <tr style={{ borderBottom: '1.5px solid #cbd5e1' }}>
-                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700 }}>Major Payments</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.nightSysMajor)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.nightActMajor)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.daySysMajor)}</td>
-                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155' }}>{fmt(compData.dayActMajor)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>{fmt(compData.totalSysMajor)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a' }}>{fmt(compData.totalActMajor)}</td>
+                <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 700, background: '#ffffff' }}>Major Payments</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#f5f7ff', borderLeft: '2px solid #e0e7ff' }}>{fmt(compData.nightSysMajor)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', fontWeight: 600, background: '#f5f7ff' }}>{fmt(compData.nightActMajor)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#334155', background: '#fffdf5', borderLeft: '2px solid #fed7aa' }}>{fmt(compData.daySysMajor)}</td>
+                <td style={{ padding: '7px 8px', textAlign: 'right', color: '#1e293b', fontWeight: 600, background: '#fffdf5' }}>{fmt(compData.dayActMajor)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: '#0f172a', background: '#f8fafc', borderLeft: '2px solid #cbd5e1' }}>{fmt(compData.totalSysMajor)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 900, color: '#0f172a', background: '#f8fafc' }}>{fmt(compData.totalActMajor)}</td>
               </tr>
 
               {/* Difference Row: System columns empty, Actual columns have diff */}
               <tr style={{ background: '#f8fafc', fontWeight: 800 }}>
-                <td style={{ padding: '8px 10px', color: '#0f172a' }}>Difference</td>
-                <td style={{ padding: '8px 8px', textAlign: 'right' }}></td>
-                <td style={{ padding: '8px 8px', textAlign: 'right', color: diffColor(compData.nightDiff) }}>
+                <td style={{ padding: '8px 10px', color: '#0f172a', background: '#ffffff' }}>Difference</td>
+                <td style={{ padding: '8px 8px', textAlign: 'right', background: '#f5f7ff', borderLeft: '2px solid #e0e7ff' }}></td>
+                <td style={{ padding: '8px 8px', textAlign: 'right', color: diffColor(compData.nightDiff), background: '#f5f7ff' }}>
                   {fmtDiff(compData.nightDiff)}
                 </td>
-                <td style={{ padding: '8px 8px', textAlign: 'right' }}></td>
-                <td style={{ padding: '8px 8px', textAlign: 'right', color: diffColor(compData.dayDiff) }}>
+                <td style={{ padding: '8px 8px', textAlign: 'right', background: '#fffdf5', borderLeft: '2px solid #fed7aa' }}></td>
+                <td style={{ padding: '8px 8px', textAlign: 'right', color: diffColor(compData.dayDiff), background: '#fffdf5' }}>
                   {fmtDiff(compData.dayDiff)}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right' }}></td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontSize: 13, color: diffColor(compData.totalDiff) }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', background: '#f8fafc', borderLeft: '2px solid #cbd5e1' }}></td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontSize: 13, color: diffColor(compData.totalDiff), background: '#f8fafc' }}>
                   {fmtDiff(compData.totalDiff)}
                 </td>
               </tr>
@@ -805,27 +811,40 @@ export default function Reports({ isTodaySales = false }) {
       <html><head><title>${report.closing_type} Closing Report</title>
       <style>
         @page { size: 80mm auto; margin: 0; }
-        body { font-family: 'Courier New', monospace; padding: 10px 15px; max-width: 380px; margin: 0 auto; font-size: 13px; color: #111; }
-        h2 { text-align: center; font-size: 16px; margin: 0 0 4px; }
+        @media print {
+          html, body {
+            width: 80mm !important;
+            max-width: 80mm !important;
+            margin: 0 !important;
+            padding: 2mm 3mm !important;
+            page-break-after: avoid !important;
+            page-break-before: avoid !important;
+          }
+          * {
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+        }
+        body { font-family: 'Courier New', monospace; padding: 4px 6px; max-width: 300px; margin: 0 auto; font-size: 11px; line-height: 1.25; color: #111; }
+        h2 { text-align: center; font-size: 14px; margin: 0 0 2px; }
         .center { text-align: center; }
-        .divider { border-top: 1px dashed #999; margin: 10px 0; }
-        .row { display: flex; justify-content: space-between; padding: 2px 0; }
+        .divider { border-top: 1px dashed #777; margin: 4px 0; }
+        .row { display: flex; justify-content: space-between; padding: 1.5px 0; }
         .label { color: #555; }
         .bold { font-weight: bold; }
-        .highlight { color: #c0392b; font-weight: bold; font-size: 16px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-        th { text-align: left; border-bottom: 1px solid #ddd; padding: 4px 0; font-size: 12px; color: #555; }
-        td { padding: 4px 0; font-size: 13px; }
+        .highlight { color: #c0392b; font-weight: bold; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 2px; }
+        th { text-align: left; border-bottom: 1px solid #ddd; padding: 2px 0; font-size: 10px; color: #555; }
+        td { padding: 2px 0; font-size: 11px; }
         td:last-child { text-align: right; }
       </style></head><body>
         <h2>${report.closing_type === 'Daily' ? '⚡ DAILY CLOSING REPORT' : '🔄 SHIFT CLOSING REPORT'}</h2>
-        <p class="center" style="color:#666;font-size:12px;margin:0 0 10px">${fmtDate(report.login_time)}</p>
+        <p class="center" style="color:#666;font-size:10.5px;margin:0 0 4px">${fmtDate(report.login_time)}</p>
 
         ${hasDiff ? `
-          <div style="border: 2px solid #111; color: #111; padding: 8px 10px; border-radius: 4px; text-align: center; margin: 6px 0 10px; font-weight: bold;">
-            <div style="font-size: 14px; letter-spacing: 0.5px;">DIFFERENCE:</div>
-            <div style="font-size: 16px; margin: 2px 0;">${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
-            ${report.difference_reason ? `<div style="font-size: 11px; margin-top: 5px; border-top: 1px dashed #666; padding-top: 4px; text-align: left; font-weight: normal; color: #111;">Reason: ${report.difference_reason}</div>` : ''}
+          <div style="border: 1.5px solid #111; color: #111; padding: 4px 6px; border-radius: 4px; text-align: center; margin: 3px 0 5px; font-weight: bold;">
+            <div style="font-size: 11.5px; letter-spacing: 0.5px;">DIFFERENCE: ${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
+            ${report.difference_reason ? `<div style="font-size: 10px; margin-top: 2px; border-top: 1px dashed #666; padding-top: 2px; text-align: left; font-weight: normal; color: #111;">Reason: ${report.difference_reason}</div>` : ''}
           </div>
         ` : ''}
 
@@ -839,74 +858,146 @@ export default function Reports({ isTodaySales = false }) {
           };
 
           return `
-            <div style="border: 1.5px solid #111; border-radius: 4px; padding: 6px 8px; margin: 8px 0;">
-              <p style="font-weight:bold; margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; text-align: center;">
+            <div style="border: 1.5px solid #111; border-radius: 4px; padding: 4px 5px; margin: 4px 0;">
+              <div style="font-weight: bold; text-align: center; font-size: 11px; border-bottom: 1px solid #111; padding-bottom: 2px; margin-bottom: 4px; text-transform: uppercase;">
                 DAILY SUMMARY: DAY + NIGHT
-              </p>
-              <table style="width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 0;">
-                <thead>
-                  <tr style="border-bottom: 1.5px solid #111;">
-                    <th style="padding: 3px 1px; text-align: left;"></th>
-                    <th style="padding: 3px 1px; text-align: right;">Night<br>Sys</th>
-                    <th style="padding: 3px 1px; text-align: right;">Night<br>Act</th>
-                    <th style="padding: 3px 1px; text-align: right;">Day<br>Sys</th>
-                    <th style="padding: 3px 1px; text-align: right;">Day<br>Act</th>
-                    <th style="padding: 3px 1px; text-align: right; font-weight: bold;">Tot<br>Sys</th>
-                    <th style="padding: 3px 1px; text-align: right; font-weight: bold;">Tot<br>Act</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style="border-bottom: 1px dashed #ddd;">
-                    <td style="padding: 3px 1px; font-weight: bold;">Cash sale</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightSysCash)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightActCash)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.daySysCash)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.dayActCash)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalSysCash)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalActCash)}</td>
-                  </tr>
-                  <tr style="border-bottom: 1px dashed #ddd;">
-                    <td style="padding: 3px 1px; font-weight: bold;">Card sale</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightSysCard)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightActCard)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.daySysCard)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.dayActCard)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalSysCard)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalActCard)}</td>
-                  </tr>
-                  <tr style="border-bottom: 1px dashed #ddd;">
-                    <td style="padding: 3px 1px; font-weight: bold;">Credit sale</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightSysCredit)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightActCredit)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.daySysCredit)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.dayActCredit)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalSysCredit)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalActCredit)}</td>
-                  </tr>
-                  <tr style="border-bottom: 1.5px solid #111;">
-                    <td style="padding: 3px 1px; font-weight: bold;">Major Payments</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightSysMajor)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.nightActMajor)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.daySysMajor)}</td>
-                    <td style="padding: 3px 1px; text-align: right;">${fmt(compData.dayActMajor)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalSysMajor)}</td>
-                    <td style="padding: 3px 1px; text-align: right; font-weight: bold;">${fmt(compData.totalActMajor)}</td>
-                  </tr>
-                  <tr style="border-bottom: 1px solid #111; font-weight: bold;">
-                    <td style="padding: 4px 1px; color: #b91c1c;">Difference</td>
-                    <td style="padding: 4px 1px; text-align: right;"></td>
-                    <td style="padding: 4px 1px; text-align: right; color: ${compData.nightDiff < 0 ? '#b91c1c' : '#15803d'};">${fmtDiff(compData.nightDiff)}</td>
-                    <td style="padding: 4px 1px; text-align: right;"></td>
-                    <td style="padding: 4px 1px; text-align: right; color: ${compData.dayDiff < 0 ? '#b91c1c' : '#15803d'};">${fmtDiff(compData.dayDiff)}</td>
-                    <td style="padding: 4px 1px; text-align: right;"></td>
-                    <td style="padding: 4px 1px; text-align: right; font-size: 11px; color: ${compData.totalDiff < 0 ? '#b91c1c' : '#15803d'};">
-                      ${fmtDiff(compData.totalDiff)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <div style="margin-top: 4px; font-size: 9.5px; text-align: right; font-weight: bold;">
-                Cash Diff: ${fmtDiff(compData.totalCashDiff)} | Card Diff: ${fmtDiff(compData.totalCardDiff)} | Total: ${fmtDiff(compData.totalDiff)}
+              </div>
+
+              <!-- 1. NIGHT SHIFT -->
+              <div style="border: 1px dashed #555; border-radius: 3px; padding: 3px 4px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 10.5px; border-bottom: 1px solid #333; padding-bottom: 2px; margin-bottom: 2px;">
+                  <span>🌙 NIGHT SHIFT</span>
+                  <span>${compData.nightCashier ? compData.nightCashier : ''}</span>
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10.5px; margin: 0;">
+                  <thead>
+                    <tr style="border-bottom: 1px dashed #999; font-size: 9.5px; color: #555;">
+                      <th style="text-align: left; padding: 1px 0;">Item</th>
+                      <th style="text-align: right; padding: 1px 0; width: 30%;">Sys</th>
+                      <th style="text-align: right; padding: 1px 0; width: 30%;">Act</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding: 1px 0;">Cash sale</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightSysCash)}</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightActCash)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0;">Card sale</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightSysCard)}</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightActCard)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0;">Credit sale</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightSysCredit)}</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightActCredit)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0;">Major Payments</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightSysMajor)}</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.nightActMajor)}</td>
+                    </tr>
+                    <tr style="border-top: 1px dashed #777; font-weight: bold;">
+                      <td style="padding: 2px 0; color: #b91c1c;">Night Diff</td>
+                      <td colspan="2" style="text-align: right; padding: 2px 0; color: ${compData.nightDiff < 0 ? '#b91c1c' : '#15803d'};">
+                        ${fmtDiff(compData.nightDiff)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- 2. DAY SHIFT -->
+              <div style="border: 1px dashed #555; border-radius: 3px; padding: 3px 4px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 10.5px; border-bottom: 1px solid #333; padding-bottom: 2px; margin-bottom: 2px;">
+                  <span>☀️ DAY SHIFT</span>
+                  <span>${compData.dayCashier ? compData.dayCashier : ''}</span>
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10.5px; margin: 0;">
+                  <thead>
+                    <tr style="border-bottom: 1px dashed #999; font-size: 9.5px; color: #555;">
+                      <th style="text-align: left; padding: 1px 0;">Item</th>
+                      <th style="text-align: right; padding: 1px 0; width: 30%;">Sys</th>
+                      <th style="text-align: right; padding: 1px 0; width: 30%;">Act</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding: 1px 0;">Cash sale</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.daySysCash)}</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.dayActCash)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0;">Card sale</td>
+                      <td style="text-align: right; padding: 2px 0;">${fmt(compData.daySysCard)}</td>
+                      <td style="text-align: right; padding: 2px 0;">${fmt(compData.dayActCard)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0;">Credit sale</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.daySysCredit)}</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.dayActCredit)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0;">Major Payments</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.daySysMajor)}</td>
+                      <td style="text-align: right; padding: 1px 0;">${fmt(compData.dayActMajor)}</td>
+                    </tr>
+                    <tr style="border-top: 1px dashed #777; font-weight: bold;">
+                      <td style="padding: 2px 0; color: #b91c1c;">Day Diff</td>
+                      <td colspan="2" style="text-align: right; padding: 2px 0; color: ${compData.dayDiff < 0 ? '#b91c1c' : '#15803d'};">
+                        ${fmtDiff(compData.dayDiff)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- 3. TOTAL COMBINED -->
+              <div style="border: 1px solid #111; border-radius: 3px; padding: 3px 4px;">
+                <div style="font-weight: bold; font-size: 10.5px; text-align: center; border-bottom: 1px solid #111; padding-bottom: 2px; margin-bottom: 2px; text-transform: uppercase;">
+                  ⚡ TOTAL COMBINED (DAY + NIGHT)
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10.5px; margin: 0;">
+                  <thead>
+                    <tr style="border-bottom: 1px dashed #999; font-size: 9.5px; color: #555;">
+                      <th style="text-align: left; padding: 1px 0;">Item</th>
+                      <th style="text-align: right; padding: 1px 0; width: 30%; font-weight: bold;">Tot Sys</th>
+                      <th style="text-align: right; padding: 1px 0; width: 30%; font-weight: bold;">Tot Act</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding: 1px 0; font-weight: bold;">Cash sale</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalSysCash)}</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalActCash)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0; font-weight: bold;">Card sale</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalSysCard)}</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalActCard)}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 1px 0; font-weight: bold;">Credit sale</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalSysCredit)}</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalActCredit)}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #111;">
+                      <td style="padding: 1px 0; font-weight: bold;">Major Payments</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalSysMajor)}</td>
+                      <td style="text-align: right; padding: 1px 0; font-weight: bold;">${fmt(compData.totalActMajor)}</td>
+                    </tr>
+                    <tr style="font-weight: bold;">
+                      <td style="padding: 2px 0; color: #b91c1c;">Total Diff</td>
+                      <td colspan="2" style="text-align: right; padding: 2px 0; font-size: 11px; color: ${compData.totalDiff < 0 ? '#b91c1c' : '#15803d'};">
+                        ${fmtDiff(compData.totalDiff)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style="margin-top: 2px; border-top: 1px dashed #888; padding-top: 2px; font-size: 9px; text-align: right; font-weight: bold;">
+                  Cash Diff: ${fmtDiff(compData.totalCashDiff)} | Card Diff: ${fmtDiff(compData.totalCardDiff)}
+                </div>
               </div>
             </div>
           `;
@@ -915,44 +1006,51 @@ export default function Reports({ isTodaySales = false }) {
         <div class="divider"></div>
         <div class="row"><span class="label">Cashier:</span><span class="bold">${report.cashier_name}</span></div>
         <div class="row"><span class="label">Branch:</span><span>${report.branch}</span></div>
-        <div class="row"><span class="label">Login Time:</span><span>${fmtTime(report.login_time)}</span></div>
-        <div class="row"><span class="label">Logout Time:</span><span>${fmtTime(report.logout_time)}</span></div>
-        <div class="row"><span class="label">Active Time:</span><span class="bold">${report.total_active_time}</span></div>
-        <div class="divider"></div>
+        <div class="row"><span class="label">Active Time:</span><span>${fmtTime(report.login_time)} - ${fmtTime(report.logout_time)} (${report.total_active_time})</span></div>
         <div class="row"><span class="label">Total Orders:</span><span class="bold">${report.total_orders}</span></div>
-        <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Cash Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.cash_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Card Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Credit Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
-        <div class="row" style="font-weight: bold; color: #059669;"><span class="label" style="font-weight: bold; color: #059669;">Total Received:</span><span>${CURRENCY}${(parseFloat(report.cash_sales || 0) + parseFloat(report.card_sales || 0) + parseFloat(report.major_payments || 0)).toFixed(2)}</span></div>
+
+        ${report.closing_type !== 'Daily' ? `
+          <div class="divider"></div>
+          <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
+          <div class="row"><span class="label" style="font-size: 10px; padding-left: 8px;">↳ Cash:</span><span>${CURRENCY}${parseFloat(report.cash_sales || 0).toFixed(2)}</span></div>
+          <div class="row"><span class="label" style="font-size: 10px; padding-left: 8px;">↳ Card:</span><span>${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
+          <div class="row"><span class="label" style="font-size: 10px; padding-left: 8px;">↳ Credit:</span><span>${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
+          <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
+          <div class="row" style="font-weight: bold; color: #059669;"><span class="label" style="font-weight: bold; color: #059669;">Total Received:</span><span>${CURRENCY}${(parseFloat(report.cash_sales || 0) + parseFloat(report.card_sales || 0) + parseFloat(report.major_payments || 0)).toFixed(2)}</span></div>
+        ` : ''}
+
         <div class="divider"></div>
-        <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
+        ${parseFloat(report.opening_cash || 0) > 0 ? `<div class="row"><span class="label">Opening Drawer:</span><span>${CURRENCY}${parseFloat(report.opening_cash).toFixed(2)}</span></div>` : ''}
         <div class="row"><span class="label">Cash Counted:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
         <div class="row"><span class="label">Card Counted:</span><span class="bold" style="color: #2563eb;">+ ${CURRENCY}${parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0)).toFixed(2)}</span></div>
-        <div class="row"><span class="label">Total Counted:</span><span class="bold">= ${CURRENCY}${(parseFloat(report.closing_cash || 0) + parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0))).toFixed(2)}</span></div>
-        ${hasDiff ? `
+        <div class="row" style="font-weight: bold;"><span class="label bold">Total Counted:</span><span>= ${CURRENCY}${(parseFloat(report.closing_cash || 0) + parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0))).toFixed(2)}</span></div>
+
+        ${report.closing_type !== 'Daily' && hasDiff ? `
           <div class="row" style="font-weight: bold; color: #b91c1c;"><span class="label" style="color: #b91c1c; font-weight: bold;">Difference:</span><span>${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)}</span></div>
-          ${report.cash_difference !== null && report.cash_difference !== undefined ? `<div class="row" style="font-size: 11px;"><span class="label">↳ Cash Diff:</span><span>${parseFloat(report.cash_difference) < 0 ? '-' : '+'}${CURRENCY}${Math.abs(parseFloat(report.cash_difference)).toFixed(2)}</span></div>` : ''}
-          ${report.card_difference !== null && report.card_difference !== undefined ? `<div class="row" style="font-size: 11px;"><span class="label">↳ Card Diff:</span><span>${parseFloat(report.card_difference) < 0 ? '-' : '+'}${CURRENCY}${Math.abs(parseFloat(report.card_difference)).toFixed(2)}</span></div>` : ''}
-          ${report.difference_reason ? `<div class="row" style="font-size: 11px;"><span class="label">Diff Reason:</span><span>${report.difference_reason}</span></div>` : ''}
+          ${report.cash_difference !== null && report.cash_difference !== undefined ? `<div class="row" style="font-size: 10px;"><span class="label">↳ Cash Diff:</span><span>${parseFloat(report.cash_difference) < 0 ? '-' : '+'}${CURRENCY}${Math.abs(parseFloat(report.cash_difference)).toFixed(2)}</span></div>` : ''}
+          ${report.card_difference !== null && report.card_difference !== undefined ? `<div class="row" style="font-size: 10px;"><span class="label">↳ Card Diff:</span><span>${parseFloat(report.card_difference) < 0 ? '-' : '+'}${CURRENCY}${Math.abs(parseFloat(report.card_difference)).toFixed(2)}</span></div>` : ''}
+          ${report.difference_reason ? `<div class="row" style="font-size: 10px;"><span class="label">Diff Reason:</span><span>${report.difference_reason}</span></div>` : ''}
         ` : ''}
+
+        ${items && items.length > 0 ? `
+          <div class="divider"></div>
+          <p style="font-weight:bold;margin:3px 0 2px;font-size:11px;">Sales by Category:</p>
+          <table>
+            <thead><tr><th>Category</th><th style="text-align:center">Qty</th><th>Amount</th></tr></thead>
+            <tbody>
+              ${items.map(i => `
+                <tr style="border-bottom: 1px dashed #eee;">
+                  <td>${i.category}</td>
+                  <td style="text-align:center">${i.qty}</td>
+                  <td>${CURRENCY}${parseFloat(i.amount || 0).toFixed(2)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : ''}
+
         <div class="divider"></div>
-        <p style="font-weight:bold;margin:6px 0 4px;">Sales by Category:</p>
-        <table>
-          <thead><tr><th>Category</th><th style="text-align:center">Qty</th><th>Amount</th></tr></thead>
-          <tbody>
-            ${items.map(i => `
-              <tr>
-                <td>${i.category}</td>
-                <td style="text-align:center">${i.qty}</td>
-                <td>${CURRENCY}${parseFloat(i.amount || 0).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        <div class="divider"></div>
-        <p class="center" style="font-size:11px;color:#888;margin-top:12px">Generated: ${formatSaudiDateTime(new Date())}</p>
+        <p class="center" style="font-size:10px;color:#888;margin:4px 0 0">Generated: ${formatSaudiDateTime(new Date())}</p>
       </body></html>`
     printWindow.document.write(html)
     printWindow.document.close()
@@ -1182,7 +1280,7 @@ export default function Reports({ isTodaySales = false }) {
                 <span style={{ textTransform: 'capitalize' }}>{activeShift?.cashier_name || user?.username || 'Cashier'}</span>'s Active Shift is Open
               </div>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
-                Cashier: <strong style={{ textTransform: 'capitalize' }}>{activeShift?.cashier_name || user?.username}</strong> • Shift Started: <strong>{formatSaudiDateTime(activeShift.start_time)}</strong> (KSA) • Opening Cash: <strong>{CURRENCY}{parseFloat(activeShift.opening_cash || 0).toFixed(2)}</strong>
+                Cashier: <strong style={{ textTransform: 'capitalize' }}>{activeShift?.cashier_name || user?.username}</strong> • Shift Started: <strong>{formatSaudiDateTime(activeShift.start_time)}</strong> (KSA){parseFloat(activeShift?.opening_cash || 0) > 0 ? <> • Opening Cash: <strong>{CURRENCY}{parseFloat(activeShift.opening_cash).toFixed(2)}</strong></> : null}
               </div>
             </div>
           </div>
@@ -2613,7 +2711,9 @@ export default function Reports({ isTodaySales = false }) {
                       <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: '#555' }}>↳ Card Sales: SAR {parseFloat(selectedHistoryReport.card_sales || 0).toFixed(2)}</p>
                       <p style={{ margin: '4px 0', paddingLeft: 10, fontSize: 13, color: '#555' }}>↳ Credit Sales: SAR {parseFloat(selectedHistoryReport.credit_sales || 0).toFixed(2)}</p>
                       <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Major Payments Received:</strong> SAR {parseFloat(selectedHistoryReport.major_payments || 0).toFixed(2)}</p>
-                      <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Opening Drawer Cash:</strong> SAR {parseFloat(selectedHistoryReport.opening_cash || 0).toFixed(2)}</p>
+                      {parseFloat(selectedHistoryReport.opening_cash || 0) > 0 && (
+                        <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Opening Drawer Cash:</strong> SAR {parseFloat(selectedHistoryReport.opening_cash).toFixed(2)}</p>
+                      )}
                       <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Cash Counted:</strong> SAR {parseFloat(selectedHistoryReport.closing_cash || 0).toFixed(2)}</p>
                       <p style={{ margin: '4px 0', fontSize: 14, color: '#2563eb' }}><strong>Card Counted:</strong> + SAR {parseFloat(selectedHistoryReport.closing_card !== null && selectedHistoryReport.closing_card !== undefined ? selectedHistoryReport.closing_card : (selectedHistoryReport.card_sales || 0)).toFixed(2)}</p>
                       <p style={{ margin: '4px 0', fontSize: 14, color: '#0f172a' }}><strong>Total Accounted:</strong> = SAR {(parseFloat(selectedHistoryReport.closing_cash || 0) + parseFloat(selectedHistoryReport.closing_card !== null && selectedHistoryReport.closing_card !== undefined ? selectedHistoryReport.closing_card : (selectedHistoryReport.card_sales || 0))).toFixed(2)}</p>

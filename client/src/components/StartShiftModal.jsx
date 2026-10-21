@@ -214,22 +214,6 @@ export default function StartShiftModal({ isOpen, user, onShiftStarted }) {
                 </div>
               </div>
 
-              {/* Cash Left in Drawer by Previous Shift */}
-              <div style={{
-                background: 'rgba(16, 185, 129, 0.08)',
-                border: '1px solid rgba(16, 185, 129, 0.25)',
-                borderRadius: 8,
-                padding: '4px 10px',
-                textAlign: 'center'
-              }}>
-                <div style={{ fontSize: 10, color: '#065f46', fontWeight: 700, textTransform: 'uppercase' }}>
-                  💵 Left in Drawer
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 900, color: '#047857', marginTop: 1 }}>
-                  {loadingPrevShift ? '...' : `${CURRENCY}${parseFloat(prevShiftInfo?.previousRemainingCash || 0).toFixed(2)}`}
-                </div>
-              </div>
-
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>
                   Pending Orders

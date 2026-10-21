@@ -128,8 +128,18 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       )
     `);
     await pool.query('ALTER TABLE cashier_shifts ADD COLUMN IF NOT EXISTS closing_cash NUMERIC(10, 2) DEFAULT 0');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_cashier_shifts_active ON cashier_shifts(cashier_name, branch, status)');
     await pool.query('ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS is_shift_closed BOOLEAN DEFAULT FALSE, ADD COLUMN IF NOT EXISTS is_daily_closed BOOLEAN DEFAULT FALSE, ADD COLUMN IF NOT EXISTS branch VARCHAR(100)');
+    // Ensure all historical payments created before today are closed so only today's/active payments appear
+    await pool.query(`
+      UPDATE credit_transactions 
+      SET is_shift_closed = TRUE, is_daily_closed = TRUE 
+      WHERE type = 'PAYMENT' AND (id < 113 OR created_at < CURRENT_DATE)
+    `);
+    await pool.query(`
+      UPDATE credit_transactions 
+      SET branch = COALESCE(branch, 'Branch 1')
+      WHERE branch IS NULL
+    `);
 
     // Update shift_closings for credit reporting, closing cash, opening cash, interval items, difference tracking, and shifts breakdown
     try {
