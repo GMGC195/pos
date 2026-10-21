@@ -61,7 +61,7 @@ async function sendExpiryEmail(employeeName, documentName, expiryDateStr, diffDa
     try {
       const resend = new Resend(process.env.RESEND_API_KEY);
       await resend.emails.send({
-        from: `Pizza Shop Document Alerts <${process.env.RESEND_FROM_EMAIL}>`,
+        from: `Employee Document Expire <${process.env.RESEND_FROM_EMAIL}>`,
         to: validRecipients,
         subject: subject,
         html: html
@@ -88,7 +88,7 @@ async function sendExpiryEmail(employeeName, documentName, expiryDateStr, diffDa
       });
 
       await transporter.sendMail({
-        from: `"Pizza Shop Document Alerts" <${process.env.GMAIL_USER}>`,
+        from: `"Employee Document Expire" <${process.env.GMAIL_USER}>`,
         to: validRecipients.join(', '),
         subject: subject,
         html: html
