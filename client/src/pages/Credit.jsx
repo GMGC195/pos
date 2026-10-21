@@ -242,7 +242,8 @@ export default function Credit() {
         amount: finalAmount,
         action: paymentAction,
         cashier_name: user?.username || 'Unknown',
-        payment_method: paymentAction === 'PAYMENT' ? paymentMethod : null
+        payment_method: paymentAction === 'PAYMENT' ? paymentMethod : null,
+        branch: user?.branch || (branchFilter !== 'All' ? branchFilter : 'Branch 1')
       });
       toast.success(paymentAction === 'PAYMENT' ? 'Major Payment added' : 'Credit added');
       setPaymentAmount('');

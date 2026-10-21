@@ -233,8 +233,7 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     if (role === 'cashier' && cashierShiftStartTime) {
       paymentsParams.push(req.user.username);
       paymentsQuery += ` AND ct.cashier_name = $${paymentsParams.length}`;
-      paymentsParams.push(cashierShiftStartTime);
-      paymentsQuery += ` AND ct.created_at >= $${paymentsParams.length}`;
+      paymentsQuery += ` AND ct.is_shift_closed = FALSE`;
       if (req.user?.branch) {
         paymentsParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
         paymentsQuery += ` AND cc.available_branches @> $${paymentsParams.length}::jsonb`;
@@ -275,8 +274,7 @@ router.get('/credit-summary', authenticateToken, async (req, res) => {
     if (role === 'cashier' && cashierShiftStartTime) {
       listParams.push(req.user.username);
       paymentsListQuery += ` AND ct.cashier_name = $${listParams.length}`;
-      listParams.push(cashierShiftStartTime);
-      paymentsListQuery += ` AND ct.created_at >= $${listParams.length}`;
+      paymentsListQuery += ` AND ct.is_shift_closed = FALSE`;
       if (req.user?.branch) {
         listParams.push(JSON.stringify([req.user.branch.split(',')[0].trim()]));
         paymentsListQuery += ` AND cc.available_branches @> $${listParams.length}::jsonb`;

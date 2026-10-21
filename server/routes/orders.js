@@ -500,12 +500,19 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
       const activeShift = activeShiftRes.rows[0] || null;
 
       const majorPaymentsRes = await pool.query(`
-        SELECT COALESCE(SUM(amount), 0) as total
+        SELECT 
+          COALESCE(SUM(amount), 0) as total,
+          COALESCE(SUM(CASE WHEN payment_method = 'Cash' THEN amount ELSE 0 END), 0) as cash_major,
+          COALESCE(SUM(CASE WHEN payment_method = 'Card' THEN amount ELSE 0 END), 0) as card_major
         FROM credit_transactions
-        WHERE type = 'PAYMENT' ${isAdminRole ? '' : 'AND cashier_name = $1'}
-          AND created_at >= $${isAdminRole ? 1 : 2}
-      `, isAdminRole ? [activeShift?.start_time || new Date(0)] : [username, activeShift?.start_time || new Date(0)]);
+        WHERE type = 'PAYMENT' 
+          AND is_shift_closed = FALSE 
+          AND (branch = $1 OR branch IS NULL)
+          ${isAdminRole ? '' : 'AND cashier_name = $2'}
+      `, isAdminRole ? [branch] : [branch, username]);
       const majorPayments = parseFloat(majorPaymentsRes.rows[0]?.total || 0);
+      const majorPaymentsCash = parseFloat(majorPaymentsRes.rows[0]?.cash_major || 0);
+      const majorPaymentsCard = parseFloat(majorPaymentsRes.rows[0]?.card_major || 0);
 
       return res.json({
         success: true,
@@ -516,6 +523,8 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
         credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
         major_payments: majorPayments,
+        major_payments_cash: majorPaymentsCash,
+        major_payments_card: majorPaymentsCard,
         start_time: activeShift?.start_time || null,
         opening_cash: parseFloat(activeShift?.opening_cash || 0)
       });
@@ -571,6 +580,20 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         difference_reason: s.difference_reason || ''
       }));
 
+      // Active shift major payments map
+      const activeMajorPaymentsRes = await pool.query(`
+        SELECT 
+          cashier_name,
+          COALESCE(SUM(amount), 0) as total
+        FROM credit_transactions
+        WHERE type = 'PAYMENT' AND is_shift_closed = FALSE AND (branch = $1 OR branch IS NULL)
+        GROUP BY cashier_name
+      `, [branch]);
+      const activeMajorMap = {};
+      activeMajorPaymentsRes.rows.forEach(r => {
+        activeMajorMap[r.cashier_name] = parseFloat(r.total || 0);
+      });
+
       // Also check if any orders are unclosed by shift (e.g. active shift right now)
       const unclosedShiftOrdersRes = await pool.query(`
         SELECT 
@@ -596,7 +619,7 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
           cash_sales: parseFloat(u.cash_sales || 0),
           card_sales: parseFloat(u.card_sales || 0),
           credit_sales: parseFloat(u.credit_sales || 0),
-          major_payments: 0,
+          major_payments: activeMajorMap[u.cashier_name] || 0,
           total_orders: parseInt(u.total_orders || 0, 10),
           closing_cash: null,
           closing_card: null,
@@ -608,11 +631,18 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
       });
 
       const dailyMajorPaymentsRes = await pool.query(`
-        SELECT COALESCE(SUM(amount), 0) as total
+        SELECT 
+          COALESCE(SUM(amount), 0) as total,
+          COALESCE(SUM(CASE WHEN payment_method = 'Cash' THEN amount ELSE 0 END), 0) as cash_major,
+          COALESCE(SUM(CASE WHEN payment_method = 'Card' THEN amount ELSE 0 END), 0) as card_major
         FROM credit_transactions
-        WHERE type = 'PAYMENT' AND created_at >= $1
-      `, [loginTime]);
+        WHERE type = 'PAYMENT' 
+          AND is_daily_closed = FALSE 
+          AND (branch = $1 OR branch IS NULL)
+      `, [branch]);
       const dailyMajorPayments = parseFloat(dailyMajorPaymentsRes.rows[0]?.total || 0);
+      const dailyMajorPaymentsCash = parseFloat(dailyMajorPaymentsRes.rows[0]?.cash_major || 0);
+      const dailyMajorPaymentsCard = parseFloat(dailyMajorPaymentsRes.rows[0]?.card_major || 0);
 
       return res.json({
         success: true,
@@ -624,6 +654,8 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
         credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
         major_payments: dailyMajorPayments,
+        major_payments_cash: dailyMajorPaymentsCash,
+        major_payments_card: dailyMajorPaymentsCard,
         shifts
       });
     }
@@ -1384,9 +1416,14 @@ async function sendClosingEmail(report, closingType) {
             <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Card Sales: SAR ${parseFloat(report.card_sales || 0).toFixed(2)}</p>
             <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Credit Sales: SAR ${parseFloat(report.credit_sales || 0).toFixed(2)}</p>
             <p style="margin: 4px 0;"><strong>Major Payments Received:</strong> SAR ${parseFloat(report.major_payments || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0; font-weight: bold; color: #059669;"><strong>Total Amount Received:</strong> SAR ${(parseFloat(report.cash_sales || 0) + parseFloat(report.card_sales || 0) + parseFloat(report.major_payments || 0)).toFixed(2)}</p>
             <p style="margin: 4px 0;"><strong>Opening Drawer Cash:</strong> SAR ${parseFloat(report.opening_cash || 0).toFixed(2)}</p>
-            <p style="margin: 4px 0;"><strong>Amount in Drawer (Closing Cash):</strong> SAR ${parseFloat(report.closing_cash || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0; color: #047857;"><strong>Cash Counted:</strong> SAR ${parseFloat(report.closing_cash || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0; color: #2563eb;"><strong>Card Counted:</strong> SAR ${parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0)).toFixed(2)}</p>
+            <p style="margin: 4px 0; font-weight: bold;"><strong>Total Counted:</strong> SAR ${(parseFloat(report.closing_cash || 0) + parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0))).toFixed(2)}</p>
             ${hasDiff ? `<p style="margin: 4px 0; color: #dc2626; font-weight: bold;"><strong>Difference:</strong> ${diffVal < 0 ? '-' : '+'}SAR ${Math.abs(diffVal).toFixed(2)}</p>` : ''}
+            ${report.cash_difference !== null && report.cash_difference !== undefined ? `<p style="margin: 2px 0 2px 10px; font-size: 12px; color: ${parseFloat(report.cash_difference) < 0 ? '#dc2626' : '#047857'};">↳ Cash Diff: ${parseFloat(report.cash_difference) < 0 ? '-' : '+'}SAR ${Math.abs(parseFloat(report.cash_difference)).toFixed(2)}</p>` : ''}
+            ${report.card_difference !== null && report.card_difference !== undefined ? `<p style="margin: 2px 0 2px 10px; font-size: 12px; color: ${parseFloat(report.card_difference) < 0 ? '#dc2626' : '#2563eb'};">↳ Card Diff: ${parseFloat(report.card_difference) < 0 ? '-' : '+'}SAR ${Math.abs(parseFloat(report.card_difference)).toFixed(2)}</p>` : ''}
             ${hasDiff && report.difference_reason ? `<p style="margin: 4px 0; color: #374151;"><strong>Diff Reason:</strong> ${report.difference_reason}</p>` : ''}
             <p style="margin: 4px 0;"><strong>Active Time:</strong> ${report.total_active_time}</p>
             <p style="margin: 4px 0; font-size: 12px; color: #777;">${new Date(report.login_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} - ${new Date(report.logout_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} (KSA)</p>
@@ -1637,11 +1674,17 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
     const totalActiveTime = `${diffHrs}h ${diffMins}m`;
     
     const majorPaymentsRes = await client.query(`
-      SELECT COALESCE(SUM(amount), 0) as total
+      SELECT 
+        COALESCE(SUM(amount), 0) as total,
+        COALESCE(SUM(CASE WHEN payment_method = 'Cash' THEN amount ELSE 0 END), 0) as cash_major,
+        COALESCE(SUM(CASE WHEN payment_method = 'Card' THEN amount ELSE 0 END), 0) as card_major
       FROM credit_transactions
-      WHERE type = 'PAYMENT' AND cashier_name = $1 AND created_at >= $2 AND created_at <= $3
-    `, [req.user.username, loginTime, logoutTime]);
-    const majorPayments = parseFloat(majorPaymentsRes.rows[0].total) || 0;
+      WHERE type = 'PAYMENT' 
+        AND is_shift_closed = FALSE 
+        AND (branch = $1 OR branch IS NULL)
+        ${isAdminRole ? '' : 'AND cashier_name = $2'}
+    `, isAdminRole ? [branch] : [branch, req.user.username]);
+    const majorPayments = parseFloat(majorPaymentsRes.rows[0]?.total || 0);
 
     const intervalItemsRes = await client.query(`
       SELECT 
@@ -1721,6 +1764,15 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
         WHERE is_shift_closed = FALSE AND status != 'Hold' AND branch = $1 AND (completed_by = $2 OR (completed_by IS NULL AND order_taker = $2))
       `, [branch, req.user.username]);
     }
+
+    await client.query(`
+      UPDATE credit_transactions 
+      SET is_shift_closed = TRUE 
+      WHERE type = 'PAYMENT' 
+        AND is_shift_closed = FALSE 
+        AND (branch = $1 OR branch IS NULL)
+        ${isAdminRole ? '' : 'AND cashier_name = $2'}
+    `, isAdminRole ? [branch] : [branch, req.user.username]);
     
     if (activeShift) {
       await client.query(
@@ -1807,11 +1859,16 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
     const totalActiveTime = `${diffHrs}h ${diffMins}m`;
 
     const majorPaymentsRes = await client.query(`
-      SELECT COALESCE(SUM(amount), 0) as total
+      SELECT 
+        COALESCE(SUM(amount), 0) as total,
+        COALESCE(SUM(CASE WHEN payment_method = 'Cash' THEN amount ELSE 0 END), 0) as cash_major,
+        COALESCE(SUM(CASE WHEN payment_method = 'Card' THEN amount ELSE 0 END), 0) as card_major
       FROM credit_transactions
-      WHERE type = 'PAYMENT' AND created_at >= $1 AND created_at <= $2
-    `, [loginTime, logoutTime]);
-    const majorPayments = parseFloat(majorPaymentsRes.rows[0].total) || 0;
+      WHERE type = 'PAYMENT' 
+        AND is_daily_closed = FALSE 
+        AND (branch = $1 OR branch IS NULL)
+    `, [branch]);
+    const majorPayments = parseFloat(majorPaymentsRes.rows[0]?.total || 0);
 
     const intervalItemsRes = await client.query(`
       SELECT 
@@ -1953,6 +2010,14 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       UPDATE "orders" 
       SET is_daily_closed = TRUE, is_shift_closed = TRUE
       WHERE is_daily_closed = FALSE AND status != 'Hold' AND branch = $1
+    `, [branch]);
+
+    await client.query(`
+      UPDATE credit_transactions 
+      SET is_daily_closed = TRUE, is_shift_closed = TRUE 
+      WHERE type = 'PAYMENT' 
+        AND is_daily_closed = FALSE 
+        AND (branch = $1 OR branch IS NULL)
     `, [branch]);
 
     // Close any active cashier shifts for this branch

@@ -646,6 +646,7 @@ export default function Dashboard() {
       <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Card Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
       <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Credit Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
       <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
+      <div class="row" style="font-weight: bold; color: #059669;"><span class="label" style="font-weight: bold; color: #059669;">Total Received:</span><span>${CURRENCY}${(parseFloat(report.cash_sales || 0) + parseFloat(report.card_sales || 0) + parseFloat(report.major_payments || 0)).toFixed(2)}</span></div>
       <div class="divider"></div>
       <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
       <div class="row"><span class="label">Cash Counted:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
@@ -1795,6 +1796,7 @@ export default function Dashboard() {
                   <p style={{ margin: '4px 0', paddingLeft: 12, fontSize: 13, color: '#555' }}>↳ Card Sales: {CURRENCY}{parseFloat(selectedHistoryReport.card_sales || 0).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', paddingLeft: 12, fontSize: 13, color: '#555' }}>↳ Credit Sales: {CURRENCY}{parseFloat(selectedHistoryReport.credit_sales || 0).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', fontSize: 14 }}><strong>Major Payments:</strong> {CURRENCY}{parseFloat(selectedHistoryReport.major_payments || 0).toFixed(2)}</p>
+                  <p style={{ margin: '4px 0', fontSize: 14, fontWeight: 700, color: '#059669' }}><strong>Total Received:</strong> {CURRENCY}{(parseFloat(selectedHistoryReport.cash_sales || 0) + parseFloat(selectedHistoryReport.card_sales || 0) + parseFloat(selectedHistoryReport.major_payments || 0)).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Opening Drawer Cash:</strong> {CURRENCY}{parseFloat(selectedHistoryReport.opening_cash || 0).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', fontSize: 14, color: '#047857' }}><strong>Cash Counted:</strong> {CURRENCY}{parseFloat(selectedHistoryReport.closing_cash || 0).toFixed(2)}</p>
                   <p style={{ margin: '4px 0', fontSize: 14, color: '#2563eb' }}><strong>Card Counted:</strong> + {CURRENCY}{parseFloat(selectedHistoryReport.closing_card !== null && selectedHistoryReport.closing_card !== undefined ? selectedHistoryReport.closing_card : (selectedHistoryReport.card_sales || 0)).toFixed(2)}</p>

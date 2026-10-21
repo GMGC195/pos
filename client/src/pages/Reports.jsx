@@ -230,14 +230,18 @@ export default function Reports({ isTodaySales = false }) {
   const returnedRow = summary.find(r => r.payment_method === 'Returned')
   const creditRow = summary.find(r => r.payment_method === 'Credit')
   
-  const totalSales = summary
-    .filter(r => r.payment_method !== 'Hold' && r.payment_method !== 'Cancelled' && r.payment_method !== 'Returned' && r.payment_method !== 'Credit')
-    .reduce((s, r) => s + parseFloat(r.total || 0), 0) + parseFloat(creditSummary?.majorPaymentsTotal || 0)
-    
-  const totalCount = summary.reduce((s, r) => s + parseInt(r.count || 0), 0)
-
+  const cashTotal = parseFloat(cashRow?.total || 0)
   const cardTotal = parseFloat(cardRow?.total || 0) + parseFloat(onlineRow?.total || 0)
+  const creditTotal = parseFloat(creditRow?.total || 0)
+  const majorPaymentsTotal = parseFloat(creditSummary?.majorPaymentsTotal || 0)
+  const majorPaymentsCash = parseFloat(creditSummary?.majorPaymentsCash || 0)
+  const majorPaymentsCard = parseFloat(creditSummary?.majorPaymentsCard || 0)
+
+  // Total Sales is strictly from orders (Cash + Card + Credit), SEPARATE from Major Payments
+  const totalSales = cashTotal + cardTotal + creditTotal
+  const totalCount = summary.reduce((s, r) => s + parseInt(r.count || 0), 0)
   const cardCount = parseInt(cardRow?.count || 0) + parseInt(onlineRow?.count || 0)
+  const totalAmountReceived = cashTotal + cardTotal + majorPaymentsTotal
 
   const isShiftSaleView = isTodaySales && isCashier
 
@@ -248,11 +252,11 @@ export default function Reports({ isTodaySales = false }) {
       icon: <TrendingUp size={20} />, 
       color: '#E31837', 
       bg: 'transparent', 
-      sub: `${totalCount} total transactions` 
+      sub: `${totalCount} total orders` 
     },
     { 
       label: 'Cash Sales', 
-      val: `${CURRENCY}${parseFloat(cashRow?.total || 0).toFixed(2)}`, 
+      val: `${CURRENCY}${cashTotal.toFixed(2)}`, 
       icon: <Banknote size={20} />, 
       color: '#10b981', 
       bg: 'transparent', 
@@ -267,8 +271,8 @@ export default function Reports({ isTodaySales = false }) {
       sub: `${cardCount} orders` 
     },
     { 
-      label: isShiftSaleView ? 'Shift Credit' : "Today's Credit", 
-      val: `${CURRENCY}${parseFloat(creditRow?.total || 0).toFixed(2)}`, 
+      label: isShiftSaleView ? 'Shift Credit' : "Credit Sales", 
+      val: `${CURRENCY}${creditTotal.toFixed(2)}`, 
       icon: <ClipboardList size={20} />, 
       color: '#8b5cf6', 
       bg: 'transparent', 
@@ -276,11 +280,19 @@ export default function Reports({ isTodaySales = false }) {
     },
     { 
       label: 'Major Payment', 
-      val: `${CURRENCY}${(creditSummary.majorPaymentsTotal || 0).toFixed(2)}`, 
+      val: `${CURRENCY}${majorPaymentsTotal.toFixed(2)}`, 
       icon: <HandCoins size={20} />, 
       color: '#14b8a6', 
       bg: 'transparent', 
-      sub: `Cash: ${CURRENCY}${(creditSummary.majorPaymentsCash || 0).toFixed(2)} | Card: ${CURRENCY}${(creditSummary.majorPaymentsCard || 0).toFixed(2)}` 
+      sub: `Cash: ${CURRENCY}${majorPaymentsCash.toFixed(2)} | Card: ${CURRENCY}${majorPaymentsCard.toFixed(2)}` 
+    },
+    { 
+      label: 'Total Received', 
+      val: `${CURRENCY}${totalAmountReceived.toFixed(2)}`, 
+      icon: <Banknote size={20} />, 
+      color: '#059669', 
+      bg: 'transparent', 
+      sub: `Cash + Card + Major Pmt` 
     }
   ]
 
@@ -373,7 +385,19 @@ export default function Reports({ isTodaySales = false }) {
             </div>
             <div style="flex: 1; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #eff6ff;">
               <div style="font-size: 11px; color: #1e40af; text-transform: uppercase;">Card Collected</div>
-              <div style="font-size: 18px; font-weight: bold; color: #1d4ed8;">${CURRENCY}${parseFloat(cardRow?.total || 0).toFixed(2)}</div>
+              <div style="font-size: 18px; font-weight: bold; color: #1d4ed8;">${CURRENCY}${cardTotal.toFixed(2)}</div>
+            </div>
+            <div style="flex: 1; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #f5f3ff;">
+              <div style="font-size: 11px; color: #6d28d9; text-transform: uppercase;">Credit Sales</div>
+              <div style="font-size: 18px; font-weight: bold; color: #7c3aed;">${CURRENCY}${creditTotal.toFixed(2)}</div>
+            </div>
+            <div style="flex: 1; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #f0fdfa;">
+              <div style="font-size: 11px; color: #0f766e; text-transform: uppercase;">Major Payments</div>
+              <div style="font-size: 18px; font-weight: bold; color: #0d9488;">${CURRENCY}${majorPaymentsTotal.toFixed(2)}</div>
+            </div>
+            <div style="flex: 1; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #f8fafc;">
+              <div style="font-size: 11px; color: #334155; text-transform: uppercase;">Total Received</div>
+              <div style="font-size: 18px; font-weight: bold; color: #0f172a;">${CURRENCY}${totalAmountReceived.toFixed(2)}</div>
             </div>
             ${(cancelledRow?.count > 0 || returnedRow?.count > 0) ? `
               <div style="flex: 1; border: 1px solid #ddd; padding: 12px; border-radius: 6px; background: #fee2e2;">
@@ -901,6 +925,7 @@ export default function Reports({ isTodaySales = false }) {
         <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Card Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
         <div class="row"><span class="label" style="font-size: 11px; padding-left: 10px;">↳ Credit Sales:</span><span style="font-size: 11px;">${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
         <div class="row"><span class="label">Major Payments:</span><span>${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
+        <div class="row" style="font-weight: bold; color: #059669;"><span class="label" style="font-weight: bold; color: #059669;">Total Received:</span><span>${CURRENCY}${(parseFloat(report.cash_sales || 0) + parseFloat(report.card_sales || 0) + parseFloat(report.major_payments || 0)).toFixed(2)}</span></div>
         <div class="divider"></div>
         <div class="row"><span class="label">Opening Drawer Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash || 0).toFixed(2)}</span></div>
         <div class="row"><span class="label">Cash Counted:</span><span class="bold" style="color: #047857;">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
@@ -2020,6 +2045,13 @@ export default function Reports({ isTodaySales = false }) {
                   const activeCardSales = closingPreview?.card_sales !== undefined
                     ? parseFloat(closingPreview.card_sales || 0)
                     : (parseFloat(cardRow?.total || 0) + parseFloat(onlineRow?.total || 0));
+                  const activeCreditSales = closingPreview?.credit_sales !== undefined
+                    ? parseFloat(closingPreview.credit_sales || 0)
+                    : parseFloat(creditRow?.total || 0);
+                  const activeMajorPayments = closingPreview?.major_payments !== undefined
+                    ? parseFloat(closingPreview.major_payments || 0)
+                    : parseFloat(creditSummary?.majorPaymentsTotal || 0);
+                  const totalReceived = activeCashSales + activeCardSales + activeMajorPayments;
 
                   const cashValNum = parseFloat(closingRemainingCash);
                   const isCashFilled = closingRemainingCash.trim() !== '' && !isNaN(cashValNum);
@@ -2044,24 +2076,34 @@ export default function Reports({ isTodaySales = false }) {
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {/* Total Sale Card */}
-                      <div className="closing-total-sale-box" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '8px 12px' }}>
+                      <div className="closing-total-sale-box" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6, padding: '10px 14px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>
-                            Total Sale ({closingType === 'Daily' ? 'Daily' : 'Shift'} کل سیل):
+                            Total Sales ({closingType === 'Daily' ? 'Daily' : 'Shift'} کل سیل):
                           </span>
                           <span style={{ fontSize: 17, fontWeight: 900, color: 'var(--primary)' }}>
                             {loadingClosingPreview ? '...' : `${CURRENCY}${activeSales.toFixed(2)}`}
                           </span>
                         </div>
-                        {/* Breakdown directly below Total Sale */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', fontSize: 12, fontWeight: 700 }}>
+                        {/* 4 separate categories: Cash, Card, Credit, Major Payments */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', fontSize: 11.5, fontWeight: 700, flexWrap: 'wrap', gap: 6 }}>
                           <span style={{ color: '#047857' }}>
                             Cash: {CURRENCY}{activeCashSales.toFixed(2)}
                           </span>
-                          <span style={{ color: '#cbd5e1' }}>•</span>
                           <span style={{ color: '#2563eb' }}>
                             Card: {CURRENCY}{activeCardSales.toFixed(2)}
                           </span>
+                          <span style={{ color: '#8b5cf6' }}>
+                            Credit: {CURRENCY}{activeCreditSales.toFixed(2)}
+                          </span>
+                          <span style={{ color: '#0d9488' }}>
+                            Major Pmt: {CURRENCY}{activeMajorPayments.toFixed(2)}
+                          </span>
+                        </div>
+                        {/* Total Amount Received today */}
+                        <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: 4, width: '100%', display: 'flex', justifyContent: 'space-between', fontSize: 11.5, fontWeight: 800 }}>
+                          <span style={{ color: '#475569' }}>Total Received (کل موصول رقم):</span>
+                          <span style={{ color: '#0f172a' }}>{CURRENCY}{totalReceived.toFixed(2)}</span>
                         </div>
                       </div>
 

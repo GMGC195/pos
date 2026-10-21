@@ -285,9 +285,11 @@ router.post('/:id/payment', async (req, res) => {
     // CHARGE adds to the balance (debt increases), PAYMENT subtracts from balance (debt decreases).
     const balanceChange = transactionType === 'CHARGE' ? amount : -amount;
 
+    const targetBranch = req.body?.branch || (req.user?.branch ? req.user.branch.split(',')[0].trim() : 'Branch 1');
+
     await pool.query(
-      'INSERT INTO credit_transactions (credit_customer_id, type, amount, cashier_name, payment_method) VALUES ($1, $2, $3, $4, $5)',
-      [id, transactionType, amount, cashier_name || req.user?.username || 'Unknown', payment_method || 'Cash']
+      'INSERT INTO credit_transactions (credit_customer_id, type, amount, cashier_name, payment_method, branch, is_shift_closed, is_daily_closed) VALUES ($1, $2, $3, $4, $5, $6, FALSE, FALSE)',
+      [id, transactionType, amount, cashier_name || req.user?.username || 'Unknown', payment_method || 'Cash', targetBranch]
     );
 
     const updateResult = await pool.query(
