@@ -1716,6 +1716,7 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
     let daysPresent = 0;
     let daysLate = 0;
     let onlyOvertimeDays = 0;
+    let expectedDutyHours = 0;
     let totalDutyHours = 0;
     let onlyOvertimeHours = 0;
     let otherOvertimeHours = 0;
@@ -1739,6 +1740,7 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
       if (dayWorkedHours >= 6.0) {
         daysPresent++;
         if (dayLogs.some(l => l.status === 'Late')) daysLate++;
+        expectedDutyHours += shiftHours;
         totalDutyHours += Math.min(shiftHours, dayWorkedHours);
         otherOvertimeHours += Math.max(0, dayWorkedHours - shiftHours);
       } else if (dayWorkedHours > 0) {
@@ -1747,7 +1749,9 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
       }
     });
 
-    const totalOvertime = onlyOvertimeHours + otherOvertimeHours;
+    const shortDutyHours = Math.max(0, expectedDutyHours - totalDutyHours);
+    const rawOvertime = onlyOvertimeHours + otherOvertimeHours;
+    const totalOvertime = rawOvertime - shortDutyHours;
 
     // Fetch pending requests for this employee
     const reqsRes = await pool.query(
@@ -1765,10 +1769,14 @@ router.get('/personal-stats', authenticateToken, async (req, res) => {
       days_present: daysPresent,
       days_late: daysLate,
       only_overtime_days: onlyOvertimeDays,
+      expected_duty_hours: parseFloat(expectedDutyHours.toFixed(2)),
       total_hours: parseFloat(totalDutyHours.toFixed(2)),
+      short_duty_hours: parseFloat(shortDutyHours.toFixed(2)),
       only_overtime_hours: parseFloat(onlyOvertimeHours.toFixed(2)),
       other_overtime_hours: parseFloat(otherOvertimeHours.toFixed(2)),
+      raw_overtime: parseFloat(rawOvertime.toFixed(2)),
       overtime: parseFloat(totalOvertime.toFixed(2)),
+      grand_total_hours: parseFloat((expectedDutyHours + totalOvertime).toFixed(2)),
       monthly_logs: logsRes.rows,
       pending_requests: reqsRes.rows
     });

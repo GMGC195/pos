@@ -778,25 +778,26 @@ export default function TodayAttendance() {
                           const totalHours = parseFloat(emp.total_hours_today || 0);
                           const isCheckedOut = sessions.length > 0 && (!emp.attendance_id || emp.check_out);
                           const isOnlyOT = isCheckedOut && totalHours > 0 && totalHours < 6;
+                          const isAbsent = sessions.length === 0 && emp.calculated_status === 'Absent';
                           const dutyHours = isOnlyOT ? 0 : Math.min(parseFloat(emp.shift_hours) || 12.0, totalHours);
                           const dayBranch = formatBranchCode((sessions.length > 0 && sessions[0].branch) ? sessions[0].branch : emp.branch);
 
                           return (
                             <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                              <span style={{ color: isOnlyOT ? '#8B5CF6' : 'var(--green)' }}>
+                              <span style={{ color: isOnlyOT ? '#8B5CF6' : isAbsent ? 'var(--red)' : 'var(--green)' }}>
                                 {isOnlyOT ? '0 min' : decimalHoursToText(dutyHours)}
                               </span>
                               <span style={{
                                 fontSize: '9px',
                                 fontWeight: 800,
-                                padding: '1px 4px',
+                                padding: isAbsent ? '0' : '1px 4px',
                                 borderRadius: '3px',
-                                background: isOnlyOT ? 'rgba(139, 92, 246, 0.15)' : 'rgba(var(--primary-rgb), 0.12)',
-                                color: isOnlyOT ? '#8B5CF6' : 'var(--primary)',
-                                border: isOnlyOT ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(var(--primary-rgb), 0.25)',
+                                background: isAbsent ? 'transparent' : (isOnlyOT ? 'rgba(139, 92, 246, 0.15)' : 'rgba(var(--primary-rgb), 0.12)'),
+                                color: isAbsent ? 'var(--text-muted)' : (isOnlyOT ? '#8B5CF6' : 'var(--primary)'),
+                                border: isAbsent ? 'none' : (isOnlyOT ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(var(--primary-rgb), 0.25)'),
                                 lineHeight: 1.1
                               }}>
-                                {dayBranch}
+                                {isAbsent ? `[${dayBranch}]` : dayBranch}
                               </span>
                             </div>
                           );

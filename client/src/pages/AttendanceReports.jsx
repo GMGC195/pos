@@ -12,8 +12,9 @@ const formatLocalDate = (date) => {
 
 const formatHoursToText = (decimalHours) => {
   if (!decimalHours || decimalHours <= 0) return '0 min'
-  const hrs = Math.floor(decimalHours)
-  const mins = Math.round((decimalHours - hrs) * 60)
+  const totalMins = Math.round(decimalHours * 60)
+  const hrs = Math.floor(totalMins / 60)
+  const mins = totalMins % 60
   if (hrs > 0 && mins > 0) return `${hrs} hr ${mins} min`
   if (hrs > 0) return `${hrs} hr`
   return `${mins} min`
@@ -427,10 +428,10 @@ export default function AttendanceReports() {
       let holidays = 0
       let lates = 0
       let onlyOvertimeDays = 0
+      let expectedDutyHours = 0
       let totalHours = 0
       let onlyOvertimeHours = 0
       let otherOvertimeHours = 0
-      let totalOvertime = 0
       let totalBreakSeconds = 0
 
       daysInMonth.forEach(day => {
@@ -454,14 +455,16 @@ export default function AttendanceReports() {
             dayHours = Math.min(24, dayHours) // Cap to 24 hours max per day
             totalBreakSeconds += dayBreakSecs
 
-            const currentDayShiftHours = mainSession.shift_hours || emp.shift_hours || 12.0
+            const currentDayShiftHours = parseFloat(mainSession.shift_hours || emp.shift_hours || 12.0)
 
             if (dayHours >= 6.0) {
               presents++
               if (sessions.some(s => s.status === 'Late')) {
                 lates++
               }
-              // Normal duty hours capped to shift hours
+              // Normal required/expected duty hours for this present day
+              expectedDutyHours += currentDayShiftHours
+              // Normal duty hours worked capped to shift hours
               totalHours += Math.min(currentDayShiftHours, dayHours)
               // Overtime beyond shift hours is "Other Overtime"
               otherOvertimeHours += Math.max(0, dayHours - currentDayShiftHours)
@@ -481,7 +484,14 @@ export default function AttendanceReports() {
         }
       })
 
-      totalOvertime = onlyOvertimeHours + otherOvertimeHours
+      expectedDutyHours = Math.round(expectedDutyHours * 100) / 100
+      totalHours = Math.round(totalHours * 100) / 100
+      onlyOvertimeHours = Math.round(onlyOvertimeHours * 100) / 100
+      otherOvertimeHours = Math.round(otherOvertimeHours * 100) / 100
+      const shortDutyHours = Math.max(0, Math.round((expectedDutyHours - totalHours) * 100) / 100)
+      const rawOvertime = Math.round((onlyOvertimeHours + otherOvertimeHours) * 100) / 100
+      const totalOvertime = Math.round((rawOvertime - shortDutyHours) * 100) / 100
+      const grandTotalHours = Math.max(0, Math.round((expectedDutyHours + totalOvertime) * 100) / 100)
 
       return {
         ...emp,
@@ -491,10 +501,14 @@ export default function AttendanceReports() {
         holidays,
         lates,
         onlyOvertimeDays,
+        expectedDutyHours,
         totalHours,
+        shortDutyHours,
         onlyOvertimeHours,
         otherOvertimeHours,
+        rawOvertime,
         totalOvertime,
+        grandTotalHours,
         totalBreakSeconds
       }
     })
@@ -590,7 +604,7 @@ export default function AttendanceReports() {
       daysInMonth.forEach(day => {
         headers.push(`${day.getDate()} (${day.toLocaleDateString([], { weekday: 'short' })})`)
       })
-      headers.push('P', 'A', 'L', 'H', 'OOT Days', 'Late Arrival', 'Duty Hours', 'Only OT', 'Other OT', 'Total Overtime', 'Total (Duty + OT)')
+      headers.push('P', 'A', 'L', 'H', 'OOT Days', 'Late Arrival', 'Req Duty', 'Worked Duty', 'Short Duty', 'Break Time', 'Only OT', 'Other OT', 'Total OT (+/-)', 'Total (Duty +/- OT)')
 
       // Build HTML content representing the Excel sheet with inline styles and worksheet configuration
       let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`
@@ -634,7 +648,7 @@ export default function AttendanceReports() {
       html += `<body>`
       html += `<table>`
 
-      // Column widths config: Code (100px), Name (180px), Day cells (180px for checkin/out visibility), PALH (60px), Totals (100px)
+      // Column widths config
       html += `<colgroup>`
       html += `  <col width="90" />`
       html += `  <col width="180" />`
@@ -646,12 +660,15 @@ export default function AttendanceReports() {
       html += `  <col width="50" />`
       html += `  <col width="50" />`
       html += `  <col width="65" />`
+      html += `  <col width="80" />`
       html += `  <col width="90" />`
       html += `  <col width="90" />`
       html += `  <col width="90" />`
+      html += `  <col width="85" />`
       html += `  <col width="90" />`
       html += `  <col width="90" />`
-      html += `  <col width="105" />`
+      html += `  <col width="95" />`
+      html += `  <col width="115" />`
       html += `</colgroup>`
 
       // Write table header with top info row, empty spacer row, and main column headers
@@ -662,14 +679,14 @@ export default function AttendanceReports() {
       html += `    <th colspan="3" style="background-color: #103C43; color: #FFFFFF; font-weight: bold; font-size: 11pt; text-align: left; padding: 12px; border: none;">`
       html += `      MONTH: ${selectedMonth}`
       html += `    </th>`
-      html += `    <th colspan="${daysInMonth.length + 10}" style="background-color: #103C43; color: #FFFFFF; font-size: 10pt; text-align: right; padding: 12px; font-weight: bold; border: none;">`
+      html += `    <th colspan="${daysInMonth.length + 13}" style="background-color: #103C43; color: #FFFFFF; font-size: 10pt; text-align: right; padding: 12px; font-weight: bold; border: none;">`
       html += `      AL RAWAQ PAKISTAN RESTAURANT • Exported: ${new Date().toLocaleDateString()}`
       html += `    </th>`
       html += `  </tr>`
       
       // Empty spacer row between the info row and the column headers
       html += `  <tr style="height: 16px;">`
-      html += `    <th colspan="${daysInMonth.length + 12}" style="border: none; background-color: #FFFFFF; height: 16px;"></th>`
+      html += `    <th colspan="${daysInMonth.length + 16}" style="border: none; background-color: #FFFFFF; height: 16px;"></th>`
       html += `  </tr>`
 
       // Column headers row
@@ -789,11 +806,25 @@ export default function AttendanceReports() {
         html += `<td class="center-text">${emp.holidays}</td>`
         html += `<td class="center-text" style="color: #8B5CF6; font-weight: bold;">${emp.onlyOvertimeDays}</td>`
         html += `<td class="center-text">${emp.lates}</td>`
+        html += `<td class="center-text" style="font-weight: bold; color: #1E293B;">${formatHoursToText(emp.expectedDutyHours)}</td>`
         html += `<td class="center-text" style="font-weight: bold; color: #16A34A;">${formatHoursToText(emp.totalHours)}</td>`
+        html += `<td class="center-text" style="font-weight: bold; color: #DC2626;">${emp.shortDutyHours > 0 ? `-${formatHoursToText(emp.shortDutyHours)}` : '--'}</td>`
+        html += `<td class="center-text" style="font-weight: bold; color: #103C43;">${formatBreakTime(emp.totalBreakSeconds)}</td>`
         html += `<td class="center-text" style="color: #8B5CF6; font-weight: bold;">${emp.onlyOvertimeHours > 0 ? formatHoursToText(emp.onlyOvertimeHours) : '--'}</td>`
         html += `<td class="center-text" style="color: #16A34A; font-weight: bold;">${emp.otherOvertimeHours > 0 ? `+${formatHoursToText(emp.otherOvertimeHours)}` : '--'}</td>`
-        html += `<td class="center-text" style="font-weight: bold; color: #16A34A;">${emp.totalOvertime > 0 ? `+${formatHoursToText(emp.totalOvertime)}` : '--'}</td>`
-        const grandTotalHours = (emp.totalHours || 0) + (emp.totalOvertime || 0)
+        
+        let otText = '--'
+        let otColor = '#1E293B'
+        if (emp.totalOvertime > 0) {
+          otText = `+${formatHoursToText(emp.totalOvertime)}`
+          otColor = '#16A34A'
+        } else if (emp.totalOvertime < 0) {
+          otText = `-${formatHoursToText(Math.abs(emp.totalOvertime))}`
+          otColor = '#DC2626'
+        }
+        html += `<td class="center-text" style="font-weight: bold; color: ${otColor};">${otText}</td>`
+        
+        const grandTotalHours = (emp.expectedDutyHours || 0) + (emp.totalOvertime || 0)
         html += `<td class="center-text" style="font-weight: bold; color: #103C43; background-color: #E2E8F0;">${grandTotalHours > 0 ? formatHoursToText(grandTotalHours) : '--'}</td>`
 
         html += `</tr>`
@@ -1153,24 +1184,26 @@ export default function AttendanceReports() {
                   ))}
 
                   {/* Summary columns */}
-                  <th style={{ minWidth: 50, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Present Days (Worked >= 6 hrs)">P</th>
-                  <th style={{ minWidth: 50, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Absent Days">A</th>
-                  <th style={{ minWidth: 50, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Leaves">L</th>
-                  <th style={{ minWidth: 50, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Holidays">H</th>
-                  <th style={{ minWidth: 70, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: '#8B5CF6', whiteSpace: 'nowrap' }} title="Only Overtime Days (Worked < 6 hrs)">OOT Days</th>
-                  <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Late Arrival</th>
-                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Duty Hours</th>
-                  <th style={{ minWidth: 85, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Break Time</th>
-                  <th style={{ minWidth: 85, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: '#8B5CF6', whiteSpace: 'nowrap' }} title="Only Overtime (from <6h days)">Only OT</th>
-                  <th style={{ minWidth: 85, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--green)', whiteSpace: 'nowrap' }} title="Other Overtime (beyond standard shift)">Other OT</th>
-                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--green)', whiteSpace: 'nowrap' }} title="Total Overtime (Only OT + Other OT)">Total OT</th>
-                  <th style={{ minWidth: 110, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 8px', fontSize: 12, fontWeight: 800, background: 'rgba(var(--primary-rgb), 0.08)', color: 'var(--primary)', whiteSpace: 'nowrap' }} title="Total Duty Time + Total Overtime">Total (Duty + OT)</th>
+                  <th style={{ minWidth: 45, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Present Days (Worked >= 6 hrs)">P</th>
+                  <th style={{ minWidth: 45, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Absent Days">A</th>
+                  <th style={{ minWidth: 45, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Leaves">L</th>
+                  <th style={{ minWidth: 45, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Holidays">H</th>
+                  <th style={{ minWidth: 65, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: '#8B5CF6', whiteSpace: 'nowrap' }} title="Only Overtime Days (Worked < 6 hrs)">OOT Days</th>
+                  <th style={{ minWidth: 75, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Late Arrival</th>
+                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }} title="Required Duty Hours (Shift Hours × Present Days)">Req. Duty</th>
+                  <th style={{ minWidth: 90, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--green)', whiteSpace: 'nowrap' }} title="Actual Worked Duty Hours">Worked Duty</th>
+                  <th style={{ minWidth: 85, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--red)', whiteSpace: 'nowrap' }} title="Duty Shortage Hours (Req. Duty - Worked Duty)">Short Duty</th>
+                  <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Break Time</th>
+                  <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: '#8B5CF6', whiteSpace: 'nowrap' }} title="Only Overtime (from <6h days)">Only OT</th>
+                  <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--green)', whiteSpace: 'nowrap' }} title="Other Overtime (beyond standard shift)">Other OT</th>
+                  <th style={{ minWidth: 95, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--text)', whiteSpace: 'nowrap' }} title="Total Overtime ((Only OT + Other OT) - Short Duty)">Total OT (+/-)</th>
+                  <th style={{ minWidth: 115, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 800, background: 'rgba(var(--primary-rgb), 0.08)', color: 'var(--primary)', whiteSpace: 'nowrap' }} title="Grand Total Working Hours (Req. Duty + Total Overtime)">Total (Duty +/- OT)</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={daysInMonth.length + 15} style={{ textAlign: 'center', padding: '100px 0', color: 'var(--text-muted)' }}>
+                    <td colSpan={daysInMonth.length + 17} style={{ textAlign: 'center', padding: '100px 0', color: 'var(--text-muted)' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                         <Loader2 className="spin" size={32} style={{ color: 'var(--primary)' }} />
                         <span style={{ fontSize: 14, fontWeight: 500 }}>Loading Attendance Sheet...</span>
@@ -1179,7 +1212,7 @@ export default function AttendanceReports() {
                   </tr>
                 ) : filteredGroupedData.length === 0 ? (
                   <tr>
-                    <td colSpan={daysInMonth.length + 15} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+                    <td colSpan={daysInMonth.length + 17} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
                       No employees registered or matching filter criteria.
                     </td>
                   </tr>
@@ -1381,37 +1414,33 @@ export default function AttendanceReports() {
 
                             if (dateStr < todayStr) {
                               cellContent = (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
-                                  {assignedShiftTime && (
-                                    <div style={{
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+                                  <div style={{
+                                    fontSize: '8px',
+                                    fontWeight: 700,
+                                    color: 'var(--red)',
+                                    marginBottom: '2px',
+                                    width: 'fit-content',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    background: 'transparent',
+                                    border: 'none'
+                                  }}>
+                                    <span style={{
                                       fontSize: '8px',
                                       fontWeight: 800,
                                       color: 'var(--red)',
-                                      background: 'rgba(255, 69, 58, 0.1)',
-                                      padding: '2px 5px',
-                                      borderRadius: '4px',
-                                      border: '1px solid rgba(255, 69, 58, 0.2)',
-                                      marginBottom: '2px',
-                                      width: 'fit-content',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: 3
+                                      lineHeight: 1,
+                                      background: 'transparent',
+                                      border: 'none'
                                     }}>
-                                      <span style={{
-                                        fontSize: '8px',
-                                        fontWeight: 800,
-                                        padding: '1px 3px',
-                                        borderRadius: '3px',
-                                        background: 'rgba(255, 69, 58, 0.15)',
-                                        color: 'var(--red)',
-                                        border: '1px solid rgba(255, 69, 58, 0.3)',
-                                        lineHeight: 1
-                                      }}>
-                                        {dayBranch}
-                                      </span>
+                                      [{dayBranch}]
+                                    </span>
+                                    {assignedShiftTime && (
                                       <span>Shift: {assignedShiftTime}</span>
-                                    </div>
-                                  )}
+                                    )}
+                                  </div>
                                   <span style={{ fontWeight: 750, color: 'var(--red)' }}>A</span>
                                 </div>
                               )
@@ -1479,7 +1508,11 @@ export default function AttendanceReports() {
                         <td style={{ textAlign: 'center', fontWeight: 650, color: 'var(--primary)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.holidays}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: '#8B5CF6', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.onlyOvertimeDays}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)', fontSize: 12, whiteSpace: 'nowrap' }}>{emp.lates}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--text)', fontSize: 12, whiteSpace: 'nowrap' }}>{formatHoursToText(emp.expectedDutyHours)}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)', fontSize: 12, whiteSpace: 'nowrap' }}>{formatHoursToText(emp.totalHours)}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: emp.shortDutyHours > 0 ? 'var(--red)' : 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                          {emp.shortDutyHours > 0 ? `-${formatHoursToText(emp.shortDutyHours)}` : '--'}
+                        </td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--primary)', fontSize: 12, whiteSpace: 'nowrap' }}>{formatBreakTime(emp.totalBreakSeconds)}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: emp.onlyOvertimeHours > 0 ? '#8B5CF6' : 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
                           {emp.onlyOvertimeHours > 0 ? formatHoursToText(emp.onlyOvertimeHours) : '--'}
@@ -1487,11 +1520,11 @@ export default function AttendanceReports() {
                         <td style={{ textAlign: 'center', fontWeight: 700, color: emp.otherOvertimeHours > 0 ? 'var(--green)' : 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
                           {emp.otherOvertimeHours > 0 ? `+${formatHoursToText(emp.otherOvertimeHours)}` : '--'}
                         </td>
-                        <td style={{ textAlign: 'center', fontWeight: 800, color: emp.totalOvertime > 0 ? 'var(--green)' : 'var(--text)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                          {emp.totalOvertime > 0 ? `+${formatHoursToText(emp.totalOvertime)}` : '--'}
+                        <td style={{ textAlign: 'center', fontWeight: 800, color: emp.totalOvertime > 0 ? 'var(--green)' : emp.totalOvertime < 0 ? 'var(--red)' : 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                          {emp.totalOvertime > 0 ? `+${formatHoursToText(emp.totalOvertime)}` : emp.totalOvertime < 0 ? `-${formatHoursToText(Math.abs(emp.totalOvertime))}` : '--'}
                         </td>
-                        <td style={{ textAlign: 'center', fontWeight: 850, color: 'var(--primary)', fontSize: 12, whiteSpace: 'nowrap', background: 'rgba(var(--primary-rgb), 0.05)' }} title="Total Duty Time + Total Overtime">
-                          {((emp.totalHours || 0) + (emp.totalOvertime || 0)) > 0 ? formatHoursToText((emp.totalHours || 0) + (emp.totalOvertime || 0)) : '--'}
+                        <td style={{ textAlign: 'center', fontWeight: 850, color: 'var(--primary)', fontSize: 12, whiteSpace: 'nowrap', background: 'rgba(var(--primary-rgb), 0.05)' }} title="Grand Total: Req. Duty + Total Overtime">
+                          {((emp.expectedDutyHours || 0) + (emp.totalOvertime || 0)) > 0 ? formatHoursToText((emp.expectedDutyHours || 0) + (emp.totalOvertime || 0)) : '--'}
                         </td>
                       </tr>
                     );
@@ -1638,7 +1671,7 @@ export default function AttendanceReports() {
             </div>
 
             {/* Metrics stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))', gap: 10, marginBottom: 20 }}>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Presents</span>
                 <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{selectedEmployeeLogs.presents} days</h4>
@@ -1652,8 +1685,18 @@ export default function AttendanceReports() {
                 <h4 style={{ margin: '4px 0 0 0', color: '#8B5CF6', fontWeight: 800 }}>{selectedEmployeeLogs.onlyOvertimeDays || 0} days</h4>
               </div>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Working Hours</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--text)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.totalHours)}</h4>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Req. Duty</span>
+                <h4 style={{ margin: '4px 0 0 0', color: 'var(--text)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.expectedDutyHours || 0)}</h4>
+              </div>
+              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Worked Duty</span>
+                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.totalHours || 0)}</h4>
+              </div>
+              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Short Duty</span>
+                <h4 style={{ margin: '4px 0 0 0', color: (selectedEmployeeLogs.shortDutyHours || 0) > 0 ? 'var(--red)' : 'var(--text-muted)', fontWeight: 800 }}>
+                  {(selectedEmployeeLogs.shortDutyHours || 0) > 0 ? `-${formatHoursToText(selectedEmployeeLogs.shortDutyHours)}` : '--'}
+                </h4>
               </div>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Only OT</span>
@@ -1661,16 +1704,24 @@ export default function AttendanceReports() {
               </div>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Other OT</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.otherOvertimeHours || 0)}</h4>
+                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>
+                  {(selectedEmployeeLogs.otherOvertimeHours || 0) > 0 ? `+${formatHoursToText(selectedEmployeeLogs.otherOvertimeHours)}` : '--'}
+                </h4>
               </div>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Total Overtime</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.totalOvertime)}</h4>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Total OT (+/-)</span>
+                <h4 style={{ 
+                  margin: '4px 0 0 0', 
+                  color: (selectedEmployeeLogs.totalOvertime || 0) > 0 ? 'var(--green)' : (selectedEmployeeLogs.totalOvertime || 0) < 0 ? 'var(--red)' : 'var(--text)', 
+                  fontWeight: 800 
+                }}>
+                  {(selectedEmployeeLogs.totalOvertime || 0) > 0 ? `+${formatHoursToText(selectedEmployeeLogs.totalOvertime)}` : (selectedEmployeeLogs.totalOvertime || 0) < 0 ? `-${formatHoursToText(Math.abs(selectedEmployeeLogs.totalOvertime))}` : '--'}
+                </h4>
               </div>
               <div style={{ background: 'rgba(var(--primary-rgb), 0.08)', padding: 10, borderRadius: 8, textAlign: 'center', border: '1px solid rgba(var(--primary-rgb), 0.25)' }}>
-                <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700 }}>Total (Duty + OT)</span>
+                <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700 }}>Total (Duty +/- OT)</span>
                 <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary)', fontWeight: 850 }}>
-                  {formatHoursToText((selectedEmployeeLogs.totalHours || 0) + (selectedEmployeeLogs.totalOvertime || 0))}
+                  {formatHoursToText(((selectedEmployeeLogs.expectedDutyHours || 0) + (selectedEmployeeLogs.totalOvertime || 0)))}
                 </h4>
               </div>
             </div>
