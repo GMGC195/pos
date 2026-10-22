@@ -8,6 +8,7 @@ import {
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
+import ManageSalaryModal from '../components/ManageSalaryModal'
 
 export default function Payroll() {
   const { user } = useAuth()
@@ -19,11 +20,25 @@ export default function Payroll() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   }
 
+  const formatDuration = (totalMinutes) => {
+    const mins = Math.max(0, Math.round(parseFloat(totalMinutes) || 0))
+    const h = Math.floor(mins / 60)
+    const m = mins % 60
+    if (h > 0 && m > 0) return `${h}h ${m}m`
+    if (h > 0) return `${h}h`
+    return `${m}m`
+  }
+
   // State Variables
   const [employeesList, setEmployeesList] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(formatMonth(new Date()))
+
+  // Manage Salary Modal State
+  const [showSalaryModal, setShowSalaryModal] = useState(false)
+  const [modalBaseSalary, setModalBaseSalary] = useState('')
+  const [savingModalSalary, setSavingModalSalary] = useState(false)
 
   // Editable Payroll Data State
   const [editableData, setEditableData] = useState({})
@@ -40,11 +55,14 @@ export default function Payroll() {
   const [baseColumns, setBaseColumns] = useState(() => {
     try {
       const stored = localStorage.getItem('payroll_base_columns');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.overtime_pay) delete parsed.overtime_pay;
+        return parsed;
+      }
     } catch (e) {}
     return {
       this_month_adv: { label: 'This M. Adv', hidden: false, action: 'Deduct', bg: '#e0f2fe' },
-      overtime_pay: { label: 'Overtime', hidden: false, action: 'Give', bg: '#fef3c7' },
       bonus: { label: 'Bonus', hidden: false, action: 'Give', bg: '#dcfce7' },
       last_month_adjustment: { label: 'Last M. Adj', hidden: false, action: 'Both', bg: '#f3e8ff' },
       internet: { label: 'InterNet', hidden: false, action: 'Deduct', bg: '#ffedd5' },
@@ -233,7 +251,6 @@ export default function Payroll() {
 
     const dynamicNet = Math.max(0, 
       earned + 
-      parseFloat(row.overtime_pay) + 
       parseFloat(row.bonus) + 
       parseFloat(row.last_month_adjustment) - 
       parseFloat(row.internet) - 
@@ -289,6 +306,76 @@ export default function Payroll() {
     })
   }
 
+  // Handle direct Base Salary edits in spreadsheet
+  const handleSalaryChange = (empId, value) => {
+    const newBaseSalary = parseFloat(value) || 0;
+    setEditableData(prev => {
+      const row = { ...prev[empId] };
+      row.base_salary = newBaseSalary;
+
+      const expectedHours = parseFloat(row.expected_hours) || 1;
+      const expectedMinutes = expectedHours * 60;
+      const perMinRate = expectedMinutes > 0 ? (newBaseSalary / expectedMinutes) : 0;
+      const perHourRate = expectedHours > 0 ? (newBaseSalary / expectedHours) : 0;
+
+      const actualHours = parseFloat(row.actual_hours) || 0;
+      const actualMinutes = actualHours * 60;
+
+      let earned = Math.round(actualMinutes * perMinRate * 100) / 100;
+      let deductions = 0;
+      let otPay = 0;
+      let otHours = 0;
+
+      if (actualHours > expectedHours) {
+        otHours = Math.round((actualHours - expectedHours) * 100) / 100;
+        const rate = parseFloat(row.overtime_rate) || perHourRate;
+        otPay = Math.round(otHours * rate * 100) / 100;
+        earned = newBaseSalary;
+        deductions = 0;
+      } else {
+        deductions = Math.max(0, Math.round((newBaseSalary - earned) * 100) / 100);
+        earned = Math.max(0, Math.round(earned * 100) / 100);
+        otHours = 0;
+        otPay = 0;
+      }
+
+      row.deductions = deductions;
+      row.overtime_hours = otHours;
+      row.overtime_pay = otPay;
+
+      const dynamicNet = recalculateNetSalary(row);
+      row.net_salary = dynamicNet;
+
+      if (parseFloat(prev[empId].paid_in_account) === parseFloat(prev[empId].net_salary)) {
+        row.paid_in_account = dynamicNet;
+      }
+
+      return { ...prev, [empId]: row };
+    });
+  }
+
+  // Save salary from Employee Modal
+  const handleSaveModalSalary = async () => {
+    if (!currentEmpData) return;
+    const val = parseFloat(modalBaseSalary);
+    if (isNaN(val) || val < 0) {
+      toast.error('Please enter a valid salary amount');
+      return;
+    }
+    setSavingModalSalary(true);
+    try {
+      await axios.post(`/api/payroll/overrides/${currentEmpData.id}`, {
+        base_salary: val
+      });
+      toast.success('Base salary updated successfully!');
+      handleSalaryChange(currentEmpData.id, val);
+    } catch (err) {
+      toast.error(err?.response?.data?.error || 'Failed to update salary');
+    } finally {
+      setSavingModalSalary(false);
+    }
+  }
+
   const handleSaveLeave = async (e) => {
     e.preventDefault()
     if (!leaveEmployeeId) {
@@ -322,8 +409,8 @@ export default function Payroll() {
       absents: row.absents,
       leaves: row.leaves,
       holidays: row.holidays,
-      overtime_hours: row.overtime_hours,
-      overtime_pay: row.overtime_pay,
+      overtime_hours: row.net_overtime_hours || 0,
+      overtime_pay: 0,
       deductions: row.deductions,
       other_adjustments: row.other_adjustments || 0,
       advance_deduction: row.this_month_adv,
@@ -399,6 +486,7 @@ export default function Payroll() {
 
   const openEmployeeModal = (empRow) => {
     setSelectedEmployeeForModal(empRow)
+    setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '')
     resetAdjForm()
     loadEmpAdjs(empRow.id)
   }
@@ -538,6 +626,14 @@ export default function Payroll() {
         {showActions && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button 
+              onClick={() => setShowSalaryModal(true)}
+              className="btn btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
+            >
+              <Banknote size={16} style={{ color: 'var(--primary)' }} />
+              Manage Salary
+            </button>
+            <button 
               onClick={() => setShowAdjustmentsModal(true)}
               className="btn btn-secondary"
               style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
@@ -602,22 +698,22 @@ export default function Payroll() {
             <thead style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--surface)', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <tr>
                 <th style={{ ...stickyStyle, left: 0, zIndex: 30, padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Employee</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Attendance</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Overtime (±)</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Expected</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Actual</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Salary</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Payable</th>
-                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Attendance</th>
-                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Adv Bal</th>
                 
                 {/* Default Editable Columns */}
                 {Object.entries(baseColumns).map(([key, config]) => !config.hidden && (
-                  <th key={key} style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: config.bg }}>{config.label} ({config.action === 'Add' || config.action === 'Give' ? '+' : config.action === 'Deduct' ? '-' : '+/-'})</th>
+                  <th key={key} style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: config.bg }}>{config.label} ({config.action === 'Add' || config.action === 'Give' ? '+' : config.action === 'Deduct' ? '-' : '±'})</th>
                 ))}
 
                 {/* Dynamic Editable Columns */}
                 {adjustmentTypes.map(adj => !hiddenDynamicCols[adj.id] && (
                   <th key={adj.id} style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: adj.action === 'Add' ? 'var(--green)' : adj.action === 'Deduct' ? '#ef4444' : 'var(--primary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: adj.action === 'Add' ? '#dcfce7' : adj.action === 'Deduct' ? '#fee2e2' : '#f3e8ff' }}>
-                    {adj.label} ({adj.action === 'Add' ? '+' : adj.action === 'Deduct' ? '-' : '+/-'})
+                    {adj.label} ({adj.action === 'Add' ? '+' : adj.action === 'Deduct' ? '-' : '±'})
                   </th>
                 ))}
                 
@@ -654,34 +750,50 @@ export default function Payroll() {
                         <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap' }}>{item.name}</div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{item.employee_id}</div>
                       </td>
-                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 600 }}>{item.expected_hours}h</td>
-                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 600, color: item.actual_hours < item.expected_hours ? '#ef4444' : 'var(--green)' }}>{item.actual_hours}h</td>
-                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700 }}>{item.base_salary}</td>
+                      <td style={{ padding: '8px', fontSize: '10px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        <span style={{ color: 'var(--green)' }}>P:{item.presents} </span>
+                        <span style={{ color: '#EF4444' }}>A:{item.absents} </span>
+                        <span style={{ color: '#F97316' }}>L:{item.leaves} </span><br/>
+                        <span style={{ color: 'var(--primary)' }}>H:{item.holidays} </span>
+                        <span style={{ color: '#8b5cf6', fontWeight: 700 }}>OOT:{item.only_overtime_days || 0}</span>
+                      </td>
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                        {item.net_overtime_hours > 0 ? (
+                          <span style={{ color: 'var(--green)' }}>
+                            +{formatDuration(Math.round(item.net_overtime_hours * 60))}
+                          </span>
+                        ) : item.net_overtime_hours < 0 ? (
+                          <span style={{ color: '#ef4444' }}>
+                            -{formatDuration(Math.round(Math.abs(item.net_overtime_hours) * 60))}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)' }}>--</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {formatDuration(item.expected_minutes !== undefined ? item.expected_minutes : item.expected_hours * 60)}
+                      </td>
+                      {(() => {
+                        const reqMins = item.req_duty_hours !== undefined ? Math.round(item.req_duty_hours * 60) : item.expected_minutes;
+                        const actMins = item.actual_minutes !== undefined ? item.actual_minutes : Math.round(item.actual_hours * 60);
+                        const isShort = actMins < reqMins;
+                        return (
+                          <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, whiteSpace: 'nowrap', color: isShort ? '#ef4444' : 'var(--green)' }}>
+                            {isShort ? '-' : '+'}{formatDuration(actMins)}
+                          </td>
+                        );
+                      })()}
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {Number(item.base_salary || 0).toLocaleString()}
+                      </td>
                       <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, color: item.deductions > 0 ? '#ef4444' : 'inherit' }}>
                         {earned.toFixed(2)}
                         {item.deductions > 0 && <span style={{ fontSize: '9px', display: 'block' }}>(-{item.deductions.toFixed(2)})</span>}
                       </td>
-                      <td style={{ padding: '8px', fontSize: '10px', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                        <span style={{ color: 'var(--green)' }}>P:{item.presents} </span>
-                        <span style={{ color: '#EF4444' }}>A:{item.absents} </span><br/>
-                        <span style={{ color: '#F97316' }}>L:{item.leaves} </span>
-                        <span style={{ color: 'var(--primary)' }}>H:{item.holidays}</span>
-                      </td>
-                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, color: '#f59e0b' }}>{item.advance_balance}</td>
                       
                       {/* Default Editables / Synced from Modal */}
                       {!baseColumns.this_month_adv.hidden && <td style={{ padding: '4px', background: baseColumns.this_month_adv.bg }}>
                         <input type="number" className="cell-input" value={item.this_month_adv} onChange={e => handleFieldChange(item.id, 'this_month_adv', e.target.value)} />
-                      </td>}
-                      {!baseColumns.overtime_pay.hidden && <td style={{ padding: '4px', background: baseColumns.overtime_pay.bg }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px', fontWeight: 700, fontSize: '12px' }}>
-                          <input type="number" className="cell-input" style={{ width: '40px' }} value={item.overtime_pay} onChange={e => handleFieldChange(item.id, 'overtime_pay', e.target.value)} />
-                          {item.overtime_hours > 0 && (
-                            <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                              ({item.overtime_hours}h)
-                            </span>
-                          )}
-                        </div>
                       </td>}
                       {!baseColumns.bonus.hidden && <td style={{ padding: '4px', background: baseColumns.bonus.bg }}>
                         <input type="number" className="cell-input" value={item.bonus} onChange={e => handleFieldChange(item.id, 'bonus', e.target.value)} />
@@ -782,13 +894,23 @@ export default function Payroll() {
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '8px' }}>Hours & Overtime</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Expected Hours:</span><span style={{ fontWeight: 700 }}>{currentEmpData.expected_hours}h</span>
+                    <span style={{ fontSize: '13px' }}>Expected Hours:</span>
+                    <span style={{ fontWeight: 700 }}>
+                      {formatDuration(currentEmpData.expected_minutes !== undefined ? currentEmpData.expected_minutes : (currentEmpData.expected_hours * 60))}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Actual Hours:</span><span style={{ fontWeight: 700, color: currentEmpData.actual_hours < currentEmpData.expected_hours ? '#ef4444' : 'var(--green)' }}>{currentEmpData.actual_hours}h</span>
+                    <span style={{ fontSize: '13px' }}>Actual Hours:</span>
+                    <span style={{ fontWeight: 700, color: currentEmpData.actual_hours < currentEmpData.expected_hours ? '#ef4444' : 'var(--green)' }}>
+                      {currentEmpData.actual_hours >= currentEmpData.expected_hours ? '+' : '-'}
+                      {formatDuration(currentEmpData.actual_minutes !== undefined ? currentEmpData.actual_minutes : (currentEmpData.actual_hours * 60))}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Overtime Hours:</span><span style={{ fontWeight: 700 }}>{currentEmpData.overtime_hours}h</span>
+                    <span style={{ fontSize: '13px' }}>Overtime Hours:</span>
+                    <span style={{ fontWeight: 700 }}>
+                      {formatDuration((currentEmpData.overtime_hours || 0) * 60)}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: '13px' }}>Overtime Pay:</span><span style={{ fontWeight: 700, color: 'var(--green)' }}>{CURRENCY} {Number(currentEmpData.overtime_pay || 0).toFixed(2)}</span>
@@ -797,8 +919,25 @@ export default function Payroll() {
 
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--surface-2)' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '8px' }}>Financials</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px' }}>Base Salary:</span><span style={{ fontWeight: 700 }}>{CURRENCY} {Number(currentEmpData.base_salary || 0).toFixed(2)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600 }}>Base Salary:</span>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <input 
+                        type="number" 
+                        value={modalBaseSalary}
+                        onChange={e => setModalBaseSalary(e.target.value)}
+                        style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--surface-2)', fontSize: '13px', fontWeight: 700, color: '#7c3aed', outline: 'none' }}
+                      />
+                      <button 
+                        onClick={handleSaveModalSalary}
+                        disabled={savingModalSalary}
+                        className="btn btn-primary"
+                        style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '3px' }}
+                      >
+                        {savingModalSalary ? <RefreshCw size={11} className="spin" /> : <Save size={11} />}
+                        Save
+                      </button>
+                    </div>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                     <span style={{ fontSize: '13px' }}>Deductions:</span><span style={{ fontWeight: 700, color: '#ef4444' }}>{CURRENCY} {Number(currentEmpData.deductions || 0).toFixed(2)}</span>
@@ -1056,7 +1195,7 @@ export default function Payroll() {
               <select value={newAdjAction} onChange={e => setNewAdjAction(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}>
                 <option value="Add">Add (+)</option>
                 <option value="Deduct">Deduct (-)</option>
-                <option value="Both">Both (+/-)</option>
+                <option value="Both">Both (±)</option>
               </select>
               <button type="submit" disabled={savingAdjType} className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700 }}>
                 {savingAdjType ? '...' : 'Add'}
@@ -1226,6 +1365,14 @@ export default function Payroll() {
           </div>
         </div>
       )}
+
+      {/* Manage Salary Modal */}
+      <ManageSalaryModal 
+        isOpen={showSalaryModal}
+        onClose={() => setShowSalaryModal(false)}
+        onUpdated={() => loadPayroll(true)}
+        month={selectedMonth}
+      />
 
       <style>{`
         .spin { animation: spin 1s linear infinite; }

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from '../api'
-import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2, ArrowRight, Info } from 'lucide-react'
+import { CalendarRange, Search, RefreshCw, FileText, User, Plus, X, Settings, Download, Edit, Filter, Loader2, ArrowRight, Info, Banknote } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import { getSaudiTodayDate, getSaudiDateString, toSaudiTimeInput, saudiTimeToISO } from '../utils/timezone'
+import ManageSalaryModal from '../components/ManageSalaryModal'
 
 const formatLocalDate = (date) => {
   if (!date) return ''
@@ -109,6 +110,7 @@ export default function AttendanceReports() {
   
   // Holiday state
   const [showHolidayModal, setShowHolidayModal] = useState(false)
+  const [showSalaryModal, setShowSalaryModal] = useState(false)
   const [holidayDate, setHolidayDate] = useState(() => formatLocalDate(new Date()))
   const [holidayEmployeeId, setHolidayEmployeeId] = useState('Global')
   const [holidayShift, setHolidayShift] = useState('All')
@@ -604,7 +606,7 @@ export default function AttendanceReports() {
       daysInMonth.forEach(day => {
         headers.push(`${day.getDate()} (${day.toLocaleDateString([], { weekday: 'short' })})`)
       })
-      headers.push('P', 'A', 'L', 'H', 'OOT Days', 'Late Arrival', 'Req Duty', 'Worked Duty', 'Short Duty', 'Break Time', 'Only OT', 'Other OT', 'Total OT (+/-)', 'Total (Duty +/- OT)')
+      headers.push('P', 'A', 'L', 'H', 'OOT Days', 'Late Arrival', 'Req Duty', 'Worked Duty', 'Short Duty', 'Break Time', 'Only OT', 'Other OT', 'Total OT (±)', 'Total (Duty ± OT)')
 
       // Build HTML content representing the Excel sheet with inline styles and worksheet configuration
       let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`
@@ -877,6 +879,17 @@ export default function AttendanceReports() {
                   title="Manage Holiday"
                 >
                   <Settings size={14} /> <span className="btn-text">Manage Holiday</span>
+                </button>
+              )}
+
+              {isAdmin && (
+                <button
+                  className="btn btn-secondary attendance-header-btn"
+                  onClick={() => setShowSalaryModal(true)}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 34, fontSize: 13, padding: '0 12px' }}
+                  title="Manage Salary"
+                >
+                  <Banknote size={14} style={{ color: 'var(--primary)' }} /> <span className="btn-text">Manage Salary</span>
                 </button>
               )}
 
@@ -1196,8 +1209,8 @@ export default function AttendanceReports() {
                   <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', whiteSpace: 'nowrap' }}>Break Time</th>
                   <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: '#8B5CF6', whiteSpace: 'nowrap' }} title="Only Overtime (from <6h days)">Only OT</th>
                   <th style={{ minWidth: 80, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--green)', whiteSpace: 'nowrap' }} title="Other Overtime (beyond standard shift)">Other OT</th>
-                  <th style={{ minWidth: 95, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--text)', whiteSpace: 'nowrap' }} title="Total Overtime ((Only OT + Other OT) - Short Duty)">Total OT (+/-)</th>
-                  <th style={{ minWidth: 115, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 800, background: 'rgba(var(--primary-rgb), 0.08)', color: 'var(--primary)', whiteSpace: 'nowrap' }} title="Grand Total Working Hours (Req. Duty + Total Overtime)">Total (Duty +/- OT)</th>
+                  <th style={{ minWidth: 95, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 700, background: 'var(--surface-1)', color: 'var(--text)', whiteSpace: 'nowrap' }} title="Total Overtime ((Only OT + Other OT) - Short Duty)">Total OT (±)</th>
+                  <th style={{ minWidth: 115, textAlign: 'center', borderBottom: '2px solid var(--surface-2)', padding: '12px 6px', fontSize: 12, fontWeight: 800, background: 'rgba(var(--primary-rgb), 0.08)', color: 'var(--primary)', whiteSpace: 'nowrap' }} title="Grand Total Working Hours (Req. Duty + Total Overtime)">Total (Duty ± OT)</th>
                 </tr>
               </thead>
               <tbody>
@@ -1709,7 +1722,7 @@ export default function AttendanceReports() {
                 </h4>
               </div>
               <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Total OT (+/-)</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Total OT (±)</span>
                 <h4 style={{ 
                   margin: '4px 0 0 0', 
                   color: (selectedEmployeeLogs.totalOvertime || 0) > 0 ? 'var(--green)' : (selectedEmployeeLogs.totalOvertime || 0) < 0 ? 'var(--red)' : 'var(--text)', 
@@ -1719,7 +1732,7 @@ export default function AttendanceReports() {
                 </h4>
               </div>
               <div style={{ background: 'rgba(var(--primary-rgb), 0.08)', padding: 10, borderRadius: 8, textAlign: 'center', border: '1px solid rgba(var(--primary-rgb), 0.25)' }}>
-                <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700 }}>Total (Duty +/- OT)</span>
+                <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700 }}>Total (Duty ± OT)</span>
                 <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary)', fontWeight: 850 }}>
                   {formatHoursToText(((selectedEmployeeLogs.expectedDutyHours || 0) + (selectedEmployeeLogs.totalOvertime || 0)))}
                 </h4>
@@ -2121,6 +2134,14 @@ export default function AttendanceReports() {
           </div>
         </div>
       )}
+
+      {/* Manage Salary Modal */}
+      <ManageSalaryModal 
+        isOpen={showSalaryModal}
+        onClose={() => setShowSalaryModal(false)}
+        onUpdated={() => loadReports()}
+        month={selectedMonth}
+      />
     </div>
   )
 }

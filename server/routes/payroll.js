@@ -188,18 +188,37 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
     // Get attendance/leave logs for the selected month
     const logsRes = await pool.query(
-      `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, ea.shift_hours, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
+      `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, ea.shift_hours, ea.total_break_duration_seconds, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
        FROM employee_attendance ea
        WHERE TO_CHAR(ea.date, 'YYYY-MM') = $1
        ORDER BY ea.date ASC, ea.check_in ASC`,
       [month]
     );
 
-    // Group logs by employee and by date
+    // Group logs by employee and by date, pre-computing hours_worked identically to the attendance route
     const logsMap = {};
     logsRes.rows.forEach(row => {
       if (!logsMap[row.employee_id]) logsMap[row.employee_id] = {};
       if (!logsMap[row.employee_id][row.date]) logsMap[row.employee_id][row.date] = [];
+      
+      // Pre-compute hours_worked exactly like the attendance /reports endpoint
+      let hours_worked = 0;
+      if (row.status !== 'Holiday' && row.status !== 'Leave') {
+        const checkInTime = row.check_in ? new Date(row.check_in).getTime() : null;
+        const checkOutTime = row.check_out ? new Date(row.check_out).getTime() : null;
+        const breakSecs = parseInt(row.total_break_duration_seconds) || 0;
+        
+        if (checkInTime && checkOutTime) {
+          const netMs = checkOutTime - checkInTime - (breakSecs * 1000);
+          hours_worked = Math.max(0, netMs / (1000 * 60 * 60));
+        } else if (checkInTime && !checkOutTime) {
+          // Active session (no checkout yet) — use current time, same as attendance route
+          const netMs = Date.now() - checkInTime - (breakSecs * 1000);
+          hours_worked = Math.max(0, netMs / (1000 * 60 * 60));
+        }
+      }
+      row.hours_worked = hours_worked;
+      
       logsMap[row.employee_id][row.date].push(row);
     });
 
@@ -299,20 +318,25 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       let leavesCount = 0;
       let paidLeaves = 0;
       let unpaidLeaves = 0;
+      let paidLeaveHours = 0;
       
       const standardShiftHours = parseFloat(emp.shift_hours || 12.0);
-      const expectedMonthlyMinutes = standardShiftHours * totalDaysInMonth * 60;
-      const perMinuteRate = expectedMonthlyMinutes > 0 ? baseSalary / expectedMonthlyMinutes : 0;
-
-      let totalActualMinutes = 0;
+      // Scheduled hours for the full month (e.g. 31 days * 12h = 372h)
+      const expectedMonthlyHours = standardShiftHours * totalDaysInMonth;
+      const expectedMonthlyMinutes = expectedMonthlyHours * 60;
+      const perMinuteRate = expectedMonthlyMinutes > 0 ? (baseSalary / expectedMonthlyMinutes) : 0;
+      const perHourRate = expectedMonthlyHours > 0 ? (baseSalary / expectedMonthlyHours) : 0;
 
       const empLogs = logsMap[emp.id] || {};
       const todayStr = new Date().toISOString().split('T')[0];
 
+      let expectedDutyHours = 0;
+      let workedDutyHours = 0;
       let onlyOvertimeDays = 0;
-      let onlyOvertimeMinutes = 0;
+      let onlyOvertimeHours = 0;
+      let otherOvertimeHours = 0;
 
-      // Loop through each day of the month to run calculations
+      // Loop through each day of the month to run calculations identical to AttendanceReports
       for (let day = 1; day <= totalDaysInMonth; day++) {
         const dayStr = `${month}-${String(day).padStart(2, '0')}`;
         const daySessions = empLogs[dayStr] || [];
@@ -326,33 +350,33 @@ router.get('/calculate', authenticateToken, async (req, res) => {
           const mainSession = daySessions[0];
           if (mainSession.status === 'Holiday') {
             holidays++;
-            totalActualMinutes += (standardShiftHours * 60);
           } else if (mainSession.status === 'Leave') {
             leavesCount++;
             if (mainSession.is_paid) {
               paidLeaves++;
-              totalActualMinutes += (standardShiftHours * 60);
+              paidLeaveHours += standardShiftHours;
             } else {
               unpaidLeaves++;
             }
           } else {
-            let dayWorkedMinutes = 0;
+            // Sum all hours worked on this day using pre-computed hours_worked
+            // (matches AttendanceReports.jsx which uses s.hours_worked)
+            let dayHours = 0;
             daySessions.forEach(s => {
-              if (s.check_in && s.check_out) {
-                const inTime = new Date(s.check_in).getTime();
-                const outTime = new Date(s.check_out).getTime();
-                const breakTime = (s.total_break_duration_seconds || 0) * 1000;
-                const workedMinutes = Math.max(0, (outTime - inTime - breakTime)) / (1000 * 60);
-                dayWorkedMinutes += workedMinutes;
-              }
+              dayHours += s.hours_worked || 0;
             });
+            dayHours = Math.min(24, dayHours); // Cap to 24 hours max per day
 
-            if (dayWorkedMinutes >= 6 * 60) {
+            const currentDayShiftHours = parseFloat(mainSession.shift_hours || emp.shift_hours || 12.0);
+
+            if (dayHours >= 6.0) {
               presents++;
-              totalActualMinutes += dayWorkedMinutes;
-            } else if (dayWorkedMinutes > 0) {
+              expectedDutyHours += currentDayShiftHours;
+              workedDutyHours += Math.min(currentDayShiftHours, dayHours);
+              otherOvertimeHours += Math.max(0, dayHours - currentDayShiftHours);
+            } else if (dayHours > 0) {
               onlyOvertimeDays++;
-              onlyOvertimeMinutes += dayWorkedMinutes;
+              onlyOvertimeHours += dayHours;
             }
           }
         } else {
@@ -366,29 +390,30 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         const excess = paidLeaves - allowedLeaves;
         paidLeaves = allowedLeaves;
         unpaidLeaves += excess;
-        // Also deduct the minutes we previously added
-        totalActualMinutes -= (excess * standardShiftHours * 60);
+        paidLeaveHours = paidLeaves * standardShiftHours;
       }
 
-      // Calculations based on minutes
-      let earnedSalary = totalActualMinutes * perMinuteRate;
-      let deductions = 0;
+      // Calculate attendance sheet metrics
+      expectedDutyHours = Math.round(expectedDutyHours * 100) / 100;
+      workedDutyHours = Math.round(workedDutyHours * 100) / 100;
+      const shortDutyHours = Math.max(0, Math.round((expectedDutyHours - workedDutyHours) * 100) / 100);
+      const rawOvertimeHours = Math.round((onlyOvertimeHours + otherOvertimeHours) * 100) / 100;
+      const netOvertimeHours = Math.round((rawOvertimeHours - shortDutyHours) * 100) / 100; // Total OT (±)
+      
+      // attendanceTotalHours is Total (Duty ± OT) from Attendance Sheet = workedDutyHours + rawOvertimeHours
+      const attendanceTotalHours = Math.max(0, Math.round((workedDutyHours + rawOvertimeHours) * 100) / 100);
+
+      // Total actual working hours credited for salary including paid leaves & holidays
+      const totalActualHours = Math.max(0, Math.round((attendanceTotalHours + paidLeaveHours + (holidays * standardShiftHours)) * 100) / 100);
+      const totalActualMinutes = Math.round(totalActualHours * 60);
+
+      // Salary calculations:
+      // totalActualMinutes is (workedDutyHours + rawOvertimeHours + paidLeaveHours + holidays) * 60.
+      // Net Overtime is reflected in the Overtime column and earnedSalary.
+      let earnedSalary = Math.round(totalActualMinutes * perMinuteRate * 100) / 100;
+      let deductions = Math.max(0, Math.round((baseSalary - earnedSalary) * 100) / 100);
       let overtimePay = 0;
-      let totalOvertimeHours = 0;
-
-      if (totalActualMinutes > expectedMonthlyMinutes) {
-        const overtimeMinutes = (totalActualMinutes - expectedMonthlyMinutes) + onlyOvertimeMinutes;
-        totalOvertimeHours = overtimeMinutes / 60;
-        overtimePay = overtimeMinutes * perMinuteRate;
-        earnedSalary = baseSalary; // Max out regular earned salary
-        deductions = 0;
-      } else {
-        deductions = baseSalary - earnedSalary;
-        if (onlyOvertimeMinutes > 0) {
-          totalOvertimeHours = onlyOvertimeMinutes / 60;
-          overtimePay = onlyOvertimeMinutes * perMinuteRate;
-        }
-      }
+      let overtimeHours = netOvertimeHours;
       
       const advanceBalance = emp.advance_balance ? parseFloat(emp.advance_balance) : 0;
       
@@ -412,7 +437,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         }
       });
 
-      const dynamicNetSalary = Math.max(0, earnedSalary + overtimePay + otherAdjustments + bonus + lastMonthAdj - internet - kafalat - advanceDeduction + dynamicAdjustmentsTotal);
+      const dynamicNetSalary = Math.max(0, earnedSalary + otherAdjustments + bonus + lastMonthAdj - internet - kafalat - advanceDeduction + dynamicAdjustmentsTotal);
       const paidAmount = savedPaidAmount !== null ? savedPaidAmount : dynamicNetSalary;
 
       return {
@@ -423,8 +448,19 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         position: emp.position || '',
         shift: emp.shift || 'R1',
         shift_hours: standardShiftHours,
-        expected_hours: expectedMonthlyMinutes / 60,
-        actual_hours: parseFloat((totalActualMinutes / 60).toFixed(2)),
+        expected_hours: parseFloat(expectedMonthlyHours.toFixed(2)),
+        expected_minutes: Math.round(expectedMonthlyMinutes),
+        actual_hours: parseFloat(attendanceTotalHours.toFixed(2)),
+        actual_minutes: Math.round(attendanceTotalHours * 60),
+        per_minute_rate: perMinuteRate,
+        per_hour_rate: perHourRate,
+        attendance_total_hours: parseFloat(attendanceTotalHours.toFixed(2)),
+        req_duty_hours: parseFloat(expectedDutyHours.toFixed(2)),
+        worked_duty_hours: parseFloat(workedDutyHours.toFixed(2)),
+        short_duty_hours: parseFloat(shortDutyHours.toFixed(2)),
+        only_overtime_hours: parseFloat(onlyOvertimeHours.toFixed(2)),
+        other_overtime_hours: parseFloat(otherOvertimeHours.toFixed(2)),
+        net_overtime_hours: parseFloat(netOvertimeHours.toFixed(2)),
         base_salary: baseSalary,
         overtime_rate: overtimeRate,
         allowed_leaves: allowedLeaves,
@@ -435,7 +471,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         leaves: leavesCount,
         paid_leaves: paidLeaves,
         unpaid_leaves: unpaidLeaves,
-        overtime_hours: parseFloat(totalOvertimeHours.toFixed(2)),
+        overtime_hours: parseFloat(overtimeHours.toFixed(2)),
         overtime_pay: parseFloat(overtimePay.toFixed(2)),
         deductions: parseFloat(deductions.toFixed(2)),
         other_adjustments: manualAdjustments,
@@ -705,8 +741,51 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       // A robust implementation would store the exact deduction breakdown in another table.
     }
 
+    // Update employee master salary if base_salary is provided
+    if (base_salary !== undefined && base_salary !== null && base_salary !== '') {
+      await client.query('UPDATE employees SET salary = $1 WHERE id = $2', [parseFloat(base_salary), employee_id]);
+      await client.query(
+        `INSERT INTO employee_payroll_settings (employee_id, base_salary)
+         VALUES ($1, $2)
+         ON CONFLICT (employee_id) DO UPDATE SET base_salary = $2`,
+        [employee_id, parseFloat(base_salary)]
+      );
+    }
+
     await client.query('COMMIT');
     res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST batch update employee base salaries
+router.post('/salaries/batch', authenticateToken, isAdmin, async (req, res) => {
+  const { salaries } = req.body;
+  if (!Array.isArray(salaries)) {
+    return res.status(400).json({ error: 'Salaries array is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const item of salaries) {
+      if (item.employee_id && item.base_salary !== undefined && item.base_salary !== '') {
+        const val = parseFloat(item.base_salary);
+        await client.query('UPDATE employees SET salary = $1 WHERE id = $2', [val, item.employee_id]);
+        await client.query(
+          `INSERT INTO employee_payroll_settings (employee_id, base_salary)
+           VALUES ($1, $2)
+           ON CONFLICT (employee_id) DO UPDATE SET base_salary = $2`,
+          [item.employee_id, val]
+        );
+      }
+    }
+    await client.query('COMMIT');
+    res.json({ message: 'Salaries updated successfully' });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
