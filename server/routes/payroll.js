@@ -354,6 +354,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       let onlyOvertimeDays = 0;
       let onlyOvertimeHours = 0;
       let otherOvertimeHours = 0;
+      let lateDays = 0;
 
       // Loop through each day of the month to run calculations identical to AttendanceReports
       for (let day = 1; day <= totalDaysInMonth; day++) {
@@ -366,7 +367,11 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         }
 
         if (daySessions.length > 0) {
-          const mainSession = daySessions[0];
+          if (daySessions.some(s => s.status === 'Late' || s.is_late)) {
+          lateDays++;
+        }
+
+        const mainSession = daySessions[0];
           if (mainSession.status === 'Holiday') {
             holidays++;
           } else if (mainSession.status === 'Leave') {
@@ -431,7 +436,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       // Net Overtime is reflected in the Overtime column and earnedSalary.
       let earnedSalary = Math.round(totalActualMinutes * perMinuteRate * 100) / 100;
       let deductions = Math.max(0, Math.round((baseSalary - earnedSalary) * 100) / 100);
-      let overtimePay = 0;
+      const netOvertimeMinutes = Math.round(netOvertimeHours * 60);
+      let overtimePay = Math.round(netOvertimeMinutes * perMinuteRate * 100) / 100;
       let overtimeHours = netOvertimeHours;
       
       const advanceBalance = emp.advance_balance ? parseFloat(emp.advance_balance) : 0;
@@ -518,6 +524,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         only_overtime_days: onlyOvertimeDays,
         holidays,
         leaves: leavesCount,
+        late_days: lateDays,
         paid_leaves: paidLeaves,
         unpaid_leaves: unpaidLeaves,
         overtime_hours: parseFloat(overtimeHours.toFixed(2)),
