@@ -3,7 +3,7 @@ import axios from '../api'
 import { 
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
   TrendingUp, Search, RefreshCw, X, AlertTriangle, FileText, Percent, 
-  CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical
+  CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
@@ -12,7 +12,8 @@ import ManageSalaryModal from '../components/ManageSalaryModal'
 
 export default function Payroll() {
   const { user } = useAuth()
-  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'developer'
+  const isDeveloper = user?.role?.trim().toLowerCase() === 'developer'
+  const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || isDeveloper
   const showActions = isAdmin
 
   const formatMonth = (date) => {
@@ -29,11 +30,17 @@ export default function Payroll() {
     return `${m}m`
   }
 
+  const getLastMonth = () => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  }
+
   // State Variables
   const [employeesList, setEmployeesList] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedMonth, setSelectedMonth] = useState(formatMonth(new Date()))
+  const [selectedMonth, setSelectedMonth] = useState(getLastMonth())
 
   // Manage Salary Modal State
   const [showSalaryModal, setShowSalaryModal] = useState(false)
@@ -58,13 +65,13 @@ export default function Payroll() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed.overtime_pay) delete parsed.overtime_pay;
+        if (parsed.last_month_adjustment) delete parsed.last_month_adjustment;
         return parsed;
       }
     } catch (e) {}
     return {
       this_month_adv: { label: 'This M. Adv', hidden: false, action: 'Deduct', bg: '#e0f2fe' },
       bonus: { label: 'Bonus', hidden: false, action: 'Give', bg: '#dcfce7' },
-      last_month_adjustment: { label: 'Last M. Adj', hidden: false, action: 'Both', bg: '#f3e8ff' },
       internet: { label: 'InterNet', hidden: false, action: 'Deduct', bg: '#ffedd5' },
       kafalat: { label: 'Kafalat', hidden: false, action: 'Deduct', bg: '#fee2e2' }
     };
@@ -139,7 +146,8 @@ export default function Payroll() {
       })
       toast.success('Adjustment Type Added!')
       setNewAdjLabel('')
-      loadAdjustmentTypes()
+      await loadAdjustmentTypes()
+      await loadPayroll(true)
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to add type')
     } finally {
@@ -161,7 +169,8 @@ export default function Payroll() {
       await axios.put(`/api/payroll/adjustment-types/${id}`, { label: editAdjValue.trim() });
       toast.success('Updated successfully');
       setEditingDynamicAdjId(null);
-      loadAdjustmentTypes();
+      await loadAdjustmentTypes();
+      await loadPayroll(true);
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to update');
     }
@@ -178,20 +187,27 @@ export default function Payroll() {
       
       const newEditableData = {}
       res.data.forEach(item => {
+        const cashVal = item.cash_paid !== undefined && item.cash_paid !== null ? item.cash_paid : (item.paid_amount !== null ? item.paid_amount : item.net_salary);
+        const bankVal = item.bank_paid !== undefined && item.bank_paid !== null ? item.bank_paid : 0;
+
         newEditableData[item.id] = {
           ...item,
-          this_month_adv: item.advance_deduction || 0,
+          payable_salary: item.payable_salary !== undefined ? item.payable_salary : (parseFloat(item.base_salary || 0) - parseFloat(item.deductions || 0)),
+          last_month_balance: item.last_month_balance !== undefined ? item.last_month_balance : 0,
+          this_month_adv: item.advance_deduction !== undefined ? item.advance_deduction : 0,
           calc_advance_deduction: item.calc_advance_deduction || 0,
-          paid_in_account: item.paid_amount !== null ? item.paid_amount : item.net_salary,
-          overtime_pay: item.overtime_pay || 0,
-          bonus: item.bonus || 0,
+          bonus: item.bonus !== undefined ? item.bonus : 0,
           calc_bonus: item.calc_bonus || 0,
-          last_month_adjustment: item.last_month_adjustment || 0,
+          last_month_adjustment: item.last_month_adjustment !== undefined ? item.last_month_adjustment : 0,
           calc_last_month_adjustment: item.calc_last_month_adjustment || 0,
-          internet: item.internet || 0,
+          internet: item.internet !== undefined ? item.internet : 0,
           calc_internet: item.calc_internet || 0,
-          kafalat: item.kafalat || 0,
+          kafalat: item.kafalat !== undefined ? item.kafalat : 0,
           calc_kafalat: item.calc_kafalat || 0,
+          cash_paid: cashVal,
+          bank_paid: bankVal,
+          paid_amount: item.paid_amount !== null ? item.paid_amount : (cashVal + bankVal),
+          overtime_pay: item.overtime_pay || 0,
           status: item.status || 'Pending',
           dynamic_adjustments: item.dynamic_adjustments || {}
         }
@@ -234,30 +250,37 @@ export default function Payroll() {
     loadPayroll()
   }, [selectedMonth])
 
-  // Helper to recalculate net salary
-  const recalculateNetSalary = (row) => {
-    const earned = Math.max(0, parseFloat(row.base_salary) - parseFloat(row.deductions));
+  // Calculate total additions and deductions (Total Expense / Adjustments)
+  const calculateTotalAdjustments = (row) => {
     let dynamicTotal = 0;
     
-    // Calculate dynamic adjustments total
+    // Calculate dynamic adjustments total (supports Add, Deduct, and Both (±))
     adjustmentTypes.forEach(adj => {
-      const val = parseFloat(row.dynamic_adjustments[adj.label] || 0);
-      if (adj.action === 'Add') {
+      const val = parseFloat(row.dynamic_adjustments?.[adj.label] || 0);
+      if (adj.action === 'Add' || adj.action === 'Both') {
         dynamicTotal += val;
       } else if (adj.action === 'Deduct') {
         dynamicTotal -= val;
       }
     });
 
-    const dynamicNet = Math.max(0, 
-      earned + 
-      parseFloat(row.bonus) + 
-      parseFloat(row.last_month_adjustment) - 
-      parseFloat(row.internet) - 
-      parseFloat(row.kafalat) - 
-      parseFloat(row.this_month_adv) +
-      dynamicTotal
-    );
+    const lastMonthBal = parseFloat(row.last_month_balance || 0);
+    const bonus = parseFloat(row.bonus || 0);
+    const thisMonthAdv = parseFloat(row.this_month_adv || 0);
+    const internet = parseFloat(row.internet || 0);
+    const kafalat = parseFloat(row.kafalat || 0);
+    const otherAdj = parseFloat(row.other_adjustments || 0);
+
+    const total = lastMonthBal + bonus - thisMonthAdv - internet - kafalat + otherAdj + dynamicTotal;
+    return Math.round(total * 100) / 100;
+  }
+
+  // Helper to recalculate net salary
+  const recalculateNetSalary = (row) => {
+    const baseSal = parseFloat(row.base_salary || 0);
+    const payable = parseFloat(row.payable_salary !== undefined ? row.payable_salary : (baseSal - parseFloat(row.deductions || 0)));
+    const totalAdj = calculateTotalAdjustments(row);
+    const dynamicNet = Math.max(0, Math.round((payable + totalAdj) * 100) / 100);
     return dynamicNet;
   }
 
@@ -265,13 +288,20 @@ export default function Payroll() {
   const handleFieldChange = (empId, field, value) => {
     setEditableData(prev => {
       const row = { ...prev[empId] }
-      row[field] = parseFloat(value) || 0;
+      row[field] = value;
       
       const dynamicNet = recalculateNetSalary(row);
       row.net_salary = dynamicNet;
       
-      if (parseFloat(prev[empId].paid_in_account) === parseFloat(prev[empId].net_salary)) {
-        row.paid_in_account = dynamicNet;
+      const prevCash = parseFloat(prev[empId].cash_paid || 0);
+      const prevBank = parseFloat(prev[empId].bank_paid || 0);
+      const prevNet = parseFloat(prev[empId].net_salary || 0);
+
+      if (prevCash === prevNet && prevBank === 0) {
+        row.cash_paid = dynamicNet;
+        row.paid_amount = dynamicNet;
+      } else {
+        row.paid_amount = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
       }
 
       return { ...prev, [empId]: row }
@@ -284,16 +314,34 @@ export default function Payroll() {
       const row = { ...prev[empId] }
       row.dynamic_adjustments = {
         ...row.dynamic_adjustments,
-        [label]: parseFloat(value) || 0
+        [label]: value
       }
       
       const dynamicNet = recalculateNetSalary(row);
       row.net_salary = dynamicNet;
       
-      if (parseFloat(prev[empId].paid_in_account) === parseFloat(prev[empId].net_salary)) {
-        row.paid_in_account = dynamicNet;
+      const prevCash = parseFloat(prev[empId].cash_paid || 0);
+      const prevBank = parseFloat(prev[empId].bank_paid || 0);
+      const prevNet = parseFloat(prev[empId].net_salary || 0);
+
+      if (prevCash === prevNet && prevBank === 0) {
+        row.cash_paid = dynamicNet;
+        row.paid_amount = dynamicNet;
+      } else {
+        row.paid_amount = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
       }
 
+      return { ...prev, [empId]: row }
+    })
+  }
+
+  const handlePaidChange = (empId, field, value) => {
+    setEditableData(prev => {
+      const row = { ...prev[empId] }
+      row[field] = value;
+      const cash = parseFloat(field === 'cash_paid' ? value : row.cash_paid) || 0;
+      const bank = parseFloat(field === 'bank_paid' ? value : row.bank_paid) || 0;
+      row.paid_amount = Math.round((cash + bank) * 100) / 100;
       return { ...prev, [empId]: row }
     })
   }
@@ -318,36 +366,37 @@ export default function Payroll() {
       const perMinRate = expectedMinutes > 0 ? (newBaseSalary / expectedMinutes) : 0;
       const perHourRate = expectedHours > 0 ? (newBaseSalary / expectedHours) : 0;
 
-      const actualHours = parseFloat(row.actual_hours) || 0;
-      const actualMinutes = actualHours * 60;
+      const actualMinutes = row.actual_minutes !== undefined ? row.actual_minutes : (parseFloat(row.actual_hours || 0) * 60);
 
-      let earned = Math.round(actualMinutes * perMinRate * 100) / 100;
-      let deductions = 0;
+      // Payable salary: per-minute rate multiplied by actual minutes
+      let payableSalary = Math.round(actualMinutes * perMinRate * 100) / 100;
+      let deductions = Math.max(0, Math.round((newBaseSalary - payableSalary) * 100) / 100);
       let otPay = 0;
       let otHours = 0;
 
-      if (actualHours > expectedHours) {
-        otHours = Math.round((actualHours - expectedHours) * 100) / 100;
+      if (parseFloat(row.actual_hours || 0) > expectedHours) {
+        otHours = Math.round((parseFloat(row.actual_hours || 0) - expectedHours) * 100) / 100;
         const rate = parseFloat(row.overtime_rate) || perHourRate;
         otPay = Math.round(otHours * rate * 100) / 100;
-        earned = newBaseSalary;
-        deductions = 0;
-      } else {
-        deductions = Math.max(0, Math.round((newBaseSalary - earned) * 100) / 100);
-        earned = Math.max(0, Math.round(earned * 100) / 100);
-        otHours = 0;
-        otPay = 0;
       }
 
       row.deductions = deductions;
+      row.payable_salary = payableSalary;
       row.overtime_hours = otHours;
       row.overtime_pay = otPay;
 
       const dynamicNet = recalculateNetSalary(row);
       row.net_salary = dynamicNet;
 
-      if (parseFloat(prev[empId].paid_in_account) === parseFloat(prev[empId].net_salary)) {
-        row.paid_in_account = dynamicNet;
+      const prevCash = parseFloat(prev[empId].cash_paid || 0);
+      const prevBank = parseFloat(prev[empId].bank_paid || 0);
+      const prevNet = parseFloat(prev[empId].net_salary || 0);
+
+      if (prevCash === prevNet && prevBank === 0) {
+        row.cash_paid = dynamicNet;
+        row.paid_amount = dynamicNet;
+      } else {
+        row.paid_amount = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
       }
 
       return { ...prev, [empId]: row };
@@ -369,6 +418,7 @@ export default function Payroll() {
       });
       toast.success('Base salary updated successfully!');
       handleSalaryChange(currentEmpData.id, val);
+      await loadPayroll(true);
     } catch (err) {
       toast.error(err?.response?.data?.error || 'Failed to update salary');
     } finally {
@@ -401,10 +451,16 @@ export default function Payroll() {
   }
 
   const saveRowRecord = async (row) => {
+    const cashVal = parseFloat(row.cash_paid || 0);
+    const bankVal = parseFloat(row.bank_paid || 0);
+    const totalPaid = Math.round((cashVal + bankVal) * 100) / 100;
+
     return axios.post('/api/payroll/record', {
       employee_id: row.id,
       month: selectedMonth,
-      base_salary: row.base_salary,
+      base_salary: parseFloat(row.base_salary || 0),
+      payable_salary: parseFloat(row.payable_salary !== undefined ? row.payable_salary : (parseFloat(row.base_salary || 0) - parseFloat(row.deductions || 0))),
+      last_month_balance: parseFloat(row.last_month_balance || 0),
       presents: row.presents,
       absents: row.absents,
       leaves: row.leaves,
@@ -413,22 +469,24 @@ export default function Payroll() {
       overtime_pay: 0,
       deductions: row.deductions,
       other_adjustments: row.other_adjustments || 0,
-      advance_deduction: row.this_month_adv,
+      advance_deduction: parseFloat(row.this_month_adv || 0),
       calc_advance_deduction: row.calc_advance_deduction,
       recurring_adjustments: row.recurring_adjustments || 0,
-      bonus: row.bonus,
+      bonus: parseFloat(row.bonus || 0),
       calc_bonus: row.calc_bonus,
-      last_month_adjustment: row.last_month_adjustment,
+      last_month_adjustment: parseFloat(row.last_month_adjustment || 0),
       calc_last_month_adjustment: row.calc_last_month_adjustment,
-      internet: row.internet,
+      internet: parseFloat(row.internet || 0),
       calc_internet: row.calc_internet,
-      kafalat: row.kafalat,
+      kafalat: parseFloat(row.kafalat || 0),
       calc_kafalat: row.calc_kafalat,
       expected_hours: row.expected_hours,
       actual_hours: row.actual_hours,
       dynamic_adjustments: row.dynamic_adjustments,
       net_salary: row.net_salary,
-      paid_amount: row.paid_in_account,
+      cash_paid: cashVal,
+      bank_paid: bankVal,
+      paid_amount: totalPaid,
       status: row.status,
       notes: row.notes || ''
     });
@@ -438,7 +496,19 @@ export default function Payroll() {
     if (!window.confirm('Are you sure you want to save all payroll records for ' + selectedMonth + '?')) return;
     setSavingAll(true);
     try {
-      const promises = Object.values(editableData).map(row => saveRowRecord(row));
+      const rowsToSave = Object.values(editableData).filter(row => {
+        // If row is Paid and user is not developer, skip it
+        if (row.status === 'Paid' && !isDeveloper) return false;
+        return true;
+      });
+
+      if (rowsToSave.length === 0) {
+        toast.info('No editable records to save.');
+        setSavingAll(false);
+        return;
+      }
+
+      const promises = rowsToSave.map(row => saveRowRecord(row));
       await Promise.all(promises);
       toast.success('All payroll records saved successfully!');
       loadPayroll();
@@ -457,6 +527,7 @@ export default function Payroll() {
       const row = editableData[empId];
       await saveRowRecord(row);
       toast.success(`Record for ${row.name} saved!`);
+      await loadPayroll(true);
     } catch (error) {
        console.error(error);
        const errMsg = error?.response?.data?.error || error.message || 'Failed to save record.';
@@ -536,6 +607,8 @@ export default function Payroll() {
         custom_label: actualLabel,
         amount: parseFloat(customAdjAmount),
         action_type: customAdjAction,
+        date: `${selectedMonth}-15`,
+        start_date: `${selectedMonth}-01`,
         remaining_amount: customAdjTotalLimit ? parseFloat(customAdjTotalLimit) : null,
         notes: customAdjNotes
       }
@@ -582,10 +655,11 @@ export default function Payroll() {
       toast.success('Deleted successfully')
       
       if (type === 'Adjustment Column') {
-        loadAdjustmentTypes()
+        await loadAdjustmentTypes()
+        await loadPayroll(true)
       } else {
-        loadEmpAdjs(currentEmpData?.id)
-        loadPayroll(true)
+        await loadEmpAdjs(currentEmpData?.id)
+        await loadPayroll(true)
       }
     } catch (err) {
       toast.error('Failed to delete')
@@ -704,6 +778,7 @@ export default function Payroll() {
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Actual</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Salary</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Payable</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#ede9fe' }}>Last M. Balance</th>
                 
                 {/* Default Editable Columns */}
                 {Object.entries(baseColumns).map(([key, config]) => !config.hidden && (
@@ -717,8 +792,10 @@ export default function Payroll() {
                   </th>
                 ))}
                 
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#b45309', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#fef3c7' }}>Total Adj (±)</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--primary)', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#f0fdf4' }}>Net Pay</th>
-                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#e0f2fe' }}>Paid Amount</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#0369a1', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#e0f2fe' }}>Cash Paid</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#4338ca', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#e0e7ff' }}>Bank Paid</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
                 {showActions && <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>}
               </tr>
@@ -726,28 +803,36 @@ export default function Payroll() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={16 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={19 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     <div style={{ animation: 'spin 1s linear infinite', margin: '0 auto 16px', border: '3px solid var(--surface-2)', borderTopColor: 'var(--primary)', borderRadius: '50%', width: '28px', height: '28px' }} />
                     Calculating Payroll...
                   </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={16 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={19 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No payroll records found for this month.
                   </td>
                 </tr>
               ) : (
                 filteredEmployees.map((item, index) => {
-                  const earned = Math.max(0, parseFloat(item.base_salary) - parseFloat(item.deductions));
+                  const baseSal = parseFloat(item.base_salary || 0);
+                  const payable = parseFloat(item.payable_salary !== undefined ? item.payable_salary : (baseSal - parseFloat(item.deductions || 0)));
+                  const payableDiff = Math.round((payable - baseSal) * 100) / 100;
+                  const isRowLocked = item.status === 'Paid' && !isDeveloper;
+                  const totalAdj = calculateTotalAdjustments(item);
+
                   return (
-                    <tr key={item.id} style={{ borderBottom: '1px solid var(--surface-2)', background: index % 2 === 0 ? 'var(--white)' : 'var(--surface)', transition: 'background 0.2s' }}>
+                    <tr key={item.id} style={{ borderBottom: '1px solid var(--surface-2)', background: index % 2 === 0 ? 'var(--white)' : 'var(--surface)', transition: 'background 0.2s', ...(isRowLocked ? { opacity: 0.88 } : {}) }}>
                       <td 
                         onClick={() => openEmployeeModal(item)}
                         style={{ ...stickyStyle, left: 0, zIndex: 10, background: index % 2 === 0 ? 'var(--white)' : 'var(--surface)', padding: '8px', borderRight: '1px solid var(--surface-2)', cursor: 'pointer' }}
                         className="employee-cell-hover"
                       >
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap' }}>{item.name}</div>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          {item.name}
+                          {item.status === 'Paid' && <Lock size={11} style={{ color: '#64748b' }} title="Locked (Paid)" />}
+                        </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{item.employee_id}</div>
                       </td>
                       <td style={{ padding: '8px', fontSize: '10px', fontWeight: 600, whiteSpace: 'nowrap' }}>
@@ -786,50 +871,136 @@ export default function Payroll() {
                       <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
                         {Number(item.base_salary || 0).toLocaleString()}
                       </td>
-                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, color: item.deductions > 0 ? '#ef4444' : 'inherit' }}>
-                        {earned.toFixed(2)}
-                        {item.deductions > 0 && <span style={{ fontSize: '9px', display: 'block' }}>(-{item.deductions.toFixed(2)})</span>}
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, color: payableDiff < 0 ? '#ef4444' : payableDiff > 0 ? 'var(--green)' : 'inherit', whiteSpace: 'nowrap' }}>
+                        {payable.toFixed(2)}
+                        {payableDiff > 0 && <span style={{ fontSize: '9px', display: 'block', color: 'var(--green)' }}>(+{payableDiff.toFixed(2)})</span>}
+                        {payableDiff < 0 && <span style={{ fontSize: '9px', display: 'block', color: '#ef4444' }}>({payableDiff.toFixed(2)})</span>}
                       </td>
                       
+                      {/* Last Month Balance (Auto carryover from previous month) */}
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, background: '#f5f3ff', whiteSpace: 'nowrap' }}>
+                        {(() => {
+                          const bal = parseFloat(item.last_month_balance || 0);
+                          if (bal > 0) return <span style={{ color: 'var(--green)' }}>+{bal.toFixed(2)}</span>;
+                          if (bal < 0) return <span style={{ color: '#ef4444' }}>{bal.toFixed(2)}</span>;
+                          return <span style={{ color: 'var(--text-muted)' }}>0.00</span>;
+                        })()}
+                      </td>
+
                       {/* Default Editables / Synced from Modal */}
                       {!baseColumns.this_month_adv.hidden && <td style={{ padding: '4px', background: baseColumns.this_month_adv.bg }}>
-                        <input type="number" className="cell-input" value={item.this_month_adv} onChange={e => handleFieldChange(item.id, 'this_month_adv', e.target.value)} />
+                        <input 
+                          type="text" 
+                          inputMode="decimal" 
+                          disabled={isRowLocked} 
+                          className="cell-input" 
+                          style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                          value={item.this_month_adv} 
+                          onChange={e => handleFieldChange(item.id, 'this_month_adv', e.target.value)} 
+                        />
                       </td>}
                       {!baseColumns.bonus.hidden && <td style={{ padding: '4px', background: baseColumns.bonus.bg }}>
-                        <input type="number" className="cell-input" value={item.bonus} onChange={e => handleFieldChange(item.id, 'bonus', e.target.value)} />
+                        <input 
+                          type="text" 
+                          inputMode="decimal" 
+                          disabled={isRowLocked} 
+                          className="cell-input" 
+                          style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                          value={item.bonus} 
+                          onChange={e => handleFieldChange(item.id, 'bonus', e.target.value)} 
+                        />
                       </td>}
-                      {!baseColumns.last_month_adjustment.hidden && <td style={{ padding: '4px', background: baseColumns.last_month_adjustment.bg }}>
-                        <input type="number" className="cell-input" value={item.last_month_adjustment} onChange={e => handleFieldChange(item.id, 'last_month_adjustment', e.target.value)} />
-                      </td>}
+
                       {!baseColumns.internet.hidden && <td style={{ padding: '4px', background: baseColumns.internet.bg }}>
-                        <input type="number" className="cell-input" value={item.internet} onChange={e => handleFieldChange(item.id, 'internet', e.target.value)} />
+                        <input 
+                          type="text" 
+                          inputMode="decimal" 
+                          disabled={isRowLocked} 
+                          className="cell-input" 
+                          style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                          value={item.internet} 
+                          onChange={e => handleFieldChange(item.id, 'internet', e.target.value)} 
+                        />
                       </td>}
                       {!baseColumns.kafalat.hidden && <td style={{ padding: '4px', background: baseColumns.kafalat.bg }}>
-                        <input type="number" className="cell-input" value={item.kafalat} onChange={e => handleFieldChange(item.id, 'kafalat', e.target.value)} />
+                        <input 
+                          type="text" 
+                          inputMode="decimal" 
+                          disabled={isRowLocked} 
+                          className="cell-input" 
+                          style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                          value={item.kafalat} 
+                          onChange={e => handleFieldChange(item.id, 'kafalat', e.target.value)} 
+                        />
                       </td>}
 
                       {/* Dynamic Editables */}
                       {adjustmentTypes.map(adj => !hiddenDynamicCols[adj.id] && (
                         <td key={adj.id} style={{ padding: '4px', background: adj.action === 'Add' ? '#f0fdf4' : adj.action === 'Deduct' ? '#fef2f2' : '#f3e8ff' }}>
                           <input 
-                            type="number" 
+                            type="text" 
+                            inputMode="decimal"
+                            disabled={isRowLocked}
+                            placeholder={adj.action === 'Both' ? '±0' : '0'}
                             className="cell-input" 
-                            value={item.dynamic_adjustments?.[adj.label] || 0} 
+                            style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }}
+                            value={item.dynamic_adjustments?.[adj.label] ?? 0} 
                             onChange={e => handleDynamicFieldChange(item.id, adj.label, e.target.value)} 
                           />
                         </td>
                       ))}
                       
-                      <td style={{ padding: '8px', fontSize: '13px', fontWeight: 800, color: 'var(--primary)', background: '#f0fdf4' }}>
+                      {/* Total Adjustments (±) (Net Deductions / Additions) */}
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 800, background: '#fffbeb', whiteSpace: 'nowrap' }}>
+                        {totalAdj > 0 ? (
+                          <span style={{ color: 'var(--green)' }}>+{totalAdj.toFixed(2)}</span>
+                        ) : totalAdj < 0 ? (
+                          <span style={{ color: '#ef4444' }}>{totalAdj.toFixed(2)}</span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)' }}>0.00</span>
+                        )}
+                      </td>
+
+                      {/* Net Pay */}
+                      <td style={{ padding: '8px', fontSize: '13px', fontWeight: 800, color: 'var(--primary)', background: '#f0fdf4', whiteSpace: 'nowrap' }}>
                         {item.net_salary.toFixed(2)}
                       </td>
                       
+                      {/* Cash Paid */}
                       <td style={{ padding: '4px', background: '#f0f9ff' }}>
-                        <input type="number" className="cell-input" style={{ fontWeight: 700 }} value={item.paid_in_account} onChange={e => handleFieldChange(item.id, 'paid_in_account', e.target.value)} />
+                        <input 
+                          type="text" 
+                          inputMode="decimal"
+                          disabled={isRowLocked}
+                          className="cell-input" 
+                          style={{ fontWeight: 700, color: '#0369a1', opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                          value={item.cash_paid} 
+                          onChange={e => handlePaidChange(item.id, 'cash_paid', e.target.value)} 
+                        />
+                      </td>
+
+                      {/* Bank Paid */}
+                      <td style={{ padding: '4px', background: '#eef2ff' }}>
+                        <input 
+                          type="text" 
+                          inputMode="decimal"
+                          disabled={isRowLocked}
+                          className="cell-input" 
+                          style={{ fontWeight: 700, color: '#4338ca', opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                          value={item.bank_paid} 
+                          onChange={e => handlePaidChange(item.id, 'bank_paid', e.target.value)} 
+                        />
                       </td>
                       
+                      {/* Status */}
                       <td style={{ padding: '4px' }}>
-                        <select className="cell-input" value={item.status} onChange={e => handleTextChange(item.id, 'status', e.target.value)} style={{ width: '80px', fontWeight: 700, color: item.status === 'Paid' ? 'var(--green)' : '#d97706' }}>
+                        <select 
+                          className="cell-input" 
+                          disabled={isRowLocked}
+                          value={item.status} 
+                          onChange={e => handleTextChange(item.id, 'status', e.target.value)} 
+                          style={{ width: '85px', fontWeight: 700, color: item.status === 'Paid' ? 'var(--green)' : '#d97706', opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'pointer' }}
+                        >
                           <option value="Pending">Pending</option>
                           <option value="Paid">Paid</option>
                         </select>
@@ -837,15 +1008,25 @@ export default function Payroll() {
 
                       {showActions && (
                         <td style={{ padding: '4px', textAlign: 'center' }}>
-                          <button 
-                            onClick={() => handleSaveRow(item.id)}
-                            disabled={savingRowId === item.id}
-                            className="btn btn-primary"
-                            style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}
-                          >
-                            {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
-                            Save
-                          </button>
+                          {isRowLocked ? (
+                            <div 
+                              title="Payroll Locked for Paid records. Only Developer role can unlock/edit." 
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, background: 'var(--surface-2)', color: 'var(--text-muted)' }}
+                            >
+                              <Lock size={12} />
+                              Locked
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => handleSaveRow(item.id)}
+                              disabled={savingRowId === item.id}
+                              className="btn btn-primary"
+                              style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
+                              Save {isDeveloper && item.status === 'Paid' ? '(Dev)' : ''}
+                            </button>
+                          )}
                         </td>
                       )}
                     </tr>
@@ -1006,11 +1187,10 @@ export default function Payroll() {
                           >
                             <option value="">Select Adjustment Type</option>
                             <optgroup label="Standard Adjustments">
-                              {(baseColumns.this_month_adv.action === customAdjAction || baseColumns.this_month_adv.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv.label}</option>}
-                              {(baseColumns.bonus.action === customAdjAction || baseColumns.bonus.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus.label}</option>}
-                              {(baseColumns.last_month_adjustment.action === customAdjAction || baseColumns.last_month_adjustment.action === 'Both') && <option value="Last Month Adjustment">{baseColumns.last_month_adjustment.label}</option>}
-                              {(baseColumns.internet.action === customAdjAction || baseColumns.internet.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet.label}</option>}
-                              {(baseColumns.kafalat.action === customAdjAction || baseColumns.kafalat.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat.label}</option>}
+                              {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
+                              {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
+                              {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
+                              {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
                             </optgroup>
                             {adjustmentTypes.length > 0 && (
                               <optgroup label="Custom Columns">

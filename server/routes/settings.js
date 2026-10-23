@@ -28,8 +28,16 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // PUT /api/settings - Update POS settings
-router.put('/', authenticateToken, isAdmin, async (req, res) => {
+router.put('/', authenticateToken, async (req, res) => {
   const { auto_print_enabled, printer_ip, low_stock_behavior, report_emails } = req.body;
+  const userRole = (req.user?.role || '').trim().toLowerCase();
+  const isAdminRole = userRole === 'admin' || userRole === 'developer';
+
+  // Protect inventory behavior and report email recipient modifications for admin/developer
+  if ((low_stock_behavior !== undefined || report_emails !== undefined) && !isAdminRole) {
+    return res.status(403).json({ error: 'Admin access required to modify global inventory or report email settings' });
+  }
+
   try {
     const check = await pool.query('SELECT * FROM settings ORDER BY id ASC LIMIT 1');
     let result;

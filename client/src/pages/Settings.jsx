@@ -23,7 +23,9 @@ import {
   Layers,
   LayoutGrid,
   ListFilter,
-  Info
+  Info,
+  Save,
+  Check
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -34,7 +36,9 @@ export default function Settings() {
   const [loading, setLoading] = useState(false)
   const [printMode, setPrintMode] = useState(localStorage.getItem('printMode') || 'standard')
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
-  const [printerIp, setPrinterIp] = useState(localStorage.getItem('printerIp') || '127.0.0.1')
+  const [printerIp, setPrinterIp] = useState(() => localStorage.getItem('printerIp') || '127.0.0.1')
+  const [savingPrinterIp, setSavingPrinterIp] = useState(false)
+  const [printerIpSaved, setPrinterIpSaved] = useState(false)
   const [lowStockBehavior, setLowStockBehavior] = useState('block')
   const [stockViewMode, setStockViewMode] = useState(() => localStorage.getItem('pos_stock_view_mode') || 'cards')
   const [reportEmails, setReportEmails] = useState(['mr.caffee25@gmail.com'])
@@ -166,7 +170,7 @@ export default function Settings() {
       fetchUsers()
       fetchShifts()
     }
-    if ((activeTab === 'hardware' || activeTab === 'pos_settings' || activeTab === 'report_emails') && isAdminRole) {
+    if (activeTab === 'hardware' || ((activeTab === 'pos_settings' || activeTab === 'report_emails') && isAdminRole)) {
       fetchSettings()
     }
   }, [activeTab, user?.role])
@@ -176,7 +180,17 @@ export default function Settings() {
       const res = await api.get('/api/settings')
       if (res.data) {
         setAutoPrintEnabled(res.data.auto_print_enabled)
-        setPrinterIp(res.data.printer_ip)
+        
+        // Retain custom IP if server still has default 127.0.0.1 but client has an IP saved
+        const localIp = localStorage.getItem('printerIp')
+        const serverIp = res.data.printer_ip
+        const effectiveIp = (serverIp && serverIp.trim() && serverIp !== '127.0.0.1')
+          ? serverIp.trim()
+          : (localIp && localIp.trim() ? localIp.trim() : (serverIp || '127.0.0.1'))
+
+        setPrinterIp(effectiveIp)
+        localStorage.setItem('printerIp', effectiveIp)
+
         setLowStockBehavior(res.data.low_stock_behavior || 'block')
         if (Array.isArray(res.data.report_emails) && res.data.report_emails.length > 0) {
           setReportEmails(res.data.report_emails)
@@ -196,6 +210,36 @@ export default function Settings() {
     }
   }
 
+  const handleSavePrinterIp = async (e) => {
+    if (e) e.preventDefault()
+    const trimmedIp = (printerIp || '').trim()
+    if (!trimmedIp) {
+      toast.error('Please enter a printer IP address')
+      return
+    }
+
+    setSavingPrinterIp(true)
+    try {
+      // 1. Immediately store to local device storage
+      localStorage.setItem('printerIp', trimmedIp)
+      setPrinterIp(trimmedIp)
+
+      // 2. Persist to server backend database
+      await api.put('/api/settings', { printer_ip: trimmedIp })
+
+      setPrinterIpSaved(true)
+      setTimeout(() => setPrinterIpSaved(false), 2500)
+      toast.success('Thermal Printer IP saved successfully!')
+    } catch (err) {
+      console.error('Failed to save printer IP to server:', err)
+      setPrinterIpSaved(true)
+      setTimeout(() => setPrinterIpSaved(false), 2500)
+      toast.success('Printer IP saved for this device')
+    } finally {
+      setSavingPrinterIp(false)
+    }
+  }
+
   const saveSettings = async () => {
     setSavingSettings(true)
     try {
@@ -205,6 +249,9 @@ export default function Settings() {
         low_stock_behavior: lowStockBehavior,
         report_emails: reportEmails
       })
+      if (printerIp) {
+        localStorage.setItem('printerIp', printerIp.trim())
+      }
       toast.success('Settings saved globally')
     } catch (err) {
       toast.error('Failed to save settings')
@@ -504,22 +551,111 @@ export default function Settings() {
                 </div>
                 
                 {printMode === 'cloud' && (
-                  <div className="form-group" style={{ maxWidth: 400, marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--surface-2)' }}>
-                    <label>Cloud Printer Configuration</label>
-                    <div style={{ marginTop: '16px' }}>
-                      <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Printer IP Address</label>
-                      <input 
-                        type="text" 
-                        value={printerIp}
-                        onChange={e => setPrinterIp(e.target.value)}
-                        onBlur={e => {
-                          localStorage.setItem('printerIp', e.target.value)
-                          toast.success('Printer IP saved for this device')
-                        }}
-                        placeholder="192.168.1.100"
-                        style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--surface-2)', width: '100%', marginTop: '6px', background: 'var(--surface)' }}
-                      />
-                      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>Port is fixed to 9100</p>
+                  <div className="form-group" style={{ maxWidth: 460, marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--surface-2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <label style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                        Cloud Printer Configuration
+                      </label>
+                      <span style={{ 
+                        fontSize: '11px', 
+                        padding: '2px 8px', 
+                        borderRadius: '6px', 
+                        background: 'rgba(16, 185, 129, 0.12)', 
+                        color: '#10b981', 
+                        fontWeight: 600 
+                      }}>
+                        Port 9100 (TCP RAW)
+                      </span>
+                    </div>
+
+                    <div style={{ marginTop: '14px' }}>
+                      <label style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                        Thermal Printer IP Address
+                      </label>
+                      
+                      {/* IP Input with Save Button directly next to it */}
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <div style={{ position: 'relative', flex: 1 }}>
+                          <input 
+                            type="text" 
+                            value={printerIp}
+                            onChange={e => {
+                              setPrinterIp(e.target.value)
+                              setPrinterIpSaved(false)
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                handleSavePrinterIp()
+                              }
+                            }}
+                            placeholder="e.g. 192.168.1.100"
+                            style={{ 
+                              padding: '11px 14px', 
+                              borderRadius: '8px', 
+                              border: printerIpSaved ? '1.5px solid #10b981' : '1px solid var(--surface-2)', 
+                              width: '100%', 
+                              background: 'var(--surface)',
+                              fontSize: '14px',
+                              fontFamily: 'monospace',
+                              color: 'var(--text-primary)',
+                              boxSizing: 'border-box',
+                              transition: 'border-color 0.2s ease',
+                              outline: 'none'
+                            }}
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          id="btn-save-printer-ip"
+                          onClick={handleSavePrinterIp}
+                          disabled={savingPrinterIp}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '7px',
+                            padding: '11px 20px',
+                            background: printerIpSaved ? '#10b981' : 'var(--primary, #e11d48)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '13.5px',
+                            fontWeight: 600,
+                            cursor: savingPrinterIp ? 'not-allowed' : 'pointer',
+                            opacity: savingPrinterIp ? 0.75 : 1,
+                            whiteSpace: 'nowrap',
+                            boxShadow: '0 2px 6px rgba(0, 0, 0, 0.12)',
+                            transition: 'all 0.2s ease',
+                            flexShrink: 0
+                          }}
+                        >
+                          {savingPrinterIp ? (
+                            <>
+                              <RefreshCw size={15} className="spin" />
+                              <span>Saving...</span>
+                            </>
+                          ) : printerIpSaved ? (
+                            <>
+                              <Check size={16} />
+                              <span>Saved</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save size={16} />
+                              <span>Save</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px' }}>
+                        <Info size={13} color="var(--text-muted)" />
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+                          Enter the local IP address of your receipt thermal printer (e.g., 192.168.1.87) and click <strong>Save</strong>.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}

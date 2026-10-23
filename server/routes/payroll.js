@@ -167,6 +167,25 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       savedRecordsMap[r.employee_id] = r;
     });
 
+    // Calculate previous month string (YYYY-MM)
+    let prevYear = year;
+    let prevMonthNum = monthNum - 1;
+    if (prevMonthNum === 0) {
+      prevMonthNum = 12;
+      prevYear = year - 1;
+    }
+    const prevMonthStr = `${prevYear}-${String(prevMonthNum).padStart(2, '0')}`;
+
+    // Get previous month's saved records to calculate unpaid balance / overpaid adjustment
+    const prevRecordsRes = await pool.query(
+      'SELECT employee_id, net_salary, paid_amount, status FROM employee_payroll_records WHERE month = $1',
+      [prevMonthStr]
+    );
+    const prevRecordsMap = {};
+    prevRecordsRes.rows.forEach(r => {
+      prevRecordsMap[r.employee_id] = r;
+    });
+
     // Get recurring adjustments
     const recurringRes = await pool.query('SELECT * FROM employee_recurring_adjustments');
     const recurringMap = {};
@@ -430,15 +449,44 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       let dynamicAdjustmentsTotal = 0;
       adjTypes.forEach(adj => {
         const val = parseFloat(dynamicAdjustmentsObj[adj.label] || 0);
-        if (adj.action === 'Add') {
+        if (adj.action === 'Add' || adj.action === 'Both') {
           dynamicAdjustmentsTotal += val;
         } else if (adj.action === 'Deduct') {
           dynamicAdjustmentsTotal -= val;
         }
       });
 
-      const dynamicNetSalary = Math.max(0, earnedSalary + otherAdjustments + bonus + lastMonthAdj - internet - kafalat - advanceDeduction + dynamicAdjustmentsTotal);
-      const paidAmount = savedPaidAmount !== null ? savedPaidAmount : dynamicNetSalary;
+      // Last month balance calculation (unpaid balance or overpaid carryover)
+      let lastMonthBalance = 0;
+      const prevRecord = prevRecordsMap[emp.id];
+      if (prevRecord) {
+        const prevNet = parseFloat(prevRecord.net_salary || 0);
+        const prevPaid = parseFloat(prevRecord.paid_amount || 0);
+        lastMonthBalance = Math.round((prevNet - prevPaid) * 100) / 100;
+      } else if (savedRecord && savedRecord.last_month_balance !== undefined && savedRecord.last_month_balance !== null) {
+        lastMonthBalance = parseFloat(savedRecord.last_month_balance || 0);
+      }
+
+      // Total adjustments (Expenses / Deductions & Additions)
+      const totalAdjustments = Math.round((lastMonthBalance + bonus + lastMonthAdj - internet - kafalat - advanceDeduction + otherAdjustments + dynamicAdjustmentsTotal) * 100) / 100;
+
+      // Net salary = Payable salary (earnedSalary) + totalAdjustments
+      const dynamicNetSalary = Math.max(0, Math.round((earnedSalary + totalAdjustments) * 100) / 100);
+
+      // Cash and Bank paid defaults
+      let cashPaid = dynamicNetSalary;
+      let bankPaid = 0;
+      if (savedRecord) {
+        if (savedRecord.cash_paid !== undefined && savedRecord.cash_paid !== null) {
+          cashPaid = parseFloat(savedRecord.cash_paid);
+        } else if (savedRecord.paid_amount !== undefined && savedRecord.paid_amount !== null) {
+          cashPaid = parseFloat(savedRecord.paid_amount);
+        }
+        if (savedRecord.bank_paid !== undefined && savedRecord.bank_paid !== null) {
+          bankPaid = parseFloat(savedRecord.bank_paid);
+        }
+      }
+      const paidAmount = Math.round((cashPaid + bankPaid) * 100) / 100;
 
       return {
         id: emp.id,
@@ -462,6 +510,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         other_overtime_hours: parseFloat(otherOvertimeHours.toFixed(2)),
         net_overtime_hours: parseFloat(netOvertimeHours.toFixed(2)),
         base_salary: baseSalary,
+        payable_salary: parseFloat(earnedSalary.toFixed(2)),
         overtime_rate: overtimeRate,
         allowed_leaves: allowedLeaves,
         presents,
@@ -476,10 +525,12 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         deductions: parseFloat(deductions.toFixed(2)),
         other_adjustments: manualAdjustments,
         recurring_adjustments: finalRecurringAdjustments,
+        last_month_balance: parseFloat(lastMonthBalance.toFixed(2)),
         bonus,
         last_month_adjustment: lastMonthAdj,
         internet,
         kafalat,
+        total_adjustments: parseFloat(totalAdjustments.toFixed(2)),
         advance_balance: advanceBalance,
         advance_deduction: advanceDeduction,
         calc_advance_deduction: calcAdvanceDeduction,
@@ -489,6 +540,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         calc_kafalat: calcKafalat,
         dynamic_adjustments: dynamicAdjustmentsObj,
         net_salary: parseFloat(dynamicNetSalary.toFixed(2)),
+        cash_paid: parseFloat(cashPaid.toFixed(2)),
+        bank_paid: parseFloat(bankPaid.toFixed(2)),
         paid_amount: parseFloat(paidAmount.toFixed(2)),
         status: paymentStatus,
         notes: notes,
@@ -591,6 +644,10 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
     employee_id,
     month,
     base_salary,
+    payable_salary,
+    last_month_balance,
+    cash_paid,
+    bank_paid,
     presents,
     absents,
     leaves,
@@ -628,9 +685,18 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Fetch old record to see if we are transitioning to Paid
+    // Fetch old record to see if it was already Paid (lock check)
     const oldRecRes = await client.query('SELECT status FROM employee_payroll_records WHERE employee_id = $1 AND month = $2', [employee_id, month]);
     const oldStatus = oldRecRes.rows.length > 0 ? oldRecRes.rows[0].status : null;
+    const userRole = req.user?.role?.trim().toLowerCase();
+
+    // If already marked as Paid, only a user with Developer role can edit or unlock it
+    if (oldStatus === 'Paid' && userRole !== 'developer') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'This payroll record is marked as Paid and locked. Only a Developer can edit or unlock it.'
+      });
+    }
 
     await syncSpreadsheetAdjustment(client, employee_id, month, 'Advance Salary / Loan', parseFloat(advance_deduction || 0), true);
     await syncSpreadsheetAdjustment(client, employee_id, month, 'Bonus', parseFloat(bonus || 0), false);
@@ -649,15 +715,22 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       }
     }
 
+    const cashVal = parseFloat(cash_paid !== undefined ? cash_paid : (paid_amount || 0));
+    const bankVal = parseFloat(bank_paid || 0);
+    const totalPaidAmount = Math.round((cashVal + bankVal) * 100) / 100;
+
     const result = await client.query(
       `INSERT INTO employee_payroll_records (
-        employee_id, month, base_salary, presents, absents, leaves, holidays, overtime_hours, overtime_pay, deductions,
-        other_adjustments, advance_deduction, recurring_adjustments, bonus, last_month_adjustment, internet, kafalat, expected_hours, actual_hours, dynamic_adjustments, net_salary, paid_amount, status, notes, paid_date
+        employee_id, month, base_salary, payable_salary, last_month_balance, presents, absents, leaves, holidays, overtime_hours, overtime_pay, deductions,
+        other_adjustments, advance_deduction, recurring_adjustments, bonus, last_month_adjustment, internet, kafalat, expected_hours, actual_hours, dynamic_adjustments, net_salary, cash_paid, bank_paid, paid_amount, status, notes, paid_date
       ) VALUES (
         $1, $2::text, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb, $21, $22, $23::text, $24::text, CASE WHEN $23::text = 'Paid' THEN NOW() ELSE NULL END
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22::jsonb, $23, $24, $25, $26, $27::text, $28::text, CASE WHEN $27::text = 'Paid' THEN NOW() ELSE NULL END
       ) ON CONFLICT (employee_id, month) DO UPDATE SET
         base_salary = EXCLUDED.base_salary,
+        payable_salary = EXCLUDED.payable_salary,
+        last_month_balance = EXCLUDED.last_month_balance,
         presents = EXCLUDED.presents,
         absents = EXCLUDED.absents,
         leaves = EXCLUDED.leaves,
@@ -676,6 +749,8 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         actual_hours = EXCLUDED.actual_hours,
         dynamic_adjustments = EXCLUDED.dynamic_adjustments,
         net_salary = EXCLUDED.net_salary,
+        cash_paid = EXCLUDED.cash_paid,
+        bank_paid = EXCLUDED.bank_paid,
         paid_amount = EXCLUDED.paid_amount,
         status = EXCLUDED.status,
         notes = EXCLUDED.notes,
@@ -685,6 +760,8 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         employee_id,
         month,
         parseFloat(base_salary || 0),
+        parseFloat(payable_salary !== undefined ? payable_salary : (parseFloat(base_salary || 0) - parseFloat(deductions || 0))),
+        parseFloat(last_month_balance || 0),
         parseInt(presents || 0),
         parseInt(absents || 0),
         parseInt(leaves || 0),
@@ -703,7 +780,9 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         parseFloat(actual_hours || 0),
         JSON.stringify(dynamic_adjustments || {}),
         parseFloat(net_salary || 0),
-        parseFloat(paid_amount || 0),
+        cashVal,
+        bankVal,
+        totalPaidAmount,
         status,
         notes
       ]

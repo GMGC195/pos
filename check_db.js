@@ -3,8 +3,8 @@ const pool = new Pool({ connectionString: 'postgresql://neondb_owner:npg_QyXo41J
 
 async function check() {
   try {
-    const res = await pool.query('SELECT id, items_summary, pg_typeof(items_summary) as type FROM shift_closings ORDER BY id DESC LIMIT 5');
-    console.log(res.rows);
+    const res = await pool.query('SELECT * FROM payroll_adjustment_types');
+    console.log('payroll_adjustment_types:', res.rows);
   } finally {
     pool.end();
   }

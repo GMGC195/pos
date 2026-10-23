@@ -561,9 +561,13 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       )
     `);
 
-    // Ensure dynamic_adjustments column exists if table already existed
+    // Ensure columns exist if table already existed
     try {
-      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN dynamic_adjustments JSONB DEFAULT \'{}\'::jsonb');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS dynamic_adjustments JSONB DEFAULT \'{}\'::jsonb');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS cash_paid NUMERIC(10, 2) DEFAULT 0');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS bank_paid NUMERIC(10, 2) DEFAULT 0');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS last_month_balance NUMERIC(10, 2) DEFAULT 0');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS payable_salary NUMERIC(10, 2) DEFAULT 0');
     } catch (e) {}
 
     // Create payroll adjustment types table for dynamic columns
@@ -572,10 +576,28 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         id SERIAL PRIMARY KEY,
         label VARCHAR(100) UNIQUE NOT NULL,
         type VARCHAR(20) DEFAULT 'One-Time', -- 'One-Time' or 'Recurring'
-        action VARCHAR(20) DEFAULT 'Add', -- 'Add' or 'Deduct'
+        action VARCHAR(20) DEFAULT 'Add', -- 'Add', 'Deduct', or 'Both'
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // Ensure 'Other (±)' column exists and rename 'Demo' if needed
+    try {
+      await pool.query(`
+        UPDATE payroll_adjustment_types 
+        SET label = 'Other', action = 'Both' 
+        WHERE LOWER(label) = 'demo'
+      `);
+
+      const checkOther = await pool.query(`SELECT 1 FROM payroll_adjustment_types WHERE LOWER(label) = 'other'`);
+      if (checkOther.rows.length === 0) {
+        await pool.query(`INSERT INTO payroll_adjustment_types (label, type, action) VALUES ('Other', 'One-Time', 'Both')`);
+      } else {
+        await pool.query(`UPDATE payroll_adjustment_types SET action = 'Both' WHERE LOWER(label) = 'other'`);
+      }
+    } catch (e) {
+      console.error('Notice on payroll adjustment types config:', e.message);
+    }
 
     // Create employee_financial_adjustments table for one-time historical logs
     await pool.query(`
