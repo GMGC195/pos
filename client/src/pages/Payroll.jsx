@@ -3,7 +3,8 @@ import axios from '../api'
 import { 
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
   TrendingUp, Search, RefreshCw, X, AlertTriangle, FileText, Percent, 
-  CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock
+  CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock,
+  Table
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
@@ -41,6 +42,9 @@ export default function Payroll() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(getLastMonth())
+  const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail'
+  const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(null)
+  const [showEmpModal, setShowEmpModal] = useState(false)
 
   // Manage Salary Modal State
   const [showSalaryModal, setShowSalaryModal] = useState(false)
@@ -562,6 +566,16 @@ export default function Payroll() {
 
   const openEmployeeModal = (empRow) => {
     setSelectedEmployeeForModal(empRow)
+    setSelectedDetailEmpId(empRow.id)
+    setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '')
+    resetAdjForm()
+    loadEmpAdjs(empRow.id)
+    setShowEmpModal(true)
+  }
+
+  const handleSelectDetailEmp = (empRow) => {
+    setSelectedEmployeeForModal(empRow)
+    setSelectedDetailEmpId(empRow.id)
     setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '')
     resetAdjForm()
     loadEmpAdjs(empRow.id)
@@ -686,55 +700,670 @@ export default function Payroll() {
   const totalNetSalary = filteredEmployees.reduce((sum, item) => sum + (parseFloat(item.net_salary) || 0), 0)
   const totalDeductions = filteredEmployees.reduce((sum, item) => sum + (parseFloat(item.deductions) || 0), 0)
 
-  const currentEmpData = selectedEmployeeForModal ? (editableData[selectedEmployeeForModal.id] || selectedEmployeeForModal) : null;
+  const selectedDetailEmp = selectedDetailEmpId 
+    ? (editableData[selectedDetailEmpId] || filteredEmployees.find(e => e.id === selectedDetailEmpId))
+    : filteredEmployees[0];
+
+  const currentEmpData = selectedEmployeeForModal 
+    ? (editableData[selectedEmployeeForModal.id] || selectedEmployeeForModal)
+    : (viewMode === 'detail' ? selectedDetailEmp : null);
+
+  useEffect(() => {
+    if (viewMode === 'detail' && selectedDetailEmp && (!selectedEmployeeForModal || selectedEmployeeForModal.id !== selectedDetailEmp.id)) {
+      setSelectedEmployeeForModal(selectedDetailEmp);
+      setModalBaseSalary(selectedDetailEmp.base_salary !== undefined ? String(selectedDetailEmp.base_salary) : '');
+      loadEmpAdjs(selectedDetailEmp.id);
+    }
+  }, [viewMode, selectedDetailEmp?.id]);
+
+  const renderEmployeeDetailBody = (targetEmpData) => {
+    if (!targetEmpData) return null;
+
+    const isRowLocked = targetEmpData.status === 'Paid' && !isDeveloper;
+    const baseSal = parseFloat(targetEmpData.base_salary || 0);
+    const expHours = parseFloat(targetEmpData.expected_hours || 0);
+    const expMins = targetEmpData.expected_minutes !== undefined ? targetEmpData.expected_minutes : (expHours * 60);
+    const perMinRate = expMins > 0 ? (baseSal / expMins) : 0;
+    
+    const netOtHours = targetEmpData.net_overtime_hours !== undefined 
+      ? parseFloat(targetEmpData.net_overtime_hours || 0) 
+      : parseFloat(targetEmpData.overtime_hours || 0);
+    const netOtMins = Math.round(netOtHours * 60);
+    
+    // Overtime pay calculated based on basic salary per minute
+    const calcOtPay = Math.round(netOtMins * perMinRate * 100) / 100;
+    const displayOtPay = (targetEmpData.overtime_pay !== undefined && targetEmpData.overtime_pay !== null && targetEmpData.overtime_pay !== 0) 
+      ? parseFloat(targetEmpData.overtime_pay) 
+      : calcOtPay;
+
+    const payableSal = parseFloat(targetEmpData.payable_salary !== undefined ? targetEmpData.payable_salary : (baseSal - parseFloat(targetEmpData.deductions || 0)));
+    const totalAdj = calculateTotalAdjustments(targetEmpData);
+    const advBalance = parseFloat(targetEmpData.advance_balance || 0);
+    const lastMonthBal = parseFloat(targetEmpData.last_month_balance || 0);
+    const bonusVal = parseFloat(targetEmpData.bonus || 0);
+    const advVal = parseFloat(targetEmpData.this_month_adv || 0);
+    const netVal = parseFloat(targetEmpData.internet || 0);
+    const kafVal = parseFloat(targetEmpData.kafalat || 0);
+
+    const givenAdjs = [
+      ...empRecurringAdjs.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
+      ...empOneTimeAdjs.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'One-Time' }))
+    ];
+
+    const deductAdjs = [
+      ...empRecurringAdjs.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
+      ...empOneTimeAdjs.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'One-Time' }))
+    ];
+
+    return (
+      <>
+        {/* 1. Attendance Summary - Compact Inline Single Row */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between', 
+          flexWrap: 'wrap', 
+          gap: '8px', 
+          marginBottom: '14px',
+          background: '#f8fafc',
+          padding: '8px 12px',
+          borderRadius: '10px',
+          border: '1px solid #e2e8f0'
+        }}>
+          <div style={{ fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
+            Attendance Summary:
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '4px 10px', borderRadius: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857' }}>P:</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#059669' }}>{targetEmpData.presents}</span>
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fef2f2', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#b91c1c' }}>A:</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626' }}>{targetEmpData.absents}</span>
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fffbeb', border: '1px solid #fde68a', padding: '4px 10px', borderRadius: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#b45309' }}>L:</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#d97706' }}>{targetEmpData.leaves}</span>
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '4px 10px', borderRadius: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#1d4ed8' }}>H:</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#2563eb' }}>{targetEmpData.holidays}</span>
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '4px 10px', borderRadius: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#6d28d9' }}>OOT:</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#7c3aed' }}>{targetEmpData.only_overtime_days || 0}</span>
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fff7ed', border: '1px solid #fed7aa', padding: '4px 10px', borderRadius: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#c2410c' }}>Late:</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#ea580c' }}>{targetEmpData.late_days || 0}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 2. Hours & Overtime - Compact Row */}
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+            Hours & Overtime
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
+            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Expected Hours:</span>
+              <span style={{ fontSize: '14px', fontWeight: 800 }}>
+                {formatDuration(targetEmpData.expected_minutes !== undefined ? targetEmpData.expected_minutes : (targetEmpData.expected_hours * 60))}
+              </span>
+            </div>
+            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Actual Worked:</span>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                {formatDuration(targetEmpData.actual_minutes !== undefined ? targetEmpData.actual_minutes : (targetEmpData.actual_hours * 60))}
+              </span>
+            </div>
+            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Total Overtime:</span>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: netOtHours > 0 ? 'var(--green)' : netOtHours < 0 ? '#ef4444' : 'var(--text-secondary)' }}>
+                {netOtHours > 0 ? '+' : netOtHours < 0 ? '-' : ''}
+                {formatDuration(Math.abs(Math.round(netOtHours * 60)))}
+              </span>
+            </div>
+            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Overtime Pay:</span>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: displayOtPay > 0 ? 'var(--green)' : displayOtPay < 0 ? '#ef4444' : 'var(--text-secondary)' }}>
+                {displayOtPay > 0 ? `+${CURRENCY} ${displayOtPay.toFixed(2)}` : displayOtPay < 0 ? `-${CURRENCY} ${Math.abs(displayOtPay).toFixed(2)}` : `${CURRENCY} 0.00`}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Financials, Deductions Breakdown & Payment Box */}
+        <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', textTransform: 'uppercase' }}>Financials & Salary Calculation</div>
+            
+            {/* Base Salary Editor */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>Base Salary:</span>
+              <input 
+                type="number" 
+                disabled={isRowLocked}
+                value={modalBaseSalary}
+                onChange={e => setModalBaseSalary(e.target.value)}
+                style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#7c3aed', outline: 'none' }}
+              />
+              {!isRowLocked && (
+                <button 
+                  onClick={handleSaveModalSalary}
+                  disabled={savingModalSalary}
+                  className="btn btn-primary"
+                  style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  {savingModalSalary ? <RefreshCw size={11} className="spin" /> : <Save size={11} />}
+                  Update Salary
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Financial Metrics & Deductions Breakdown Grid - 4 in Single Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px', marginBottom: '14px' }}>
+            <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Payable (Worked Duty)</span>
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b', marginTop: '2px' }}>{CURRENCY} {payableSal.toFixed(2)}</div>
+              <span style={{ fontSize: '10px', color: targetEmpData.deductions > 0 ? '#ef4444' : '#64748b', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {targetEmpData.deductions > 0 ? `(-${CURRENCY} ${targetEmpData.deductions.toFixed(2)} short)` : 'Full hours achieved'}
+              </span>
+            </div>
+
+            <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Total Adjustments (±)</span>
+              <div style={{ fontSize: '15px', fontWeight: 800, color: totalAdj >= 0 ? 'var(--green)' : '#ef4444', marginTop: '2px' }}>
+                {totalAdj >= 0 ? `+${totalAdj.toFixed(2)}` : totalAdj.toFixed(2)}
+              </div>
+              <span style={{ fontSize: '10px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>
+                Additions minus deductions
+              </span>
+            </div>
+
+            <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Advance Balance (Loan)</span>
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
+              <span style={{ fontSize: '10px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>Remaining loan</span>
+            </div>
+
+            <div style={{ background: '#ecfdf5', padding: '10px 12px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+              <span style={{ fontSize: '11px', color: '#047857', fontWeight: 700, display: 'block', whiteSpace: 'nowrap' }}>Net Payable Salary</span>
+              <div style={{ fontSize: '15px', fontWeight: 900, color: '#059669', marginTop: '2px' }}>{CURRENCY} {Number(targetEmpData.net_salary || 0).toFixed(2)}</div>
+              <span style={{ fontSize: '10px', color: '#047857', display: 'block', whiteSpace: 'nowrap' }}>Payable + Total Adj</span>
+            </div>
+          </div>
+
+          {/* Deductions & Additions Detailed Summary List */}
+          <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>Current Month Calculation Breakdown</div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '12px' }}>
+              {lastMonthBal !== 0 && (
+                <span style={{ padding: '3px 8px', borderRadius: '6px', background: lastMonthBal > 0 ? '#ecfdf5' : '#fef2f2', color: lastMonthBal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                  Last M. Bal: {lastMonthBal > 0 ? `+${lastMonthBal}` : lastMonthBal}
+                </span>
+              )}
+              {bonusVal > 0 && (
+                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#059669', fontWeight: 600 }}>
+                  Bonus: +{bonusVal}
+                </span>
+              )}
+              {advVal > 0 && (
+                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
+                  Adv Deduction: -{advVal}
+                </span>
+              )}
+              {netVal > 0 && (
+                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
+                  Internet: -{netVal}
+                </span>
+              )}
+              {kafVal > 0 && (
+                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
+                  Kafalat: -{kafVal}
+                </span>
+              )}
+              {Object.entries(targetEmpData.dynamic_adjustments || {}).map(([lbl, val]) => {
+                const num = parseFloat(val) || 0;
+                if (num === 0) return null;
+                const isPositive = num > 0;
+                return (
+                  <span key={lbl} style={{ padding: '3px 8px', borderRadius: '6px', background: isPositive ? '#f5f3ff' : '#fef2f2', color: isPositive ? '#7c3aed' : '#dc2626', fontWeight: 600 }}>
+                    {lbl}: {isPositive ? `+${num}` : num}
+                  </span>
+                );
+              })}
+              {lastMonthBal === 0 && bonusVal === 0 && advVal === 0 && netVal === 0 && kafVal === 0 && Object.keys(targetEmpData.dynamic_adjustments || {}).length === 0 && (
+                <span style={{ color: '#94a3b8', fontSize: '11px' }}>No active adjustments applied for this month.</span>
+              )}
+            </div>
+          </div>
+
+          {/* Payment Execution Controls (Cash, Bank, Status, Save) */}
+          <div style={{ background: '#f1f5f9', padding: '12px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#0369a1', display: 'block', marginBottom: '2px' }}>Cash Paid</label>
+                <input 
+                  type="text"
+                  inputMode="decimal"
+                  disabled={isRowLocked}
+                  value={targetEmpData.cash_paid}
+                  onChange={e => handlePaidChange(targetEmpData.id, 'cash_paid', e.target.value)}
+                  style={{ width: '90px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#0369a1', background: '#fff' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca', display: 'block', marginBottom: '2px' }}>Bank Paid</label>
+                <input 
+                  type="text"
+                  inputMode="decimal"
+                  disabled={isRowLocked}
+                  value={targetEmpData.bank_paid}
+                  onChange={e => handlePaidChange(targetEmpData.id, 'bank_paid', e.target.value)}
+                  style={{ width: '90px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#4338ca', background: '#fff' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Payment Status</label>
+                <select 
+                  disabled={isRowLocked}
+                  value={targetEmpData.status}
+                  onChange={e => handleTextChange(targetEmpData.id, 'status', e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: targetEmpData.status === 'Paid' ? 'var(--green)' : '#d97706', background: '#fff' }}
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Paid">Paid</option>
+                </select>
+              </div>
+            </div>
+
+            {showActions && (
+              <div>
+                {isRowLocked ? (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, background: '#e2e8f0', color: '#64748b' }}>
+                    <Lock size={13} /> Locked (Paid)
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => handleSaveRow(targetEmpData.id)}
+                    disabled={savingRowId === targetEmpData.id}
+                    className="btn btn-primary"
+                    style={{ padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--primary)' }}
+                  >
+                    {savingRowId === targetEmpData.id ? <RefreshCw size={13} className="spin" /> : <Save size={13} />}
+                    Save Record {isDeveloper && targetEmpData.status === 'Paid' ? '(Dev)' : ''}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 4. Top Form: Add / Edit Adjustment */}
+        <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 800, margin: 0, color: '#1e293b' }}>
+              {editingAdjId ? 'Edit Adjustment' : 'Add Adjustment / Loan'}
+            </h3>
+            {editingAdjId && (
+              <button type="button" onClick={resetAdjForm} style={{ fontSize: '12px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                Cancel Edit
+              </button>
+            )}
+          </div>
+
+          <form onSubmit={handleAddCustomAdj} autoComplete="off">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Action</label>
+                <div style={{ display: 'flex', gap: '14px', alignItems: 'center', height: '36px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                    <input type="radio" name="adjAction" value="Give" checked={customAdjAction === 'Give'} onChange={() => setCustomAdjAction('Give')} />
+                    Give (+)
+                  </label>
+                  <label style={{ fontSize: '13px', fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                    <input type="radio" name="adjAction" value="Deduct" checked={customAdjAction === 'Deduct'} onChange={() => setCustomAdjAction('Deduct')} />
+                    Deduct (-)
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Adjustment Name</label>
+                <select 
+                  value={customAdjLabel} 
+                  onChange={e => {
+                    const val = e.target.value;
+                    setCustomAdjLabel(val);
+                    if (val === 'Advance Salary / Loan') {
+                      setCustomAdjAction('Deduct');
+                      setCustomAdjType('Repeated Monthly');
+                    } else if (val === 'Bonus') {
+                      setCustomAdjAction('Give');
+                      setCustomAdjType('One-Time');
+                    } else if (val === 'Internet' || val === 'Kafalat') {
+                      setCustomAdjAction('Deduct');
+                      setCustomAdjType('Repeated Monthly');
+                    } else {
+                      const dynamicAdj = adjustmentTypes.find(a => a.label === val);
+                      if (dynamicAdj) {
+                        setCustomAdjAction(dynamicAdj.action === 'Add' ? 'Give' : dynamicAdj.action === 'Deduct' ? 'Deduct' : customAdjAction);
+                        setCustomAdjType('One-Time');
+                      }
+                    }
+                  }} 
+                  required 
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', background: '#fff' }}
+                >
+                  <option value="">Select Adjustment Type</option>
+                  <optgroup label="Standard Adjustments">
+                    {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
+                    {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
+                    {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
+                    {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
+                  </optgroup>
+                  {adjustmentTypes.length > 0 && (
+                    <optgroup label="Custom Columns">
+                      {adjustmentTypes
+                        .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
+                        .map(adj => (
+                        <option key={adj.id} value={adj.label}>{adj.label}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <option value="Other Custom">Other Custom...</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Repetition</label>
+                <select 
+                  value={customAdjType} 
+                  onChange={e => setCustomAdjType(e.target.value)} 
+                  disabled={editingAdjId !== null} 
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', background: editingAdjId ? '#f1f5f9' : '#fff' }}
+                >
+                  <option value="One-Time">One-Time (This Month)</option>
+                  <option value="Repeated Monthly">Repeated Monthly</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Row 2: Custom Name (if selected), Amount, Limit, Notes */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+              {customAdjLabel === 'Other Custom' && (
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Custom Label</label>
+                  <input 
+                    type="text" 
+                    value={customAdjOtherLabel} 
+                    onChange={e => setCustomAdjOtherLabel(e.target.value)} 
+                    placeholder="e.g. Fine, Reward" 
+                    required 
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
+                  />
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
+                  {customAdjType === 'Repeated Monthly' ? (customAdjAction === 'Give' ? 'Monthly Pay Amount' : 'Monthly Cut Amount') : 'Amount'}
+                </label>
+                <input 
+                  type="number" 
+                  value={customAdjAmount} 
+                  onChange={e => setCustomAdjAmount(e.target.value)} 
+                  placeholder="e.g. 500" 
+                  required 
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
+                />
+              </div>
+
+              {customAdjType === 'Repeated Monthly' && (
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Total Limit Amount (Optional)</label>
+                  <input 
+                    type="number" 
+                    value={customAdjTotalLimit} 
+                    onChange={e => setCustomAdjTotalLimit(e.target.value)} 
+                    placeholder="e.g. 5000" 
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
+                  />
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Note (Optional)</label>
+                <input 
+                  type="text" 
+                  value={customAdjNotes} 
+                  onChange={e => setCustomAdjNotes(e.target.value)} 
+                  placeholder="Reason / Note" 
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
+                />
+              </div>
+            </div>
+
+            {/* Submit Button */}
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button 
+                type="submit" 
+                disabled={savingCustomAdj} 
+                className="btn btn-primary" 
+                style={{ padding: '8px 20px', borderRadius: '6px', fontWeight: 700, fontSize: '12px', border: 'none', cursor: 'pointer' }}
+              >
+                {savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Adjustment' : '+ Add Adjustment'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* 5. Two Distinct Side-by-Side Columns: Given (+) vs Deductions (-) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+          
+          {/* Left Column: Given / Additions (+) */}
+          <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #a7f3d0', overflow: 'hidden' }}>
+            <div style={{ background: '#ecfdf5', padding: '12px 16px', borderBottom: '1px solid #a7f3d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#047857' }}>Given / Additions (+)</span>
+              <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#d1fae5', color: '#065f46' }}>
+                {givenAdjs.length} Active
+              </span>
+            </div>
+
+            <div style={{ padding: '14px', maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {loadingAdjs ? (
+                <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '20px' }}>Loading...</div>
+              ) : givenAdjs.length === 0 ? (
+                <div style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '24px' }}>No additions given for this employee.</div>
+              ) : (
+                givenAdjs.map(adj => (
+                  <div key={`${adj.repetition}-${adj.id}`} style={{ padding: '10px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {adj.custom_label}
+                        <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: adj.repetition === 'Repeated Monthly' ? '#dcfce7' : '#e0f2fe', color: '#065f46', fontWeight: 600 }}>
+                          {adj.repetition === 'Repeated Monthly' ? 'Monthly' : 'One-Time'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
+                        Amount: <span style={{ fontWeight: 800, color: '#059669' }}>+{CURRENCY} {adj.amount}</span>
+                        {adj.remaining_amount !== null && adj.remaining_amount !== undefined && ` | Limit: ${CURRENCY} ${adj.remaining_amount}`}
+                        {adj.notes && ` | ${adj.notes}`}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={() => handleEditAdj(adj, adj.repetition)} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', color: '#3b82f6', padding: '4px 6px' }} title="Edit">
+                        <Edit2 size={13} />
+                      </button>
+                      <button onClick={() => setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', color: '#ef4444', padding: '4px 6px' }} title="Delete">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Deductions / Cuts (-) */}
+          <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #fecaca', overflow: 'hidden' }}>
+            <div style={{ background: '#fef2f2', padding: '12px 16px', borderBottom: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#b91c1c' }}>Deductions / Cuts (-)</span>
+              <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#fee2e2', color: '#991b1b' }}>
+                {deductAdjs.length} Active
+              </span>
+            </div>
+
+            <div style={{ padding: '14px', maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {loadingAdjs ? (
+                <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '20px' }}>Loading...</div>
+              ) : deductAdjs.length === 0 ? (
+                <div style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '24px' }}>No deductions for this employee.</div>
+              ) : (
+                deductAdjs.map(adj => (
+                  <div key={`${adj.repetition}-${adj.id}`} style={{ padding: '10px 12px', background: '#fff5f5', border: '1px solid #fecaca', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {adj.custom_label}
+                        <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: adj.repetition === 'Repeated Monthly' ? '#fee2e2' : '#fef3c7', color: '#991b1b', fontWeight: 600 }}>
+                          {adj.repetition === 'Repeated Monthly' ? 'Monthly' : 'One-Time'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
+                        Amount: <span style={{ fontWeight: 800, color: '#dc2626' }}>-{CURRENCY} {adj.amount}</span>
+                        {adj.remaining_amount !== null && adj.remaining_amount !== undefined && ` | Limit: ${CURRENCY} ${adj.remaining_amount}`}
+                        {adj.notes && ` | ${adj.notes}`}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={() => handleEditAdj(adj, adj.repetition)} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', color: '#3b82f6', padding: '4px 6px' }} title="Edit">
+                        <Edit2 size={13} />
+                      </button>
+                      <button onClick={() => setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', color: '#ef4444', padding: '4px 6px' }} title="Delete">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+        </div>
+      </>
+    );
+  };
 
   return (
-    <div style={{ padding: '16px', maxWidth: '100%', margin: '0 auto', fontFamily: 'var(--font-family)', background: 'var(--background)' }}>
+    <div style={{ padding: '12px 16px', maxWidth: '100%', margin: '0 auto', fontFamily: 'var(--font-family)', background: 'var(--background)' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Calculator size={28} style={{ color: 'var(--primary)' }} />
+          <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 2px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Calculator size={26} style={{ color: 'var(--primary)' }} />
             Payroll Management
           </h1>
-          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '13px' }}>
+          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '12px' }}>
             Manage monthly salaries, attendance, and Excel-like editable payroll records.
           </p>
         </div>
 
         {showActions && (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* View Mode Toggle: Sheet View vs Detail View */}
+            <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '3px', borderRadius: '8px', border: '1px solid var(--surface-2)', gap: '2px' }}>
+              <button 
+                type="button"
+                onClick={() => setViewMode('sheet')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: viewMode === 'sheet' ? 'var(--primary)' : 'transparent',
+                  color: viewMode === 'sheet' ? '#000' : 'var(--text-secondary)',
+                  boxShadow: viewMode === 'sheet' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Table size={14} />
+                Sheet View
+              </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  setViewMode('detail');
+                  if (!selectedDetailEmpId && filteredEmployees.length > 0) {
+                    handleSelectDetailEmp(filteredEmployees[0]);
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: viewMode === 'detail' ? 'var(--primary)' : 'transparent',
+                  color: viewMode === 'detail' ? '#000' : 'var(--text-secondary)',
+                  boxShadow: viewMode === 'detail' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <FileText size={14} />
+                Detail View
+              </button>
+            </div>
+
             <button 
               onClick={() => setShowSalaryModal(true)}
               className="btn btn-secondary"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
             >
-              <Banknote size={16} style={{ color: 'var(--primary)' }} />
+              <Banknote size={15} style={{ color: 'var(--primary)' }} />
               Manage Salary
             </button>
             <button 
               onClick={() => setShowAdjustmentsModal(true)}
               className="btn btn-secondary"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
             >
-              <Settings size={16} />
+              <Settings size={15} />
               Manage Columns
             </button>
             <button 
               onClick={handleSaveAll}
               disabled={savingAll}
               className="btn btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '13px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(244, 180, 0, 0.2)' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(244, 180, 0, 0.2)' }}
             >
-              <Save size={16} />
+              <Save size={15} />
               {savingAll ? 'Saving...' : 'Save All'}
             </button>
           </div>
         )}
       </div>
 
-      {/* Filters */}
-      <div style={{ background: 'var(--surface)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--surface-2)', marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', boxShadow: 'var(--shadow-sm)' }}>
+      {/* Sheet View */}
+      {viewMode === 'sheet' && (
+        <>
+          {/* Filters */}
+          <div style={{ background: 'var(--surface)', padding: '8px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', marginBottom: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', boxShadow: 'var(--shadow-sm)' }}>
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
           <div style={{ position: 'relative', minWidth: '200px', flex: 1 }}>
             <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -1043,12 +1672,138 @@ export default function Payroll() {
         </div>
       </div>
 
-      {/* Employee Details & Adjustments Modal */}
-      {currentEmpData && (
+        </>
+      )}
+
+      {/* Detail View (Master-Detail Full Page) */}
+      {viewMode === 'detail' && (
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', minHeight: 'calc(100vh - 180px)' }}>
+          {/* Left Column: Employee List Sidebar */}
+          <div style={{ 
+            width: '280px', 
+            flexShrink: 0, 
+            background: 'var(--surface)', 
+            borderRadius: '12px', 
+            border: '1px solid var(--surface-2)', 
+            boxShadow: 'var(--shadow-sm)',
+            overflow: 'hidden',
+            position: 'sticky',
+            top: '16px',
+            maxHeight: 'calc(100vh - 120px)',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--surface-2)', background: 'var(--white)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)' }}>Employees</span>
+                <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: 'var(--surface-2)', color: 'var(--text-secondary)' }}>
+                  {filteredEmployees.length}
+                </span>
+              </div>
+              <div style={{ position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input 
+                  type="text"
+                  placeholder="Filter employee..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{ width: '100%', padding: '6px 10px 6px 30px', borderRadius: '6px', border: '1px solid var(--surface-2)', fontSize: '12px', background: 'var(--background)', color: 'var(--text-primary)', outline: 'none' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, padding: '8px' }}>
+              {filteredEmployees.map(emp => {
+                const isSelected = (currentEmpData?.id === emp.id);
+                const isPaid = emp.status === 'Paid';
+                return (
+                  <div 
+                    key={emp.id}
+                    onClick={() => handleSelectDetailEmp(emp)}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      marginBottom: '6px',
+                      cursor: 'pointer',
+                      background: isSelected ? '#fef3c7' : 'transparent',
+                      border: isSelected ? '1.5px solid #f59e0b' : '1px solid var(--surface-2)',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '13px', fontWeight: isSelected ? 800 : 700, color: isSelected ? '#92400e' : 'var(--text-primary)' }}>
+                        {emp.name}
+                      </span>
+                      <span style={{ 
+                        fontSize: '10px', 
+                        fontWeight: 700, 
+                        padding: '2px 6px', 
+                        borderRadius: '4px',
+                        background: isPaid ? '#ecfdf5' : '#fffbeb',
+                        color: isPaid ? '#059669' : '#d97706'
+                      }}>
+                        {isPaid ? 'Paid' : 'Pending'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                      <span>ID: {emp.employee_id}</span>
+                      <span style={{ fontWeight: 700, color: '#059669' }}>{CURRENCY} {Number(emp.net_salary || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right Panel: Detail Page View */}
+          <div style={{ flex: 1, minWidth: 0, background: 'var(--white)', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+            {currentEmpData ? (
+              <>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', background: '#fafafa' }}>
+                  <div>
+                    <h2 style={{ fontSize: '20px', fontWeight: 800, margin: '0 0 2px 0', color: 'var(--text-primary)' }}>
+                      {currentEmpData.name}
+                    </h2>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      ID: {currentEmpData.employee_id} • Role: {currentEmpData.role} {currentEmpData.branch ? `• Branch: ${currentEmpData.branch}` : ''}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '5px 10px', borderRadius: '8px' }}>
+                      <CalendarDays size={16} style={{ color: 'var(--primary, #d97706)' }} />
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Month:</span>
+                      <input 
+                        type="month"
+                        value={selectedMonth}
+                        onChange={e => setSelectedMonth(e.target.value)}
+                        style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ padding: '20px' }}>
+                  {renderEmployeeDetailBody(currentEmpData)}
+                </div>
+              </>
+            ) : (
+              <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                Please select an employee from the left list.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Popup Modal for Sheet View */}
+      {showEmpModal && currentEmpData && viewMode === 'sheet' && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
           <div style={{ background: 'var(--white)', borderRadius: '16px', width: '100%', maxWidth: '900px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
-            
-            {/* Header */}
+            {/* Modal Header */}
             <div style={{ position: 'sticky', top: 0, background: 'var(--white)', zIndex: 10, padding: '16px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h2 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 4px 0', color: 'var(--text-primary)' }}>{currentEmpData.name}</h2>
@@ -1056,577 +1811,27 @@ export default function Payroll() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {/* Month Filter Selector in Modal Header */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px', 
-                  background: '#f8fafc', 
-                  border: '1.5px solid #cbd5e1', 
-                  padding: '6px 12px', 
-                  borderRadius: '10px'
-                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', padding: '6px 12px', borderRadius: '10px' }}>
                   <CalendarDays size={18} style={{ color: 'var(--primary, #d97706)' }} />
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.5px' }}>
-                      Selected Month
-                    </span>
+                    <span style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.5px' }}>Selected Month</span>
                     <input 
                       type="month" 
                       value={selectedMonth} 
                       onChange={(e) => setSelectedMonth(e.target.value)}
-                      style={{ 
-                        border: 'none', 
-                        background: 'transparent', 
-                        fontSize: '13px', 
-                        fontWeight: 800, 
-                        color: 'var(--text-primary)', 
-                        outline: 'none', 
-                        cursor: 'pointer',
-                        padding: 0
-                      }}
+                      style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
                     />
                   </div>
                 </div>
 
-                <button onClick={() => setSelectedEmployeeForModal(null)} style={{ background: 'var(--surface-2)', border: 'none', cursor: 'pointer', color: 'var(--text-primary)', padding: '6px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Close Modal">
+                <button onClick={() => { setShowEmpModal(false); setSelectedEmployeeForModal(null); }} style={{ background: 'var(--surface-2)', border: 'none', cursor: 'pointer', color: 'var(--text-primary)', padding: '6px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Close Modal">
                   <X size={20} />
                 </button>
               </div>
             </div>
 
-            <div style={{ padding: '24px' }}>
-              {(() => {
-                const isRowLocked = currentEmpData.status === 'Paid' && !isDeveloper;
-                const baseSal = parseFloat(currentEmpData.base_salary || 0);
-                const expHours = parseFloat(currentEmpData.expected_hours || 0);
-                const expMins = currentEmpData.expected_minutes !== undefined ? currentEmpData.expected_minutes : (expHours * 60);
-                const perMinRate = expMins > 0 ? (baseSal / expMins) : 0;
-                
-                const netOtHours = currentEmpData.net_overtime_hours !== undefined 
-                  ? parseFloat(currentEmpData.net_overtime_hours || 0) 
-                  : parseFloat(currentEmpData.overtime_hours || 0);
-                const netOtMins = Math.round(netOtHours * 60);
-                
-                // Overtime pay calculated based on basic salary per minute
-                const calcOtPay = Math.round(netOtMins * perMinRate * 100) / 100;
-                const displayOtPay = (currentEmpData.overtime_pay !== undefined && currentEmpData.overtime_pay !== null && currentEmpData.overtime_pay !== 0) 
-                  ? parseFloat(currentEmpData.overtime_pay) 
-                  : calcOtPay;
-
-                const payableSal = parseFloat(currentEmpData.payable_salary !== undefined ? currentEmpData.payable_salary : (baseSal - parseFloat(currentEmpData.deductions || 0)));
-                const totalAdj = calculateTotalAdjustments(currentEmpData);
-                const advBalance = parseFloat(currentEmpData.advance_balance || 0);
-                const lastMonthBal = parseFloat(currentEmpData.last_month_balance || 0);
-                const bonusVal = parseFloat(currentEmpData.bonus || 0);
-                const advVal = parseFloat(currentEmpData.this_month_adv || 0);
-                const netVal = parseFloat(currentEmpData.internet || 0);
-                const kafVal = parseFloat(currentEmpData.kafalat || 0);
-
-                const givenAdjs = [
-                  ...empRecurringAdjs.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
-                  ...empOneTimeAdjs.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'One-Time' }))
-                ];
-
-                const deductAdjs = [
-                  ...empRecurringAdjs.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
-                  ...empOneTimeAdjs.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'One-Time' }))
-                ];
-
-                return (
-                  <>
-                    {/* 1. Attendance Summary - Full Single Row */}
-                    <div style={{ marginBottom: '16px' }}>
-                      <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
-                        Attendance Summary
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px' }}>
-                        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '10px 12px', borderRadius: '10px', textAlign: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857', display: 'block' }}>Presents (P)</span>
-                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#059669' }}>{currentEmpData.presents}</span>
-                        </div>
-                        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '10px 12px', borderRadius: '10px', textAlign: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#b91c1c', display: 'block' }}>Absents (A)</span>
-                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#dc2626' }}>{currentEmpData.absents}</span>
-                        </div>
-                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '10px 12px', borderRadius: '10px', textAlign: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#b45309', display: 'block' }}>Leaves (L)</span>
-                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#d97706' }}>{currentEmpData.leaves}</span>
-                        </div>
-                        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 12px', borderRadius: '10px', textAlign: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#1d4ed8', display: 'block' }}>Holidays (H)</span>
-                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#2563eb' }}>{currentEmpData.holidays}</span>
-                        </div>
-                        <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '10px 12px', borderRadius: '10px', textAlign: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#6d28d9', display: 'block' }}>Only OT (OOT)</span>
-                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#7c3aed' }}>{currentEmpData.only_overtime_days || 0}</span>
-                        </div>
-                        <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: '10px 12px', borderRadius: '10px', textAlign: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#c2410c', display: 'block' }}>Late Days</span>
-                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#ea580c' }}>{currentEmpData.late_days || 0}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 2. Hours & Overtime - Full Single Row */}
-                    <div style={{ marginBottom: '20px' }}>
-                      <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
-                        Hours & Overtime
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
-                        <div style={{ background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Expected Hours:</span>
-                          <span style={{ fontSize: '14px', fontWeight: 800 }}>
-                            {formatDuration(currentEmpData.expected_minutes !== undefined ? currentEmpData.expected_minutes : (currentEmpData.expected_hours * 60))}
-                          </span>
-                        </div>
-                        <div style={{ background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Actual Worked:</span>
-                          <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                            {formatDuration(currentEmpData.actual_minutes !== undefined ? currentEmpData.actual_minutes : (currentEmpData.actual_hours * 60))}
-                          </span>
-                        </div>
-                        <div style={{ background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Total Overtime:</span>
-                          <span style={{ fontSize: '14px', fontWeight: 800, color: netOtHours > 0 ? 'var(--green)' : netOtHours < 0 ? '#ef4444' : 'var(--text-secondary)' }}>
-                            {netOtHours > 0 ? '+' : netOtHours < 0 ? '-' : ''}
-                            {formatDuration(Math.abs(Math.round(netOtHours * 60)))}
-                          </span>
-                        </div>
-                        <div style={{ background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Overtime Pay:</span>
-                          <span style={{ fontSize: '14px', fontWeight: 800, color: displayOtPay > 0 ? 'var(--green)' : displayOtPay < 0 ? '#ef4444' : 'var(--text-secondary)' }}>
-                            {displayOtPay > 0 ? `+${CURRENCY} ${displayOtPay.toFixed(2)}` : displayOtPay < 0 ? `-${CURRENCY} ${Math.abs(displayOtPay).toFixed(2)}` : `${CURRENCY} 0.00`}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 3. Financials, Deductions Breakdown & Payment Box */}
-                    <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', textTransform: 'uppercase' }}>Financials & Salary Calculation</div>
-                        
-                        {/* Base Salary Editor */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>Base Salary:</span>
-                          <input 
-                            type="number" 
-                            disabled={isRowLocked}
-                            value={modalBaseSalary}
-                            onChange={e => setModalBaseSalary(e.target.value)}
-                            style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#7c3aed', outline: 'none' }}
-                          />
-                          {!isRowLocked && (
-                            <button 
-                              onClick={handleSaveModalSalary}
-                              disabled={savingModalSalary}
-                              className="btn btn-primary"
-                              style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              {savingModalSalary ? <RefreshCw size={11} className="spin" /> : <Save size={11} />}
-                              Update Salary
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Financial Metrics & Deductions Breakdown Grid - 4 in Single Row */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px', marginBottom: '16px' }}>
-                        <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Payable (Worked Duty)</span>
-                          <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b', marginTop: '2px' }}>{CURRENCY} {payableSal.toFixed(2)}</div>
-                          <span style={{ fontSize: '10px', color: currentEmpData.deductions > 0 ? '#ef4444' : '#64748b', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {currentEmpData.deductions > 0 ? `(-${CURRENCY} ${currentEmpData.deductions.toFixed(2)} short)` : 'Full hours achieved'}
-                          </span>
-                        </div>
-
-                        <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Total Adjustments (±)</span>
-                          <div style={{ fontSize: '15px', fontWeight: 800, color: totalAdj >= 0 ? 'var(--green)' : '#ef4444', marginTop: '2px' }}>
-                            {totalAdj >= 0 ? `+${totalAdj.toFixed(2)}` : totalAdj.toFixed(2)}
-                          </div>
-                          <span style={{ fontSize: '10px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>
-                            Additions minus deductions
-                          </span>
-                        </div>
-
-                        <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Advance Balance (Loan)</span>
-                          <div style={{ fontSize: '15px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
-                          <span style={{ fontSize: '10px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>Remaining loan</span>
-                        </div>
-
-                        <div style={{ background: '#ecfdf5', padding: '10px 12px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-                          <span style={{ fontSize: '11px', color: '#047857', fontWeight: 700, display: 'block', whiteSpace: 'nowrap' }}>Net Payable Salary</span>
-                          <div style={{ fontSize: '15px', fontWeight: 900, color: '#059669', marginTop: '2px' }}>{CURRENCY} {Number(currentEmpData.net_salary || 0).toFixed(2)}</div>
-                          <span style={{ fontSize: '10px', color: '#047857', display: 'block', whiteSpace: 'nowrap' }}>Payable + Total Adj</span>
-                        </div>
-                      </div>
-
-                      {/* Deductions & Additions Detailed Summary List */}
-                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
-                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>Current Month Calculation Breakdown</div>
-                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '12px' }}>
-                          {lastMonthBal !== 0 && (
-                            <span style={{ padding: '3px 8px', borderRadius: '6px', background: lastMonthBal > 0 ? '#ecfdf5' : '#fef2f2', color: lastMonthBal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
-                              Last M. Bal: {lastMonthBal > 0 ? `+${lastMonthBal}` : lastMonthBal}
-                            </span>
-                          )}
-                          {bonusVal > 0 && (
-                            <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#059669', fontWeight: 600 }}>
-                              Bonus: +{bonusVal}
-                            </span>
-                          )}
-                          {advVal > 0 && (
-                            <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
-                              Adv Deduction: -{advVal}
-                            </span>
-                          )}
-                          {netVal > 0 && (
-                            <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
-                              Internet: -{netVal}
-                            </span>
-                          )}
-                          {kafVal > 0 && (
-                            <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
-                              Kafalat: -{kafVal}
-                            </span>
-                          )}
-                          {Object.entries(currentEmpData.dynamic_adjustments || {}).map(([lbl, val]) => {
-                            const num = parseFloat(val) || 0;
-                            if (num === 0) return null;
-                            const isPositive = num > 0;
-                            return (
-                              <span key={lbl} style={{ padding: '3px 8px', borderRadius: '6px', background: isPositive ? '#f5f3ff' : '#fef2f2', color: isPositive ? '#7c3aed' : '#dc2626', fontWeight: 600 }}>
-                                {lbl}: {isPositive ? `+${num}` : num}
-                              </span>
-                            );
-                          })}
-                          {lastMonthBal === 0 && bonusVal === 0 && advVal === 0 && netVal === 0 && kafVal === 0 && Object.keys(currentEmpData.dynamic_adjustments || {}).length === 0 && (
-                            <span style={{ color: '#94a3b8', fontSize: '11px' }}>No active adjustments applied for this month.</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Payment Execution Controls (Cash, Bank, Status, Save) */}
-                      <div style={{ background: '#f1f5f9', padding: '12px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#0369a1', display: 'block', marginBottom: '2px' }}>Cash Paid</label>
-                            <input 
-                              type="text"
-                              inputMode="decimal"
-                              disabled={isRowLocked}
-                              value={currentEmpData.cash_paid}
-                              onChange={e => handlePaidChange(currentEmpData.id, 'cash_paid', e.target.value)}
-                              style={{ width: '90px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#0369a1', background: '#fff' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca', display: 'block', marginBottom: '2px' }}>Bank Paid</label>
-                            <input 
-                              type="text"
-                              inputMode="decimal"
-                              disabled={isRowLocked}
-                              value={currentEmpData.bank_paid}
-                              onChange={e => handlePaidChange(currentEmpData.id, 'bank_paid', e.target.value)}
-                              style={{ width: '90px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#4338ca', background: '#fff' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Payment Status</label>
-                            <select 
-                              disabled={isRowLocked}
-                              value={currentEmpData.status}
-                              onChange={e => handleTextChange(currentEmpData.id, 'status', e.target.value)}
-                              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: currentEmpData.status === 'Paid' ? 'var(--green)' : '#d97706', background: '#fff' }}
-                            >
-                              <option value="Pending">Pending</option>
-                              <option value="Paid">Paid</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        {showActions && (
-                          <div>
-                            {isRowLocked ? (
-                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, background: '#e2e8f0', color: '#64748b' }}>
-                                <Lock size={13} /> Locked (Paid)
-                              </div>
-                            ) : (
-                              <button 
-                                onClick={() => handleSaveRow(currentEmpData.id)}
-                                disabled={savingRowId === currentEmpData.id}
-                                className="btn btn-primary"
-                                style={{ padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--primary)' }}
-                              >
-                                {savingRowId === currentEmpData.id ? <RefreshCw size={13} className="spin" /> : <Save size={13} />}
-                                Save Record {isDeveloper && currentEmpData.status === 'Paid' ? '(Dev)' : ''}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* 4. Top Form: Add / Edit Adjustment */}
-                    <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                        <h3 style={{ fontSize: '14px', fontWeight: 800, margin: 0, color: '#1e293b' }}>
-                          {editingAdjId ? 'Edit Adjustment' : 'Add Adjustment / Loan'}
-                        </h3>
-                        {editingAdjId && (
-                          <button type="button" onClick={resetAdjForm} style={{ fontSize: '12px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                            Cancel Edit
-                          </button>
-                        )}
-                      </div>
-
-                      <form onSubmit={handleAddCustomAdj} autoComplete="off">
-                        {/* Row 1: Action Radio, Adjustment Type/Name, Repetition */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '12px' }}>
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Action</label>
-                            <div style={{ display: 'flex', gap: '14px', alignItems: 'center', height: '36px' }}>
-                              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                                <input type="radio" name="adjAction" value="Give" checked={customAdjAction === 'Give'} onChange={() => setCustomAdjAction('Give')} />
-                                Give (+)
-                              </label>
-                              <label style={{ fontSize: '13px', fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                                <input type="radio" name="adjAction" value="Deduct" checked={customAdjAction === 'Deduct'} onChange={() => setCustomAdjAction('Deduct')} />
-                                Deduct (-)
-                              </label>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Adjustment Name</label>
-                            <select 
-                              value={customAdjLabel} 
-                              onChange={e => {
-                                const val = e.target.value;
-                                setCustomAdjLabel(val);
-                                if (val === 'Advance Salary / Loan') {
-                                  setCustomAdjAction('Deduct');
-                                  setCustomAdjType('Repeated Monthly');
-                                } else if (val === 'Bonus') {
-                                  setCustomAdjAction('Give');
-                                  setCustomAdjType('One-Time');
-                                } else if (val === 'Internet' || val === 'Kafalat') {
-                                  setCustomAdjAction('Deduct');
-                                  setCustomAdjType('Repeated Monthly');
-                                } else {
-                                  const dynamicAdj = adjustmentTypes.find(a => a.label === val);
-                                  if (dynamicAdj) {
-                                    setCustomAdjAction(dynamicAdj.action === 'Add' ? 'Give' : dynamicAdj.action === 'Deduct' ? 'Deduct' : customAdjAction);
-                                    setCustomAdjType('One-Time');
-                                  }
-                                }
-                              }} 
-                              required 
-                              style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', background: '#fff' }}
-                            >
-                              <option value="">Select Adjustment Type</option>
-                              <optgroup label="Standard Adjustments">
-                                {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
-                                {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
-                                {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
-                                {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
-                              </optgroup>
-                              {adjustmentTypes.length > 0 && (
-                                <optgroup label="Custom Columns">
-                                  {adjustmentTypes
-                                    .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
-                                    .map(adj => (
-                                    <option key={adj.id} value={adj.label}>{adj.label}</option>
-                                  ))}
-                                </optgroup>
-                              )}
-                              <option value="Other Custom">Other Custom...</option>
-                            </select>
-                          </div>
-
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Repetition</label>
-                            <select 
-                              value={customAdjType} 
-                              onChange={e => setCustomAdjType(e.target.value)} 
-                              disabled={editingAdjId !== null} 
-                              style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', background: editingAdjId ? '#f1f5f9' : '#fff' }}
-                            >
-                              <option value="One-Time">One-Time (This Month)</option>
-                              <option value="Repeated Monthly">Repeated Monthly</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        {/* Row 2: Custom Name (if selected), Amount, Limit, Notes */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
-                          {customAdjLabel === 'Other Custom' && (
-                            <div>
-                              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Custom Label</label>
-                              <input 
-                                type="text" 
-                                value={customAdjOtherLabel} 
-                                onChange={e => setCustomAdjOtherLabel(e.target.value)} 
-                                placeholder="e.g. Fine, Reward" 
-                                required 
-                                style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
-                              />
-                            </div>
-                          )}
-
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
-                              {customAdjType === 'Repeated Monthly' ? (customAdjAction === 'Give' ? 'Monthly Pay Amount' : 'Monthly Cut Amount') : 'Amount'}
-                            </label>
-                            <input 
-                              type="number" 
-                              value={customAdjAmount} 
-                              onChange={e => setCustomAdjAmount(e.target.value)} 
-                              placeholder="e.g. 500" 
-                              required 
-                              style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
-                            />
-                          </div>
-
-                          {customAdjType === 'Repeated Monthly' && (
-                            <div>
-                              <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Total Limit Amount (Optional)</label>
-                              <input 
-                                type="number" 
-                                value={customAdjTotalLimit} 
-                                onChange={e => setCustomAdjTotalLimit(e.target.value)} 
-                                placeholder="e.g. 5000" 
-                                style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
-                              />
-                            </div>
-                          )}
-
-                          <div>
-                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Note (Optional)</label>
-                            <input 
-                              type="text" 
-                              value={customAdjNotes} 
-                              onChange={e => setCustomAdjNotes(e.target.value)} 
-                              placeholder="Reason / Note" 
-                              style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
-                            />
-                          </div>
-                        </div>
-
-                        {/* Submit Button */}
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                          <button 
-                            type="submit" 
-                            disabled={savingCustomAdj} 
-                            className="btn btn-primary" 
-                            style={{ padding: '8px 20px', borderRadius: '6px', fontWeight: 700, fontSize: '12px', border: 'none', cursor: 'pointer' }}
-                          >
-                            {savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Adjustment' : '+ Add Adjustment'}
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-
-                    {/* 5. Two Distinct Side-by-Side Columns: Given (+) vs Deductions (-) */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-                      
-                      {/* Left Column: Given / Additions (+) */}
-                      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #a7f3d0', overflow: 'hidden' }}>
-                        <div style={{ background: '#ecfdf5', padding: '12px 16px', borderBottom: '1px solid #a7f3d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 800, color: '#047857' }}>Given / Additions (+)</span>
-                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#d1fae5', color: '#065f46' }}>
-                            {givenAdjs.length} Active
-                          </span>
-                        </div>
-
-                        <div style={{ padding: '14px', maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {loadingAdjs ? (
-                            <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '20px' }}>Loading...</div>
-                          ) : givenAdjs.length === 0 ? (
-                            <div style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '24px' }}>No additions given for this employee.</div>
-                          ) : (
-                            givenAdjs.map(adj => (
-                              <div key={`${adj.repetition}-${adj.id}`} style={{ padding: '10px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div>
-                                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    {adj.custom_label}
-                                    <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: adj.repetition === 'Repeated Monthly' ? '#dcfce7' : '#e0f2fe', color: '#065f46', fontWeight: 600 }}>
-                                      {adj.repetition === 'Repeated Monthly' ? 'Monthly' : 'One-Time'}
-                                    </span>
-                                  </div>
-                                  <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
-                                    Amount: <span style={{ fontWeight: 800, color: '#059669' }}>+{CURRENCY} {adj.amount}</span>
-                                    {adj.remaining_amount !== null && adj.remaining_amount !== undefined && ` | Limit: ${CURRENCY} ${adj.remaining_amount}`}
-                                    {adj.notes && ` | ${adj.notes}`}
-                                  </div>
-                                </div>
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button onClick={() => handleEditAdj(adj, adj.repetition)} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', color: '#3b82f6', padding: '4px 6px' }} title="Edit">
-                                    <Edit2 size={13} />
-                                  </button>
-                                  <button onClick={() => setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', color: '#ef4444', padding: '4px 6px' }} title="Delete">
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Right Column: Deductions / Cuts (-) */}
-                      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #fecaca', overflow: 'hidden' }}>
-                        <div style={{ background: '#fef2f2', padding: '12px 16px', borderBottom: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 800, color: '#b91c1c' }}>Deductions / Cuts (-)</span>
-                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#fee2e2', color: '#991b1b' }}>
-                            {deductAdjs.length} Active
-                          </span>
-                        </div>
-
-                        <div style={{ padding: '14px', maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {loadingAdjs ? (
-                            <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', padding: '20px' }}>Loading...</div>
-                          ) : deductAdjs.length === 0 ? (
-                            <div style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '24px' }}>No deductions for this employee.</div>
-                          ) : (
-                            deductAdjs.map(adj => (
-                              <div key={`${adj.repetition}-${adj.id}`} style={{ padding: '10px 12px', background: '#fff5f5', border: '1px solid #fecaca', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div>
-                                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    {adj.custom_label}
-                                    <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: adj.repetition === 'Repeated Monthly' ? '#fee2e2' : '#fef3c7', color: '#991b1b', fontWeight: 600 }}>
-                                      {adj.repetition === 'Repeated Monthly' ? 'Monthly' : 'One-Time'}
-                                    </span>
-                                  </div>
-                                  <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
-                                    Amount: <span style={{ fontWeight: 800, color: '#dc2626' }}>-{CURRENCY} {adj.amount}</span>
-                                    {adj.remaining_amount !== null && adj.remaining_amount !== undefined && ` | Limit: ${CURRENCY} ${adj.remaining_amount}`}
-                                    {adj.notes && ` | ${adj.notes}`}
-                                  </div>
-                                </div>
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button onClick={() => handleEditAdj(adj, adj.repetition)} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', color: '#3b82f6', padding: '4px 6px' }} title="Edit">
-                                    <Edit2 size={13} />
-                                  </button>
-                                  <button onClick={() => setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', color: '#ef4444', padding: '4px 6px' }} title="Delete">
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                    </div>
-                  </>
-                );
-              })()}
+            <div style={{ padding: '20px 24px' }}>
+              {renderEmployeeDetailBody(currentEmpData)}
             </div>
           </div>
         </div>
