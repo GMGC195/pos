@@ -763,167 +763,169 @@ export default function Payroll() {
           alignItems: 'center', 
           justifyContent: 'space-between', 
           flexWrap: 'wrap', 
-          gap: '8px', 
-          marginBottom: '14px',
+          gap: '6px', 
+          marginBottom: '8px',
           background: '#f8fafc',
-          padding: '8px 12px',
-          borderRadius: '10px',
+          padding: '5px 10px',
+          borderRadius: '8px',
           border: '1px solid #e2e8f0'
         }}>
           <div style={{ fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
-            Attendance Summary:
+            Attendance:
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '4px 10px', borderRadius: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857' }}>P:</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#059669' }}>{targetEmpData.presents}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '2px 8px', borderRadius: '5px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#047857' }}>P:</span>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#059669' }}>{targetEmpData.presents}</span>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fef2f2', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#b91c1c' }}>A:</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626' }}>{targetEmpData.absents}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#fef2f2', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: '5px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#b91c1c' }}>A:</span>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626' }}>{targetEmpData.absents}</span>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fffbeb', border: '1px solid #fde68a', padding: '4px 10px', borderRadius: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#b45309' }}>L:</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#d97706' }}>{targetEmpData.leaves}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#fffbeb', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: '5px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#b45309' }}>L:</span>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#d97706' }}>{targetEmpData.leaves}</span>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '4px 10px', borderRadius: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#1d4ed8' }}>H:</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#2563eb' }}>{targetEmpData.holidays}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '5px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#1d4ed8' }}>H:</span>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#2563eb' }}>{targetEmpData.holidays}</span>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '4px 10px', borderRadius: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#6d28d9' }}>OOT:</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#7c3aed' }}>{targetEmpData.only_overtime_days || 0}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '2px 8px', borderRadius: '5px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#6d28d9' }}>OOT:</span>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#7c3aed' }}>{targetEmpData.only_overtime_days || 0}</span>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fff7ed', border: '1px solid #fed7aa', padding: '4px 10px', borderRadius: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#c2410c' }}>Late:</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#ea580c' }}>{targetEmpData.late_days || 0}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#fff7ed', border: '1px solid #fed7aa', padding: '2px 8px', borderRadius: '5px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#c2410c' }}>Late:</span>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ea580c' }}>{targetEmpData.late_days || 0}</span>
             </div>
           </div>
         </div>
 
-        {/* 2. Hours & Overtime - Compact Row */}
-        <div style={{ marginBottom: '16px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
-            Hours & Overtime
+        {/* 2. Hours & Overtime - Ultra Compact Row */}
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', 
+          gap: '8px', 
+          marginBottom: '8px' 
+        }}>
+          <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Expected:</span>
+            <span style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>
+              {formatDuration(targetEmpData.expected_minutes !== undefined ? targetEmpData.expected_minutes : (targetEmpData.expected_hours * 60))}
+            </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
-            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Expected Hours:</span>
-              <span style={{ fontSize: '14px', fontWeight: 800 }}>
-                {formatDuration(targetEmpData.expected_minutes !== undefined ? targetEmpData.expected_minutes : (targetEmpData.expected_hours * 60))}
-              </span>
-            </div>
-            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Actual Worked:</span>
-              <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                {formatDuration(targetEmpData.actual_minutes !== undefined ? targetEmpData.actual_minutes : (targetEmpData.actual_hours * 60))}
-              </span>
-            </div>
-            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Total Overtime:</span>
-              <span style={{ fontSize: '14px', fontWeight: 800, color: netOtHours > 0 ? 'var(--green)' : netOtHours < 0 ? '#ef4444' : 'var(--text-secondary)' }}>
-                {netOtHours > 0 ? '+' : netOtHours < 0 ? '-' : ''}
-                {formatDuration(Math.abs(Math.round(netOtHours * 60)))}
-              </span>
-            </div>
-            <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Overtime Pay:</span>
-              <span style={{ fontSize: '14px', fontWeight: 800, color: displayOtPay > 0 ? 'var(--green)' : displayOtPay < 0 ? '#ef4444' : 'var(--text-secondary)' }}>
-                {displayOtPay > 0 ? `+${CURRENCY} ${displayOtPay.toFixed(2)}` : displayOtPay < 0 ? `-${CURRENCY} ${Math.abs(displayOtPay).toFixed(2)}` : `${CURRENCY} 0.00`}
-              </span>
-            </div>
+          <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Actual:</span>
+            <span style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>
+              {formatDuration(targetEmpData.actual_minutes !== undefined ? targetEmpData.actual_minutes : (targetEmpData.actual_hours * 60))}
+            </span>
+          </div>
+          <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Overtime:</span>
+            <span style={{ fontSize: '12px', fontWeight: 800, color: netOtHours > 0 ? 'var(--green)' : netOtHours < 0 ? '#ef4444' : '#64748b' }}>
+              {netOtHours > 0 ? '+' : netOtHours < 0 ? '-' : ''}
+              {formatDuration(Math.abs(Math.round(netOtHours * 60)))}
+            </span>
+          </div>
+          <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>OT Pay:</span>
+            <span style={{ fontSize: '12px', fontWeight: 800, color: displayOtPay > 0 ? 'var(--green)' : displayOtPay < 0 ? '#ef4444' : '#64748b' }}>
+              {displayOtPay > 0 ? `+${CURRENCY} ${displayOtPay.toFixed(2)}` : displayOtPay < 0 ? `-${CURRENCY} ${Math.abs(displayOtPay).toFixed(2)}` : `${CURRENCY} 0.00`}
+            </span>
           </div>
         </div>
 
         {/* 3. Financials, Deductions Breakdown & Payment Box */}
-        <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', textTransform: 'uppercase' }}>Financials & Salary Calculation</div>
+        <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 800, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Financials & Salary Calculation
+            </div>
             
             {/* Base Salary Editor */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>Base Salary:</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Base Salary:</span>
               <input 
                 type="number" 
                 disabled={isRowLocked}
                 value={modalBaseSalary}
                 onChange={e => setModalBaseSalary(e.target.value)}
-                style={{ width: '90px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#7c3aed', outline: 'none' }}
+                style={{ width: '80px', padding: '3px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#7c3aed', outline: 'none' }}
               />
               {!isRowLocked && (
                 <button 
                   onClick={handleSaveModalSalary}
                   disabled={savingModalSalary}
                   className="btn btn-primary"
-                  style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  style={{ padding: '3px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
                   {savingModalSalary ? <RefreshCw size={11} className="spin" /> : <Save size={11} />}
-                  Update Salary
+                  Update
                 </button>
               )}
             </div>
           </div>
 
-          {/* Financial Metrics & Deductions Breakdown Grid - 4 in Single Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px', marginBottom: '14px' }}>
-            <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Payable (Worked Duty)</span>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b', marginTop: '2px' }}>{CURRENCY} {payableSal.toFixed(2)}</div>
-              <span style={{ fontSize: '10px', color: targetEmpData.deductions > 0 ? '#ef4444' : '#64748b', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {targetEmpData.deductions > 0 ? `(-${CURRENCY} ${targetEmpData.deductions.toFixed(2)} short)` : 'Full hours achieved'}
+          {/* Financial Metrics Grid - 4 in Single Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '8px', marginBottom: '8px' }}>
+            <div style={{ background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Payable (Worked Duty)</span>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', marginTop: '1px' }}>{CURRENCY} {payableSal.toFixed(2)}</div>
+              <span style={{ fontSize: '9px', color: targetEmpData.deductions > 0 ? '#ef4444' : '#64748b', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {targetEmpData.deductions > 0 ? `(-${CURRENCY} ${targetEmpData.deductions.toFixed(2)})` : 'Full hours'}
               </span>
             </div>
 
-            <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Total Adjustments (±)</span>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: totalAdj >= 0 ? 'var(--green)' : '#ef4444', marginTop: '2px' }}>
+            <div style={{ background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Total Adjustments (±)</span>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: totalAdj >= 0 ? 'var(--green)' : '#ef4444', marginTop: '1px' }}>
                 {totalAdj >= 0 ? `+${totalAdj.toFixed(2)}` : totalAdj.toFixed(2)}
               </div>
-              <span style={{ fontSize: '10px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>
-                Additions minus deductions
+              <span style={{ fontSize: '9px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>
+                Additions - deductions
               </span>
             </div>
 
-            <div style={{ background: '#fff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Advance Balance (Loan)</span>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
-              <span style={{ fontSize: '10px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>Remaining loan</span>
+            <div style={{ background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Advance Balance (Loan)</span>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: '#f59e0b', marginTop: '1px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
+              <span style={{ fontSize: '9px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>Remaining loan</span>
             </div>
 
-            <div style={{ background: '#ecfdf5', padding: '10px 12px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-              <span style={{ fontSize: '11px', color: '#047857', fontWeight: 700, display: 'block', whiteSpace: 'nowrap' }}>Net Payable Salary</span>
-              <div style={{ fontSize: '15px', fontWeight: 900, color: '#059669', marginTop: '2px' }}>{CURRENCY} {Number(targetEmpData.net_salary || 0).toFixed(2)}</div>
-              <span style={{ fontSize: '10px', color: '#047857', display: 'block', whiteSpace: 'nowrap' }}>Payable + Total Adj</span>
+            <div style={{ background: '#ecfdf5', padding: '6px 10px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+              <span style={{ fontSize: '10px', color: '#047857', fontWeight: 700, display: 'block', whiteSpace: 'nowrap' }}>Net Payable Salary</span>
+              <div style={{ fontSize: '13px', fontWeight: 900, color: '#059669', marginTop: '1px' }}>{CURRENCY} {Number(targetEmpData.net_salary || 0).toFixed(2)}</div>
+              <span style={{ fontSize: '9px', color: '#047857', display: 'block', whiteSpace: 'nowrap' }}>Payable + Adj</span>
             </div>
           </div>
 
           {/* Deductions & Additions Detailed Summary List */}
-          <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>Current Month Calculation Breakdown</div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '12px' }}>
+          <div style={{ background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', marginBottom: '8px' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Calculation Breakdown</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', fontSize: '11px' }}>
               {lastMonthBal !== 0 && (
-                <span style={{ padding: '3px 8px', borderRadius: '6px', background: lastMonthBal > 0 ? '#ecfdf5' : '#fef2f2', color: lastMonthBal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: lastMonthBal > 0 ? '#ecfdf5' : '#fef2f2', color: lastMonthBal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
                   Last M. Bal: {lastMonthBal > 0 ? `+${lastMonthBal}` : lastMonthBal}
                 </span>
               )}
               {bonusVal > 0 && (
-                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#059669', fontWeight: 600 }}>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#ecfdf5', color: '#059669', fontWeight: 600 }}>
                   Bonus: +{bonusVal}
                 </span>
               )}
               {advVal > 0 && (
-                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
-                  Adv Deduction: -{advVal}
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
+                  Adv: -{advVal}
                 </span>
               )}
               {netVal > 0 && (
-                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
                   Internet: -{netVal}
                 </span>
               )}
               {kafVal > 0 && (
-                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
                   Kafalat: -{kafVal}
                 </span>
               )}
@@ -932,51 +934,51 @@ export default function Payroll() {
                 if (num === 0) return null;
                 const isPositive = num > 0;
                 return (
-                  <span key={lbl} style={{ padding: '3px 8px', borderRadius: '6px', background: isPositive ? '#f5f3ff' : '#fef2f2', color: isPositive ? '#7c3aed' : '#dc2626', fontWeight: 600 }}>
+                  <span key={lbl} style={{ padding: '2px 6px', borderRadius: '4px', background: isPositive ? '#f5f3ff' : '#fef2f2', color: isPositive ? '#7c3aed' : '#dc2626', fontWeight: 600 }}>
                     {lbl}: {isPositive ? `+${num}` : num}
                   </span>
                 );
               })}
               {lastMonthBal === 0 && bonusVal === 0 && advVal === 0 && netVal === 0 && kafVal === 0 && Object.keys(targetEmpData.dynamic_adjustments || {}).length === 0 && (
-                <span style={{ color: '#94a3b8', fontSize: '11px' }}>No active adjustments applied for this month.</span>
+                <span style={{ color: '#94a3b8', fontSize: '10px' }}>No active adjustments applied for this month.</span>
               )}
             </div>
           </div>
 
           {/* Payment Execution Controls (Cash, Bank, Status, Save) */}
-          <div style={{ background: '#f1f5f9', padding: '12px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#0369a1', display: 'block', marginBottom: '2px' }}>Cash Paid</label>
+          <div style={{ background: '#f1f5f9', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#0369a1' }}>Cash Paid:</label>
                 <input 
                   type="text"
                   inputMode="decimal"
                   disabled={isRowLocked}
                   value={targetEmpData.cash_paid}
                   onChange={e => handlePaidChange(targetEmpData.id, 'cash_paid', e.target.value)}
-                  style={{ width: '90px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#0369a1', background: '#fff' }}
+                  style={{ width: '80px', padding: '4px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#0369a1', background: '#fff' }}
                 />
               </div>
 
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca', display: 'block', marginBottom: '2px' }}>Bank Paid</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca' }}>Bank Paid:</label>
                 <input 
                   type="text"
                   inputMode="decimal"
                   disabled={isRowLocked}
                   value={targetEmpData.bank_paid}
                   onChange={e => handlePaidChange(targetEmpData.id, 'bank_paid', e.target.value)}
-                  style={{ width: '90px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: '#4338ca', background: '#fff' }}
+                  style={{ width: '80px', padding: '4px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#4338ca', background: '#fff' }}
                 />
               </div>
 
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Payment Status</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Status:</label>
                 <select 
                   disabled={isRowLocked}
                   value={targetEmpData.status}
                   onChange={e => handleTextChange(targetEmpData.id, 'status', e.target.value)}
-                  style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, color: targetEmpData.status === 'Paid' ? 'var(--green)' : '#d97706', background: '#fff' }}
+                  style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: targetEmpData.status === 'Paid' ? 'var(--green)' : '#d97706', background: '#fff' }}
                 >
                   <option value="Pending">Pending</option>
                   <option value="Paid">Paid</option>
@@ -987,17 +989,17 @@ export default function Payroll() {
             {showActions && (
               <div>
                 {isRowLocked ? (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, background: '#e2e8f0', color: '#64748b' }}>
-                    <Lock size={13} /> Locked (Paid)
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, background: '#e2e8f0', color: '#64748b' }}>
+                    <Lock size={12} /> Locked (Paid)
                   </div>
                 ) : (
                   <button 
                     onClick={() => handleSaveRow(targetEmpData.id)}
                     disabled={savingRowId === targetEmpData.id}
                     className="btn btn-primary"
-                    style={{ padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--primary)' }}
+                    style={{ padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'var(--primary)' }}
                   >
-                    {savingRowId === targetEmpData.id ? <RefreshCw size={13} className="spin" /> : <Save size={13} />}
+                    {savingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
                     Save Record {isDeveloper && targetEmpData.status === 'Paid' ? '(Dev)' : ''}
                   </button>
                 )}
@@ -1677,7 +1679,7 @@ export default function Payroll() {
 
       {/* Detail View (Master-Detail Full Page) */}
       {viewMode === 'detail' && (
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', minHeight: 'calc(100vh - 180px)' }}>
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'stretch', height: 'calc(100vh - 105px)', overflow: 'hidden' }}>
           {/* Left Column: Employee List Sidebar */}
           <div style={{ 
             width: '280px', 
@@ -1687,14 +1689,12 @@ export default function Payroll() {
             border: '1px solid var(--surface-2)', 
             boxShadow: 'var(--shadow-sm)',
             overflow: 'hidden',
-            position: 'sticky',
-            top: '16px',
-            maxHeight: 'calc(100vh - 120px)',
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            height: '100%'
           }}>
-            <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--surface-2)', background: 'var(--white)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--surface-2)', background: 'var(--white)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)' }}>Employees</span>
                 <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: 'var(--surface-2)', color: 'var(--text-secondary)' }}>
                   {filteredEmployees.length}
@@ -1721,16 +1721,16 @@ export default function Payroll() {
                     key={emp.id}
                     onClick={() => handleSelectDetailEmp(emp)}
                     style={{
-                      padding: '10px 12px',
+                      padding: '8px 10px',
                       borderRadius: '8px',
-                      marginBottom: '6px',
+                      marginBottom: '5px',
                       cursor: 'pointer',
                       background: isSelected ? '#fef3c7' : 'transparent',
                       border: isSelected ? '1.5px solid #f59e0b' : '1px solid var(--surface-2)',
                       transition: 'all 0.15s ease',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '4px'
+                      gap: '3px'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1740,7 +1740,7 @@ export default function Payroll() {
                       <span style={{ 
                         fontSize: '10px', 
                         fontWeight: 700, 
-                        padding: '2px 6px', 
+                        padding: '1px 6px', 
                         borderRadius: '4px',
                         background: isPaid ? '#ecfdf5' : '#fffbeb',
                         color: isPaid ? '#059669' : '#d97706'
@@ -1759,22 +1759,33 @@ export default function Payroll() {
           </div>
 
           {/* Right Panel: Detail Page View */}
-          <div style={{ flex: 1, minWidth: 0, background: 'var(--white)', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+          <div style={{ 
+            flex: 1, 
+            minWidth: 0, 
+            background: 'var(--white)', 
+            borderRadius: '12px', 
+            border: '1px solid var(--surface-2)', 
+            boxShadow: 'var(--shadow-sm)', 
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            overflow: 'hidden'
+          }}>
             {currentEmpData ? (
               <>
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', background: '#fafafa' }}>
+                <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', background: '#fafafa', flexShrink: 0 }}>
                   <div>
-                    <h2 style={{ fontSize: '20px', fontWeight: 800, margin: '0 0 2px 0', color: 'var(--text-primary)' }}>
+                    <h2 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 2px 0', color: 'var(--text-primary)' }}>
                       {currentEmpData.name}
                     </h2>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                       ID: {currentEmpData.employee_id} • Role: {currentEmpData.role} {currentEmpData.branch ? `• Branch: ${currentEmpData.branch}` : ''}
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '5px 10px', borderRadius: '8px' }}>
-                      <CalendarDays size={16} style={{ color: 'var(--primary, #d97706)' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '6px' }}>
+                      <CalendarDays size={14} style={{ color: 'var(--primary, #d97706)' }} />
                       <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Month:</span>
                       <input 
                         type="month"
@@ -1786,7 +1797,7 @@ export default function Payroll() {
                   </div>
                 </div>
 
-                <div style={{ padding: '20px' }}>
+                <div style={{ padding: '12px 16px', overflowY: 'auto', flex: 1 }}>
                   {renderEmployeeDetailBody(currentEmpData)}
                 </div>
               </>
