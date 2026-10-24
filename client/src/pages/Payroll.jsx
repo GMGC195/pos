@@ -4,7 +4,7 @@ import {
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
   TrendingUp, Search, RefreshCw, X, AlertTriangle, FileText, Percent, 
   CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock,
-  Table
+  Table, Unlock
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
@@ -45,6 +45,14 @@ export default function Payroll() {
   const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail'
   const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(null)
   const [showEmpModal, setShowEmpModal] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
+  const [mobileSheetViewMode, setMobileSheetViewMode] = useState('cards') // 'cards' | 'table'
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   // Manage Salary Modal State
   const [showSalaryModal, setShowSalaryModal] = useState(false)
@@ -107,6 +115,10 @@ export default function Payroll() {
   const [editAdjValue, setEditAdjValue] = useState('')
   const [editingStandardKey, setEditingStandardKey] = useState(null)
   const [editStandardValue, setEditStandardValue] = useState('')
+
+  // Row Unlock State for Locked / Paid records
+  const [unlockedRowIds, setUnlockedRowIds] = useState(new Set())
+  const [unlockPromptEmp, setUnlockPromptEmp] = useState(null)
 
   // Employee Detail Modal State
   const [selectedEmployeeForModal, setSelectedEmployeeForModal] = useState(null)
@@ -506,8 +518,8 @@ export default function Payroll() {
     setSavingAll(true);
     try {
       const rowsToSave = Object.values(editableData).filter(row => {
-        // If row is Paid and user is not developer, skip it
-        if (row.status === 'Paid' && !isDeveloper) return false;
+        // If row is Paid and not unlocked, skip it
+        if (row.status === 'Paid' && !unlockedRowIds.has(row.id)) return false;
         return true;
       });
 
@@ -536,6 +548,12 @@ export default function Payroll() {
       const row = editableData[empId];
       await saveRowRecord(row);
       toast.success(`Record for ${row.name} saved!`);
+      // Re-lock after saving
+      setUnlockedRowIds(prev => {
+        const next = new Set(prev);
+        next.delete(empId);
+        return next;
+      });
       await loadPayroll(true);
     } catch (error) {
        console.error(error);
@@ -574,11 +592,16 @@ export default function Payroll() {
   }
 
   const handleSelectDetailEmp = (empRow) => {
-    setSelectedEmployeeForModal(empRow)
-    setSelectedDetailEmpId(empRow.id)
-    setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '')
-    resetAdjForm()
-    loadEmpAdjs(empRow.id)
+    if (!empRow) {
+      setSelectedEmployeeForModal(null);
+      setSelectedDetailEmpId(null);
+      return;
+    }
+    setSelectedEmployeeForModal(empRow);
+    setSelectedDetailEmpId(empRow.id);
+    setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '');
+    resetAdjForm();
+    loadEmpAdjs(empRow.id);
   }
 
   const resetAdjForm = () => {
@@ -702,7 +725,7 @@ export default function Payroll() {
 
   const selectedDetailEmp = selectedDetailEmpId 
     ? (editableData[selectedDetailEmpId] || filteredEmployees.find(e => e.id === selectedDetailEmpId))
-    : filteredEmployees[0];
+    : (isMobile ? null : filteredEmployees[0]);
 
   const currentEmpData = selectedEmployeeForModal 
     ? (editableData[selectedEmployeeForModal.id] || selectedEmployeeForModal)
@@ -719,7 +742,7 @@ export default function Payroll() {
   const renderEmployeeDetailBody = (targetEmpData) => {
     if (!targetEmpData) return null;
 
-    const isRowLocked = targetEmpData.status === 'Paid' && !isDeveloper;
+    const isRowLocked = targetEmpData.status === 'Paid' && !unlockedRowIds.has(targetEmpData.id);
     const baseSal = parseFloat(targetEmpData.base_salary || 0);
     const expHours = parseFloat(targetEmpData.expected_hours || 0);
     const expMins = targetEmpData.expected_minutes !== undefined ? targetEmpData.expected_minutes : (expHours * 60);
@@ -757,57 +780,12 @@ export default function Payroll() {
 
     return (
       <>
-        {/* 1. Attendance Summary - Compact Inline Single Row */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between', 
-          flexWrap: 'wrap', 
-          gap: '6px', 
-          marginBottom: '8px',
-          background: '#f8fafc',
-          padding: '5px 10px',
-          borderRadius: '8px',
-          border: '1px solid #e2e8f0'
-        }}>
-          <div style={{ fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
-            Attendance:
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '2px 8px', borderRadius: '5px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#047857' }}>P:</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#059669' }}>{targetEmpData.presents}</span>
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#fef2f2', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: '5px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#b91c1c' }}>A:</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626' }}>{targetEmpData.absents}</span>
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#fffbeb', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: '5px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#b45309' }}>L:</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#d97706' }}>{targetEmpData.leaves}</span>
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '5px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#1d4ed8' }}>H:</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#2563eb' }}>{targetEmpData.holidays}</span>
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '2px 8px', borderRadius: '5px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#6d28d9' }}>OOT:</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#7c3aed' }}>{targetEmpData.only_overtime_days || 0}</span>
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#fff7ed', border: '1px solid #fed7aa', padding: '2px 8px', borderRadius: '5px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#c2410c' }}>Late:</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ea580c' }}>{targetEmpData.late_days || 0}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. Hours & Overtime - Ultra Compact Row */}
+        {/* 1. Hours & Overtime Summary (2x2 on mobile, 4-col on desktop) */}
         <div style={{ 
           display: 'grid', 
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', 
+          gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, minmax(0, 1fr))', 
           gap: '8px', 
-          marginBottom: '8px' 
+          marginBottom: '10px' 
         }}>
           <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Expected:</span>
@@ -867,36 +845,54 @@ export default function Payroll() {
             </div>
           </div>
 
-          {/* Financial Metrics Grid - 4 in Single Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '8px', marginBottom: '8px' }}>
-            <div style={{ background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Payable (Worked Duty)</span>
-              <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', marginTop: '1px' }}>{CURRENCY} {payableSal.toFixed(2)}</div>
+          {/* Financial Metrics Grid - 2x2 on Mobile, 4 in row on Desktop */}
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, minmax(0, 1fr))', 
+            gap: '8px', 
+            marginBottom: '8px' 
+          }}>
+            <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, display: 'block' }}>Payable (Worked Duty)</span>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', marginTop: '2px' }}>{CURRENCY} {payableSal.toFixed(2)}</div>
               <span style={{ fontSize: '9px', color: targetEmpData.deductions > 0 ? '#ef4444' : '#64748b', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {targetEmpData.deductions > 0 ? `(-${CURRENCY} ${targetEmpData.deductions.toFixed(2)})` : 'Full hours'}
               </span>
             </div>
 
-            <div style={{ background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Total Adjustments (±)</span>
-              <div style={{ fontSize: '13px', fontWeight: 800, color: totalAdj >= 0 ? 'var(--green)' : '#ef4444', marginTop: '1px' }}>
+            <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, display: 'block' }}>Total Adjustments (±)</span>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: totalAdj >= 0 ? 'var(--green)' : '#ef4444', marginTop: '2px' }}>
                 {totalAdj >= 0 ? `+${totalAdj.toFixed(2)}` : totalAdj.toFixed(2)}
               </div>
-              <span style={{ fontSize: '9px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: '9px', color: '#64748b', display: 'block' }}>
                 Additions - deductions
               </span>
             </div>
 
-            <div style={{ background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, display: 'block', whiteSpace: 'nowrap' }}>Advance Balance (Loan)</span>
-              <div style={{ fontSize: '13px', fontWeight: 800, color: '#f59e0b', marginTop: '1px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
-              <span style={{ fontSize: '9px', color: '#64748b', display: 'block', whiteSpace: 'nowrap' }}>Remaining loan</span>
+            <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, display: 'block' }}>Advance Balance (Loan)</span>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
+              <span style={{ fontSize: '9px', color: '#64748b', display: 'block' }}>Remaining loan</span>
             </div>
 
-            <div style={{ background: '#ecfdf5', padding: '6px 10px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
-              <span style={{ fontSize: '10px', color: '#047857', fontWeight: 700, display: 'block', whiteSpace: 'nowrap' }}>Net Payable Salary</span>
-              <div style={{ fontSize: '13px', fontWeight: 900, color: '#059669', marginTop: '1px' }}>{CURRENCY} {Number(targetEmpData.net_salary || 0).toFixed(2)}</div>
-              <span style={{ fontSize: '9px', color: '#047857', display: 'block', whiteSpace: 'nowrap' }}>Payable + Adj</span>
+            <div style={{ 
+              background: '#ecfdf5', 
+              padding: '8px 10px', 
+              borderRadius: '6px', 
+              border: '1.5px solid #a7f3d0',
+              gridColumn: isMobile ? 'span 2' : 'auto',
+              display: isMobile ? 'flex' : 'block',
+              justifyContent: isMobile ? 'space-between' : 'initial',
+              alignItems: isMobile ? 'center' : 'initial'
+            }}>
+              <div>
+                <span style={{ fontSize: '11px', color: '#047857', fontWeight: 800, display: 'block' }}>Net Payable Salary</span>
+                <span style={{ fontSize: '9px', color: '#047857', display: 'block' }}>Payable + Adj</span>
+              </div>
+              <div style={{ fontSize: isMobile ? '16px' : '13px', fontWeight: 900, color: '#059669', marginTop: isMobile ? 0 : '1px' }}>
+                {CURRENCY} {Number(targetEmpData.net_salary || 0).toFixed(2)}
+              </div>
             </div>
           </div>
 
@@ -946,9 +942,24 @@ export default function Payroll() {
           </div>
 
           {/* Payment Execution Controls (Cash, Bank, Status, Save) */}
-          <div style={{ background: '#f1f5f9', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ 
+            background: '#f1f5f9', 
+            padding: isMobile ? '10px' : '8px 12px', 
+            borderRadius: '8px', 
+            border: '1px solid #cbd5e1', 
+            display: 'flex', 
+            flexDirection: isMobile ? 'column' : 'row',
+            alignItems: isMobile ? 'stretch' : 'center', 
+            justifyContent: 'space-between', 
+            gap: '10px' 
+          }}>
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'auto auto auto', 
+              gap: isMobile ? '8px' : '12px', 
+              alignItems: 'center' 
+            }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: '4px' }}>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#0369a1' }}>Cash Paid:</label>
                 <input 
                   type="text"
@@ -956,11 +967,11 @@ export default function Payroll() {
                   disabled={isRowLocked}
                   value={targetEmpData.cash_paid}
                   onChange={e => handlePaidChange(targetEmpData.id, 'cash_paid', e.target.value)}
-                  style={{ width: '80px', padding: '4px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#0369a1', background: '#fff' }}
+                  style={{ width: isMobile ? '100%' : '80px', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#0369a1', background: '#fff' }}
                 />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: '4px' }}>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca' }}>Bank Paid:</label>
                 <input 
                   type="text"
@@ -968,17 +979,17 @@ export default function Payroll() {
                   disabled={isRowLocked}
                   value={targetEmpData.bank_paid}
                   onChange={e => handlePaidChange(targetEmpData.id, 'bank_paid', e.target.value)}
-                  style={{ width: '80px', padding: '4px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#4338ca', background: '#fff' }}
+                  style={{ width: isMobile ? '100%' : '80px', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#4338ca', background: '#fff' }}
                 />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: '4px', gridColumn: isMobile ? 'span 2' : 'auto' }}>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Status:</label>
                 <select 
                   disabled={isRowLocked}
                   value={targetEmpData.status}
                   onChange={e => handleTextChange(targetEmpData.id, 'status', e.target.value)}
-                  style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: targetEmpData.status === 'Paid' ? 'var(--green)' : '#d97706', background: '#fff' }}
+                  style={{ width: isMobile ? '100%' : 'auto', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: targetEmpData.status === 'Paid' ? 'var(--green)' : '#d97706', background: '#fff' }}
                 >
                   <option value="Pending">Pending</option>
                   <option value="Paid">Paid</option>
@@ -987,20 +998,41 @@ export default function Payroll() {
             </div>
 
             {showActions && (
-              <div>
+              <div style={{ display: 'flex', justifyContent: isMobile ? 'stretch' : 'flex-end', marginTop: isMobile ? '4px' : '0' }}>
                 {isRowLocked ? (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, background: '#e2e8f0', color: '#64748b' }}>
-                    <Lock size={12} /> Locked (Paid)
-                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setUnlockPromptEmp(targetEmpData)}
+                    className="btn"
+                    style={{ 
+                      width: isMobile ? '100%' : 'auto',
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      gap: '5px', 
+                      padding: '8px 14px', 
+                      borderRadius: '6px', 
+                      fontSize: '12px', 
+                      fontWeight: 800, 
+                      background: '#fef3c7', 
+                      color: '#b45309', 
+                      border: '1.5px solid #fde68a',
+                      cursor: 'pointer'
+                    }}
+                    title="Record is marked as Paid and locked. Click to unlock."
+                  >
+                    <Lock size={12} style={{ color: '#d97706' }} />
+                    Locked
+                  </button>
                 ) : (
                   <button 
                     onClick={() => handleSaveRow(targetEmpData.id)}
                     disabled={savingRowId === targetEmpData.id}
                     className="btn btn-primary"
-                    style={{ padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'var(--primary)' }}
+                    style={{ width: isMobile ? '100%' : 'auto', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: 'var(--primary)' }}
                   >
                     {savingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
-                    Save Record {isDeveloper && targetEmpData.status === 'Paid' ? '(Dev)' : ''}
+                    Save Record
                   </button>
                 )}
               </div>
@@ -1009,114 +1041,183 @@ export default function Payroll() {
         </div>
 
         {/* 4. Top Form: Add / Edit Adjustment */}
-        <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 800, margin: 0, color: '#1e293b' }}>
-              {editingAdjId ? 'Edit Adjustment' : 'Add Adjustment / Loan'}
-            </h3>
-            {editingAdjId && (
-              <button type="button" onClick={resetAdjForm} style={{ fontSize: '12px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                Cancel Edit
-              </button>
-            )}
-          </div>
-
+        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
           <form onSubmit={handleAddCustomAdj} autoComplete="off">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '12px' }}>
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Action</label>
-                <div style={{ display: 'flex', gap: '14px', alignItems: 'center', height: '36px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                    <input type="radio" name="adjAction" value="Give" checked={customAdjAction === 'Give'} onChange={() => setCustomAdjAction('Give')} />
+            {/* Row 1: Heading (Left) + Action & Repetition Radios (Centered) + Submit Button (Right) */}
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: isMobile ? 'column' : 'row',
+              justifyContent: 'space-between', 
+              alignItems: isMobile ? 'stretch' : 'center', 
+              flexWrap: 'wrap', 
+              gap: '8px', 
+              marginBottom: '10px' 
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '13px', fontWeight: 800, margin: 0, color: '#1e293b', whiteSpace: 'nowrap' }}>
+                  {editingAdjId ? 'Edit Adjustment' : 'Add Adjustment / Loan'}
+                </h3>
+                {isMobile && editingAdjId && (
+                  <button 
+                    type="button" 
+                    onClick={resetAdjForm} 
+                    style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {/* Center: Action & Repetition Radios */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: isMobile ? '12px' : '16px', flexWrap: 'wrap', margin: isMobile ? '2px 0' : '0 10px' }}>
+                {/* Action Radios */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Action:</span>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--green)', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="adjAction" 
+                      value="Give" 
+                      checked={customAdjAction === 'Give'} 
+                      onChange={() => setCustomAdjAction('Give')} 
+                    />
                     Give (+)
                   </label>
-                  <label style={{ fontSize: '13px', fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                    <input type="radio" name="adjAction" value="Deduct" checked={customAdjAction === 'Deduct'} onChange={() => setCustomAdjAction('Deduct')} />
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="adjAction" 
+                      value="Deduct" 
+                      checked={customAdjAction === 'Deduct'} 
+                      onChange={() => setCustomAdjAction('Deduct')} 
+                    />
                     Deduct (-)
                   </label>
                 </div>
+
+                {/* Repetition Radios */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Repetition:</span>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: editingAdjId ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
+                    <input 
+                      type="radio" 
+                      name="adjRepetition" 
+                      value="Repeated Monthly" 
+                      checked={customAdjType === 'Repeated Monthly'} 
+                      onChange={() => setCustomAdjType('Repeated Monthly')} 
+                      disabled={editingAdjId !== null} 
+                    />
+                    Repeat
+                  </label>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: editingAdjId ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
+                    <input 
+                      type="radio" 
+                      name="adjRepetition" 
+                      value="One-Time" 
+                      checked={customAdjType === 'One-Time'} 
+                      onChange={() => setCustomAdjType('One-Time')} 
+                      disabled={editingAdjId !== null} 
+                    />
+                    One Time
+                  </label>
+                </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Adjustment Name</label>
-                <select 
-                  value={customAdjLabel} 
-                  onChange={e => {
-                    const val = e.target.value;
-                    setCustomAdjLabel(val);
-                    if (val === 'Advance Salary / Loan') {
-                      setCustomAdjAction('Deduct');
-                      setCustomAdjType('Repeated Monthly');
-                    } else if (val === 'Bonus') {
-                      setCustomAdjAction('Give');
-                      setCustomAdjType('One-Time');
-                    } else if (val === 'Internet' || val === 'Kafalat') {
-                      setCustomAdjAction('Deduct');
-                      setCustomAdjType('Repeated Monthly');
-                    } else {
-                      const dynamicAdj = adjustmentTypes.find(a => a.label === val);
-                      if (dynamicAdj) {
-                        setCustomAdjAction(dynamicAdj.action === 'Add' ? 'Give' : dynamicAdj.action === 'Deduct' ? 'Deduct' : customAdjAction);
-                        setCustomAdjType('One-Time');
-                      }
-                    }
-                  }} 
-                  required 
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', background: '#fff' }}
+              {/* Submit Button on Right */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: isMobile ? 'stretch' : 'flex-end' }}>
+                {!isMobile && editingAdjId && (
+                  <button 
+                    type="button" 
+                    onClick={resetAdjForm} 
+                    style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button 
+                  type="submit" 
+                  disabled={savingCustomAdj} 
+                  className="btn btn-primary" 
+                  style={{ width: isMobile ? '100%' : 'auto', padding: isMobile ? '8px 14px' : '6px 14px', borderRadius: '6px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
                 >
-                  <option value="">Select Adjustment Type</option>
-                  <optgroup label="Standard Adjustments">
-                    {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
-                    {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
-                    {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
-                    {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
-                  </optgroup>
-                  {adjustmentTypes.length > 0 && (
-                    <optgroup label="Custom Columns">
-                      {adjustmentTypes
-                        .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
-                        .map(adj => (
-                        <option key={adj.id} value={adj.label}>{adj.label}</option>
-                      ))}
-                    </optgroup>
-                  )}
-                  <option value="Other Custom">Other Custom...</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Repetition</label>
-                <select 
-                  value={customAdjType} 
-                  onChange={e => setCustomAdjType(e.target.value)} 
-                  disabled={editingAdjId !== null} 
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', background: editingAdjId ? '#f1f5f9' : '#fff' }}
-                >
-                  <option value="One-Time">One-Time (This Month)</option>
-                  <option value="Repeated Monthly">Repeated Monthly</option>
-                </select>
+                  {savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Adjustment' : '+ Add Adjustment'}
+                </button>
               </div>
             </div>
 
-            {/* Row 2: Custom Name (if selected), Amount, Limit, Notes */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
-              {customAdjLabel === 'Other Custom' && (
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Custom Label</label>
-                  <input 
-                    type="text" 
-                    value={customAdjOtherLabel} 
-                    onChange={e => setCustomAdjOtherLabel(e.target.value)} 
-                    placeholder="e.g. Fine, Reward" 
+            {/* Row 2: 4 Inputs in One Row (or 2x2 on Mobile) */}
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+              <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
+                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Adjustment Name</label>
+                {customAdjLabel === 'Other Custom' ? (
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <input 
+                      type="text" 
+                      value={customAdjOtherLabel} 
+                      onChange={e => setCustomAdjOtherLabel(e.target.value)} 
+                      placeholder="Custom Name" 
+                      required 
+                      style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => setCustomAdjLabel('')} 
+                      style={{ padding: '0 6px', fontSize: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', background: '#f1f5f9', cursor: 'pointer' }}
+                      title="Back to list"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <select 
+                    value={customAdjLabel} 
+                    onChange={e => {
+                      const val = e.target.value;
+                      setCustomAdjLabel(val);
+                      if (val === 'Advance Salary / Loan') {
+                        setCustomAdjAction('Deduct');
+                        setCustomAdjType('Repeated Monthly');
+                      } else if (val === 'Bonus') {
+                        setCustomAdjAction('Give');
+                        setCustomAdjType('One-Time');
+                      } else if (val === 'Internet' || val === 'Kafalat') {
+                        setCustomAdjAction('Deduct');
+                        setCustomAdjType('Repeated Monthly');
+                      } else {
+                        const dynamicAdj = adjustmentTypes.find(a => a.label === val);
+                        if (dynamicAdj) {
+                          setCustomAdjAction(dynamicAdj.action === 'Add' ? 'Give' : dynamicAdj.action === 'Deduct' ? 'Deduct' : customAdjAction);
+                          setCustomAdjType('One-Time');
+                        }
+                      }
+                    }} 
                     required 
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
-                  />
-                </div>
-              )}
+                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }}
+                  >
+                    <option value="">Select Adjustment Name</option>
+                    <optgroup label="Standard Adjustments">
+                      {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
+                      {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
+                      {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
+                      {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
+                    </optgroup>
+                    {adjustmentTypes.length > 0 && (
+                      <optgroup label="Custom Columns">
+                        {adjustmentTypes
+                          .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
+                          .map(adj => (
+                          <option key={adj.id} value={adj.label}>{adj.label}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value="Other Custom">Other Custom...</option>
+                  </select>
+                )}
+              </div>
 
               <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
-                  {customAdjType === 'Repeated Monthly' ? (customAdjAction === 'Give' ? 'Monthly Pay Amount' : 'Monthly Cut Amount') : 'Amount'}
+                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                  {customAdjType === 'Repeated Monthly' ? (customAdjAction === 'Give' ? 'Monthly Pay Amount' : 'Monthly Cut Amount') : 'Current Month Amount'}
                 </label>
                 <input 
                   type="number" 
@@ -1124,51 +1225,38 @@ export default function Payroll() {
                   onChange={e => setCustomAdjAmount(e.target.value)} 
                   placeholder="e.g. 500" 
                   required 
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
                 />
               </div>
 
-              {customAdjType === 'Repeated Monthly' && (
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Total Limit Amount (Optional)</label>
-                  <input 
-                    type="number" 
-                    value={customAdjTotalLimit} 
-                    onChange={e => setCustomAdjTotalLimit(e.target.value)} 
-                    placeholder="e.g. 5000" 
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
-                  />
-                </div>
-              )}
-
               <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Note (Optional)</label>
+                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Total Limit Amount (Optional)</label>
+                <input 
+                  type="number" 
+                  value={customAdjTotalLimit} 
+                  onChange={e => setCustomAdjTotalLimit(e.target.value)} 
+                  placeholder={customAdjType === 'Repeated Monthly' ? 'e.g. 5000' : 'N/A for One-Time'} 
+                  disabled={customAdjType !== 'Repeated Monthly'}
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: customAdjType !== 'Repeated Monthly' ? '#f1f5f9' : '#fff' }} 
+                />
+              </div>
+
+              <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
+                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Note (Optional)</label>
                 <input 
                   type="text" 
                   value={customAdjNotes} 
                   onChange={e => setCustomAdjNotes(e.target.value)} 
                   placeholder="Reason / Note" 
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} 
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
                 />
               </div>
-            </div>
-
-            {/* Submit Button */}
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button 
-                type="submit" 
-                disabled={savingCustomAdj} 
-                className="btn btn-primary" 
-                style={{ padding: '8px 20px', borderRadius: '6px', fontWeight: 700, fontSize: '12px', border: 'none', cursor: 'pointer' }}
-              >
-                {savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Adjustment' : '+ Add Adjustment'}
-              </button>
             </div>
           </form>
         </div>
 
-        {/* 5. Two Distinct Side-by-Side Columns: Given (+) vs Deductions (-) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+        {/* 5. Two Distinct Columns: Given (+) vs Deductions (-) (1-col on mobile) */}
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
           
           {/* Left Column: Given / Additions (+) */}
           <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #a7f3d0', overflow: 'hidden' }}>
@@ -1264,146 +1352,277 @@ export default function Payroll() {
   };
 
   return (
-    <div style={{ padding: '12px 16px', maxWidth: '100%', margin: '0 auto', fontFamily: 'var(--font-family)', background: 'var(--background)' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 2px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Calculator size={26} style={{ color: 'var(--primary)' }} />
-            Payroll Management
-          </h1>
-          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '12px' }}>
-            Manage monthly salaries, attendance, and Excel-like editable payroll records.
-          </p>
+    <div className="payroll-page" style={{ padding: '0 4px 12px 4px', maxWidth: '100%', margin: '0 auto', fontFamily: 'var(--font-family)', background: 'var(--background)' }}>
+      {/* Top Controls Bar */}
+      <div style={{ 
+        background: 'var(--surface)', 
+        padding: '8px 12px', 
+        borderRadius: '10px', 
+        border: '1px solid var(--surface-2)', 
+        marginBottom: '10px', 
+        display: 'flex', 
+        gap: '10px', 
+        flexWrap: 'wrap', 
+        alignItems: 'center', 
+        boxShadow: 'var(--shadow-sm)' 
+      }}>
+        {/* 1. Search Bar */}
+        <div style={{ position: 'relative', minWidth: '180px', flex: '1 1 200px', maxWidth: '340px' }}>
+          <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input 
+            type="text" 
+            placeholder="Search by name or ID..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ width: '100%', padding: '8px 12px 8px 36px', borderRadius: '8px', border: '1px solid var(--surface-2)', background: 'var(--background)', fontSize: '13px', color: 'var(--text-primary)', outline: 'none' }}
+          />
         </div>
 
-        {showActions && (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* View Mode Toggle: Sheet View vs Detail View */}
-            <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '3px', borderRadius: '8px', border: '1px solid var(--surface-2)', gap: '2px' }}>
-              <button 
-                type="button"
-                onClick={() => setViewMode('sheet')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: viewMode === 'sheet' ? 'var(--primary)' : 'transparent',
-                  color: viewMode === 'sheet' ? '#000' : 'var(--text-secondary)',
-                  boxShadow: viewMode === 'sheet' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <Table size={14} />
-                Sheet View
-              </button>
-              <button 
-                type="button"
-                onClick={() => {
-                  setViewMode('detail');
-                  if (!selectedDetailEmpId && filteredEmployees.length > 0) {
-                    handleSelectDetailEmp(filteredEmployees[0]);
-                  }
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: viewMode === 'detail' ? 'var(--primary)' : 'transparent',
-                  color: viewMode === 'detail' ? '#000' : 'var(--text-secondary)',
-                  boxShadow: viewMode === 'detail' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <FileText size={14} />
-                Detail View
-              </button>
-            </div>
+        {/* 2. Switching Button: Sheet View vs View Detail */}
+        <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '3px', borderRadius: '8px', border: '1px solid var(--surface-2)', gap: '2px', flexShrink: 0 }}>
+          <button 
+            type="button"
+            onClick={() => setViewMode('sheet')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: 700,
+              border: 'none',
+              cursor: 'pointer',
+              background: viewMode === 'sheet' ? 'var(--primary)' : 'transparent',
+              color: viewMode === 'sheet' ? '#000' : 'var(--text-secondary)',
+              boxShadow: viewMode === 'sheet' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Table size={14} />
+            Sheet View
+          </button>
+          <button 
+            type="button"
+            onClick={() => {
+              setViewMode('detail');
+              if (!isMobile && !selectedDetailEmpId && filteredEmployees.length > 0) {
+                handleSelectDetailEmp(filteredEmployees[0]);
+              }
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: 700,
+              border: 'none',
+              cursor: 'pointer',
+              background: viewMode === 'detail' ? 'var(--primary)' : 'transparent',
+              color: viewMode === 'detail' ? '#000' : 'var(--text-secondary)',
+              boxShadow: viewMode === 'detail' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <FileText size={14} />
+            View Detail
+          </button>
+        </div>
 
-            <button 
-              onClick={() => setShowSalaryModal(true)}
-              className="btn btn-secondary"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
-            >
-              <Banknote size={15} style={{ color: 'var(--primary)' }} />
-              Manage Salary
-            </button>
-            <button 
-              onClick={() => setShowAdjustmentsModal(true)}
-              className="btn btn-secondary"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer' }}
-            >
-              <Settings size={15} />
-              Manage Columns
-            </button>
-            <button 
-              onClick={handleSaveAll}
-              disabled={savingAll}
-              className="btn btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(244, 180, 0, 0.2)' }}
-            >
-              <Save size={15} />
-              {savingAll ? 'Saving...' : 'Save All'}
-            </button>
-          </div>
-        )}
+        {/* 3. Month Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Month:</label>
+          <input 
+            type="month" 
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--surface-2)', background: 'var(--background)', fontSize: '13px', color: 'var(--text-primary)', outline: 'none', fontWeight: 600, cursor: 'pointer' }}
+          />
+        </div>
+
+        {/* Action Buttons & Refresh Button on Right */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginLeft: 'auto' }}>
+          {showActions && (
+            <>
+              <button 
+                onClick={() => setShowSalaryModal(true)}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                <Banknote size={15} style={{ color: 'var(--primary)' }} />
+                Manage Salary
+              </button>
+              <button 
+                onClick={() => setShowAdjustmentsModal(true)}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                <Settings size={15} />
+                Manage Columns
+              </button>
+              <button 
+                onClick={handleSaveAll}
+                disabled={savingAll}
+                className="btn btn-primary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(244, 180, 0, 0.2)', whiteSpace: 'nowrap' }}
+              >
+                <Save size={15} />
+                {savingAll ? 'Saving...' : 'Save All'}
+              </button>
+            </>
+          )}
+
+          {/* 5. Refresh Button (Icon Only - After Save All) */}
+          <button 
+            onClick={loadPayroll}
+            disabled={loading}
+            title={loading ? 'Refreshing...' : 'Refresh'}
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              width: '36px', 
+              height: '36px', 
+              borderRadius: '8px', 
+              background: 'var(--surface-2)', 
+              color: 'var(--text-primary)', 
+              border: 'none', 
+              cursor: loading ? 'not-allowed' : 'pointer', 
+              transition: 'all 0.2s', 
+              opacity: loading ? 0.7 : 1,
+              flexShrink: 0
+            }}
+          >
+            <RefreshCw size={16} className={loading ? "spin" : ""} />
+          </button>
+        </div>
       </div>
 
       {/* Sheet View */}
       {viewMode === 'sheet' && (
         <>
-          {/* Filters */}
-          <div style={{ background: 'var(--surface)', padding: '8px 14px', borderRadius: '10px', border: '1px solid var(--surface-2)', marginBottom: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', boxShadow: 'var(--shadow-sm)' }}>
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
-          <div style={{ position: 'relative', minWidth: '200px', flex: 1 }}>
-            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input 
-              type="text" 
-              placeholder="Search by name or ID..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: '8px', border: '1px solid var(--surface-2)', background: 'var(--background)', fontSize: '13px', color: 'var(--text-primary)', outline: 'none' }}
-            />
-          </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Month:</label>
-            <input 
-              type="month" 
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--surface-2)', background: 'var(--background)', fontSize: '13px', color: 'var(--text-primary)', outline: 'none', fontWeight: 600, cursor: 'pointer' }}
-            />
-          </div>
-        </div>
+          {/* Mobile Card / Table Toggle */}
+          {isMobile && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', padding: '2px 4px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)' }}>
+                {filteredEmployees.length} Employees
+              </span>
+              <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '2px', borderRadius: '6px', gap: '2px' }}>
+                <button 
+                  onClick={() => setMobileSheetViewMode('cards')} 
+                  style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '4px', border: 'none', background: mobileSheetViewMode === 'cards' ? 'var(--primary)' : 'transparent', color: mobileSheetViewMode === 'cards' ? '#000' : 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Cards
+                </button>
+                <button 
+                  onClick={() => setMobileSheetViewMode('table')} 
+                  style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '4px', border: 'none', background: mobileSheetViewMode === 'table' ? 'var(--primary)' : 'transparent', color: mobileSheetViewMode === 'table' ? '#000' : 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Table
+                </button>
+              </div>
+            </div>
+          )}
 
-        <button 
-          onClick={loadPayroll}
-          disabled={loading}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', borderRadius: '8px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: '13px', transition: 'all 0.2s', ...(loading ? {opacity: 0.7, cursor: 'not-allowed'} : {}) }}
-        >
-          <RefreshCw size={16} className={loading ? "spin" : ""} />
-          {loading ? 'Refreshing...' : 'Refresh'}
-        </button>
-      </div>
+          {isMobile && mobileSheetViewMode === 'cards' ? (
+            /* Mobile Card View */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {filteredEmployees.length === 0 ? (
+                <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface)', borderRadius: '10px' }}>
+                  No payroll records found for this month.
+                </div>
+              ) : (
+                filteredEmployees.map(item => (
+                  <div key={item.id} style={{ background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: '10px', padding: '12px', boxShadow: 'var(--shadow-sm)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>{item.name}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ID: {item.employee_id} • {item.role || 'Staff'}</div>
+                      </div>
+                      <span style={{ 
+                        fontSize: '10px', 
+                        fontWeight: 700, 
+                        padding: '2px 8px', 
+                        borderRadius: '4px', 
+                        background: item.status === 'Paid' ? '#ecfdf5' : '#fffbeb',
+                        color: item.status === 'Paid' ? '#059669' : '#d97706'
+                      }}>
+                        {item.status || 'Pending'}
+                      </span>
+                    </div>
 
-      {/* Spreadsheet View */}
+                    {/* Attendance Badges */}
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '1px 6px', borderRadius: '4px' }}>P:{item.presents || 0}</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '1px 6px', borderRadius: '4px' }}>A:{item.absents || 0}</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px' }}>L:{item.leaves || 0}</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: '4px' }}>H:{item.holidays || 0}</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe', padding: '1px 6px', borderRadius: '4px' }}>OOT:{item.only_overtime_days || 0}</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '1px 6px', borderRadius: '4px' }}>Late:{item.late_days || 0}</span>
+                    </div>
+
+                    {/* Financial Summary */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', background: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '8px' }}>
+                      <div>
+                        <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Salary</div>
+                        <div style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>{CURRENCY} {item.base_salary || 0}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Payable</div>
+                        <div style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626' }}>{CURRENCY} {Number(item.payable_salary !== undefined ? item.payable_salary : (item.base_salary - (item.deductions || 0))).toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '9px', fontWeight: 700, color: '#047857', textTransform: 'uppercase' }}>Net Pay</div>
+                        <div style={{ fontSize: '13px', fontWeight: 900, color: '#059669' }}>{CURRENCY} {Number(item.net_salary || 0).toFixed(2)}</div>
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <button 
+                        onClick={() => {
+                          handleSelectDetailEmp(item);
+                          setViewMode('detail');
+                        }}
+                        style={{ fontSize: '11px', fontWeight: 700, color: 'var(--primary-dark, #b45309)', background: '#fef3c7', border: '1px solid #fde68a', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer' }}
+                      >
+                        View / Edit Adjustments →
+                      </button>
+                      {showActions && (
+                        (item.status === 'Paid' && !unlockedRowIds.has(item.id)) ? (
+                          <button 
+                            type="button"
+                            onClick={() => setUnlockPromptEmp(item)}
+                            style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                            title="Click to unlock this record"
+                          >
+                            <Lock size={11} style={{ color: '#d97706' }} />
+                            Locked
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => handleSaveRow(item.id)}
+                            disabled={savingRowId === item.id}
+                            className="btn btn-primary"
+                            style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 700, borderRadius: '6px' }}
+                          >
+                            {savingRowId === item.id ? 'Saving...' : 'Save'}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            /* Spreadsheet View (Desktop and Table Mode) */
       <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
         
-        {/* Table Container with Horizontal Scroll */}
-        <div style={{ overflowX: 'auto', maxHeight: '70vh', overflowY: 'auto' }}>
+        {/* Table Container with Horizontal Scroll - Height expanded by 1 row */}
+        <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 175px)', overflowY: 'auto' }}>
           <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--surface)', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <tr>
@@ -1455,7 +1674,7 @@ export default function Payroll() {
                   const baseSal = parseFloat(item.base_salary || 0);
                   const payable = parseFloat(item.payable_salary !== undefined ? item.payable_salary : (baseSal - parseFloat(item.deductions || 0)));
                   const payableDiff = Math.round((payable - baseSal) * 100) / 100;
-                  const isRowLocked = item.status === 'Paid' && !isDeveloper;
+                  const isRowLocked = item.status === 'Paid' && !unlockedRowIds.has(item.id);
                   const totalAdj = calculateTotalAdjustments(item);
 
                   return (
@@ -1645,13 +1864,27 @@ export default function Payroll() {
                       {showActions && (
                         <td style={{ padding: '4px', textAlign: 'center' }}>
                           {isRowLocked ? (
-                            <div 
-                              title="Payroll Locked for Paid records. Only Developer role can unlock/edit." 
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, background: 'var(--surface-2)', color: 'var(--text-muted)' }}
+                            <button 
+                              type="button"
+                              onClick={() => setUnlockPromptEmp(item)}
+                              style={{ 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                gap: '4px', 
+                                padding: '4px 8px', 
+                                borderRadius: '4px', 
+                                fontSize: '11px', 
+                                fontWeight: 700, 
+                                background: '#fef3c7', 
+                                color: '#b45309', 
+                                border: '1px solid #fde68a', 
+                                cursor: 'pointer' 
+                              }}
+                              title="Record is marked as Paid and locked. Click to unlock."
                             >
-                              <Lock size={12} />
+                              <Lock size={11} style={{ color: '#d97706' }} />
                               Locked
-                            </div>
+                            </button>
                           ) : (
                             <button 
                               onClick={() => handleSaveRow(item.id)}
@@ -1660,7 +1893,7 @@ export default function Payroll() {
                               style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                             >
                               {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
-                              Save {isDeveloper && item.status === 'Paid' ? '(Dev)' : ''}
+                              Save
                             </button>
                           )}
                         </td>
@@ -1673,13 +1906,123 @@ export default function Payroll() {
           </table>
         </div>
       </div>
+          )}
 
         </>
       )}
 
-      {/* Detail View (Master-Detail Full Page) */}
+      {/* Detail View (Master-Detail Full Page with Mobile Accordion) */}
       {viewMode === 'detail' && (
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'stretch', height: 'calc(100vh - 105px)', overflow: 'hidden' }}>
+        isMobile ? (
+          /* Mobile Accordion View: Click employee to expand details directly underneath */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingBottom: '24px' }}>
+            {/* Filter bar on mobile */}
+            <div style={{ background: 'var(--surface)', padding: '8px 12px', borderRadius: '10px', border: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input 
+                  type="text"
+                  placeholder="Filter employee..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{ width: '100%', padding: '6px 10px 6px 30px', borderRadius: '6px', border: '1px solid var(--surface-2)', fontSize: '12px', background: 'var(--background)', color: 'var(--text-primary)', outline: 'none' }}
+                />
+              </div>
+              <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 8px', borderRadius: '10px', background: 'var(--surface-2)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                {filteredEmployees.length} Emps
+              </span>
+            </div>
+
+            {/* List of Employees with Accordion Collapse/Expand */}
+            {filteredEmployees.map(emp => {
+              const isSelected = (currentEmpData?.id === emp.id);
+              const isPaid = emp.status === 'Paid';
+              return (
+                <div 
+                  key={emp.id}
+                  data-mobile-card="true"
+                  style={{
+                    borderRadius: '10px',
+                    border: isSelected ? '1.5px solid var(--primary, #f59e0b)' : '1px solid var(--surface-2)',
+                    background: 'var(--surface)',
+                    overflow: 'hidden',
+                    boxShadow: isSelected ? '0 2px 10px rgba(245, 158, 11, 0.15)' : 'var(--shadow-sm)',
+                    scrollMarginTop: '80px'
+                  }}
+                >
+                  {/* Card Header (clickable) */}
+                  <div 
+                    onClick={(e) => {
+                      if (isSelected) {
+                        handleSelectDetailEmp(null);
+                      } else {
+                        handleSelectDetailEmp(emp);
+                        const card = e.currentTarget.closest('[data-mobile-card]');
+                        if (card) {
+                          setTimeout(() => {
+                            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                          }, 50);
+                        }
+                      }
+                    }}
+                    style={{
+                      padding: '10px 12px',
+                      cursor: 'pointer',
+                      background: isSelected ? '#fffbeb' : 'var(--surface)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      userSelect: 'none'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 800, color: isSelected ? '#92400e' : 'var(--text-primary)' }}>
+                        {emp.name}
+                      </span>
+                      <span style={{ 
+                        fontSize: '10px', 
+                        fontWeight: 700, 
+                        padding: '2px 7px', 
+                        borderRadius: '4px',
+                        background: isPaid ? '#ecfdf5' : '#fffbeb',
+                        color: isPaid ? '#059669' : '#d97706'
+                      }}>
+                        {isPaid ? 'Paid' : 'Pending'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                      <span>ID: {emp.employee_id} • {emp.role || 'Staff'}</span>
+                      <span style={{ fontWeight: 800, color: '#059669', fontSize: '12px' }}>{CURRENCY} {Number(emp.net_salary || 0).toFixed(2)}</span>
+                    </div>
+
+                    {/* Attendance Mini Badges */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
+                      <span style={{ fontSize: '9px', fontWeight: 700, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: '4px' }}>P:{emp.presents || 0}</span>
+                      <span style={{ fontSize: '9px', fontWeight: 700, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '1px 5px', borderRadius: '4px' }}>A:{emp.absents || 0}</span>
+                      <span style={{ fontSize: '9px', fontWeight: 700, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 5px', borderRadius: '4px' }}>L:{emp.leaves || 0}</span>
+                      <span style={{ fontSize: '9px', fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 5px', borderRadius: '4px' }}>H:{emp.holidays || 0}</span>
+                      <span style={{ fontSize: '9px', fontWeight: 700, background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe', padding: '1px 5px', borderRadius: '4px' }}>OOT:{emp.only_overtime_days || 0}</span>
+                      <span style={{ fontSize: '9px', fontWeight: 700, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '1px 5px', borderRadius: '4px' }}>Late:{emp.late_days || 0}</span>
+                      <span style={{ fontSize: '10px', color: '#b45309', marginLeft: 'auto', fontWeight: 700 }}>
+                        {isSelected ? '▲ Hide Details' : '▼ View Details'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Inline Expanded Detail Section directly underneath */}
+                  {isSelected && (
+                    <div style={{ padding: '12px', borderTop: '1px solid var(--surface-2)', background: 'var(--white)' }}>
+                      {renderEmployeeDetailBody(emp)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* Desktop Master-Detail Side-by-Side */
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'stretch', height: 'calc(100vh - 175px)', overflow: 'hidden' }}>
           {/* Left Column: Employee List Sidebar */}
           <div style={{ 
             width: '280px', 
@@ -1773,9 +2116,10 @@ export default function Payroll() {
           }}>
             {currentEmpData ? (
               <>
-                <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', background: '#fafafa', flexShrink: 0 }}>
+                <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', background: '#fafafa', flexShrink: 0 }}>
+                  {/* Left: Employee Info */}
                   <div>
-                    <h2 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 2px 0', color: 'var(--text-primary)' }}>
+                    <h2 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 2px 0', color: 'var(--text-primary)' }}>
                       {currentEmpData.name}
                     </h2>
                     <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
@@ -1783,17 +2127,43 @@ export default function Payroll() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '6px' }}>
-                      <CalendarDays size={14} style={{ color: 'var(--primary, #d97706)' }} />
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Month:</span>
-                      <input 
-                        type="month"
-                        value={selectedMonth}
-                        onChange={e => setSelectedMonth(e.target.value)}
-                        style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
-                      />
+                  {/* Center: Attendance Badges in Middle */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', flexWrap: 'wrap', flex: '1 1 auto', margin: '0 10px' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '2px 6px', borderRadius: '5px' }} title="Presents">
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#047857' }}>P:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#059669' }}>{currentEmpData.presents || 0}</span>
                     </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#fef2f2', border: '1px solid #fecaca', padding: '2px 6px', borderRadius: '5px' }} title="Absents">
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#b91c1c' }}>A:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#dc2626' }}>{currentEmpData.absents || 0}</span>
+                    </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#fffbeb', border: '1px solid #fde68a', padding: '2px 6px', borderRadius: '5px' }} title="Leaves">
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#b45309' }}>L:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#d97706' }}>{currentEmpData.leaves || 0}</span>
+                    </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '2px 6px', borderRadius: '5px' }} title="Holidays">
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#1d4ed8' }}>H:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#2563eb' }}>{currentEmpData.holidays || 0}</span>
+                    </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '2px 6px', borderRadius: '5px' }} title="Only Overtime Days">
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#6d28d9' }}>OOT:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#7c3aed' }}>{currentEmpData.only_overtime_days || 0}</span>
+                    </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#fff7ed', border: '1px solid #fed7aa', padding: '2px 6px', borderRadius: '5px' }} title="Late Days">
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#c2410c' }}>Late:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ea580c' }}>{currentEmpData.late_days || 0}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '6px' }}>
+                    <CalendarDays size={14} style={{ color: 'var(--primary, #d97706)' }} />
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Month:</span>
+                    <input 
+                      type="month"
+                      value={selectedMonth}
+                      onChange={e => setSelectedMonth(e.target.value)}
+                      style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
+                    />
                   </div>
                 </div>
 
@@ -1808,6 +2178,7 @@ export default function Payroll() {
             )}
           </div>
         </div>
+        )
       )}
 
       {/* Popup Modal for Sheet View */}
@@ -1815,10 +2186,38 @@ export default function Payroll() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
           <div style={{ background: 'var(--white)', borderRadius: '16px', width: '100%', maxWidth: '900px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--surface-2)', boxShadow: 'var(--shadow-lg)' }}>
             {/* Modal Header */}
-            <div style={{ position: 'sticky', top: 0, background: 'var(--white)', zIndex: 10, padding: '16px 24px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ position: 'sticky', top: 0, background: 'var(--white)', zIndex: 10, padding: '12px 20px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <h2 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 4px 0', color: 'var(--text-primary)' }}>{currentEmpData.name}</h2>
-                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>ID: {currentEmpData.employee_id} • Role: {currentEmpData.role}</div>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 2px 0', color: 'var(--text-primary)' }}>{currentEmpData.name}</h2>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ID: {currentEmpData.employee_id} • Role: {currentEmpData.role}</div>
+              </div>
+
+              {/* Attendance Badges in Center */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', flexWrap: 'wrap', flex: '1 1 auto', margin: '0 10px' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '2px 6px', borderRadius: '5px' }} title="Presents">
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#047857' }}>P:</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#059669' }}>{currentEmpData.presents || 0}</span>
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#fef2f2', border: '1px solid #fecaca', padding: '2px 6px', borderRadius: '5px' }} title="Absents">
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#b91c1c' }}>A:</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#dc2626' }}>{currentEmpData.absents || 0}</span>
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#fffbeb', border: '1px solid #fde68a', padding: '2px 6px', borderRadius: '5px' }} title="Leaves">
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#b45309' }}>L:</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#d97706' }}>{currentEmpData.leaves || 0}</span>
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '2px 6px', borderRadius: '5px' }} title="Holidays">
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#1d4ed8' }}>H:</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#2563eb' }}>{currentEmpData.holidays || 0}</span>
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '2px 6px', borderRadius: '5px' }} title="Only Overtime Days">
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#6d28d9' }}>OOT:</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#7c3aed' }}>{currentEmpData.only_overtime_days || 0}</span>
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#fff7ed', border: '1px solid #fed7aa', padding: '2px 6px', borderRadius: '5px' }} title="Late Days">
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#c2410c' }}>Late:</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#ea580c' }}>{currentEmpData.late_days || 0}</span>
+                </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1843,6 +2242,49 @@ export default function Payroll() {
 
             <div style={{ padding: '20px 24px' }}>
               {renderEmployeeDetailBody(currentEmpData)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unlock Salary Record Confirmation Modal */}
+      {unlockPromptEmp && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10001, padding: '16px' }}>
+          <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', width: '100%', maxWidth: '420px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', textAlign: 'center' }}>
+            <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#fef3c7', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Unlock size={24} />
+            </div>
+            <h3 style={{ fontSize: '18px', fontWeight: 800, marginBottom: '8px', color: '#1e293b' }}>
+              Unlock Salary Record?
+            </h3>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '22px', lineHeight: 1.5 }}>
+              This record for <strong style={{ color: '#0f172a' }}>{unlockPromptEmp.name}</strong> is currently marked as <strong>Paid</strong> and locked.
+              <br />
+              Do you want to unlock this record to make edits?
+            </p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button 
+                type="button" 
+                onClick={() => setUnlockPromptEmp(null)} 
+                className="btn-secondary" 
+                style={{ flex: 1, padding: '9px 16px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={() => {
+                  const emp = unlockPromptEmp;
+                  setUnlockedRowIds(prev => new Set(prev).add(emp.id));
+                  setUnlockPromptEmp(null);
+                  toast.success(`Record for ${emp.name} is now unlocked!`);
+                }} 
+                className="btn btn-primary" 
+                style={{ flex: 1, padding: '9px 16px', borderRadius: '8px', background: 'var(--primary)', color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <Unlock size={15} />
+                Unlock Record
+              </button>
             </div>
           </div>
         </div>
