@@ -3,25 +3,74 @@ const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 
-// Middleware to auto checkout old sessions (> 23 hours)
-const autoCheckoutOldSessions = async (req, res, next) => {
+let lastIo = null;
+
+// Function to auto checkout old sessions (> 23 hours) and notify Admin, Developer, and Branch Operator
+async function performAutoCheckout(io) {
   try {
-    // Auto checkout: set check_out to NOW() (the actual checkout time)
-    // Runs for sessions that have been open for more than 23 hours
-    await pool.query(`
-      UPDATE employee_attendance 
-      SET check_out = NOW(),
-          on_break = false,
-          break_start = null,
-          remarks = 'automatically system check out'
-      WHERE check_out IS NULL 
-        AND check_in < NOW() - INTERVAL '23 hours'
+    // Ensure notifications table has branch column
+    await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS branch VARCHAR(100)").catch(() => {});
+
+    // Atomically check out sessions open for > 23 hours
+    const result = await pool.query(`
+      WITH updated AS (
+        UPDATE employee_attendance 
+        SET check_out = NOW(),
+            on_break = false,
+            break_start = null,
+            remarks = 'automatically system check out'
+        WHERE check_out IS NULL 
+          AND check_in < NOW() - INTERVAL '23 hours'
+        RETURNING id, employee_id, check_in, check_out, branch
+      )
+      SELECT u.id, u.employee_id, u.check_in, u.check_out,
+             COALESCE(u.branch, e.branch, 'Branch 1') AS branch,
+             e.name AS employee_name, e.employee_id AS employee_code
+      FROM updated u
+      JOIN employees e ON u.employee_id = e.id
     `);
+
+    if (result.rows && result.rows.length > 0) {
+      for (const row of result.rows) {
+        const empCode = row.employee_code || ('EMP-' + row.employee_id);
+        const msg = `System automatically checked out ${row.employee_name} (${empCode}) after 23+ hours of open session. [${row.branch}]`;
+        
+        await pool.query(
+          `INSERT INTO notifications (message, type, branch, target_roles, target_users)
+           VALUES ($1, 'auto_checkout_alert', $2, $3::jsonb, '[]'::jsonb)`,
+          [msg, row.branch, JSON.stringify(['admin', 'developer', 'operator'])]
+        ).catch(err => console.error('Error inserting auto checkout notif:', err.message));
+
+        const emitIo = io || lastIo;
+        if (emitIo) {
+          emitIo.emit('attendance_alert', {
+            id: `auto-checkout-${row.id}`,
+            type: 'auto_checkout_alert',
+            employee_id: row.employee_id,
+            employee_name: row.employee_name,
+            branch: row.branch,
+            message: msg,
+            created_at: new Date().toISOString()
+          });
+        }
+      }
+    }
   } catch (err) {
     console.error('Error auto checking out old sessions:', err.message);
   }
+}
+
+// Middleware to auto checkout old sessions (> 23 hours)
+const autoCheckoutOldSessions = async (req, res, next) => {
+  if (req.io) lastIo = req.io;
+  await performAutoCheckout(req.io);
   next();
 };
+
+// Check every 5 minutes in background
+setInterval(() => {
+  performAutoCheckout(lastIo);
+}, 5 * 60 * 1000);
 
 router.use(autoCheckoutOldSessions);
 
@@ -97,6 +146,25 @@ async function verifyOperator24HourLimit(employee_id, recordDate, pool) {
   return { allowed: true };
 }
 
+// Helper to extract branch matching variations (e.g., 'Restaurant 1' -> ['restaurant 1', 'branch 1', 'r1', '1'])
+function getBranchMatchPatterns(branchStr) {
+  if (!branchStr) return [];
+  const branches = branchStr.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const patterns = new Set();
+  for (const b of branches) {
+    patterns.add(b);
+    const numMatch = b.match(/\d+/);
+    if (numMatch) {
+      const num = numMatch[0];
+      patterns.add(`branch ${num}`);
+      patterns.add(`restaurant ${num}`);
+      patterns.add(`r${num}`);
+      patterns.add(num);
+    }
+  }
+  return Array.from(patterns);
+}
+
 router.get('/notifications', authenticateToken, async (req, res) => {
   try {
     const userRole = req.user.role?.toLowerCase();
@@ -116,7 +184,8 @@ router.get('/notifications', authenticateToken, async (req, res) => {
 
     // Query active sessions running for more than 15 hours
     let query = `
-      SELECT ea.id, ea.employee_id, e.name AS employee_name, ea.check_in, e.employee_id AS employee_code
+      SELECT ea.id, ea.employee_id, e.name AS employee_name, ea.check_in, e.employee_id AS employee_code,
+             COALESCE(ea.branch, e.branch, 'Branch 1') AS branch
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
       WHERE ea.check_out IS NULL
@@ -131,7 +200,22 @@ router.get('/notifications', authenticateToken, async (req, res) => {
       } else {
         return res.json([]);
       }
+    } else if (userRole === 'operator') {
+      // Operator should only see 15h warnings for employees in their branch
+      let userBranchStr = req.user.branch;
+      if (!userBranchStr) {
+        const uRes = await pool.query('SELECT branch FROM users WHERE id = $1', [req.user.id]);
+        if (uRes.rows.length > 0) userBranchStr = uRes.rows[0].branch;
+      }
+      const opPatterns = getBranchMatchPatterns(userBranchStr);
+      if (opPatterns.length > 0) {
+        query += ` AND LOWER(COALESCE(ea.branch, e.branch, 'Branch 1')) = ANY($${params.length + 1})`;
+        params.push(opPatterns);
+      } else {
+        query += ` AND 1=0`;
+      }
     }
+    // Admin and Developer receive 15h alerts for ALL branches
 
     const result = await pool.query(query, params);
 
@@ -141,8 +225,9 @@ router.get('/notifications', authenticateToken, async (req, res) => {
       employee_id: row.employee_id,
       employee_name: row.employee_name,
       employee_code: row.employee_code,
+      branch: row.branch,
       check_in: row.check_in,
-      message: `${row.employee_name} (${row.employee_code || 'EMP-' + row.employee_id}) has been checked in for more than 15 hours.`
+      message: `${row.employee_name} (${row.employee_code || 'EMP-' + row.employee_id}) has been checked in for more than 15 hours. [${row.branch}]`
     }));
 
     let requestNotifs = [];
@@ -181,12 +266,17 @@ router.get('/notifications', authenticateToken, async (req, res) => {
         if (uRes.rows.length > 0) userBranchStr = uRes.rows[0].branch;
       }
       
-      let opQuery = `SELECT r.id, e.name AS employee_name, r.created_at, r.request_type, r.reason
+      let opQuery = `SELECT r.id, e.name AS employee_name, r.created_at, r.request_type, r.reason,
+                            COALESCE(e.branch, 'Branch 1') AS branch
          FROM attendance_edit_requests r
          JOIN employees e ON r.employee_id = e.id
          WHERE r.status = 'Pending' AND (r.target_role IN ('Operator', 'Both') OR r.request_type = 'Early Check-In')`;
       let opParams = [];
-      if (userBranchStr) {
+      const opPatterns = getBranchMatchPatterns(userBranchStr);
+      if (opPatterns.length > 0) {
+        opQuery += ` AND LOWER(COALESCE(e.branch, 'Branch 1')) = ANY($1)`;
+        opParams.push(opPatterns);
+      } else if (userBranchStr) {
         opQuery += ` AND COALESCE(e.branch, '') = ANY($1)`;
         opParams.push(userBranchStr.split(',').map(s => s.trim()));
       }
@@ -263,20 +353,38 @@ router.get('/notifications', authenticateToken, async (req, res) => {
         }
       }
     }
+
     let systemNotifs = [];
     try {
-      const sysNotifRes = await pool.query(
-        `SELECT * FROM notifications WHERE target_roles @> $1::jsonb OR target_users @> $2::jsonb ORDER BY created_at DESC LIMIT 20`,
-        [JSON.stringify([userRole]), JSON.stringify([req.user.id])]
-      );
+      let sysQuery = `SELECT * FROM notifications WHERE (target_roles @> $1::jsonb OR target_users @> $2::jsonb)`;
+      const sysParams = [JSON.stringify([userRole]), JSON.stringify([req.user.id])];
+
+      if (userRole === 'operator') {
+        let userBranchStr = req.user.branch;
+        if (!userBranchStr) {
+          const uRes = await pool.query('SELECT branch FROM users WHERE id = $1', [req.user.id]);
+          if (uRes.rows.length > 0) userBranchStr = uRes.rows[0].branch;
+        }
+        const opPatterns = getBranchMatchPatterns(userBranchStr);
+        if (opPatterns.length > 0) {
+          sysQuery += ` AND (branch IS NULL OR branch = '' OR LOWER(branch) = ANY($3))`;
+          sysParams.push(opPatterns);
+        } else {
+          sysQuery += ` AND (branch IS NULL OR branch = '')`;
+        }
+      }
+
+      sysQuery += ` ORDER BY created_at DESC LIMIT 30`;
+      const sysNotifRes = await pool.query(sysQuery, sysParams);
       systemNotifs = sysNotifRes.rows.map(n => ({
         id: `sys-${n.id}`,
         type: n.type,
         created_at: n.created_at,
+        branch: n.branch,
         message: n.message
       }));
     } catch(e) {
-      // table might not exist yet, ignore
+      console.error('Error fetching systemNotifs:', e.message);
     }
 
     res.json([...notifications, ...requestNotifs, ...systemNotifs]);

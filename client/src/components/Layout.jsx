@@ -249,7 +249,8 @@ export default function Layout() {
           check_in: item.check_in,
           created_at: item.created_at,
           employee_name: item.employee_name,
-          request_type: item.request_type
+          request_type: item.request_type,
+          branch: item.branch
         }));
         combinedAlerts = [...combinedAlerts, ...attAlerts];
       } catch (err) {
@@ -869,7 +870,7 @@ export default function Layout() {
                             key={item.id} 
                             className="notif-item"
                             onClick={() => {
-                              if (item.type === 'attendance_warning') {
+                              if (item.type === 'attendance_warning' || item.type === 'auto_checkout_alert') {
                                 navigate('/today-attendance');
                               } else if (item.type === 'attendance_request') {
                                 if (item.request_type === 'Early Check-In') {
@@ -897,32 +898,19 @@ export default function Layout() {
                               style={{ 
                                 backgroundColor: item.type === 'attendance_warning' 
                                   ? 'rgba(255, 152, 0, 0.1)' 
-                                  : item.request_type === 'Early Check-In'
-                                    ? 'rgba(59, 130, 246, 0.12)'
-                                    : item.type === 'attendance_request' 
-                                      ? 'rgba(255, 193, 7, 0.1)' 
-                                      : item.type === 'expiry_alert' 
-                                        ? 'rgba(227, 24, 55, 0.1)' 
-                                        : undefined, 
+                                  : item.type === 'auto_checkout_alert'
+                                    ? 'rgba(239, 68, 68, 0.12)'
+                                    : item.request_type === 'Early Check-In'
+                                      ? 'rgba(59, 130, 246, 0.12)'
+                                      : item.type === 'attendance_request' 
+                                        ? 'rgba(255, 193, 7, 0.1)' 
+                                        : item.type === 'expiry_alert' 
+                                          ? 'rgba(227, 24, 55, 0.1)' 
+                                          : undefined, 
                                 color: item.type === 'attendance_warning' 
                                   ? '#ff9800' 
-                                  : item.request_type === 'Early Check-In'
-                                    ? '#2563eb'
-                                    : item.type === 'attendance_request' 
-                                      ? '#ffc107' 
-                                      : item.type === 'expiry_alert' 
-                                        ? '#e31837' 
-                                        : undefined 
-                              }}
-                            >
-                              {item.type === 'attendance_warning' || item.request_type === 'Early Check-In' ? <Clock size={18} /> : item.type === 'expiry_alert' ? <AlertTriangle size={18} /> : <AlertTriangle size={18} />}
-                            </div>
-                            <div className="notif-item-content">
-                              <span 
-                                className="notif-item-title" 
-                                style={{ 
-                                  color: item.type === 'attendance_warning' 
-                                    ? '#ff9800' 
+                                  : item.type === 'auto_checkout_alert'
+                                    ? '#ef4444'
                                     : item.request_type === 'Early Check-In'
                                       ? '#2563eb'
                                       : item.type === 'attendance_request' 
@@ -930,21 +918,50 @@ export default function Layout() {
                                         : item.type === 'expiry_alert' 
                                           ? '#e31837' 
                                           : undefined 
+                              }}
+                            >
+                              {item.type === 'auto_checkout_alert' ? (
+                                <LogOut size={18} />
+                              ) : item.type === 'attendance_warning' || item.request_type === 'Early Check-In' ? (
+                                <Clock size={18} />
+                              ) : item.type === 'expiry_alert' ? (
+                                <AlertTriangle size={18} />
+                              ) : (
+                                <AlertTriangle size={18} />
+                              )}
+                            </div>
+                            <div className="notif-item-content">
+                              <span 
+                                className="notif-item-title" 
+                                style={{ 
+                                  color: item.type === 'attendance_warning' 
+                                    ? '#ff9800' 
+                                    : item.type === 'auto_checkout_alert'
+                                      ? '#ef4444'
+                                      : item.request_type === 'Early Check-In'
+                                        ? '#2563eb'
+                                        : item.type === 'attendance_request' 
+                                          ? '#ffc107' 
+                                          : item.type === 'expiry_alert' 
+                                            ? '#e31837' 
+                                            : undefined 
                                 }}
                               >
                                 {item.type === 'attendance_warning' 
-                                  ? 'Long Session Warning' 
-                                  : item.type === 'attendance_request' 
-                                    ? (item.request_type === 'Early Check-In' ? 'Early Check-In Alert' : item.request_type === 'Overtime' ? 'Overtime Request' : 'Correction Request') 
-                                    : item.type === 'expiry_alert' 
-                                      ? 'Document Expiry Alert' 
-                                      : `Low Stock: ${item.name}`}
+                                  ? 'Long Session Warning (15h+)' 
+                                  : item.type === 'auto_checkout_alert'
+                                    ? 'Auto System Check-Out'
+                                    : item.type === 'attendance_request' 
+                                      ? (item.request_type === 'Early Check-In' ? 'Early Check-In Alert' : item.request_type === 'Overtime' ? 'Overtime Request' : 'Correction Request') 
+                                      : item.type === 'expiry_alert' 
+                                        ? 'Document Expiry Alert' 
+                                        : `Low Stock: ${item.name}`}
                               </span>
                               <span className="notif-item-desc">
-                                {item.type === 'attendance_warning' || item.type === 'attendance_request' || item.type === 'expiry_alert' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}
+                                {item.type === 'attendance_warning' || item.type === 'auto_checkout_alert' || item.type === 'attendance_request' || item.type === 'expiry_alert' ? item.message : `Currently ${Number(item.quantity).toFixed(2)} ${item.unit}`}
                               </span>
                               <span className="notif-item-time">
-                                {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.type === 'attendance_request' ? item.created_at : item.type === 'expiry_alert' ? item.created_at : item.low_stock_at)}
+                                {formatNotifTime(item.type === 'attendance_warning' ? item.check_in : item.type === 'attendance_request' || item.type === 'auto_checkout_alert' || item.type === 'expiry_alert' ? item.created_at : item.low_stock_at)}
                               </span>
                               {!item.read && (
                                 <div style={{ width: 6, height: 6, background: 'var(--primary)', borderRadius: '50%', position: 'absolute', top: 14, left: -4 }}></div>

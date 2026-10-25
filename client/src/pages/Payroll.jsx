@@ -4,7 +4,7 @@ import {
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
   TrendingUp, Search, RefreshCw, X, AlertTriangle, FileText, Percent, 
   CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock,
-  Table, Unlock
+  Table, Unlock, RotateCcw
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
@@ -43,6 +43,7 @@ export default function Payroll() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(getLastMonth())
   const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail'
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState('ALL') // 'ALL' | 'R1' | 'R2' | 'R3'
   const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(null)
   const [showEmpModal, setShowEmpModal] = useState(false)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
@@ -308,6 +309,43 @@ export default function Payroll() {
     const dynamicNet = Math.max(0, Math.round((payable + totalAdj) * 100) / 100);
     return dynamicNet;
   }
+
+  // Clear previous month carryover balance to 0.00
+  const handleClearPastBalance = async (empId, empName) => {
+    const name = empName || editableData[empId]?.name || 'this employee';
+    const confirmMsg = `Clear previous carryover balance for ${name}? This will settle previous month's balance and set past balance to 0.00.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      await axios.post('/api/payroll/clear-balance', {
+        employee_id: empId,
+        month: selectedMonth
+      });
+
+      setEditableData(prev => {
+        const emp = prev[empId];
+        if (!emp) return prev;
+        const newEmp = {
+          ...emp,
+          last_month_balance: 0
+        };
+        const dynamicNet = recalculateNetSalary(newEmp);
+        newEmp.net_salary = dynamicNet;
+        newEmp.cash_paid = dynamicNet;
+        newEmp.bank_paid = 0;
+        newEmp.paid_amount = dynamicNet;
+        return {
+          ...prev,
+          [empId]: newEmp
+        };
+      });
+
+      toast.success(`Previous balance cleared to 0.00 for ${name}`);
+    } catch (err) {
+      console.error('Error clearing balance:', err);
+      toast.error(err.response?.data?.error || 'Failed to clear past balance');
+    }
+  };
 
   // Recalculate Net Salary dynamically when standard fields change
   const handleFieldChange = (empId, field, value) => {
@@ -715,7 +753,25 @@ export default function Payroll() {
   const filteredEmployees = Object.values(editableData).filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           (item.employee_id && item.employee_id.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesSearch;
+    if (!matchesSearch) return false;
+
+    if (selectedBranchFilter === 'ALL') return true;
+
+    const b = String(item.branch || '').toUpperCase().trim();
+    const s = String(item.shift || item.working_hours || '').toUpperCase().trim();
+
+    if (b) {
+      if (selectedBranchFilter === 'R1' && (b.includes('1') || b === 'R1')) return true;
+      if (selectedBranchFilter === 'R2' && (b.includes('2') || b === 'R2')) return true;
+      if (selectedBranchFilter === 'R3' && (b.includes('3') || b === 'R3')) return true;
+    }
+    if (s) {
+      if (selectedBranchFilter === 'R1' && (s.includes('1') || s === 'R1')) return true;
+      if (selectedBranchFilter === 'R2' && (s.includes('2') || s === 'R2')) return true;
+      if (selectedBranchFilter === 'R3' && (s.includes('3') || s === 'R3')) return true;
+    }
+
+    return selectedBranchFilter === 'R1';
   });
 
   // Calculate Summary Totals
@@ -723,7 +779,7 @@ export default function Payroll() {
   const totalNetSalary = filteredEmployees.reduce((sum, item) => sum + (parseFloat(item.net_salary) || 0), 0)
   const totalDeductions = filteredEmployees.reduce((sum, item) => sum + (parseFloat(item.deductions) || 0), 0)
 
-  const selectedDetailEmp = selectedDetailEmpId 
+  const selectedDetailEmp = (selectedDetailEmpId && filteredEmployees.some(e => e.id === selectedDetailEmpId))
     ? (editableData[selectedDetailEmpId] || filteredEmployees.find(e => e.id === selectedDetailEmpId))
     : (isMobile ? null : filteredEmployees[0]);
 
@@ -821,8 +877,8 @@ export default function Payroll() {
               Financials & Salary Calculation
             </div>
             
-            {/* Base Salary Editor */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {/* Base Salary Editor & Clear Balance */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Base Salary:</span>
               <input 
                 type="number" 
@@ -840,6 +896,30 @@ export default function Payroll() {
                 >
                   {savingModalSalary ? <RefreshCw size={11} className="spin" /> : <Save size={11} />}
                   Update
+                </button>
+              )}
+              {showActions && (
+                <button 
+                  type="button"
+                  onClick={() => handleClearPastBalance(targetEmpData.id, targetEmpData.name)}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    borderRadius: '5px',
+                    border: '1px solid #fed7aa',
+                    background: '#fffaf0',
+                    color: '#c2410c',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s ease'
+                  }}
+                  title="Clear previous month balance (Zero out carryover balance to 0.00)"
+                >
+                  <RotateCcw size={11} />
+                  Clear Past Bal (0.00)
                 </button>
               )}
             </div>
@@ -901,8 +981,18 @@ export default function Payroll() {
             <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Calculation Breakdown</div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', fontSize: '11px' }}>
               {lastMonthBal !== 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: lastMonthBal > 0 ? '#ecfdf5' : '#fef2f2', color: lastMonthBal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px', borderRadius: '4px', background: lastMonthBal > 0 ? '#ecfdf5' : '#fef2f2', color: lastMonthBal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
                   Last M. Bal: {lastMonthBal > 0 ? `+${lastMonthBal}` : lastMonthBal}
+                  {showActions && (
+                    <button
+                      type="button"
+                      onClick={() => handleClearPastBalance(targetEmpData.id, targetEmpData.name)}
+                      style={{ background: 'none', border: 'none', color: '#f97316', cursor: 'pointer', padding: '0 2px', display: 'inline-flex', alignItems: 'center' }}
+                      title="Clear past balance to 0.00"
+                    >
+                      <RotateCcw size={10} />
+                    </button>
+                  )}
                 </span>
               )}
               {bonusVal > 0 && (
@@ -1347,6 +1437,162 @@ export default function Payroll() {
           </div>
 
         </div>
+
+        {/* 5. Monthly Attendance Calendar Breakdown (Color-coded grid & Summary) */}
+        {(() => {
+          const breakdown = targetEmpData.daily_breakdown || [];
+          const summary = targetEmpData.calendar_summary || {};
+          const otMins = summary.total_overtime_minutes || 0;
+          const shortMins = summary.total_shortage_minutes || 0;
+          const netMins = summary.net_minutes !== undefined ? summary.net_minutes : (otMins - shortMins);
+          const absentDays = summary.absent_days !== undefined ? summary.absent_days : (targetEmpData.absents || 0);
+          const targetHours = summary.target_hours || targetEmpData.shift_hours || 12;
+
+          return (
+            <div style={{
+              background: '#0b1329',
+              borderRadius: '12px',
+              padding: isMobile ? '12px' : '16px',
+              marginTop: '14px',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+              border: '1px solid rgba(255, 255, 255, 0.08)'
+            }}>
+              {/* Header Summary */}
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ color: '#10b981', fontSize: isMobile ? '13px' : '14px', fontWeight: 800 }}>
+                    Overtime {formatDuration(otMins)}
+                  </span>
+                  <span style={{ color: '#ef4444', fontSize: isMobile ? '13px' : '14px', fontWeight: 800 }}>
+                    Shortage {formatDuration(shortMins)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ color: '#f8fafc', fontSize: isMobile ? '12px' : '13px', fontWeight: 700 }}>
+                      Absent {absentDays} days
+                    </span>
+                    <span style={{ color: '#f8fafc', fontSize: isMobile ? '12px' : '13px', fontWeight: 800 }}>
+                      Net {netMins >= 0 ? '+' : '-'}{formatDuration(Math.abs(netMins))}
+                    </span>
+                  </div>
+                  <span style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 600 }}>
+                    Target {targetHours}h per day
+                  </span>
+                </div>
+              </div>
+
+              {/* Day Cards Grid (3 columns on mobile, auto-fill on desktop) */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: isMobile ? 'repeat(3, 1fr)' : 'repeat(auto-fill, minmax(95px, 1fr))',
+                gap: '8px',
+                marginBottom: '14px'
+              }}>
+                {breakdown.map((dayItem) => {
+                  let cardBg = '#f1f5f9';
+                  let textColor = '#0f172a';
+                  let subColor = '#475569';
+                  let diffLabel = '';
+
+                  if (dayItem.isFuture) {
+                    cardBg = 'rgba(255, 255, 255, 0.05)';
+                    textColor = '#94a3b8';
+                    subColor = '#64748b';
+                    diffLabel = '--';
+                  } else if (dayItem.status === 'Holiday') {
+                    cardBg = '#e0e7ff';
+                    textColor = '#3730a3';
+                    subColor = '#4338ca';
+                    diffLabel = 'Holiday';
+                  } else if (dayItem.status === 'Leave') {
+                    cardBg = '#fef3c7';
+                    textColor = '#92400e';
+                    subColor = '#b45309';
+                    diffLabel = 'Leave';
+                  } else if (dayItem.status === 'Absent' || (dayItem.hours_worked === 0 && !dayItem.isFuture)) {
+                    cardBg = '#fee2e2';
+                    textColor = '#991b1b';
+                    subColor = '#dc2626';
+                    diffLabel = 'Absent';
+                  } else {
+                    const ot = dayItem.ot_minutes || 0;
+                    const sh = dayItem.short_minutes || 0;
+
+                    if (ot > 0) {
+                      cardBg = ot >= 90 ? '#34d399' : '#a7f3d0';
+                      textColor = '#064e3b';
+                      subColor = '#065f46';
+                      diffLabel = `+${formatDuration(ot)} OT`;
+                    } else if (sh > 0) {
+                      if (sh <= 60) {
+                        cardBg = '#f8fafc';
+                        textColor = '#0f172a';
+                        subColor = '#475569';
+                      } else if (sh <= 150) {
+                        cardBg = '#fed7aa';
+                        textColor = '#7c2d12';
+                        subColor = '#9a3412';
+                      } else {
+                        cardBg = '#fecdd3';
+                        textColor = '#881337';
+                        subColor = '#9f1239';
+                      }
+                      diffLabel = `-${formatDuration(sh)} Short`;
+                    } else {
+                      cardBg = '#bbf7d0';
+                      textColor = '#064e3b';
+                      subColor = '#065f46';
+                      diffLabel = '+00h 00m OT';
+                    }
+                  }
+
+                  return (
+                    <div
+                      key={dayItem.date}
+                      style={{
+                        background: cardBg,
+                        borderRadius: '8px',
+                        padding: '8px 6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '66px',
+                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)'
+                      }}
+                    >
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: subColor, display: 'block', lineHeight: 1 }}>
+                        {dayItem.formattedDate}
+                      </span>
+                      <span style={{ fontSize: '13px', fontWeight: 900, color: textColor, margin: '4px 0', lineHeight: 1.1 }}>
+                        {dayItem.isFuture ? '--' : dayItem.hours_worked > 0 ? formatDuration(dayItem.hours_worked * 60) : '00h 00m'}
+                      </span>
+                      <span style={{ fontSize: '10px', fontWeight: 800, color: subColor, display: 'block', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                        {diffLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Legend */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '10px' : '16px', flexWrap: 'wrap', fontSize: '11px', color: '#94a3b8' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#34d399' }}></div>
+                  <span>Overtime</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#f8fafc' }}></div>
+                  <span>Short up to 1h</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#fed7aa' }}></div>
+                  <span>Short 1h–2h30m</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </>
     );
   };
@@ -1431,7 +1677,37 @@ export default function Payroll() {
           </button>
         </div>
 
-        {/* 3. Month Selector */}
+        {/* 3. Branch / Restaurant Filter: ALL, R1, R2, R3 */}
+        <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '3px', borderRadius: '8px', border: '1px solid var(--surface-2)', gap: '2px', flexShrink: 0 }}>
+          {['ALL', 'R1', 'R2', 'R3'].map(opt => {
+            const isActive = selectedBranchFilter === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setSelectedBranchFilter(opt)}
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: isActive ? 'var(--primary)' : 'transparent',
+                  color: isActive ? '#000' : 'var(--text-secondary)',
+                  boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.12)' : 'none',
+                  transition: 'all 0.15s ease',
+                  letterSpacing: '0.3px',
+                  lineHeight: 1
+                }}
+              >
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 4. Month Selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Month:</label>
           <input 
@@ -1734,12 +2010,35 @@ export default function Payroll() {
                       
                       {/* Last Month Balance (Auto carryover from previous month) */}
                       <td style={{ padding: '8px', fontSize: '12px', fontWeight: 700, background: '#f5f3ff', whiteSpace: 'nowrap' }}>
-                        {(() => {
-                          const bal = parseFloat(item.last_month_balance || 0);
-                          if (bal > 0) return <span style={{ color: 'var(--green)' }}>+{bal.toFixed(2)}</span>;
-                          if (bal < 0) return <span style={{ color: '#ef4444' }}>{bal.toFixed(2)}</span>;
-                          return <span style={{ color: 'var(--text-muted)' }}>0.00</span>;
-                        })()}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+                          {(() => {
+                            const bal = parseFloat(item.last_month_balance || 0);
+                            if (bal > 0) return <span style={{ color: 'var(--green)' }}>+{bal.toFixed(2)}</span>;
+                            if (bal < 0) return <span style={{ color: '#ef4444' }}>{bal.toFixed(2)}</span>;
+                            return <span style={{ color: 'var(--text-muted)' }}>0.00</span>;
+                          })()}
+                          {showActions && parseFloat(item.last_month_balance || 0) !== 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleClearPastBalance(item.id, item.name);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#f97316',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                display: 'inline-flex',
+                                alignItems: 'center'
+                              }}
+                              title="Clear past balance to 0.00"
+                            >
+                              <RotateCcw size={11} />
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                       {/* Default Editables / Synced from Modal */}

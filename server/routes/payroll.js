@@ -356,26 +356,54 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       let otherOvertimeHours = 0;
       let lateDays = 0;
 
+      const dailyBreakdown = [];
+      let calOvertimeMins = 0;
+      let calShortageMins = 0;
+
       // Loop through each day of the month to run calculations identical to AttendanceReports
       for (let day = 1; day <= totalDaysInMonth; day++) {
         const dayStr = `${month}-${String(day).padStart(2, '0')}`;
         const daySessions = empLogs[dayStr] || [];
+        const dateObj = new Date(`${dayStr}T12:00:00+03:00`);
+        const dayFormatted = dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 
         // Check if date is in the future
         if (dayStr > todayStr) {
+          dailyBreakdown.push({
+            date: dayStr,
+            formattedDate: dayFormatted,
+            day,
+            status: 'Future',
+            hours_worked: 0,
+            shift_hours: standardShiftHours,
+            ot_minutes: 0,
+            short_minutes: 0,
+            isFuture: true
+          });
           continue;
         }
 
+        let dayStatus = 'Present';
+        let dayHours = 0;
+        let dayOtMinutes = 0;
+        let dayShortMinutes = 0;
+        let currentDayShiftHours = standardShiftHours;
+
         if (daySessions.length > 0) {
           if (daySessions.some(s => s.status === 'Late' || s.is_late)) {
-          lateDays++;
-        }
+            lateDays++;
+            dayStatus = 'Late';
+          }
 
-        const mainSession = daySessions[0];
+          const mainSession = daySessions[0];
+          currentDayShiftHours = parseFloat(mainSession.shift_hours || emp.shift_hours || 12.0);
+
           if (mainSession.status === 'Holiday') {
             holidays++;
+            dayStatus = 'Holiday';
           } else if (mainSession.status === 'Leave') {
             leavesCount++;
+            dayStatus = 'Leave';
             if (mainSession.is_paid) {
               paidLeaves++;
               paidLeaveHours += standardShiftHours;
@@ -384,14 +412,10 @@ router.get('/calculate', authenticateToken, async (req, res) => {
             }
           } else {
             // Sum all hours worked on this day using pre-computed hours_worked
-            // (matches AttendanceReports.jsx which uses s.hours_worked)
-            let dayHours = 0;
             daySessions.forEach(s => {
               dayHours += s.hours_worked || 0;
             });
             dayHours = Math.min(24, dayHours); // Cap to 24 hours max per day
-
-            const currentDayShiftHours = parseFloat(mainSession.shift_hours || emp.shift_hours || 12.0);
 
             if (dayHours >= 6.0) {
               presents++;
@@ -402,11 +426,35 @@ router.get('/calculate', authenticateToken, async (req, res) => {
               onlyOvertimeDays++;
               onlyOvertimeHours += dayHours;
             }
+
+            const diffMins = Math.round((dayHours - currentDayShiftHours) * 60);
+            if (diffMins > 0) {
+              dayOtMinutes = diffMins;
+              calOvertimeMins += diffMins;
+            } else if (diffMins < 0) {
+              dayShortMinutes = Math.abs(diffMins);
+              calShortageMins += Math.abs(diffMins);
+            }
           }
         } else {
           // No record means absent for past days
           absents++;
+          dayStatus = 'Absent';
+          dayShortMinutes = Math.round(standardShiftHours * 60);
+          calShortageMins += dayShortMinutes;
         }
+
+        dailyBreakdown.push({
+          date: dayStr,
+          formattedDate: dayFormatted,
+          day,
+          status: dayStatus,
+          hours_worked: parseFloat(dayHours.toFixed(2)),
+          shift_hours: currentDayShiftHours,
+          ot_minutes: dayOtMinutes,
+          short_minutes: dayShortMinutes,
+          isFuture: false
+        });
       }
 
       // If paid leaves exceed allowed leaves, convert excess to unpaid leaves
@@ -464,13 +512,15 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
       // Last month balance calculation (unpaid balance or overpaid carryover)
       let lastMonthBalance = 0;
-      const prevRecord = prevRecordsMap[emp.id];
-      if (prevRecord) {
-        const prevNet = parseFloat(prevRecord.net_salary || 0);
-        const prevPaid = parseFloat(prevRecord.paid_amount || 0);
-        lastMonthBalance = Math.round((prevNet - prevPaid) * 100) / 100;
-      } else if (savedRecord && savedRecord.last_month_balance !== undefined && savedRecord.last_month_balance !== null) {
+      if (savedRecord && savedRecord.last_month_balance !== undefined && savedRecord.last_month_balance !== null) {
         lastMonthBalance = parseFloat(savedRecord.last_month_balance || 0);
+      } else {
+        const prevRecord = prevRecordsMap[emp.id];
+        if (prevRecord) {
+          const prevNet = parseFloat(prevRecord.net_salary || 0);
+          const prevPaid = parseFloat(prevRecord.paid_amount || 0);
+          lastMonthBalance = Math.round((prevNet - prevPaid) * 100) / 100;
+        }
       }
 
       // Total adjustments (Expenses / Deductions & Additions)
@@ -553,7 +603,15 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         status: paymentStatus,
         notes: notes,
         branch: emp.branch || '',
-        department: emp.department || ''
+        department: emp.department || '',
+        daily_breakdown: dailyBreakdown,
+        calendar_summary: {
+          total_overtime_minutes: calOvertimeMins,
+          total_shortage_minutes: calShortageMins,
+          net_minutes: calOvertimeMins - calShortageMins,
+          absent_days: absents,
+          target_hours: standardShiftHours
+        }
       };
     });
 
@@ -840,6 +898,53 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST clear previous month carryover balance (Sets past balance to 0.00)
+router.post('/clear-balance', authenticateToken, isAdmin, async (req, res) => {
+  const { employee_id, month } = req.body;
+  if (!employee_id || !month) {
+    return res.status(400).json({ error: 'employee_id and month are required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const [year, monthNum] = month.split('-').map(Number);
+    let prevYear = year;
+    let prevMonthNum = monthNum - 1;
+    if (prevMonthNum === 0) {
+      prevMonthNum = 12;
+      prevYear = year - 1;
+    }
+    const prevMonthStr = `${prevYear}-${String(prevMonthNum).padStart(2, '0')}`;
+
+    // 1. Settle previous month if record exists (so prevNet - prevPaid becomes 0)
+    await client.query(`
+      UPDATE employee_payroll_records 
+      SET paid_amount = net_salary,
+          cash_paid = net_salary,
+          bank_paid = 0,
+          status = 'Paid'
+      WHERE employee_id = $1 AND month = $2
+    `, [employee_id, prevMonthStr]);
+
+    // 2. Set current month's last_month_balance to 0 if record exists
+    await client.query(`
+      UPDATE employee_payroll_records
+      SET last_month_balance = 0
+      WHERE employee_id = $1 AND month = $2
+    `, [employee_id, month]);
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Past balance cleared to 0.00' });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
