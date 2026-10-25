@@ -485,7 +485,30 @@ export default function AttendanceTracker() {
     if (emp.on_break && emp.break_start) {
       totalBreakSecs += Math.floor((Date.now() - new Date(emp.break_start).getTime()) / 1000);
     }
-    const expectedCheckoutTime = checkInTime + (shiftHours * 60 * 60 * 1000) + (totalBreakSecs * 1000);
+    
+    let expectedCheckoutTime = checkInTime + (shiftHours * 60 * 60 * 1000) + (totalBreakSecs * 1000);
+
+    const shiftEndTime = emp.shift_end_time || emp.sessions?.[emp.sessions.length - 1]?.shift_end_time;
+    const shiftStartTime = emp.shift_start_time || emp.sessions?.[emp.sessions.length - 1]?.shift_start_time;
+
+    if (shiftEndTime) {
+      const cleanDate = getSaudiDateString(emp.date || emp.check_in || new Date());
+      const [sH, sM] = (shiftStartTime || '00:00').split(':').map(Number);
+      const [eH, eM] = shiftEndTime.split(':').map(Number);
+      let endDate = new Date(`${cleanDate}T12:00:00+03:00`);
+      if (eH < sH || (eH === sH && eM < sM)) {
+        endDate.setDate(endDate.getDate() + 1);
+      }
+      const y = endDate.getFullYear();
+      const m = String(endDate.getMonth() + 1).padStart(2, '0');
+      const d = String(endDate.getDate()).padStart(2, '0');
+      const eHStr = String(eH).padStart(2, '0');
+      const eMStr = String(eM).padStart(2, '0');
+      const scheduledShiftEndMs = new Date(`${y}-${m}-${d}T${eHStr}:${eMStr}:00+03:00`).getTime();
+
+      expectedCheckoutTime = Math.min(scheduledShiftEndMs, expectedCheckoutTime);
+    }
+
     const overtimeMins = Math.floor((Date.now() - expectedCheckoutTime) / (1000 * 60));
 
     if (overtimeMins > 0) {

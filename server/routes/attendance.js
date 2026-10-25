@@ -416,6 +416,9 @@ router.get('/today', authenticateToken, async (req, res) => {
         attendance_id: lastSession ? lastSession.attendance_id : null,
         check_in: lastSession ? lastSession.check_in : null,
         check_out: lastSession ? lastSession.check_out : null,
+        shift_start_time: lastSession ? lastSession.shift_start_time : null,
+        shift_end_time: lastSession ? lastSession.shift_end_time : null,
+        date: lastSession ? lastSession.date : null,
         attendance_status: lastSession ? lastSession.attendance_status : null,
         on_break: lastSession ? lastSession.on_break : false,
         break_start: lastSession ? lastSession.break_start : null,
@@ -730,7 +733,32 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     const remainingMs = Math.max(0, expectedMs - prevSessionsMs);
     
     const checkInTime = new Date(session.check_in).getTime();
-    const expectedCheckoutTime = checkInTime + remainingMs + (totalBreakSecs * 1000);
+    let expectedCheckoutTime = checkInTime + remainingMs + (totalBreakSecs * 1000);
+
+    // If employee has a scheduled shift_end_time, any time worked after the scheduled shift end is Overtime,
+    // even if the employee arrived late and their total worked hours didn't reach full shift hours.
+    if (session.shift_end_time) {
+      const cleanDate = typeof session.date === 'string'
+        ? session.date.split('T')[0]
+        : (session.date instanceof Date ? session.date.toLocaleDateString('en-CA') : String(session.date).split('T')[0]);
+
+      const [sH, sM] = (session.shift_start_time || '00:00').split(':').map(Number);
+      const [eH, eM] = session.shift_end_time.split(':').map(Number);
+      let endDate = new Date(`${cleanDate}T12:00:00+03:00`);
+      if (eH < sH || (eH === sH && eM < sM)) {
+        // Overnight shift: ends next calendar day
+        endDate.setDate(endDate.getDate() + 1);
+      }
+      const y = endDate.getFullYear();
+      const m = String(endDate.getMonth() + 1).padStart(2, '0');
+      const d = String(endDate.getDate()).padStart(2, '0');
+      const eHStr = String(eH).padStart(2, '0');
+      const eMStr = String(eM).padStart(2, '0');
+      const scheduledShiftEndMs = new Date(`${y}-${m}-${d}T${eHStr}:${eMStr}:00+03:00`).getTime();
+      
+      expectedCheckoutTime = Math.min(scheduledShiftEndMs, expectedCheckoutTime);
+    }
+
     let actualCheckoutTime = Date.now();
     
     // Prevent negative duty hours if checkout happens before the clamped check-in time
