@@ -295,9 +295,9 @@ export default function AttendanceReports() {
 
   const getHolidayDayName = () => {
     if (!holidayDate) return ''
-    const [year, month, day] = holidayDate.split('-').map(Number)
-    const date = new Date(year, month - 1, day)
-    return date.toLocaleDateString('en-US', { weekday: 'long' })
+    const cleanDate = holidayDate.includes('T') ? holidayDate.split('T')[0] : holidayDate
+    const date = new Date(`${cleanDate}T12:00:00+03:00`)
+    return date.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long' })
   }
 
   // Scroll ref — used to toggle active CSS classes on the grid container
@@ -335,8 +335,7 @@ export default function AttendanceReports() {
 
   // Filters
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    return getSaudiTodayDate().slice(0, 7)
   })
   const [selectedEmployee, setSelectedEmployee] = useState('All')
 
@@ -367,11 +366,14 @@ export default function AttendanceReports() {
   const getDaysInMonth = (monthStr) => {
     if (!monthStr) return []
     const [year, month] = monthStr.split('-').map(Number)
-    const date = new Date(year, month - 1, 1)
+    const totalDays = new Date(year, month, 0).getDate()
     const days = []
-    while (date.getMonth() === month - 1) {
-      days.push(new Date(date))
-      date.setDate(date.getDate() + 1)
+    for (let d = 1; d <= totalDays; d++) {
+      const dStr = String(d).padStart(2, '0')
+      const mStr = String(month).padStart(2, '0')
+      // Anchor to 12:00:00+03:00 (midday Asia/Riyadh) so client local timezones (e.g. PKT UTC+5)
+      // do not shift midnight into previous day in Saudi Arabia time.
+      days.push(new Date(`${year}-${mStr}-${dStr}T12:00:00+03:00`))
     }
     return days
   }
@@ -604,7 +606,9 @@ export default function AttendanceReports() {
     try {
       const headers = ['Code', 'Employee Name']
       daysInMonth.forEach(day => {
-        headers.push(`${day.getDate()} (${day.toLocaleDateString([], { weekday: 'short' })})`)
+        const dayNum = day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', day: 'numeric' })
+        const weekday = day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'short' })
+        headers.push(`${dayNum} (${weekday})`)
       })
       headers.push('P', 'A', 'L', 'H', 'OOT Days', 'Late Arrival', 'Req Duty', 'Worked Duty', 'Short Duty', 'Break Time', 'Only OT', 'Other OT', 'Total OT (±)', 'Total (Duty ± OT)')
 
@@ -1181,7 +1185,7 @@ export default function AttendanceReports() {
 
                   {/* Day columns — scroll with the rest */}
                   {daysInMonth.map(day => (
-                    <th key={day.getDate()} style={{
+                    <th key={formatLocalDate(day)} style={{
                       minWidth: 85,
                       textAlign: 'center',
                       borderBottom: '2px solid var(--surface-2)',
@@ -1191,8 +1195,8 @@ export default function AttendanceReports() {
                       fontWeight: 600,
                       background: 'var(--surface-1)'
                     }}>
-                      <div style={{ color: 'var(--text-muted)' }}>{day.toLocaleDateString([], { weekday: 'short' })}</div>
-                      <div style={{ fontSize: 13, fontWeight: 750, color: 'var(--text)' }}>{day.getDate()}</div>
+                      <div style={{ color: 'var(--text-muted)' }}>{day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'short' })}</div>
+                      <div style={{ fontSize: 13, fontWeight: 750, color: 'var(--text)' }}>{day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', day: 'numeric' })}</div>
                     </th>
                   ))}
 
@@ -1770,7 +1774,7 @@ export default function AttendanceReports() {
                       const isPast = dateStr < todayStr
                       return (
                         <tr key={dateStr} style={{ borderBottom: '1px solid var(--surface-2)', opacity: isPast ? 1 : 0.45 }}>
-                          <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>{day.toLocaleDateString([], { month: 'short', day: 'numeric' })}</td>
+                          <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>{day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'short', day: 'numeric' })}</td>
                           <td colSpan={6} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
                             {isPast ? 'Absent / Unmarked' : 'Future Day'}
                           </td>
@@ -1828,7 +1832,7 @@ export default function AttendanceReports() {
                       return (
                         <tr key={`${dateStr}-${sIdx}`} style={{ borderBottom: '1px solid var(--surface-2)' }}>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>
-                            {sIdx === 0 ? day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}
+                            {sIdx === 0 ? day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'short', day: 'numeric' }) : ''}
                           </td>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 700 }}>
                             <span style={{

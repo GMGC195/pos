@@ -296,11 +296,11 @@ async function checkExpiries() {
 }
 
 function initCron() {
-  // Run every day at midnight (00:00)
+  // Run every day at midnight (00:00 Asia/Riyadh)
   cron.schedule('0 0 * * *', () => {
     checkExpiries();
-  });
-  console.log('✅ Daily expiry check cron initialized (00:00)');
+  }, { timezone: 'Asia/Riyadh' });
+  console.log('✅ Daily expiry check cron initialized (00:00 Asia/Riyadh)');
   
   // Also run a check 5 seconds after server startup
   setTimeout(() => {
