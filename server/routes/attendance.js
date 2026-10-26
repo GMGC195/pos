@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { clampBreakLogsToDutyWindow } = require('../utils/attendanceHelper');
 
 let lastIo = null;
 
@@ -492,10 +493,22 @@ router.get('/today', authenticateToken, async (req, res) => {
       empSessions.forEach(row => {
         const checkInTime = new Date(row.check_in).getTime();
         const checkOutTime = row.check_out ? new Date(row.check_out).getTime() : Date.now();
+        
+        const rowBreakLogs = Array.isArray(row.break_logs) 
+          ? row.break_logs 
+          : (typeof row.break_logs === 'string' ? JSON.parse(row.break_logs || '[]') : []);
+        
         let breakSecs = row.total_break_duration_seconds || 0;
-        if (row.on_break && row.break_start) {
+        if (row.on_break && row.break_start && !row.check_out) {
           breakSecs += Math.floor((Date.now() - new Date(row.break_start).getTime()) / 1000);
+        } else if (rowBreakLogs.length > 0 && row.check_out) {
+          const clamped = clampBreakLogsToDutyWindow(rowBreakLogs, row.check_in, row.check_out);
+          breakSecs = clamped.totalBreakSecs;
+        } else if (row.check_out) {
+          const maxPossible = Math.max(0, Math.floor((checkOutTime - checkInTime) / 1000));
+          breakSecs = Math.min(breakSecs, maxPossible);
         }
+
         totalBreakSecondsToday += breakSecs;
         const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
         totalHoursToday += Math.max(0, sessionMs / (1000 * 60 * 60));
@@ -893,6 +906,13 @@ router.post('/check-out', authenticateToken, async (req, res) => {
       }
     }
 
+    // Auto-clamp break logs to finalCheckoutTime:
+    // Any break starting at or after finalCheckoutTime is removed.
+    // Any break ending after finalCheckoutTime is trimmed/clamped to finalCheckoutTime.
+    const clampedBreakData = clampBreakLogsToDutyWindow(breakLogs, session.check_in, finalCheckoutTime);
+    totalBreakSecs = clampedBreakData.totalBreakSecs;
+    breakLogs = clampedBreakData.breakLogs;
+
     const result = await pool.query(
       'UPDATE employee_attendance SET check_out = $1, on_break = false, break_start = null, total_break_duration_seconds = $2, checked_out_by = $4, break_logs = $5 WHERE id = $3 RETURNING *',
       [finalCheckoutTime, totalBreakSecs, session.id, req.user.username, JSON.stringify(breakLogs)]
@@ -1142,15 +1162,27 @@ router.get('/reports', authenticateToken, async (req, res) => {
         };
       }
       
+      const rowBreakLogs = Array.isArray(row.break_logs) 
+        ? row.break_logs 
+        : (typeof row.break_logs === 'string' ? JSON.parse(row.break_logs || '[]') : []);
+      
+      let effectiveBreakSecs = parseInt(row.total_break_duration_seconds) || 0;
+      if (rowBreakLogs.length > 0 && checkOutTime) {
+        const clamped = clampBreakLogsToDutyWindow(rowBreakLogs, row.check_in, row.check_out);
+        effectiveBreakSecs = clamped.totalBreakSecs;
+      } else if (checkOutTime) {
+        // Legacy fallback: break cannot exceed total elapsed session time
+        const maxPossibleBreak = Math.max(0, Math.floor((checkOutTime - checkInTime) / 1000));
+        effectiveBreakSecs = Math.min(effectiveBreakSecs, maxPossibleBreak);
+      }
+
       if (checkOutTime) {
-        const breakSecs = row.total_break_duration_seconds || 0;
-        const netMs = checkOutTime - checkInTime - (breakSecs * 1000);
+        const netMs = checkOutTime - checkInTime - (effectiveBreakSecs * 1000);
         durationHours = Math.max(0, netMs / (1000 * 60 * 60));
         otHours = Math.max(0, durationHours - shiftHours);
       } else {
         // Active session for today
-        const breakSecs = row.total_break_duration_seconds || 0;
-        const netMs = Date.now() - checkInTime - (breakSecs * 1000);
+        const netMs = Date.now() - checkInTime - (effectiveBreakSecs * 1000);
         durationHours = Math.max(0, netMs / (1000 * 60 * 60));
         otHours = Math.max(0, durationHours - shiftHours);
       }
@@ -1447,16 +1479,18 @@ router.put('/session/:id', authenticateToken, async (req, res) => {
     let parsedBreakLogs = null;
     if (break_logs !== undefined && break_logs !== null) {
       parsedBreakLogs = Array.isArray(break_logs) ? break_logs : (typeof break_logs === 'string' ? JSON.parse(break_logs) : []);
-      totalBreakSecs = 0;
-      parsedBreakLogs.forEach(b => {
-        if (b.break_in && b.break_out) {
-          const dur = Math.max(0, Math.floor((new Date(b.break_out).getTime() - new Date(b.break_in).getTime()) / 1000));
-          b.duration_seconds = dur;
-          totalBreakSecs += dur;
-        } else if (b.duration_seconds) {
-          totalBreakSecs += Number(b.duration_seconds);
-        }
-      });
+    } else if (check_out) {
+      // If caller didn't pass break_logs, load existing break_logs to clamp against new check_out
+      const curr = await pool.query('SELECT break_logs, total_break_duration_seconds FROM employee_attendance WHERE id = $1', [id]);
+      if (curr.rows.length > 0 && curr.rows[0].break_logs) {
+        parsedBreakLogs = Array.isArray(curr.rows[0].break_logs) ? curr.rows[0].break_logs : (typeof curr.rows[0].break_logs === 'string' ? JSON.parse(curr.rows[0].break_logs) : []);
+      }
+    }
+
+    if (parsedBreakLogs !== null) {
+      const clamped = clampBreakLogsToDutyWindow(parsedBreakLogs, check_in, check_out || null);
+      parsedBreakLogs = clamped.breakLogs;
+      totalBreakSecs = clamped.totalBreakSecs;
     }
 
     let resDB;

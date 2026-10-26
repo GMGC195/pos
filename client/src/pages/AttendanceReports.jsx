@@ -757,9 +757,17 @@ export default function AttendanceReports() {
                 if (s.on_break && s.break_start && !bLogs.some(b => !b.break_out)) {
                   bLogs.push({ break_in: s.break_start, break_out: null })
                 }
+                const sOutMs = s.check_out ? new Date(s.check_out).getTime() : null;
                 bLogs.forEach(b => {
+                  if (!b || !b.break_in) return;
+                  const bInMs = new Date(b.break_in).getTime();
+                  if (sOutMs && bInMs >= sOutMs) return; // Skip break that started after checkout
+                  let bOutTime = b.break_out;
+                  if (sOutMs && bOutTime && new Date(bOutTime).getTime() > sOutMs) {
+                    bOutTime = s.check_out; // Clamp break ending after checkout
+                  }
                   const bIn = b.break_in ? new Date(b.break_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'
-                  const bOut = b.break_out ? new Date(b.break_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'
+                  const bOut = bOutTime ? new Date(bOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'
                   breakLines.push(`<span style="color: #E11D48; font-weight: bold;">B: In: ${bIn} Out: ${bOut}</span>`)
                 })
               })
@@ -1305,7 +1313,17 @@ export default function AttendanceReports() {
                                 if (s.on_break && s.break_start && !bLogs.some(b => !b.break_out)) {
                                   bLogs.push({ break_in: s.break_start, break_out: null })
                                 }
-                                bLogs.forEach(b => allDayBreaks.push(b))
+                                const sOutMs = s.check_out ? new Date(s.check_out).getTime() : null;
+                                bLogs.forEach(b => {
+                                  if (!b || !b.break_in) return;
+                                  const bInMs = new Date(b.break_in).getTime();
+                                  if (sOutMs && bInMs >= sOutMs) return; // Skip break that started after checkout
+                                  let bOutTime = b.break_out;
+                                  if (sOutMs && bOutTime && new Date(bOutTime).getTime() > sOutMs) {
+                                    bOutTime = s.check_out; // Clamp break ending after checkout
+                                  }
+                                  allDayBreaks.push({ ...b, break_out: bOutTime })
+                                })
                               })
 
                               let neededBottom = 16 + 14

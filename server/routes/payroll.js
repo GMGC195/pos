@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { clampBreakLogsToDutyWindow } = require('../utils/attendanceHelper');
 
 
 
@@ -207,7 +208,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
     // Get attendance/leave logs for the selected month
     const logsRes = await pool.query(
-      `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, ea.shift_hours, ea.total_break_duration_seconds, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
+      `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, ea.shift_hours, ea.total_break_duration_seconds, ea.break_logs, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
        FROM employee_attendance ea
        WHERE TO_CHAR(ea.date, 'YYYY-MM') = $1
        ORDER BY ea.date ASC, ea.check_in ASC`,
@@ -225,7 +226,19 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       if (row.status !== 'Holiday' && row.status !== 'Leave') {
         const checkInTime = row.check_in ? new Date(row.check_in).getTime() : null;
         const checkOutTime = row.check_out ? new Date(row.check_out).getTime() : null;
-        const breakSecs = parseInt(row.total_break_duration_seconds) || 0;
+        
+        const rowBreakLogs = Array.isArray(row.break_logs) 
+          ? row.break_logs 
+          : (typeof row.break_logs === 'string' ? JSON.parse(row.break_logs || '[]') : []);
+        
+        let breakSecs = parseInt(row.total_break_duration_seconds) || 0;
+        if (rowBreakLogs.length > 0 && checkOutTime) {
+          const clamped = clampBreakLogsToDutyWindow(rowBreakLogs, row.check_in, row.check_out);
+          breakSecs = clamped.totalBreakSecs;
+        } else if (checkOutTime && checkInTime) {
+          const maxPossibleBreak = Math.max(0, Math.floor((checkOutTime - checkInTime) / 1000));
+          breakSecs = Math.min(breakSecs, maxPossibleBreak);
+        }
         
         if (checkInTime && checkOutTime) {
           const netMs = checkOutTime - checkInTime - (breakSecs * 1000);
