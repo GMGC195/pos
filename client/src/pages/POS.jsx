@@ -27,7 +27,8 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronLeft,
-  Ban
+  Ban,
+  Move
 } from 'lucide-react'
 import {
   savePendingOrder,
@@ -231,6 +232,25 @@ export default function POS() {
   const [showTableDotsMenu, setShowTableDotsMenu] = useState(false)
   const [tablesList, setTablesList] = useState([])
   const [showManageTables, setShowManageTables] = useState(false)
+  const [isArrangingTables, setIsArrangingTables] = useState(false)
+  const [posDragIndex, setPosDragIndex] = useState(null)
+  const [posDragOverIndex, setPosDragOverIndex] = useState(null)
+
+  const handleGridTableReorder = async (fromIdx, toIdx) => {
+    if (fromIdx === null || fromIdx === toIdx) return;
+    const updated = [...tablesList];
+    const [moved] = updated.splice(fromIdx, 1);
+    updated.splice(toIdx, 0, moved);
+    setTablesList(updated);
+    try {
+      await axios.put('/api/tables/reorder', { tableIds: updated.map(t => t.id) });
+      toast.success('Table layout updated', { duration: 1500 });
+    } catch (err) {
+      console.error('Failed to save layout:', err);
+      toast.error('Failed to save layout');
+      fetchTablesList();
+    }
+  };
   const [currentTime, setCurrentTime] = useState(Date.now())
   const [selectedBranch, setSelectedBranch] = useState('Branch 1')
   
@@ -687,7 +707,7 @@ export default function POS() {
         payment_method: method,
         customer_name: customerInfo.name,
         customer_phone: customerInfo.phone,
-        customer_address: customerInfo.orderType === 'Dine-In' ? (customerInfo.tableNumber ? `Table ${String(customerInfo.tableNumber).replace(/^Table\s*/i, '')}` : 'Dine-In') : customerInfo.address,
+        customer_address: customerInfo.orderType === 'Dine-In' ? (customerInfo.tableNumber ? customerInfo.tableNumber : 'Dine-In') : customerInfo.address,
         discount: finalDiscount,
         client_order_id: crypto.randomUUID(),
         order_type: customerInfo.orderType,
@@ -1130,18 +1150,25 @@ export default function POS() {
                     <button 
                       onClick={() => setShowTableDotsMenu(!showTableDotsMenu)}
                       style={{ padding: '4px', borderRadius: 6, border: '1px solid var(--surface-2)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      title="Table Options"
                     >
                       <MoreVertical size={18} color="var(--text-secondary)" />
                     </button>
                     {showTableDotsMenu && (
                       <>
                         <div style={{ position: 'fixed', inset: 0, zIndex: 998 }} onClick={() => setShowTableDotsMenu(false)} />
-                        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 8, boxShadow: '0 4px 6px rgba(0,0,0,0.1)', zIndex: 999, minWidth: 150, overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 8, boxShadow: '0 4px 6px rgba(0,0,0,0.1)', zIndex: 999, minWidth: 175, overflow: 'hidden' }}>
                           <button 
-                            style={{ width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 14 }}
+                            style={{ width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}
                             onClick={() => { setShowManageTables(true); setShowTableDotsMenu(false); }}
                           >
                             Manage Tables
+                          </button>
+                          <button 
+                            style={{ width: '100%', padding: '10px 16px', background: 'transparent', border: 'none', borderTop: '1px solid var(--surface-2)', textAlign: 'left', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}
+                            onClick={() => { setIsArrangingTables(!isArrangingTables); setShowTableDotsMenu(false); }}
+                          >
+                            <Move size={14} /> {isArrangingTables ? 'Done Arranging' : 'Arrange Table Layout'}
                           </button>
                         </div>
                       </>
@@ -1149,16 +1176,66 @@ export default function POS() {
                   </div>
                 )}
               </div>
-              <h4 style={{ margin: '0 0 6px 0', textAlign: 'center', fontSize: '13px' }}>Select a Table</h4>
+
+              {isArrangingTables ? (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,184,0,0.15)', padding: '6px 12px', borderRadius: 8, marginBottom: 8, border: '1px solid var(--primary)' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Move size={14} color="var(--primary)" /> Drag & drop table cards to arrange layout
+                  </span>
+                  <button 
+                    className="btn btn-sm btn-primary" 
+                    style={{ padding: '3px 12px', fontSize: 12 }} 
+                    onClick={() => setIsArrangingTables(false)}
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <h4 style={{ margin: '0 0 6px 0', textAlign: 'center', fontSize: '13px' }}>Select a Table</h4>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 10, overflowY: 'auto', flex: 1, paddingRight: 4, paddingBottom: 60, WebkitOverflowScrolling: 'touch', alignContent: 'start' }}>
-                {tablesList.map(t => {
-                  const tableStr = String(t.table_number);
-                  const activeOrder = activeOrders.find(o => (o.order_type === 'Dine-In' || (!o.order_type && o.customer_address?.startsWith('Table '))) && String(o.table_number || o.customer_address?.replace('Table ', '')) === tableStr && o.status === 'Hold');
+                {tablesList.map((t, idx) => {
+                  const tableStr = String(t.table_number || '').trim();
+                  const activeOrder = activeOrders.find(o => {
+                    if (o.status !== 'Hold') return false;
+                    const isDineIn = o.order_type === 'Dine-In' || (!o.order_type && o.customer_address);
+                    if (!isDineIn) return false;
+                    const oTable = String(o.table_number || (o.customer_address ? o.customer_address.replace(/^Table\s*/i, '') : '')).trim().toLowerCase();
+                    const curTable = tableStr.toLowerCase();
+                    return oTable === curTable || oTable.replace(/^table\s*/i, '') === curTable.replace(/^table\s*/i, '');
+                  });
                   const isBooked = !!activeOrder;
+                  const isDraggingThis = posDragIndex === idx;
+                  const isOverThis = posDragOverIndex === idx && posDragIndex !== idx;
+
                   return (
                     <button
                       key={t.id}
+                      draggable={isArrangingTables}
+                      onDragStart={e => {
+                        if (!isArrangingTables) return;
+                        setPosDragIndex(idx);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={e => {
+                        if (!isArrangingTables) return;
+                        e.preventDefault();
+                        if (posDragOverIndex !== idx) setPosDragOverIndex(idx);
+                      }}
+                      onDrop={e => {
+                        if (!isArrangingTables) return;
+                        e.preventDefault();
+                        handleGridTableReorder(posDragIndex, idx);
+                        setPosDragIndex(null);
+                        setPosDragOverIndex(null);
+                      }}
+                      onDragEnd={() => {
+                        setPosDragIndex(null);
+                        setPosDragOverIndex(null);
+                      }}
                       onClick={() => {
+                        if (isArrangingTables) return;
                         if (isBooked) {
                           if (isManagement) {
                             setDetailOrder(activeOrder);
@@ -1177,12 +1254,12 @@ export default function POS() {
                       style={{
                         padding: '12px 8px',
                         borderRadius: 12,
-                        border: 'none',
+                        border: isOverThis ? '2px dashed #fff' : isArrangingTables ? '2px dashed rgba(255,255,255,0.7)' : 'none',
                         background: isBooked ? '#3b82f6' : '#10b981',
                         color: 'white',
                         fontWeight: 700,
                         fontSize: 14,
-                        cursor: isManagement && !isBooked ? 'not-allowed' : 'pointer',
+                        cursor: isArrangingTables ? 'grab' : (isManagement && !isBooked ? 'not-allowed' : 'pointer'),
                         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
                         display: 'flex',
                         flexDirection: 'column',
@@ -1190,13 +1267,21 @@ export default function POS() {
                         justifyContent: 'center',
                         minHeight: '80px',
                         gap: 4,
-                        transition: 'transform 0.1s'
+                        opacity: isDraggingThis ? 0.4 : 1,
+                        transform: isOverThis ? 'scale(1.05)' : 'none',
+                        transition: 'transform 0.1s, opacity 0.1s',
+                        position: 'relative'
                       }}
-                      onMouseDown={e => e.currentTarget.style.transform = 'scale(0.95)'}
-                      onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
-                      onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                      onMouseDown={e => { if (!isArrangingTables) e.currentTarget.style.transform = 'scale(0.95)'; }}
+                      onMouseUp={e => { if (!isArrangingTables) e.currentTarget.style.transform = 'scale(1)'; }}
+                      onMouseLeave={e => { if (!isArrangingTables) e.currentTarget.style.transform = 'scale(1)'; }}
                     >
-                      <span>Table {String(t.table_number).replace(/^Table\s*/i, '')}</span>
+                      {isArrangingTables && (
+                        <span style={{ position: 'absolute', top: 4, left: 6, fontSize: 10, background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: 4 }}>
+                          #{idx + 1}
+                        </span>
+                      )}
+                      <span>{t.table_number}</span>
                       {isBooked && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                           <span style={{ fontSize: 11, fontWeight: 500, background: 'rgba(255,255,255,0.2)', padding: '2px 6px', borderRadius: 4 }}>Booked</span>
@@ -1477,7 +1562,7 @@ export default function POS() {
                                 ) : type === 'Takeaway' ? (
                                   <>{o.customer_name || 'Guest'}</>
                                 ) : (
-                                  <>Table {String(o.table_number || (o.customer_address ? o.customer_address.replace('Table ', '') : '-')).replace(/^Table\s*/i, '')} {o.customer_name && ` | ${o.customer_name}`}</>
+                                  <>{o.table_number || (o.customer_address ? o.customer_address.replace(/^Table\s*/i, '') : '-')} {o.customer_name && ` | ${o.customer_name}`}</>
                                 )}
                               </div>
                               <div className="order-actions" style={{ display: 'flex', gap: 4 }}>
@@ -1781,7 +1866,7 @@ export default function POS() {
                     </span>
                     {customerInfo.orderType === 'Dine-In' && customerInfo.tableNumber && (
                       <span style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', padding: '4px 10px', borderRadius: 6, fontSize: 13, border: '1px solid #3b82f6', fontWeight: 'bold' }}>
-                        Table {String(customerInfo.tableNumber).replace(/^Table\s*/i, '')}
+                        {customerInfo.tableNumber}
                       </span>
                     )}
                   </div>

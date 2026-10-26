@@ -680,15 +680,19 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         table_number VARCHAR(50) NOT NULL UNIQUE,
         status VARCHAR(20) DEFAULT 'Active',
         available_branches JSONB DEFAULT '["Branch 1", "Branch 2", "Branch 3"]'::jsonb,
+        sort_order INT DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // Ensure sort_order column exists
+    await pool.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0`);
 
     // Pre-fill 1 to 20 tables if the table is completely empty
     const checkTables = await pool.query('SELECT COUNT(*) FROM tables');
     if (parseInt(checkTables.rows[0].count) === 0) {
       for (let i = 1; i <= 20; i++) {
-        await pool.query('INSERT INTO tables (table_number) VALUES ($1)', [String(i)]);
+        await pool.query('INSERT INTO tables (table_number, sort_order) VALUES ($1, $2)', [String(i), i]);
       }
       console.log('Migrated: Auto-created default tables 1 to 20');
     }
