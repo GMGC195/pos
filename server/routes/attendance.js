@@ -506,10 +506,12 @@ router.get('/today', authenticateToken, async (req, res) => {
         } else if (rowBreakLogs.length > 0 && row.check_out) {
           const clamped = clampBreakLogsToDutyWindow(rowBreakLogs, row.check_in, row.check_out);
           breakSecs = clamped.totalBreakSecs;
+          row.break_logs = clamped.breakLogs;
         } else if (row.check_out) {
           const maxPossible = Math.max(0, Math.floor((checkOutTime - checkInTime) / 1000));
           breakSecs = Math.min(breakSecs, maxPossible);
         }
+        row.total_break_duration_seconds = breakSecs;
 
         totalBreakSecondsToday += breakSecs;
         const sessionMs = checkOutTime - checkInTime - (breakSecs * 1000);
@@ -1303,9 +1305,11 @@ router.get('/reports', authenticateToken, async (req, res) => {
         : (typeof row.break_logs === 'string' ? JSON.parse(row.break_logs || '[]') : []);
       
       let effectiveBreakSecs = parseInt(row.total_break_duration_seconds) || 0;
+      let effectiveBreakLogs = rowBreakLogs;
       if (rowBreakLogs.length > 0 && checkOutTime) {
         const clamped = clampBreakLogsToDutyWindow(rowBreakLogs, row.check_in, row.check_out);
         effectiveBreakSecs = clamped.totalBreakSecs;
+        effectiveBreakLogs = clamped.breakLogs;
       } else if (checkOutTime) {
         // Legacy fallback: break cannot exceed total elapsed session time
         const maxPossibleBreak = Math.max(0, Math.floor((checkOutTime - checkInTime) / 1000));
@@ -1325,6 +1329,8 @@ router.get('/reports', authenticateToken, async (req, res) => {
       
       return {
         ...row,
+        total_break_duration_seconds: effectiveBreakSecs,
+        break_logs: effectiveBreakLogs,
         is_split_shift: row.is_split_shift ?? row.master_is_split_shift ?? false,
         shift_start_time: row.shift_start_time || row.master_start_time,
         shift_end_time: row.shift_end_time || row.master_end_time,

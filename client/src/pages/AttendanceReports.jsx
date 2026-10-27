@@ -63,6 +63,60 @@ const formatCellShiftTime = (item, empFallback) => {
   return info.shift1;
 };
 
+const getClampedSessionBreaks = (sessions) => {
+  const allDayBreaks = [];
+  let dayBreakSecs = 0;
+
+  if (!Array.isArray(sessions)) return { allDayBreaks, dayBreakSecs };
+
+  sessions.forEach(s => {
+    let bLogs = [];
+    if (Array.isArray(s.break_logs)) bLogs = s.break_logs;
+    else if (typeof s.break_logs === 'string') {
+      try { bLogs = JSON.parse(s.break_logs) } catch (e) {}
+    }
+    if (s.on_break && s.break_start && !bLogs.some(b => !b.break_out)) {
+      bLogs.push({ break_in: s.break_start, break_out: null });
+    }
+
+    const sOutMs = s.check_out ? new Date(s.check_out).getTime() : null;
+    const sInMs = s.check_in ? new Date(s.check_in).getTime() : null;
+
+    if (bLogs.length > 0 && sOutMs) {
+      bLogs.forEach(b => {
+        if (!b || !b.break_in) return;
+        let bInMs = new Date(b.break_in).getTime();
+        let bOutMs = b.break_out ? new Date(b.break_out).getTime() : sOutMs;
+        if (bInMs >= sOutMs) return; // Started after checkout -> dropped
+        if (bOutMs > sOutMs) bOutMs = sOutMs; // Ended after checkout -> clamped
+        if (sInMs) {
+          if (bOutMs <= sInMs) return;
+          if (bInMs < sInMs) bInMs = sInMs;
+        }
+        const durSecs = Math.max(0, Math.floor((bOutMs - bInMs) / 1000));
+        if (durSecs > 0) {
+          dayBreakSecs += durSecs;
+          allDayBreaks.push({
+            ...b,
+            break_in: new Date(bInMs).toISOString(),
+            break_out: b.break_out ? new Date(bOutMs).toISOString() : (sOutMs ? new Date(sOutMs).toISOString() : null),
+            duration_seconds: durSecs
+          });
+        }
+      });
+    } else {
+      const fallbackSecs = parseInt(s.total_break_duration_seconds || 0);
+      dayBreakSecs += fallbackSecs;
+      bLogs.forEach(b => {
+        if (!b || !b.break_in) return;
+        allDayBreaks.push(b);
+      });
+    }
+  });
+
+  return { allDayBreaks, dayBreakSecs };
+};
+
 const renderShiftHeaderBadge = (shiftInfo, dayBranch, isAbsent = false) => {
   if (isAbsent) {
     return (
@@ -595,10 +649,9 @@ export default function AttendanceReports() {
           } else {
             // Sum all hours worked on this day and calculate daily overtime
             let dayHours = 0
-            let dayBreakSecs = 0
+            const { dayBreakSecs } = getClampedSessionBreaks(sessions);
             sessions.forEach(s => {
               dayHours += s.hours_worked || 0
-              dayBreakSecs += parseInt(s.total_break_duration_seconds || 0)
             })
             dayHours = Math.min(24, dayHours) // Cap to 24 hours max per day
             totalBreakSeconds += dayBreakSecs
@@ -880,7 +933,7 @@ export default function AttendanceReports() {
               const dayHours = Math.min(24, sessions.reduce((acc, s) => acc + (s.hours_worked || 0), 0))
               const currentDayShiftHours = main.shift_hours || emp.shift_hours || 12.0
               const dayOvertime = Math.max(0, dayHours - currentDayShiftHours)
-              const dayBreakSecs = sessions.reduce((acc, s) => acc + parseInt(s.total_break_duration_seconds || 0), 0)
+              const { allDayBreaks, dayBreakSecs } = getClampedSessionBreaks(sessions);
               
               const sessionLines = sessions.map(s => {
                 const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -891,29 +944,10 @@ export default function AttendanceReports() {
                 return `In: ${inStr} Out: ${outStr}`
               })
 
-              const breakLines = []
-              sessions.forEach(s => {
-                let bLogs = []
-                if (Array.isArray(s.break_logs)) bLogs = s.break_logs
-                else if (typeof s.break_logs === 'string') {
-                  try { bLogs = JSON.parse(s.break_logs) } catch (e) {}
-                }
-                if (s.on_break && s.break_start && !bLogs.some(b => !b.break_out)) {
-                  bLogs.push({ break_in: s.break_start, break_out: null })
-                }
-                const sOutMs = s.check_out ? new Date(s.check_out).getTime() : null;
-                bLogs.forEach(b => {
-                  if (!b || !b.break_in) return;
-                  const bInMs = new Date(b.break_in).getTime();
-                  if (sOutMs && bInMs >= sOutMs) return; // Skip break that started after checkout
-                  let bOutTime = b.break_out;
-                  if (sOutMs && bOutTime && new Date(bOutTime).getTime() > sOutMs) {
-                    bOutTime = s.check_out; // Clamp break ending after checkout
-                  }
-                  const bIn = b.break_in ? new Date(b.break_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'
-                  const bOut = bOutTime ? new Date(bOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'
-                  breakLines.push(`<span style="color: #E11D48; font-weight: bold;">B: In: ${bIn} Out: ${bOut}</span>`)
-                })
+              const breakLines = allDayBreaks.map(b => {
+                const bIn = b.break_in ? new Date(b.break_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '--'
+                const bOut = b.break_out ? new Date(b.break_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : 'Active'
+                return `<span style="color: #E11D48; font-weight: bold;">B: In: ${bIn} Out: ${bOut}</span>`
               })
               
               // Pad cells to align Total Duty text horizontally in Excel
@@ -1451,31 +1485,8 @@ export default function AttendanceReports() {
                               const currentDayShiftHours = sessions[0].shift_hours || emp.shift_hours || 12.0
                               const isOnlyOT = dayHours > 0 && dayHours < 6.0
                               const dayOvertime = isOnlyOT ? 0 : Math.max(0, dayHours - currentDayShiftHours)
-                              const dayBreakSecs = sessions.reduce((acc, s) => acc + parseInt(s.total_break_duration_seconds || 0), 0)
+                              const { allDayBreaks, dayBreakSecs } = getClampedSessionBreaks(sessions);
                               const dayBranch = formatBranchName(sessions[0].branch || emp.branch || 'R1')
-
-                              const allDayBreaks = []
-                              sessions.forEach(s => {
-                                let bLogs = []
-                                if (Array.isArray(s.break_logs)) bLogs = s.break_logs
-                                else if (typeof s.break_logs === 'string') {
-                                  try { bLogs = JSON.parse(s.break_logs) } catch (e) {}
-                                }
-                                if (s.on_break && s.break_start && !bLogs.some(b => !b.break_out)) {
-                                  bLogs.push({ break_in: s.break_start, break_out: null })
-                                }
-                                const sOutMs = s.check_out ? new Date(s.check_out).getTime() : null;
-                                bLogs.forEach(b => {
-                                  if (!b || !b.break_in) return;
-                                  const bInMs = new Date(b.break_in).getTime();
-                                  if (sOutMs && bInMs >= sOutMs) return; // Skip break that started after checkout
-                                  let bOutTime = b.break_out;
-                                  if (sOutMs && bOutTime && new Date(bOutTime).getTime() > sOutMs) {
-                                    bOutTime = s.check_out; // Clamp break ending after checkout
-                                  }
-                                  allDayBreaks.push({ ...b, break_out: bOutTime })
-                                })
-                              })
 
                               let neededBottom = 16 + 14
                               if (dayOvertime > 0) neededBottom += 12
@@ -1894,7 +1905,8 @@ export default function AttendanceReports() {
                         ? `${new Date(session.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}${isSystemCheckout ? ' (automatically system check out)' : ''}` 
                         : 'Active'
                       
-                      const breakMins = Math.floor((session.total_break_duration_seconds || 0) / 60)
+                      const sessionBreaks = getClampedSessionBreaks([session]);
+                      const breakMins = Math.floor(sessionBreaks.dayBreakSecs / 60)
                       
                       let badgeColor = 'var(--green)'
                       let badgeBg = 'rgba(34, 197, 94, 0.1)'
