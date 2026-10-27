@@ -37,6 +37,122 @@ const formatTime = (t) => {
   return t;
 };
 
+const calculateShiftScheduleDetailsClient = ({
+  cleanDate,
+  checkInTime,
+  actualCheckoutTime,
+  shiftHoursVal,
+  prevSessionsMs,
+  totalBreakSecs,
+  shift1Start,
+  shift1End,
+  isSplitShift,
+  shift2Start,
+  shift2End,
+  hasPreviousSessionsToday
+}) => {
+  const parseTime = (tStr) => {
+    if (!tStr) return 0;
+    if (tStr === '24:00') return 24 * 60;
+    const m = tStr.match(/^(\d+):(\d+)/);
+    if (!m) return 0;
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  };
+
+  const [s1H, s1M] = (shift1Start || '00:00').split(':').map(Number);
+  let [e1H, e1M] = (shift1End || '00:00').split(':').map(Number);
+
+  // Shift 1 start
+  const d1Start = new Date(`${cleanDate}T12:00:00+03:00`);
+  const shift1StartMs = new Date(
+    `${d1Start.getFullYear()}-${String(d1Start.getMonth() + 1).padStart(2, '0')}-${String(d1Start.getDate()).padStart(2, '0')}T${String(s1H).padStart(2, '0')}:${String(s1M || 0).padStart(2, '0')}:00+03:00`
+  ).getTime();
+
+  // Shift 1 end
+  let end1DayOffset = 0;
+  if (e1H === 24) {
+    e1H = 0;
+    end1DayOffset = 1;
+  } else if (e1H < s1H || (e1H === s1H && (e1M || 0) < (s1M || 0))) {
+    end1DayOffset = 1;
+  }
+  const d1End = new Date(`${cleanDate}T12:00:00+03:00`);
+  if (end1DayOffset > 0) d1End.setDate(d1End.getDate() + end1DayOffset);
+  const shift1EndMs = new Date(
+    `${d1End.getFullYear()}-${String(d1End.getMonth() + 1).padStart(2, '0')}-${String(d1End.getDate()).padStart(2, '0')}T${String(e1H).padStart(2, '0')}:${String(e1M || 0).padStart(2, '0')}:00+03:00`
+  ).getTime();
+
+  let shift2StartMs = null;
+  let shift2EndMs = null;
+
+  if (isSplitShift && shift2End) {
+    let [s2H, s2M] = (shift2Start || '00:00').split(':').map(Number);
+    let s1TotalMins = s1H * 60 + (s1M || 0);
+    let s2TotalMins = s2H * 60 + (s2M || 0);
+    let start2DayOffset = 0;
+    if (end1DayOffset > 0 && s2TotalMins <= parseTime(shift1End)) {
+      start2DayOffset = end1DayOffset;
+    } else if (s2TotalMins < s1TotalMins && end1DayOffset === 0) {
+      start2DayOffset = 1;
+    }
+
+    const d2Start = new Date(`${cleanDate}T12:00:00+03:00`);
+    if (start2DayOffset > 0) d2Start.setDate(d2Start.getDate() + start2DayOffset);
+    shift2StartMs = new Date(
+      `${d2Start.getFullYear()}-${String(d2Start.getMonth() + 1).padStart(2, '0')}-${String(d2Start.getDate()).padStart(2, '0')}T${String(s2H).padStart(2, '0')}:${String(s2M || 0).padStart(2, '0')}:00+03:00`
+    ).getTime();
+
+    let [e2H, e2M] = (shift2End || '00:00').split(':').map(Number);
+    let end2DayOffset = start2DayOffset;
+    if (e2H === 24) {
+      e2H = 0;
+      end2DayOffset += 1;
+    } else if (e2H < s2H || (e2H === s2H && (e2M || 0) < (s2M || 0))) {
+      end2DayOffset += 1;
+    }
+
+    const d2End = new Date(`${cleanDate}T12:00:00+03:00`);
+    if (end2DayOffset > 0) d2End.setDate(d2End.getDate() + end2DayOffset);
+    shift2EndMs = new Date(
+      `${d2End.getFullYear()}-${String(d2End.getMonth() + 1).padStart(2, '0')}-${String(d2End.getDate()).padStart(2, '0')}T${String(e2H).padStart(2, '0')}:${String(e2M || 0).padStart(2, '0')}:00+03:00`
+    ).getTime();
+  }
+
+  // Determine if this checkout corresponds to Shift 2 or Shift 1
+  let isShift2 = false;
+  if (isSplitShift && shift2EndMs) {
+    const midpoint = shift2StartMs ? Math.floor((shift1EndMs + shift2StartMs) / 2) : shift1EndMs;
+    if (hasPreviousSessionsToday) {
+      isShift2 = true;
+    } else if (checkInTime >= midpoint) {
+      isShift2 = true;
+    } else if (actualCheckoutTime >= (shift2StartMs || midpoint)) {
+      isShift2 = true;
+    }
+  }
+
+  const scheduledShiftEndMs = (isShift2 && shift2EndMs) ? shift2EndMs : (shift1EndMs || null);
+
+  const shiftHours = parseFloat(shiftHoursVal || 12.0);
+  const expectedMs = shiftHours * 60 * 60 * 1000;
+  const remainingMs = Math.max(0, expectedMs - prevSessionsMs);
+
+  let expectedCheckoutTime = checkInTime + remainingMs + (totalBreakSecs * 1000);
+  if (scheduledShiftEndMs) {
+    expectedCheckoutTime = Math.min(scheduledShiftEndMs, expectedCheckoutTime);
+  }
+
+  return {
+    isShift2,
+    scheduledShiftEndMs,
+    expectedCheckoutTime,
+    shift1StartMs,
+    shift1EndMs,
+    shift2StartMs,
+    shift2EndMs
+  };
+};
+
 export default function AttendanceTracker() {
   const { user } = useAuth()
 
@@ -486,30 +602,49 @@ export default function AttendanceTracker() {
       totalBreakSecs += Math.floor((Date.now() - new Date(emp.break_start).getTime()) / 1000);
     }
     
-    let expectedCheckoutTime = checkInTime + (shiftHours * 60 * 60 * 1000) + (totalBreakSecs * 1000);
-
-    const shiftEndTime = emp.shift_end_time || emp.sessions?.[emp.sessions.length - 1]?.shift_end_time;
-    const shiftStartTime = emp.shift_start_time || emp.sessions?.[emp.sessions.length - 1]?.shift_start_time;
-
-    if (shiftEndTime) {
-      const cleanDate = getSaudiDateString(emp.date || emp.check_in || new Date());
-      const [sH, sM] = (shiftStartTime || '00:00').split(':').map(Number);
-      const [eH, eM] = shiftEndTime.split(':').map(Number);
-      let endDate = new Date(`${cleanDate}T12:00:00+03:00`);
-      if (eH < sH || (eH === sH && eM < sM)) {
-        endDate.setDate(endDate.getDate() + 1);
-      }
-      const y = endDate.getFullYear();
-      const m = String(endDate.getMonth() + 1).padStart(2, '0');
-      const d = String(endDate.getDate()).padStart(2, '0');
-      const eHStr = String(eH).padStart(2, '0');
-      const eMStr = String(eM).padStart(2, '0');
-      const scheduledShiftEndMs = new Date(`${y}-${m}-${d}T${eHStr}:${eMStr}:00+03:00`).getTime();
-
-      expectedCheckoutTime = Math.min(scheduledShiftEndMs, expectedCheckoutTime);
+    // Sum previous completed sessions today
+    let prevSessionsMs = 0;
+    let completedSessionsCount = 0;
+    if (Array.isArray(emp.sessions)) {
+      emp.sessions.forEach(s => {
+        if (s.check_out && s.attendance_id !== emp.attendance_id) {
+          completedSessionsCount += 1;
+          const pIn = new Date(s.check_in).getTime();
+          const pOut = new Date(s.check_out).getTime();
+          const pBreak = (s.total_break_duration_seconds || 0) * 1000;
+          prevSessionsMs += Math.max(0, pOut - pIn - pBreak);
+        }
+      });
     }
 
-    const overtimeMins = Math.floor((Date.now() - expectedCheckoutTime) / (1000 * 60));
+    const shiftName = emp.shift || 'R1';
+    const matchedShift = shiftsList.find(s => s.name?.toUpperCase() === shiftName.toUpperCase()) || {};
+
+    const isSplitShift = Boolean(emp.is_split_shift ?? matchedShift.is_split_shift);
+    const shift1Start = emp.shift_start_time || emp.sessions?.[emp.sessions.length - 1]?.shift_start_time || matchedShift.start_time || '10:00';
+    const shift1End = emp.shift_end_time || emp.sessions?.[emp.sessions.length - 1]?.shift_end_time || matchedShift.end_time;
+    const shift2Start = emp.shift_start_time_2 || emp.start_time_2 || matchedShift.start_time_2;
+    const shift2End = emp.shift_end_time_2 || emp.end_time_2 || matchedShift.end_time_2;
+
+    const cleanDate = getSaudiDateString(emp.date || emp.check_in || new Date());
+    const actualCheckoutTime = Date.now();
+
+    const { scheduledShiftEndMs, expectedCheckoutTime } = calculateShiftScheduleDetailsClient({
+      cleanDate,
+      checkInTime,
+      actualCheckoutTime,
+      shiftHoursVal: shiftHours,
+      prevSessionsMs,
+      totalBreakSecs,
+      shift1Start,
+      shift1End,
+      isSplitShift,
+      shift2Start,
+      shift2End,
+      hasPreviousSessionsToday: completedSessionsCount > 0
+    });
+
+    const overtimeMins = Math.floor((actualCheckoutTime - expectedCheckoutTime) / (1000 * 60));
 
     if (overtimeMins > 0) {
       setOvertimeModal({ empId, name, overtimeMins });
@@ -521,7 +656,7 @@ export default function AttendanceTracker() {
     }
 
     proceedWithCheckout(empId, name, '');
-  }
+  };
 
   const proceedWithCheckout = async (empId, name, reason = '', ignore_overtime = false, requested_overtime_minutes = null) => {
     const actionKey = `check-out-${empId}`;

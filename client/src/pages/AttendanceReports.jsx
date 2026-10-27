@@ -39,6 +39,138 @@ const formatBreakTime = (seconds) => {
   return m > 0 ? `${hrs} h ${m} m` : `${hrs} h`;
 }
 
+const getCellShiftInfo = (item, empFallback) => {
+  const isSplit = Boolean(item?.is_split_shift ?? empFallback?.is_split_shift);
+  const s1Start = (item?.shift_start_time || empFallback?.shift_start_time)?.substring(0, 5);
+  const s1End = (item?.shift_end_time || empFallback?.shift_end_time)?.substring(0, 5);
+  const s2Start = (item?.shift_start_time_2 || empFallback?.shift_start_time_2 || empFallback?.start_time_2)?.substring(0, 5);
+  const s2End = (item?.shift_end_time_2 || empFallback?.shift_end_time_2 || empFallback?.end_time_2)?.substring(0, 5);
+
+  if (!s1Start || !s1End) return null;
+  return {
+    isSplit: Boolean(isSplit && s2Start && s2End),
+    shift1: `${s1Start} - ${s1End}`,
+    shift2: (isSplit && s2Start && s2End) ? `${s2Start} - ${s2End}` : null
+  };
+};
+
+const formatCellShiftTime = (item, empFallback) => {
+  const info = getCellShiftInfo(item, empFallback);
+  if (!info) return null;
+  if (info.isSplit) {
+    return `${info.shift1} & ${info.shift2}`;
+  }
+  return info.shift1;
+};
+
+const renderShiftHeaderBadge = (shiftInfo, dayBranch, isAbsent = false) => {
+  if (isAbsent) {
+    return (
+      <div style={{
+        fontSize: '8px',
+        fontWeight: 700,
+        color: 'var(--red)',
+        marginBottom: '2px',
+        width: 'fit-content',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        alignItems: 'center',
+        background: 'transparent',
+        border: 'none'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
+          <span style={{
+            fontSize: '8px',
+            fontWeight: 800,
+            color: 'var(--red)',
+            lineHeight: 1,
+            background: 'transparent',
+            border: 'none',
+            minWidth: '18px',
+            textAlign: 'center'
+          }}>
+            [{dayBranch}]
+          </span>
+          {shiftInfo ? <span>Shift: {shiftInfo.shift1}</span> : <span>Shift</span>}
+        </div>
+        {shiftInfo?.isSplit && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
+            <span style={{
+              fontSize: '8px',
+              fontWeight: 800,
+              color: 'var(--red)',
+              lineHeight: 1,
+              background: 'transparent',
+              border: 'none',
+              minWidth: '18px',
+              textAlign: 'center'
+            }}>
+              [&]
+            </span>
+            <span>{shiftInfo.shift2}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      fontSize: '8px',
+      fontWeight: 800,
+      color: 'var(--text-secondary)',
+      background: 'var(--surface-2)',
+      padding: '2px 5px',
+      borderRadius: '4px',
+      border: '1px solid var(--border)',
+      marginBottom: '2px',
+      width: 'fit-content',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 2
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
+        <span style={{
+          fontSize: '8px',
+          fontWeight: 800,
+          padding: '1px 3px',
+          borderRadius: '3px',
+          background: 'rgba(var(--primary-rgb), 0.15)',
+          color: 'var(--primary)',
+          border: '1px solid rgba(var(--primary-rgb), 0.3)',
+          lineHeight: 1,
+          minWidth: '18px',
+          textAlign: 'center'
+        }}>
+          {dayBranch}
+        </span>
+        <span>{shiftInfo ? `Shift: ${shiftInfo.shift1}` : 'Shift'}</span>
+      </div>
+      {shiftInfo?.isSplit && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
+          <span style={{
+            fontSize: '8px',
+            fontWeight: 800,
+            padding: '1px 3px',
+            borderRadius: '3px',
+            background: 'rgba(var(--primary-rgb), 0.15)',
+            color: 'var(--primary)',
+            border: '1px solid rgba(var(--primary-rgb), 0.3)',
+            lineHeight: 1,
+            minWidth: '18px',
+            textAlign: 'center'
+          }}>
+            &
+          </span>
+          <span>{shiftInfo.shift2}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 const confirmAction = (message, onConfirm) => {
   toast((t) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
@@ -394,6 +526,9 @@ export default function AttendanceReports() {
         shift_hours: parseFloat(emp.shift_hours || 12.0),
         shift_start_time: emp.shift_start_time,
         shift_end_time: emp.shift_end_time,
+        is_split_shift: Boolean(emp.is_split_shift),
+        shift_start_time_2: emp.shift_start_time_2 || emp.start_time_2 || null,
+        shift_end_time_2: emp.shift_end_time_2 || emp.end_time_2 || null,
         department: emp.department || '',
         branch: emp.branch || '',
         days: {}
@@ -411,10 +546,19 @@ export default function AttendanceReports() {
           role: log.role,
           shift: log.shift || 'R1',
           shift_hours: parseFloat(log.shift_hours || 12.0),
+          shift_start_time: log.shift_start_time || null,
+          shift_end_time: log.shift_end_time || null,
+          is_split_shift: Boolean(log.is_split_shift),
+          shift_start_time_2: log.shift_start_time_2 || null,
+          shift_end_time_2: log.shift_end_time_2 || null,
           department: log.department || '',
           branch: log.branch || '',
           days: {}
         }
+      } else {
+        if (log.is_split_shift) map[empId].is_split_shift = true;
+        if (log.shift_start_time_2 && !map[empId].shift_start_time_2) map[empId].shift_start_time_2 = log.shift_start_time_2;
+        if (log.shift_end_time_2 && !map[empId].shift_end_time_2) map[empId].shift_end_time_2 = log.shift_end_time_2;
       }
 
       const logDate = typeof log.date === 'string' && log.date.includes('-') ? log.date.split('T')[0] : formatLocalDate(log.date)
@@ -780,10 +924,17 @@ export default function AttendanceReports() {
               }
               
               const dayBranch = formatBranchName(main.branch || emp.branch || 'R1')
-              const assignedShiftTime = (main?.shift_start_time && main?.shift_end_time) 
-                ? `${main.shift_start_time.substring(0,5)} - ${main.shift_end_time.substring(0,5)}` 
-                : (emp.shift_start_time && emp.shift_end_time ? `${emp.shift_start_time.substring(0,5)} - ${emp.shift_end_time.substring(0,5)}` : null);
-              const shiftHeader = `<span style="font-size: 8pt; font-weight: bold; color: #1E293B; background-color: #E2E8F0; padding: 2px 4px; border-radius: 3px;">[${dayBranch}]${assignedShiftTime ? ` Shift: ${assignedShiftTime}` : ''}</span>`
+              const shiftInfo = getCellShiftInfo(main, emp);
+              let shiftHeader = ''
+              if (shiftInfo) {
+                if (shiftInfo.isSplit) {
+                  shiftHeader = `<span style="font-size: 8pt; font-weight: bold; color: #1E293B; background-color: #E2E8F0; padding: 2px 4px; border-radius: 3px;">[${dayBranch}] Shift: ${shiftInfo.shift1}<br/>&nbsp;&nbsp;&amp;&nbsp;${shiftInfo.shift2}</span>`
+                } else {
+                  shiftHeader = `<span style="font-size: 8pt; font-weight: bold; color: #1E293B; background-color: #E2E8F0; padding: 2px 4px; border-radius: 3px;">[${dayBranch}] Shift: ${shiftInfo.shift1}</span>`
+                }
+              } else {
+                shiftHeader = `<span style="font-size: 8pt; font-weight: bold; color: #1E293B; background-color: #E2E8F0; padding: 2px 4px; border-radius: 3px;">[${dayBranch}]</span>`
+              }
               const isOnlyOT = dayHours > 0 && dayHours < 6.0
               cellText = [shiftHeader, ...sessionLines, ...paddingLines].join('<br/>')
 
@@ -1332,44 +1483,11 @@ export default function AttendanceReports() {
                               if (dayBreakSecs > 0) neededBottom += 12
                               cellPaddingBottom = `${neededBottom}px`
                               
-                              const assignedShiftTime = (sessions[0]?.shift_start_time && sessions[0]?.shift_end_time) 
-                                ? `${sessions[0].shift_start_time.substring(0,5)} - ${sessions[0].shift_end_time.substring(0,5)}` 
-                                : (emp.shift_start_time && emp.shift_end_time ? `${emp.shift_start_time.substring(0,5)} - ${emp.shift_end_time.substring(0,5)}` : null);
+                              const shiftInfo = getCellShiftInfo(sessions[0], emp);
 
                               cellContent = (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', fontSize: 9 }}>
-                                  <div style={{
-                                    fontSize: '8px',
-                                    fontWeight: 800,
-                                    color: 'var(--text-secondary)',
-                                    background: 'var(--surface-2)',
-                                    padding: '2px 5px',
-                                    borderRadius: '4px',
-                                    border: '1px solid var(--border)',
-                                    marginBottom: '2px',
-                                    width: 'fit-content',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 3
-                                  }}>
-                                    <span style={{
-                                      fontSize: '8px',
-                                      fontWeight: 800,
-                                      padding: '1px 3px',
-                                      borderRadius: '3px',
-                                      background: 'rgba(var(--primary-rgb), 0.15)',
-                                      color: 'var(--primary)',
-                                      border: '1px solid rgba(var(--primary-rgb), 0.3)',
-                                      lineHeight: 1
-                                    }}>
-                                      {dayBranch}
-                                    </span>
-                                    {assignedShiftTime ? (
-                                      <span>Shift: {assignedShiftTime}</span>
-                                    ) : (
-                                      <span>Shift</span>
-                                    )}
-                                  </div>
+                                  {renderShiftHeaderBadge(shiftInfo, dayBranch, false)}
                                   {sessions.map((s, idx) => {
                                     const inStr = new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
                                     const isSystem = s.remarks === 'automatically system check out' || s.remarks === 'System Checkout'
@@ -1443,39 +1561,12 @@ export default function AttendanceReports() {
                           } else {
                             const todayStr = formatLocalDate(new Date())
                             const dayBranch = formatBranchName(emp.branch || 'R1')
-                            const assignedShiftTime = (emp.shift_start_time && emp.shift_end_time) 
-                              ? `${emp.shift_start_time.substring(0,5)} - ${emp.shift_end_time.substring(0,5)}` 
-                              : null;
+                            const shiftInfo = getCellShiftInfo(emp, null);
 
                             if (dateStr < todayStr) {
                               cellContent = (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
-                                  <div style={{
-                                    fontSize: '8px',
-                                    fontWeight: 700,
-                                    color: 'var(--red)',
-                                    marginBottom: '2px',
-                                    width: 'fit-content',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 3,
-                                    background: 'transparent',
-                                    border: 'none'
-                                  }}>
-                                    <span style={{
-                                      fontSize: '8px',
-                                      fontWeight: 800,
-                                      color: 'var(--red)',
-                                      lineHeight: 1,
-                                      background: 'transparent',
-                                      border: 'none'
-                                    }}>
-                                      [{dayBranch}]
-                                    </span>
-                                    {assignedShiftTime && (
-                                      <span>Shift: {assignedShiftTime}</span>
-                                    )}
-                                  </div>
+                                  {renderShiftHeaderBadge(shiftInfo, dayBranch, true)}
                                   <span style={{ fontWeight: 750, color: 'var(--red)' }}>A</span>
                                 </div>
                               )
@@ -1483,36 +1574,7 @@ export default function AttendanceReports() {
                             } else if (dateStr === todayStr) {
                               cellContent = (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
-                                  {assignedShiftTime && (
-                                    <div style={{
-                                      fontSize: '8px',
-                                      fontWeight: 800,
-                                      color: 'var(--text-secondary)',
-                                      background: 'var(--surface-2)',
-                                      padding: '2px 5px',
-                                      borderRadius: '4px',
-                                      border: '1px solid var(--border)',
-                                      marginBottom: '2px',
-                                      width: 'fit-content',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: 3
-                                    }}>
-                                      <span style={{
-                                        fontSize: '8px',
-                                        fontWeight: 800,
-                                        padding: '1px 3px',
-                                        borderRadius: '3px',
-                                        background: 'rgba(var(--primary-rgb), 0.15)',
-                                        color: 'var(--primary)',
-                                        border: '1px solid rgba(var(--primary-rgb), 0.3)',
-                                        lineHeight: 1
-                                      }}>
-                                        {dayBranch}
-                                      </span>
-                                      <span>Shift: {assignedShiftTime}</span>
-                                    </div>
-                                  )}
+                                  {shiftInfo && renderShiftHeaderBadge(shiftInfo, dayBranch, false)}
                                 </div>
                               )
                             }

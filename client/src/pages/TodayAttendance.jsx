@@ -594,8 +594,8 @@ export default function TodayAttendance() {
                 <tr style={{ background: 'var(--surface-1)' }}>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '50px' }}>#</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Code</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '220px' }}>Employee Name</th>
-                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '100px' }}>Shift Hrs</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '170px' }}>Employee Name</th>
+                  <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', width: '140px', minWidth: '135px', whiteSpace: 'nowrap' }}>Shift Hrs</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'left', minWidth: '150px' }}>Branch</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-In Time</th>
                   <th style={{ padding: '12px 14px', fontSize: 12, fontWeight: 700, borderBottom: '2px solid var(--surface-2)', textAlign: 'center', width: '120px' }}>Check-Out Time</th>
@@ -629,11 +629,26 @@ export default function TodayAttendance() {
                     >
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>{index + 1}</td>
                       <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600 }}>{emp.employee_code || emp.employee_id}</td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '220px' }}>{emp.name}</td>
-                       <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>
-                         {sessions.length > 0 && sessions[0].shift_start_time && sessions[0].shift_end_time 
-                           ? `${sessions[0].shift_start_time} - ${sessions[0].shift_end_time}` 
-                           : '--'}
+                      <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '170px' }}>{emp.name}</td>
+                       <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600, width: '140px', minWidth: '135px', whiteSpace: 'nowrap' }}>
+                         {(() => {
+                           const isSplit = Boolean((sessions.length > 0 && sessions[0].is_split_shift) || emp.is_split_shift);
+                           const s1Start = ((sessions.length > 0 && sessions[0].shift_start_time) || emp.shift_start_time)?.substring(0, 5);
+                           const s1End = ((sessions.length > 0 && sessions[0].shift_end_time) || emp.shift_end_time)?.substring(0, 5);
+                           const s2Start = ((sessions.length > 0 && sessions[0].shift_start_time_2) || emp.shift_start_time_2 || emp.start_time_2)?.substring(0, 5);
+                           const s2End = ((sessions.length > 0 && sessions[0].shift_end_time_2) || emp.shift_end_time_2 || emp.end_time_2)?.substring(0, 5);
+
+                           if (!s1Start || !s1End) return '--';
+                           if (isSplit && s2Start && s2End) {
+                             return (
+                               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.2 }}>
+                                 <span style={{ whiteSpace: 'nowrap' }}>{s1Start} - {s1End}</span>
+                                 <span style={{ color: 'var(--primary)', fontSize: 11, whiteSpace: 'nowrap' }}>{s2Start} - {s2End}</span>
+                               </div>
+                             );
+                           }
+                           return <span style={{ whiteSpace: 'nowrap' }}>{s1Start} - {s1End}</span>;
+                         })()}
                        </td>
                        <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>
                          {(() => {

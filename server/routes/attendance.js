@@ -421,34 +421,36 @@ const evaluateShiftStart = (shiftName, shiftsList) => {
 // Get today's attendance status for all active employees
 router.get('/today', authenticateToken, async (req, res) => {
   try {
-    // Fetch all active employees
+    // Fetch all active employees with shift info
     let queryStr = `
-      SELECT id as employee_id, name, role, working_hours as shift, shift_hours, status as employee_status, employee_id as employee_code, department, branch, shift as new_shift
-      FROM employees
-      WHERE status = 'Active'
+      SELECT e.id as employee_id, e.name, e.role, e.working_hours as shift, e.shift_hours, e.status as employee_status, e.employee_id as employee_code, e.department, e.branch, e.shift as new_shift,
+             ewh.is_split_shift, ewh.start_time as shift_start_time, ewh.end_time as shift_end_time, ewh.start_time_2, ewh.end_time_2
+      FROM employees e
+      LEFT JOIN employee_working_hours ewh ON UPPER(ewh.name) = UPPER(e.working_hours)
+      WHERE e.status = 'Active'
     `;
     const queryParams = [];
     const userRole = req.user.role?.toLowerCase();
     if (userRole === 'operator') {
       if (req.user.shift) {
-        queryStr += ` AND COALESCE(shift, 'Day') = ANY($1)`;
+        queryStr += ` AND COALESCE(e.shift, 'Day') = ANY($1)`;
         queryParams.push(req.user.shift.split(',').map(s => s.trim()));
       }
       if (req.user.branch) {
         if (queryParams.length === 1) {
-          queryStr += ` AND COALESCE(branch, '') = ANY($2)`;
+          queryStr += ` AND COALESCE(e.branch, '') = ANY($2)`;
         } else {
-          queryStr += ` AND COALESCE(branch, '') = ANY($1)`;
+          queryStr += ` AND COALESCE(e.branch, '') = ANY($1)`;
         }
         queryParams.push(req.user.branch.split(',').map(s => s.trim()));
       }
     }
-    queryStr += ` ORDER BY id ASC`;
+    queryStr += ` ORDER BY e.id ASC`;
     const activeEmps = await pool.query(queryStr, queryParams);
 
     // Fetch all today's attendance sessions
     const sessions = await pool.query(`
-      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, break_logs, remarks, shift_start_time, shift_end_time, created_by, checked_out_by, branch
+      SELECT id as attendance_id, employee_id, check_in, check_out, status as attendance_status, on_break, break_start, total_break_duration_seconds, break_logs, remarks, shift_start_time, shift_end_time, is_split_shift, shift_start_time_2, shift_end_time_2, created_by, checked_out_by, branch
       FROM employee_attendance
       WHERE date = CURRENT_DATE OR check_out IS NULL
       ORDER BY check_in ASC
@@ -537,8 +539,11 @@ router.get('/today', authenticateToken, async (req, res) => {
         attendance_id: lastSession ? lastSession.attendance_id : null,
         check_in: lastSession ? lastSession.check_in : null,
         check_out: lastSession ? lastSession.check_out : null,
-        shift_start_time: lastSession ? lastSession.shift_start_time : null,
-        shift_end_time: lastSession ? lastSession.shift_end_time : null,
+        shift_start_time: lastSession ? lastSession.shift_start_time : emp.shift_start_time,
+        shift_end_time: lastSession ? lastSession.shift_end_time : emp.shift_end_time,
+        is_split_shift: lastSession ? (lastSession.is_split_shift ?? emp.is_split_shift ?? false) : (emp.is_split_shift ?? false),
+        shift_start_time_2: lastSession ? (lastSession.shift_start_time_2 || emp.start_time_2) : emp.start_time_2,
+        shift_end_time_2: lastSession ? (lastSession.shift_end_time_2 || emp.end_time_2) : emp.end_time_2,
         date: lastSession ? lastSession.date : null,
         attendance_status: lastSession ? lastSession.attendance_status : null,
         on_break: lastSession ? lastSession.on_break : false,
@@ -803,6 +808,126 @@ router.post('/check-in', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * Helper to determine scheduled shift end and expected checkout time,
+ * handling split shifts (double shift: Shift 1 and Shift 2) with overnight roll-over support.
+ */
+function calculateShiftScheduleDetails({
+  cleanDate,
+  checkInTime,
+  actualCheckoutTime,
+  shiftHoursVal,
+  prevSessionsMs,
+  totalBreakSecs,
+  shift1Start,
+  shift1End,
+  isSplitShift,
+  shift2Start,
+  shift2End,
+  hasPreviousSessionsToday
+}) {
+  const parseTime = (tStr) => {
+    if (!tStr) return 0;
+    if (tStr === '24:00') return 24 * 60;
+    const m = tStr.match(/^(\d+):(\d+)/);
+    if (!m) return 0;
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  };
+
+  const [s1H, s1M] = (shift1Start || '00:00').split(':').map(Number);
+  let [e1H, e1M] = (shift1End || '00:00').split(':').map(Number);
+
+  // Shift 1 start
+  const d1Start = new Date(`${cleanDate}T12:00:00+03:00`);
+  const shift1StartMs = new Date(
+    `${d1Start.getFullYear()}-${String(d1Start.getMonth() + 1).padStart(2, '0')}-${String(d1Start.getDate()).padStart(2, '0')}T${String(s1H).padStart(2, '0')}:${String(s1M || 0).padStart(2, '0')}:00+03:00`
+  ).getTime();
+
+  // Shift 1 end
+  let end1DayOffset = 0;
+  if (e1H === 24) {
+    e1H = 0;
+    end1DayOffset = 1;
+  } else if (e1H < s1H || (e1H === s1H && (e1M || 0) < (s1M || 0))) {
+    end1DayOffset = 1;
+  }
+  const d1End = new Date(`${cleanDate}T12:00:00+03:00`);
+  if (end1DayOffset > 0) d1End.setDate(d1End.getDate() + end1DayOffset);
+  const shift1EndMs = new Date(
+    `${d1End.getFullYear()}-${String(d1End.getMonth() + 1).padStart(2, '0')}-${String(d1End.getDate()).padStart(2, '0')}T${String(e1H).padStart(2, '0')}:${String(e1M || 0).padStart(2, '0')}:00+03:00`
+  ).getTime();
+
+  let shift2StartMs = null;
+  let shift2EndMs = null;
+
+  if (isSplitShift && shift2End) {
+    let [s2H, s2M] = (shift2Start || '00:00').split(':').map(Number);
+    let s1TotalMins = s1H * 60 + (s1M || 0);
+    let s2TotalMins = s2H * 60 + (s2M || 0);
+    let start2DayOffset = 0;
+    if (end1DayOffset > 0 && s2TotalMins <= parseTime(shift1End)) {
+      start2DayOffset = end1DayOffset;
+    } else if (s2TotalMins < s1TotalMins && end1DayOffset === 0) {
+      start2DayOffset = 1;
+    }
+
+    const d2Start = new Date(`${cleanDate}T12:00:00+03:00`);
+    if (start2DayOffset > 0) d2Start.setDate(d2Start.getDate() + start2DayOffset);
+    shift2StartMs = new Date(
+      `${d2Start.getFullYear()}-${String(d2Start.getMonth() + 1).padStart(2, '0')}-${String(d2Start.getDate()).padStart(2, '0')}T${String(s2H).padStart(2, '0')}:${String(s2M || 0).padStart(2, '0')}:00+03:00`
+    ).getTime();
+
+    let [e2H, e2M] = (shift2End || '00:00').split(':').map(Number);
+    let end2DayOffset = start2DayOffset;
+    if (e2H === 24) {
+      e2H = 0;
+      end2DayOffset += 1;
+    } else if (e2H < s2H || (e2H === s2H && (e2M || 0) < (s2M || 0))) {
+      end2DayOffset += 1;
+    }
+
+    const d2End = new Date(`${cleanDate}T12:00:00+03:00`);
+    if (end2DayOffset > 0) d2End.setDate(d2End.getDate() + end2DayOffset);
+    shift2EndMs = new Date(
+      `${d2End.getFullYear()}-${String(d2End.getMonth() + 1).padStart(2, '0')}-${String(d2End.getDate()).padStart(2, '0')}T${String(e2H).padStart(2, '0')}:${String(e2M || 0).padStart(2, '0')}:00+03:00`
+    ).getTime();
+  }
+
+  // Determine if this checkout corresponds to Shift 2 or Shift 1
+  let isShift2 = false;
+  if (isSplitShift && shift2EndMs) {
+    const midpoint = shift2StartMs ? Math.floor((shift1EndMs + shift2StartMs) / 2) : shift1EndMs;
+    if (hasPreviousSessionsToday) {
+      isShift2 = true;
+    } else if (checkInTime >= midpoint) {
+      isShift2 = true;
+    } else if (actualCheckoutTime >= (shift2StartMs || midpoint)) {
+      isShift2 = true;
+    }
+  }
+
+  const scheduledShiftEndMs = (isShift2 && shift2EndMs) ? shift2EndMs : (shift1EndMs || null);
+
+  const shiftHours = parseFloat(shiftHoursVal || 12.0);
+  const expectedMs = shiftHours * 60 * 60 * 1000;
+  const remainingMs = Math.max(0, expectedMs - prevSessionsMs);
+
+  let expectedCheckoutTime = checkInTime + remainingMs + (totalBreakSecs * 1000);
+  if (scheduledShiftEndMs) {
+    expectedCheckoutTime = Math.min(scheduledShiftEndMs, expectedCheckoutTime);
+  }
+
+  return {
+    isShift2,
+    scheduledShiftEndMs,
+    expectedCheckoutTime,
+    shift1StartMs,
+    shift1EndMs,
+    shift2StartMs,
+    shift2EndMs
+  };
+}
+
 // Check-out endpoint
 router.post('/check-out', authenticateToken, async (req, res) => {
   const { employee_id, overtime_reason, ignore_overtime, requested_overtime_minutes } = req.body;
@@ -845,48 +970,57 @@ router.post('/check-out', authenticateToken, async (req, res) => {
       const pIn = new Date(r.check_in).getTime();
       const pOut = new Date(r.check_out).getTime();
       const pBreak = (r.total_break_duration_seconds || 0) * 1000;
-      prevSessionsMs += (pOut - pIn - pBreak);
+      prevSessionsMs += Math.max(0, pOut - pIn - pBreak);
     });
 
-    // Overtime Logic
-    const shiftHours = parseFloat(session.shift_hours || 12.0);
-    const expectedMs = shiftHours * 60 * 60 * 1000;
-    const remainingMs = Math.max(0, expectedMs - prevSessionsMs);
-    
-    const checkInTime = new Date(session.check_in).getTime();
-    let expectedCheckoutTime = checkInTime + remainingMs + (totalBreakSecs * 1000);
-
-    // If employee has a scheduled shift_end_time, any time worked after the scheduled shift end is Overtime,
-    // even if the employee arrived late and their total worked hours didn't reach full shift hours.
-    if (session.shift_end_time) {
-      const cleanDate = typeof session.date === 'string'
-        ? session.date.split('T')[0]
-        : (session.date instanceof Date ? session.date.toLocaleDateString('en-CA') : String(session.date).split('T')[0]);
-
-      const [sH, sM] = (session.shift_start_time || '00:00').split(':').map(Number);
-      const [eH, eM] = session.shift_end_time.split(':').map(Number);
-      let endDate = new Date(`${cleanDate}T12:00:00+03:00`);
-      if (eH < sH || (eH === sH && eM < sM)) {
-        // Overnight shift: ends next calendar day
-        endDate.setDate(endDate.getDate() + 1);
-      }
-      const y = endDate.getFullYear();
-      const m = String(endDate.getMonth() + 1).padStart(2, '0');
-      const d = String(endDate.getDate()).padStart(2, '0');
-      const eHStr = String(eH).padStart(2, '0');
-      const eMStr = String(eM).padStart(2, '0');
-      const scheduledShiftEndMs = new Date(`${y}-${m}-${d}T${eHStr}:${eMStr}:00+03:00`).getTime();
-      
-      expectedCheckoutTime = Math.min(scheduledShiftEndMs, expectedCheckoutTime);
-    }
-
     let actualCheckoutTime = Date.now();
-    
+    const checkInTime = new Date(session.check_in).getTime();
+
     // Prevent negative duty hours if checkout happens before the clamped check-in time
     if (actualCheckoutTime < checkInTime) {
       actualCheckoutTime = checkInTime;
     }
-    
+
+    // Resolve split shift details (with fallback to employee_working_hours)
+    let isSplitShift = session.is_split_shift;
+    let sStart1 = session.shift_start_time;
+    let sEnd1 = session.shift_end_time;
+    let sStart2 = session.shift_start_time_2;
+    let sEnd2 = session.shift_end_time_2;
+
+    if (!isSplitShift || !sEnd2) {
+      const whRes = await pool.query(
+        'SELECT is_split_shift, start_time, end_time, start_time_2, end_time_2, hours FROM employee_working_hours WHERE UPPER(name) = UPPER($1)',
+        [session.shift_name]
+      );
+      if (whRes.rows.length > 0 && whRes.rows[0].is_split_shift) {
+        isSplitShift = true;
+        sStart1 = sStart1 || whRes.rows[0].start_time;
+        sEnd1 = sEnd1 || whRes.rows[0].end_time;
+        sStart2 = whRes.rows[0].start_time_2;
+        sEnd2 = whRes.rows[0].end_time_2;
+      }
+    }
+
+    const cleanDate = typeof session.date === 'string'
+      ? session.date.split('T')[0]
+      : (session.date instanceof Date ? session.date.toLocaleDateString('en-CA') : String(session.date).split('T')[0]);
+
+    const { isShift2, scheduledShiftEndMs, expectedCheckoutTime } = calculateShiftScheduleDetails({
+      cleanDate,
+      checkInTime,
+      actualCheckoutTime,
+      shiftHoursVal: session.shift_hours,
+      prevSessionsMs,
+      totalBreakSecs,
+      shift1Start: sStart1,
+      shift1End: sEnd1,
+      isSplitShift,
+      shift2Start: sStart2,
+      shift2End: sEnd2,
+      hasPreviousSessionsToday: prevSessionsRes.rows.length > 0
+    });
+
     let finalCheckoutTime = new Date(actualCheckoutTime);
     const overtimeMs = actualCheckoutTime - expectedCheckoutTime;
     const overtimeMins = Math.round(overtimeMs / (1000 * 60));
@@ -1117,9 +1251,11 @@ router.get('/reports', authenticateToken, async (req, res) => {
   const { month, employee_id } = req.query; // month format: 'YYYY-MM'
   try {
     let query = `
-      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.break_logs, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, ea.created_by, ea.checked_out_by, COALESCE(ea.branch, e.branch, 'Branch 1') as branch, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch as emp_master_branch
+      SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.on_break, ea.break_start, ea.total_break_duration_seconds, ea.break_logs, ea.remarks, TO_CHAR(ea.date, 'YYYY-MM-DD') as date, ea.created_at, ea.shift_name, ea.shift_hours, ea.shift_start_time, ea.shift_end_time, ea.is_split_shift, ea.shift_start_time_2, ea.shift_end_time_2, ea.created_by, ea.checked_out_by, COALESCE(ea.branch, e.branch, 'Branch 1') as branch, e.name, e.role, e.shift as current_shift, e.shift_hours as current_shift_hours, e.employee_id as employee_code, e.department, e.branch as emp_master_branch,
+             ewh.is_split_shift as master_is_split_shift, ewh.start_time as master_start_time, ewh.end_time as master_end_time, ewh.start_time_2 as master_start_time_2, ewh.end_time_2 as master_end_time_2
       FROM employee_attendance ea
       JOIN employees e ON ea.employee_id = e.id
+      LEFT JOIN employee_working_hours ewh ON UPPER(ewh.name) = UPPER(COALESCE(ea.shift_name, e.working_hours))
       WHERE 1=1
     `;
     const params = [];
@@ -1189,6 +1325,11 @@ router.get('/reports', authenticateToken, async (req, res) => {
       
       return {
         ...row,
+        is_split_shift: row.is_split_shift ?? row.master_is_split_shift ?? false,
+        shift_start_time: row.shift_start_time || row.master_start_time,
+        shift_end_time: row.shift_end_time || row.master_end_time,
+        shift_start_time_2: row.shift_start_time_2 || row.master_start_time_2,
+        shift_end_time_2: row.shift_end_time_2 || row.master_end_time_2,
         hours_worked: durationHours,
         shift_hours: shiftHours,
         ot_hours: otHours,

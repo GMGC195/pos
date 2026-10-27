@@ -79,9 +79,10 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const userRole = req.user.role?.toLowerCase();
     let query = `
-      SELECT e.*, ewh.start_time as shift_start_time, ewh.end_time as shift_end_time 
+      SELECT e.*, ewh.start_time as shift_start_time, ewh.end_time as shift_end_time,
+             ewh.is_split_shift, ewh.start_time_2, ewh.end_time_2
       FROM employees e
-      LEFT JOIN employee_working_hours ewh ON e.working_hours = ewh.name
+      LEFT JOIN employee_working_hours ewh ON UPPER(e.working_hours) = UPPER(ewh.name)
     `;
     const params = [];
     
