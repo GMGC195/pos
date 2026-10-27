@@ -5,6 +5,41 @@ import { Ban, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, MessageSquare } f
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
 import OrderDetailModal from '../components/OrderDetailModal'
+const confirmAction = (message, onConfirm) => {
+  toast((t) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
+      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
+        {message}
+      </span>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button 
+          onClick={() => toast.dismiss(t.id)}
+          style={{ padding: '6px 12px', background: 'transparent', border: '1.5px solid var(--surface-3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)' }}
+        >
+          Cancel
+        </button>
+        <button 
+          onClick={() => {
+            toast.dismiss(t.id);
+            onConfirm();
+          }}
+          style={{ padding: '6px 12px', background: 'var(--primary)', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#fff' }}
+        >
+          Confirm
+        </button>
+      </div>
+    </div>
+  ), {
+    duration: 10000,
+    position: 'top-center',
+    style: {
+      background: 'var(--surface)',
+      border: '1.5px solid var(--surface-2)',
+      borderRadius: 12,
+      padding: '12px 16px'
+    }
+  });
+};
 
 export default function CancelRequests() {
   const { user } = useAuth()
@@ -31,19 +66,19 @@ export default function CancelRequests() {
     return () => clearInterval(interval)
   }, [])
 
-  const handleAction = async (orderId, action) => {
-    if (!window.confirm(`Are you sure you want to ${action} this cancellation request?`)) return
-    
-    setProcessingId(orderId)
-    try {
-      await axios.patch(`/api/orders/${orderId}/handle-cancel-request`, { action })
-      toast.success(action === 'approve' ? 'Order Cancelled!' : 'Request Rejected!')
-      loadRequests()
-    } catch (err) {
-      toast.error('Failed to process request: ' + (err?.response?.data?.error || err.message))
-    } finally {
-      setProcessingId(null)
-    }
+  const handleAction = (orderId, action) => {
+    confirmAction(`Are you sure you want to ${action} this cancellation request?`, async () => {
+      setProcessingId(orderId)
+      try {
+        await axios.patch(`/api/orders/${orderId}/handle-cancel-request`, { action })
+        toast.success(action === 'approve' ? 'Order Cancelled!' : 'Request Rejected!')
+        loadRequests()
+      } catch (err) {
+        toast.error('Failed to process request: ' + (err?.response?.data?.error || err.message))
+      } finally {
+        setProcessingId(null)
+      }
+    })
   }
 
   const viewOrderDetail = async (orderId) => {

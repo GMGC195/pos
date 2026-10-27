@@ -100,15 +100,46 @@ export default function EmployeeDocumentsModal({ employee, onClose }) {
     }
   }
 
-  const handleDelete = async (docId) => {
-    if (!window.confirm('Are you sure you want to delete this document?')) return
-    try {
-      await axios.delete(`/api/employees/documents/${docId}`)
-      toast.success('Document deleted')
-      loadDocuments()
-    } catch (err) {
-      toast.error('Failed to delete document')
-    }
+  const handleDelete = (docId) => {
+    toast((t) => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px' }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
+          Are you sure you want to delete this document?
+        </span>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button 
+            onClick={() => toast.dismiss(t.id)}
+            style={{ padding: '6px 12px', background: 'transparent', border: '1.5px solid var(--surface-3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)' }}
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={async () => {
+              toast.dismiss(t.id);
+              try {
+                await axios.delete(`/api/employees/documents/${docId}`)
+                toast.success('Document deleted')
+                loadDocuments()
+              } catch (err) {
+                toast.error('Failed to delete document')
+              }
+            }}
+            style={{ padding: '6px 12px', background: 'var(--primary)', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#fff' }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    ), {
+      duration: 10000,
+      position: 'top-center',
+      style: {
+        background: 'var(--surface)',
+        border: '1.5px solid var(--surface-2)',
+        borderRadius: 12,
+        padding: '12px 16px'
+      }
+    });
   }
 
   const getFileIcon = (mimeType) => {

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import axios from '../api'
 import toast from 'react-hot-toast'
@@ -87,6 +87,8 @@ export default function Layout() {
   const [alerts, setAlerts] = useState([])
   const [isNotifOpen, setIsNotifOpen] = useState(false)
   const [hasNewAlerts, setHasNewAlerts] = useState(false)
+  const knownAlertIdsRef = useRef(new Set())
+  const isInitialAlertFetchRef = useRef(true)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const location = useLocation()
@@ -277,6 +279,29 @@ export default function Layout() {
       if (unreadCount > 0 && !isNotifOpen) {
         setHasNewAlerts(true);
       }
+
+      // Show toast notifications for newly arrived unread alerts
+      if (!isInitialAlertFetchRef.current) {
+        combinedAlerts.forEach(item => {
+          if (!knownAlertIdsRef.current.has(item.id) && !item.read) {
+            knownAlertIdsRef.current.add(item.id);
+            if (item.type === 'auto_checkout_alert') {
+              toast.error(item.message || 'Auto-checkout alert', { duration: 5000, position: 'top-right' });
+            } else if (item.type === 'attendance_request') {
+              toast.success(item.message || `New request: ${item.request_type || 'Attendance Request'}`, { icon: '📋', duration: 5000, position: 'top-right' });
+            } else if (item.type === 'attendance_warning') {
+              toast(item.message || 'Attendance warning', { icon: '⚠️', duration: 5000, position: 'top-right' });
+            } else if (item.type === 'stock') {
+              toast.error(`Low Stock: ${item.name} (${item.quantity} ${item.unit || ''} remaining)`, { duration: 5000, position: 'top-right' });
+            } else {
+              toast(item.message || 'New notification', { icon: '🔔', duration: 5000, position: 'top-right' });
+            }
+          }
+        });
+      } else {
+        combinedAlerts.forEach(item => knownAlertIdsRef.current.add(item.id));
+        isInitialAlertFetchRef.current = false;
+      }
     } catch (err) {
       console.error('Error fetching alerts:', err);
     }
@@ -341,23 +366,57 @@ export default function Layout() {
       fetchAlerts();
       const interval = setInterval(fetchAlerts, 20 * 1000); // Check every 20s as fallback
 
-      const handleRefresh = () => {
+      const handleAttendanceAlert = (data) => {
+        if (data?.id) {
+          if (!knownAlertIdsRef.current.has(data.id)) {
+            knownAlertIdsRef.current.add(data.id);
+            const msg = data.message || (data.employee_name ? `${data.employee_name}: ${data.type || 'Attendance alert'}` : 'New attendance alert received');
+            if (data.type === 'auto_checkout_alert') {
+              toast.error(msg, { duration: 5000, position: 'top-right' });
+            } else {
+              toast(msg, { icon: '🔔', duration: 5000, position: 'top-right' });
+            }
+          }
+        } else if (data?.message) {
+          toast(data.message, { icon: '🔔', duration: 5000, position: 'top-right' });
+        }
+        fetchAlerts();
+      };
+
+      const handleAttendanceRequest = (data) => {
+        if (data?.id) {
+          if (!knownAlertIdsRef.current.has(data.id)) {
+            knownAlertIdsRef.current.add(data.id);
+            const msg = data.message || `New ${data.request_type || 'attendance'} request from ${data.employee_name || 'Staff'}`;
+            toast.success(msg, { icon: '📋', duration: 5000, position: 'top-right' });
+          }
+        } else {
+          const msg = data?.message || (data?.employee_name ? `${data.employee_name} submitted a ${data.request_type || 'request'}` : 'New attendance request received');
+          toast.success(msg, { icon: '📋', duration: 5000, position: 'top-right' });
+        }
+        fetchAlerts();
+      };
+
+      const handleCustomRefresh = (e) => {
+        if (e?.detail?.message) {
+          toast(e.detail.message, { icon: '🔔', duration: 4000, position: 'top-right' });
+        }
         fetchAlerts();
       };
 
       if (socket) {
-        socket.on('attendance_alert', handleRefresh);
-        socket.on('attendance_request', handleRefresh);
+        socket.on('attendance_alert', handleAttendanceAlert);
+        socket.on('attendance_request', handleAttendanceRequest);
       }
-      window.addEventListener('refresh-notifications', handleRefresh);
+      window.addEventListener('refresh-notifications', handleCustomRefresh);
 
       return () => {
         clearInterval(interval);
         if (socket) {
-          socket.off('attendance_alert', handleRefresh);
-          socket.off('attendance_request', handleRefresh);
+          socket.off('attendance_alert', handleAttendanceAlert);
+          socket.off('attendance_request', handleAttendanceRequest);
         }
-        window.removeEventListener('refresh-notifications', handleRefresh);
+        window.removeEventListener('refresh-notifications', handleCustomRefresh);
       };
     }
   }, [user]);

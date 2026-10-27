@@ -13,6 +13,11 @@ const EmployeeAdjustmentsModal = ({ employee, isOpen, onClose, onUpdate }) => {
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const showNotification = (msg, type = 'success') => {
+    if (type === 'error') {
+      toast.error(msg);
+    } else {
+      toast.success(msg);
+    }
     setNotification({ text: msg, type });
     setTimeout(() => {
       setNotification((current) => current?.text === msg ? null : current);

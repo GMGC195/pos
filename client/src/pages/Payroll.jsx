@@ -11,6 +11,75 @@ import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ManageSalaryModal from '../components/ManageSalaryModal'
 
+const confirmAction = (message, onConfirm, confirmText = 'Confirm') => {
+  toast((t) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px', minWidth: 260 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ 
+          color: 'var(--primary)', 
+          background: 'rgba(var(--primary-rgb, 227, 24, 55), 0.12)', 
+          padding: 6, 
+          borderRadius: 8, 
+          display: 'flex',
+          flexShrink: 0 
+        }}>
+          <AlertTriangle size={18} />
+        </div>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)', lineHeight: 1.4 }}>
+          {message}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+        <button 
+          onClick={() => toast.dismiss(t.id)}
+          style={{
+            padding: '6px 14px',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--surface-3)',
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            color: 'var(--text-muted)'
+          }}
+        >
+          Cancel
+        </button>
+        <button 
+          onClick={() => {
+            toast.dismiss(t.id);
+            onConfirm();
+          }}
+          style={{
+            padding: '6px 14px',
+            background: 'var(--primary)',
+            border: 'none',
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            color: '#fff',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          }}
+        >
+          {confirmText}
+        </button>
+      </div>
+    </div>
+  ), {
+    duration: 15000,
+    position: 'top-center',
+    style: {
+      background: 'var(--surface)',
+      border: '1.5px solid var(--surface-2)',
+      borderRadius: 12,
+      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+      padding: '14px 18px',
+      maxWidth: 440
+    }
+  });
+};
+
 export default function Payroll() {
   const { user } = useAuth()
   const isDeveloper = user?.role?.trim().toLowerCase() === 'developer'
@@ -181,16 +250,17 @@ export default function Payroll() {
       toast.error('Label cannot be empty');
       return;
     }
-    if (!window.confirm('Are you sure you want to rename this column?')) return;
-    try {
-      await axios.put(`/api/payroll/adjustment-types/${id}`, { label: editAdjValue.trim() });
-      toast.success('Updated successfully');
-      setEditingDynamicAdjId(null);
-      await loadAdjustmentTypes();
-      await loadPayroll(true);
-    } catch (err) {
-      toast.error(err?.response?.data?.error || 'Failed to update');
-    }
+    confirmAction('Are you sure you want to rename this column?', async () => {
+      try {
+        await axios.put(`/api/payroll/adjustment-types/${id}`, { label: editAdjValue.trim() });
+        toast.success('Updated successfully');
+        setEditingDynamicAdjId(null);
+        await loadAdjustmentTypes();
+        await loadPayroll(true);
+      } catch (err) {
+        toast.error(err?.response?.data?.error || 'Failed to update');
+      }
+    }, 'Rename');
   }
 
   // Load calculations
@@ -230,6 +300,7 @@ export default function Payroll() {
         }
       })
       setEditableData(newEditableData)
+      setSelectedEmployeeForModal(prev => prev ? (newEditableData[prev.id] || prev) : null)
     } catch (err) {
       toast.error('Error loading payroll calculations')
       console.error(err)
@@ -311,40 +382,49 @@ export default function Payroll() {
   }
 
   // Clear previous month carryover balance to 0.00
-  const handleClearPastBalance = async (empId, empName) => {
+  const handleClearPastBalance = (empId, empName) => {
+    const isLocked = editableData[empId]?.status === 'Paid' && !unlockedRowIds.has(empId);
+    if (isLocked) {
+      toast.error('Record is marked as Paid and locked. Please unlock first.');
+      return;
+    }
+
     const name = empName || editableData[empId]?.name || 'this employee';
     const confirmMsg = `Clear previous carryover balance for ${name}? This will settle previous month's balance and set past balance to 0.00.`;
-    if (!window.confirm(confirmMsg)) return;
+    
+    confirmAction(confirmMsg, async () => {
+      try {
+        await axios.post('/api/payroll/clear-balance', {
+          employee_id: empId,
+          month: selectedMonth
+        });
 
-    try {
-      await axios.post('/api/payroll/clear-balance', {
-        employee_id: empId,
-        month: selectedMonth
-      });
+        setEditableData(prev => {
+          const emp = prev[empId];
+          if (!emp) return prev;
+          const newEmp = {
+            ...emp,
+            last_month_balance: 0
+          };
+          const dynamicNet = recalculateNetSalary(newEmp);
+          newEmp.net_salary = dynamicNet;
+          newEmp.cash_paid = dynamicNet;
+          newEmp.bank_paid = 0;
+          newEmp.paid_amount = dynamicNet;
+          return {
+            ...prev,
+            [empId]: newEmp
+          };
+        });
 
-      setEditableData(prev => {
-        const emp = prev[empId];
-        if (!emp) return prev;
-        const newEmp = {
-          ...emp,
-          last_month_balance: 0
-        };
-        const dynamicNet = recalculateNetSalary(newEmp);
-        newEmp.net_salary = dynamicNet;
-        newEmp.cash_paid = dynamicNet;
-        newEmp.bank_paid = 0;
-        newEmp.paid_amount = dynamicNet;
-        return {
-          ...prev,
-          [empId]: newEmp
-        };
-      });
-
-      toast.success(`Previous balance cleared to 0.00 for ${name}`);
-    } catch (err) {
-      console.error('Error clearing balance:', err);
-      toast.error(err.response?.data?.error || 'Failed to clear past balance');
-    }
+        setSelectedEmployeeForModal(curr => (curr?.id === empId ? { ...curr, last_month_balance: 0 } : curr));
+        toast.success(`Previous balance cleared to 0.00 for ${name}`);
+        await loadPayroll(true);
+      } catch (err) {
+        console.error('Error clearing balance:', err);
+        toast.error(err.response?.data?.error || 'Failed to clear past balance');
+      }
+    }, 'Clear Balance');
   };
 
   // Recalculate Net Salary dynamically when standard fields change
@@ -367,6 +447,7 @@ export default function Payroll() {
         row.paid_amount = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
       }
 
+      setSelectedEmployeeForModal(curr => (curr?.id === empId ? row : curr));
       return { ...prev, [empId]: row }
     })
   }
@@ -394,6 +475,7 @@ export default function Payroll() {
         row.paid_amount = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
       }
 
+      setSelectedEmployeeForModal(curr => (curr?.id === empId ? row : curr));
       return { ...prev, [empId]: row }
     })
   }
@@ -551,34 +633,35 @@ export default function Payroll() {
     });
   }
 
-  const handleSaveAll = async () => {
-    if (!window.confirm('Are you sure you want to save all payroll records for ' + selectedMonth + '?')) return;
-    setSavingAll(true);
-    try {
-      const rowsToSave = Object.values(editableData).filter(row => {
-        // If row is Paid and not unlocked, skip it
-        if (row.status === 'Paid' && !unlockedRowIds.has(row.id)) return false;
-        return true;
-      });
+  const handleSaveAll = () => {
+    confirmAction('Are you sure you want to save all payroll records for ' + selectedMonth + '?', async () => {
+      setSavingAll(true);
+      try {
+        const rowsToSave = Object.values(editableData).filter(row => {
+          // If row is Paid and not unlocked, skip it
+          if (row.status === 'Paid' && !unlockedRowIds.has(row.id)) return false;
+          return true;
+        });
 
-      if (rowsToSave.length === 0) {
-        toast.info('No editable records to save.');
+        if (rowsToSave.length === 0) {
+          toast.info('No editable records to save.');
+          setSavingAll(false);
+          return;
+        }
+
+        const promises = rowsToSave.map(row => saveRowRecord(row));
+        await Promise.all(promises);
+        toast.success('All payroll records saved successfully!');
+        loadPayroll();
+      } catch (error) {
+        console.error(error);
+        const errMsg = error?.response?.data?.error || error.message || 'Failed to save some payroll records.';
+        toast.error(errMsg);
+      } finally {
         setSavingAll(false);
-        return;
       }
-
-      const promises = rowsToSave.map(row => saveRowRecord(row));
-      await Promise.all(promises);
-      toast.success('All payroll records saved successfully!');
-      loadPayroll();
-    } catch (error) {
-      console.error(error);
-      const errMsg = error?.response?.data?.error || error.message || 'Failed to save some payroll records.';
-      toast.error(errMsg);
-    } finally {
-      setSavingAll(false);
-    }
-  }
+    }, 'Save All');
+  };
   
   const handleSaveRow = async (empId) => {
     setSavingRowId(empId);
@@ -597,6 +680,58 @@ export default function Payroll() {
        console.error(error);
        const errMsg = error?.response?.data?.error || error.message || 'Failed to save record.';
        toast.error(errMsg);
+    } finally {
+      setSavingRowId(null);
+    }
+  }
+
+  const handleExecuteUnlock = async (emp) => {
+    if (!emp) return;
+    if (!isAdmin) {
+      toast.error('Only Admin or Developer can unlock records');
+      setUnlockPromptEmp(null);
+      return;
+    }
+
+    setSavingRowId(emp.id);
+    try {
+      const targetId = emp.id;
+      
+      // 1. Mark as unlocked locally
+      setUnlockedRowIds(prev => {
+        const next = new Set(prev);
+        next.add(targetId);
+        return next;
+      });
+
+      // 2. Prepare row with status changed from Paid to Pending
+      const currentRow = editableData[targetId] || emp;
+      const updatedRow = {
+        ...currentRow,
+        status: 'Pending'
+      };
+
+      setEditableData(prev => ({
+        ...prev,
+        [targetId]: updatedRow
+      }));
+
+      setSelectedEmployeeForModal(prev => {
+        if (prev && prev.id === targetId) {
+          return { ...prev, status: 'Pending' };
+        }
+        return prev;
+      });
+
+      // 3. Persist status change to database via backend
+      await saveRowRecord(updatedRow);
+
+      toast.success(`Record unlocked for ${emp.name}! Status changed to Pending.`);
+      setUnlockPromptEmp(null);
+      await loadPayroll(true);
+    } catch (err) {
+      console.error('Error unlocking record:', err);
+      toast.error(err?.response?.data?.error || err.message || 'Failed to unlock record');
     } finally {
       setSavingRowId(null);
     }
@@ -676,16 +811,32 @@ export default function Payroll() {
   }
 
   const handleAddCustomAdj = async (e) => {
-    e.preventDefault()
+    e.preventDefault();
+    if (!currentEmpData) return;
+    const isLocked = currentEmpData.status === 'Paid' && !unlockedRowIds.has(currentEmpData.id);
+    if (isLocked) {
+      toast.error('Record is marked as Paid and locked. Please unlock the record to add or edit adjustments.');
+      return;
+    }
+
     const actualLabel = customAdjLabel === 'Other Custom' ? customAdjOtherLabel : customAdjLabel;
-    if (!actualLabel) return;
-    setSavingCustomAdj(true)
+    if (!actualLabel) {
+      toast.error('Please specify an adjustment name');
+      return;
+    }
+    const amt = parseFloat(customAdjAmount);
+    if (isNaN(amt) || amt <= 0) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+
+    setSavingCustomAdj(true);
     try {
       const payload = {
         employee_id: currentEmpData.id,
         type: actualLabel === 'Advance Salary / Loan' ? 'Advance Salary / Loan' : 'Custom Adjustment',
         custom_label: actualLabel,
-        amount: parseFloat(customAdjAmount),
+        amount: amt,
         action_type: customAdjAction,
         date: `${selectedMonth}-15`,
         start_date: `${selectedMonth}-01`,
@@ -696,55 +847,68 @@ export default function Payroll() {
       if (editingAdjId) {
         // Edit mode
         if (editingAdjType === 'Repeated Monthly') {
-          await axios.put(`/api/payroll/recurring-adjustments/${editingAdjId}`, payload)
+          await axios.put(`/api/payroll/recurring-adjustments/${editingAdjId}`, payload);
         } else {
-          await axios.put(`/api/payroll/financial-adjustments/${editingAdjId}`, payload)
+          await axios.put(`/api/payroll/financial-adjustments/${editingAdjId}`, payload);
         }
-        toast.success('Adjustment updated successfully!')
+        toast.success('Adjustment updated successfully!');
       } else {
         // Create mode
         if (customAdjType === 'Repeated Monthly') {
-          await axios.post('/api/payroll/recurring-adjustments', payload)
+          await axios.post('/api/payroll/recurring-adjustments', payload);
         } else {
-          await axios.post('/api/payroll/financial-adjustments', payload)
+          await axios.post('/api/payroll/financial-adjustments', payload);
         }
-        toast.success('Adjustment added successfully!')
+        toast.success('Adjustment added successfully!');
       }
 
-      resetAdjForm()
-      loadEmpAdjs(currentEmpData.id)
-      loadPayroll(true)
+      resetAdjForm();
+      await Promise.all([
+        loadEmpAdjs(currentEmpData.id),
+        loadPayroll(true)
+      ]);
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to save adjustment';
       toast.error(errorMsg);
     } finally {
-      setSavingCustomAdj(false)
+      setSavingCustomAdj(false);
     }
   }
 
   const executeDelete = async () => {
-    const { id, type } = confirmDelete
+    const { id, type } = confirmDelete;
+    const isLocked = currentEmpData?.status === 'Paid' && !unlockedRowIds.has(currentEmpData?.id);
+    if (isLocked && type !== 'Adjustment Column') {
+      toast.error('Record is marked as Paid and locked. Please unlock the record first.');
+      setConfirmDelete({ isOpen: false, id: null, type: null });
+      return;
+    }
+
+    // Close confirmation modal immediately for snappy UX
+    setConfirmDelete({ isOpen: false, id: null, type: null });
+
     try {
       if (type === 'Repeated Monthly') {
-        await axios.delete(`/api/payroll/recurring-adjustments/${id}`)
+        await axios.delete(`/api/payroll/recurring-adjustments/${id}`);
       } else if (type === 'Adjustment Column') {
-        await axios.delete(`/api/payroll/adjustment-types/${id}`)
+        await axios.delete(`/api/payroll/adjustment-types/${id}`);
       } else {
-        await axios.delete(`/api/payroll/adjustments/${id}`)
+        await axios.delete(`/api/payroll/adjustments/${id}`);
       }
-      toast.success('Deleted successfully')
+      toast.success('Deleted successfully');
       
       if (type === 'Adjustment Column') {
-        await loadAdjustmentTypes()
-        await loadPayroll(true)
+        await loadAdjustmentTypes();
+        await loadPayroll(true);
       } else {
-        await loadEmpAdjs(currentEmpData?.id)
-        await loadPayroll(true)
+        await Promise.all([
+          loadEmpAdjs(currentEmpData?.id),
+          loadPayroll(true)
+        ]);
       }
     } catch (err) {
-      toast.error('Failed to delete')
-    } finally {
-      setConfirmDelete({ isOpen: false, id: null, type: null })
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to delete';
+      toast.error(errorMsg);
     }
   }
 
@@ -995,24 +1159,29 @@ export default function Payroll() {
                   )}
                 </span>
               )}
-              {bonusVal > 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#ecfdf5', color: '#059669', fontWeight: 600 }}>
-                  Bonus: +{bonusVal}
+              {bonusVal !== 0 && (
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: bonusVal > 0 ? '#ecfdf5' : '#fef2f2', color: bonusVal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                  Bonus: {bonusVal > 0 ? `+${bonusVal}` : bonusVal}
                 </span>
               )}
-              {advVal > 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
-                  Adv: -{advVal}
+              {advVal !== 0 && (
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: advVal > 0 ? '#fef2f2' : '#ecfdf5', color: advVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
+                  Adv: {advVal > 0 ? `-${advVal}` : `+${Math.abs(advVal)}`}
                 </span>
               )}
-              {netVal > 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
-                  Internet: -{netVal}
+              {netVal !== 0 && (
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: netVal > 0 ? '#fef2f2' : '#ecfdf5', color: netVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
+                  Internet: {netVal > 0 ? `-${netVal}` : `+${Math.abs(netVal)}`}
                 </span>
               )}
-              {kafVal > 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
-                  Kafalat: -{kafVal}
+              {kafVal !== 0 && (
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: kafVal > 0 ? '#fef2f2' : '#ecfdf5', color: kafVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
+                  Kafalat: {kafVal > 0 ? `-${kafVal}` : `+${Math.abs(kafVal)}`}
+                </span>
+              )}
+              {parseFloat(targetEmpData.other_adjustments || 0) !== 0 && (
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: parseFloat(targetEmpData.other_adjustments) > 0 ? '#ecfdf5' : '#fef2f2', color: parseFloat(targetEmpData.other_adjustments) > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                  Other Adj: {parseFloat(targetEmpData.other_adjustments) > 0 ? `+${parseFloat(targetEmpData.other_adjustments)}` : parseFloat(targetEmpData.other_adjustments)}
                 </span>
               )}
               {Object.entries(targetEmpData.dynamic_adjustments || {}).map(([lbl, val]) => {
@@ -1025,7 +1194,7 @@ export default function Payroll() {
                   </span>
                 );
               })}
-              {lastMonthBal === 0 && bonusVal === 0 && advVal === 0 && netVal === 0 && kafVal === 0 && Object.keys(targetEmpData.dynamic_adjustments || {}).length === 0 && (
+              {lastMonthBal === 0 && bonusVal === 0 && advVal === 0 && netVal === 0 && kafVal === 0 && parseFloat(targetEmpData.other_adjustments || 0) === 0 && Object.keys(targetEmpData.dynamic_adjustments || {}).length === 0 && (
                 <span style={{ color: '#94a3b8', fontSize: '10px' }}>No active adjustments applied for this month.</span>
               )}
             </div>
@@ -1131,217 +1300,281 @@ export default function Payroll() {
         </div>
 
         {/* 4. Top Form: Add / Edit Adjustment */}
-        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
-          <form onSubmit={handleAddCustomAdj} autoComplete="off">
-            {/* Row 1: Heading (Left) + Action & Repetition Radios (Centered) + Submit Button (Right) */}
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: isMobile ? 'column' : 'row',
-              justifyContent: 'space-between', 
-              alignItems: isMobile ? 'stretch' : 'center', 
-              flexWrap: 'wrap', 
-              gap: '8px', 
-              marginBottom: '10px' 
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '13px', fontWeight: 800, margin: 0, color: '#1e293b', whiteSpace: 'nowrap' }}>
-                  {editingAdjId ? 'Edit Adjustment' : 'Add Adjustment / Loan'}
-                </h3>
-                {isMobile && editingAdjId && (
-                  <button 
-                    type="button" 
-                    onClick={resetAdjForm} 
-                    style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-
-              {/* Center: Action & Repetition Radios */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: isMobile ? '12px' : '16px', flexWrap: 'wrap', margin: isMobile ? '2px 0' : '0 10px' }}>
-                {/* Action Radios */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Action:</span>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--green)', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                    <input 
-                      type="radio" 
-                      name="adjAction" 
-                      value="Give" 
-                      checked={customAdjAction === 'Give'} 
-                      onChange={() => setCustomAdjAction('Give')} 
-                    />
-                    Give (+)
-                  </label>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                    <input 
-                      type="radio" 
-                      name="adjAction" 
-                      value="Deduct" 
-                      checked={customAdjAction === 'Deduct'} 
-                      onChange={() => setCustomAdjAction('Deduct')} 
-                    />
-                    Deduct (-)
-                  </label>
-                </div>
-
-                {/* Repetition Radios */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Repetition:</span>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: editingAdjId ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
-                    <input 
-                      type="radio" 
-                      name="adjRepetition" 
-                      value="Repeated Monthly" 
-                      checked={customAdjType === 'Repeated Monthly'} 
-                      onChange={() => setCustomAdjType('Repeated Monthly')} 
-                      disabled={editingAdjId !== null} 
-                    />
-                    Repeat
-                  </label>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: editingAdjId ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
-                    <input 
-                      type="radio" 
-                      name="adjRepetition" 
-                      value="One-Time" 
-                      checked={customAdjType === 'One-Time'} 
-                      onChange={() => setCustomAdjType('One-Time')} 
-                      disabled={editingAdjId !== null} 
-                    />
-                    One Time
-                  </label>
-                </div>
-              </div>
-
-              {/* Submit Button on Right */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: isMobile ? 'stretch' : 'flex-end' }}>
-                {!isMobile && editingAdjId && (
-                  <button 
-                    type="button" 
-                    onClick={resetAdjForm} 
-                    style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                  >
-                    Cancel
-                  </button>
-                )}
-                <button 
-                  type="submit" 
-                  disabled={savingCustomAdj} 
-                  className="btn btn-primary" 
-                  style={{ width: isMobile ? '100%' : 'auto', padding: isMobile ? '8px 14px' : '6px 14px', borderRadius: '6px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                >
-                  {savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Adjustment' : '+ Add Adjustment'}
-                </button>
-              </div>
+        {isRowLocked && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'space-between', 
+            gap: '10px', 
+            background: '#fef3c7', 
+            border: '1.5px solid #fde68a', 
+            borderRadius: '8px', 
+            padding: '10px 14px', 
+            marginBottom: '12px',
+            color: '#92400e'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 700 }}>
+              <Lock size={16} style={{ color: '#d97706', flexShrink: 0 }} />
+              <span>Record is marked as Paid and locked. Please unlock the record to add or modify adjustments.</span>
             </div>
+            {showActions && (
+              <button 
+                type="button" 
+                onClick={() => setUnlockPromptEmp(targetEmpData)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  background: '#fff',
+                  border: '1px solid #d97706',
+                  color: '#b45309',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                }}
+              >
+                <Unlock size={12} /> Unlock to Edit
+              </button>
+            )}
+          </div>
+        )}
 
-            {/* Row 2: 4 Inputs in One Row (or 2x2 on Mobile) */}
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
-              <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
-                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Adjustment Name</label>
-                {customAdjLabel === 'Other Custom' ? (
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <input 
-                      type="text" 
-                      value={customAdjOtherLabel} 
-                      onChange={e => setCustomAdjOtherLabel(e.target.value)} 
-                      placeholder="Custom Name" 
-                      required 
-                      style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
-                    />
+        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '14px', opacity: isRowLocked ? 0.7 : 1 }}>
+          <form onSubmit={handleAddCustomAdj} autoComplete="off">
+            <fieldset disabled={isRowLocked} style={{ border: 'none', padding: 0, margin: 0 }}>
+              {/* Row 1: Heading (Left) + Action & Repetition Radios (Centered) + Submit Button (Right) */}
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: isMobile ? 'column' : 'row',
+                justifyContent: 'space-between', 
+                alignItems: isMobile ? 'stretch' : 'center', 
+                flexWrap: 'wrap', 
+                gap: '8px', 
+                marginBottom: '10px' 
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '13px', fontWeight: 800, margin: 0, color: '#1e293b', whiteSpace: 'nowrap' }}>
+                    {editingAdjId ? 'Edit Adjustment' : 'Add Adjustment / Loan'}
+                  </h3>
+                  {isMobile && editingAdjId && (
                     <button 
                       type="button" 
-                      onClick={() => setCustomAdjLabel('')} 
-                      style={{ padding: '0 6px', fontSize: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', background: '#f1f5f9', cursor: 'pointer' }}
-                      title="Back to list"
+                      onClick={resetAdjForm} 
+                      style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
                     >
-                      ✕
+                      Cancel
                     </button>
+                  )}
+                </div>
+
+                {/* Center: Action & Repetition Radios */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: isMobile ? '12px' : '16px', flexWrap: 'wrap', margin: isMobile ? '2px 0' : '0 10px' }}>
+                  {/* Action Radios */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Action:</span>
+                    <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--green)', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: isRowLocked ? 'not-allowed' : 'pointer' }}>
+                      <input 
+                        type="radio" 
+                        name="adjAction" 
+                        value="Give" 
+                        disabled={isRowLocked}
+                        checked={customAdjAction === 'Give'} 
+                        onChange={() => setCustomAdjAction('Give')} 
+                      />
+                      Give (+)
+                    </label>
+                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: isRowLocked ? 'not-allowed' : 'pointer' }}>
+                      <input 
+                        type="radio" 
+                        name="adjAction" 
+                        value="Deduct" 
+                        disabled={isRowLocked}
+                        checked={customAdjAction === 'Deduct'} 
+                        onChange={() => setCustomAdjAction('Deduct')} 
+                      />
+                      Deduct (-)
+                    </label>
                   </div>
-                ) : (
-                  <select 
-                    value={customAdjLabel} 
-                    onChange={e => {
-                      const val = e.target.value;
-                      setCustomAdjLabel(val);
-                      if (val === 'Advance Salary / Loan') {
-                        setCustomAdjAction('Deduct');
-                        setCustomAdjType('Repeated Monthly');
-                      } else if (val === 'Bonus') {
-                        setCustomAdjAction('Give');
-                        setCustomAdjType('One-Time');
-                      } else if (val === 'Internet' || val === 'Kafalat') {
-                        setCustomAdjAction('Deduct');
-                        setCustomAdjType('Repeated Monthly');
-                      } else {
-                        const dynamicAdj = adjustmentTypes.find(a => a.label === val);
-                        if (dynamicAdj) {
-                          setCustomAdjAction(dynamicAdj.action === 'Add' ? 'Give' : dynamicAdj.action === 'Deduct' ? 'Deduct' : customAdjAction);
-                          setCustomAdjType('One-Time');
-                        }
-                      }
-                    }} 
-                    required 
-                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }}
+
+                  {/* Repetition Radios */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Repetition:</span>
+                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: (editingAdjId || isRowLocked) ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
+                      <input 
+                        type="radio" 
+                        name="adjRepetition" 
+                        value="Repeated Monthly" 
+                        checked={customAdjType === 'Repeated Monthly'} 
+                        onChange={() => setCustomAdjType('Repeated Monthly')} 
+                        disabled={editingAdjId !== null || isRowLocked} 
+                      />
+                      Repeat
+                    </label>
+                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: (editingAdjId || isRowLocked) ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
+                      <input 
+                        type="radio" 
+                        name="adjRepetition" 
+                        value="One-Time" 
+                        checked={customAdjType === 'One-Time'} 
+                        onChange={() => setCustomAdjType('One-Time')} 
+                        disabled={editingAdjId !== null || isRowLocked} 
+                      />
+                      One Time
+                    </label>
+                  </div>
+                </div>
+
+                {/* Submit Button on Right */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: isMobile ? 'stretch' : 'flex-end' }}>
+                  {!isMobile && editingAdjId && (
+                    <button 
+                      type="button" 
+                      onClick={resetAdjForm} 
+                      style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  <button 
+                    type="submit" 
+                    disabled={savingCustomAdj || isRowLocked} 
+                    className="btn btn-primary" 
+                    title={isRowLocked ? "Record is marked as Paid and locked. Please unlock to add or edit adjustments." : ""}
+                    style={{ 
+                      width: isMobile ? '100%' : 'auto', 
+                      padding: isMobile ? '8px 14px' : '6px 14px', 
+                      borderRadius: '6px', 
+                      fontWeight: 700, 
+                      fontSize: '12px', 
+                      background: isRowLocked ? '#cbd5e1' : 'var(--primary)', 
+                      color: isRowLocked ? '#64748b' : '#111', 
+                      border: 'none', 
+                      cursor: isRowLocked ? 'not-allowed' : 'pointer', 
+                      whiteSpace: 'nowrap' 
+                    }}
                   >
-                    <option value="">Select Adjustment Name</option>
-                    <optgroup label="Standard Adjustments">
-                      {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
-                      {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
-                      {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
-                      {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
-                    </optgroup>
-                    {adjustmentTypes.length > 0 && (
-                      <optgroup label="Custom Columns">
-                        {adjustmentTypes
-                          .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
-                          .map(adj => (
-                          <option key={adj.id} value={adj.label}>{adj.label}</option>
-                        ))}
+                    {isRowLocked ? 'Locked (Please Unlock)' : savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Adjustment' : '+ Add Adjustment'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Row 2: 4 Inputs in One Row (or 2x2 on Mobile) */}
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
+                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Adjustment Name</label>
+                  {customAdjLabel === 'Other Custom' ? (
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <input 
+                        type="text" 
+                        disabled={isRowLocked}
+                        value={customAdjOtherLabel} 
+                        onChange={e => setCustomAdjOtherLabel(e.target.value)} 
+                        placeholder="Custom Name" 
+                        required 
+                        style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                      />
+                      <button 
+                        type="button" 
+                        disabled={isRowLocked}
+                        onClick={() => setCustomAdjLabel('')} 
+                        style={{ padding: '0 6px', fontSize: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', background: '#f1f5f9', cursor: isRowLocked ? 'not-allowed' : 'pointer' }} 
+                        title="Back to list"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <select 
+                      disabled={isRowLocked}
+                      value={customAdjLabel} 
+                      onChange={e => {
+                        const val = e.target.value;
+                        setCustomAdjLabel(val);
+                        if (val === 'Advance Salary / Loan') {
+                          setCustomAdjAction('Deduct');
+                          setCustomAdjType('Repeated Monthly');
+                        } else if (val === 'Bonus') {
+                          setCustomAdjAction('Give');
+                          setCustomAdjType('One-Time');
+                        } else if (val === 'Internet' || val === 'Kafalat') {
+                          setCustomAdjAction('Deduct');
+                          setCustomAdjType('Repeated Monthly');
+                        } else {
+                          const dynamicAdj = adjustmentTypes.find(a => a.label === val);
+                          if (dynamicAdj) {
+                            setCustomAdjAction(dynamicAdj.action === 'Add' ? 'Give' : dynamicAdj.action === 'Deduct' ? 'Deduct' : customAdjAction);
+                            setCustomAdjType('One-Time');
+                          }
+                        }
+                      }} 
+                      required 
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'pointer' }}
+                    >
+                      <option value="">Select Adjustment Name</option>
+                      <optgroup label="Standard Adjustments">
+                        {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
+                        {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
+                        {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
+                        {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
                       </optgroup>
-                    )}
-                    <option value="Other Custom">Other Custom...</option>
-                  </select>
-                )}
-              </div>
+                      {adjustmentTypes.length > 0 && (
+                        <optgroup label="Custom Columns">
+                          {adjustmentTypes
+                            .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
+                            .map(adj => (
+                            <option key={adj.id} value={adj.label}>{adj.label}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                      <option value="Other Custom">Other Custom...</option>
+                    </select>
+                  )}
+                </div>
 
-              <div>
-                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                  {customAdjType === 'Repeated Monthly' ? (customAdjAction === 'Give' ? 'Monthly Pay Amount' : 'Monthly Cut Amount') : 'Current Month Amount'}
-                </label>
-                <input 
-                  type="number" 
-                  value={customAdjAmount} 
-                  onChange={e => setCustomAdjAmount(e.target.value)} 
-                  placeholder="e.g. 500" 
-                  required 
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
-                />
-              </div>
+                <div>
+                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                    {customAdjType === 'Repeated Monthly' ? (customAdjAction === 'Give' ? 'Monthly Pay Amount' : 'Monthly Cut Amount') : 'Current Month Amount'}
+                  </label>
+                  <input 
+                    type="number" 
+                    disabled={isRowLocked}
+                    value={customAdjAmount} 
+                    onChange={e => setCustomAdjAmount(e.target.value)} 
+                    placeholder="e.g. 500" 
+                    required 
+                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                  />
+                </div>
 
-              <div>
-                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Total Limit Amount (Optional)</label>
-                <input 
-                  type="number" 
-                  value={customAdjTotalLimit} 
-                  onChange={e => setCustomAdjTotalLimit(e.target.value)} 
-                  placeholder={customAdjType === 'Repeated Monthly' ? 'e.g. 5000' : 'N/A for One-Time'} 
-                  disabled={customAdjType !== 'Repeated Monthly'}
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: customAdjType !== 'Repeated Monthly' ? '#f1f5f9' : '#fff' }} 
-                />
-              </div>
+                <div>
+                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Total Limit Amount (Optional)</label>
+                  <input 
+                    type="number" 
+                    value={customAdjTotalLimit} 
+                    onChange={e => setCustomAdjTotalLimit(e.target.value)} 
+                    placeholder={customAdjType === 'Repeated Monthly' ? 'e.g. 5000' : 'N/A for One-Time'} 
+                    disabled={customAdjType !== 'Repeated Monthly' || isRowLocked}
+                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: (customAdjType !== 'Repeated Monthly' || isRowLocked) ? '#f1f5f9' : '#fff', cursor: (customAdjType !== 'Repeated Monthly' || isRowLocked) ? 'not-allowed' : 'text' }} 
+                  />
+                </div>
 
-              <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
-                <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Note (Optional)</label>
-                <input 
-                  type="text" 
-                  value={customAdjNotes} 
-                  onChange={e => setCustomAdjNotes(e.target.value)} 
-                  placeholder="Reason / Note" 
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
-                />
+                <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
+                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Note (Optional)</label>
+                  <input 
+                    type="text" 
+                    disabled={isRowLocked}
+                    value={customAdjNotes} 
+                    onChange={e => setCustomAdjNotes(e.target.value)} 
+                    placeholder="Reason / Note" 
+                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'text' }} 
+                  />
+                </div>
               </div>
-            </div>
+            </fieldset>
           </form>
         </div>
 
@@ -1379,10 +1612,36 @@ export default function Payroll() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <button onClick={() => handleEditAdj(adj, adj.repetition)} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', color: '#3b82f6', padding: '4px 6px' }} title="Edit">
+                      <button 
+                        disabled={isRowLocked}
+                        onClick={() => !isRowLocked && handleEditAdj(adj, adj.repetition)} 
+                        style={{ 
+                          background: '#fff', 
+                          border: '1px solid #cbd5e1', 
+                          borderRadius: '4px', 
+                          cursor: isRowLocked ? 'not-allowed' : 'pointer', 
+                          opacity: isRowLocked ? 0.35 : 1,
+                          color: isRowLocked ? '#94a3b8' : '#3b82f6', 
+                          padding: '4px 6px' 
+                        }} 
+                        title={isRowLocked ? "Record is locked. Please unlock to edit." : "Edit"}
+                      >
                         <Edit2 size={13} />
                       </button>
-                      <button onClick={() => setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', color: '#ef4444', padding: '4px 6px' }} title="Delete">
+                      <button 
+                        disabled={isRowLocked}
+                        onClick={() => !isRowLocked && setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} 
+                        style={{ 
+                          background: '#fff', 
+                          border: '1px solid #fecaca', 
+                          borderRadius: '4px', 
+                          cursor: isRowLocked ? 'not-allowed' : 'pointer', 
+                          opacity: isRowLocked ? 0.35 : 1,
+                          color: isRowLocked ? '#94a3b8' : '#ef4444', 
+                          padding: '4px 6px' 
+                        }} 
+                        title={isRowLocked ? "Record is locked. Please unlock to delete." : "Delete"}
+                      >
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -1423,10 +1682,36 @@ export default function Payroll() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <button onClick={() => handleEditAdj(adj, adj.repetition)} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', color: '#3b82f6', padding: '4px 6px' }} title="Edit">
+                      <button 
+                        disabled={isRowLocked}
+                        onClick={() => !isRowLocked && handleEditAdj(adj, adj.repetition)} 
+                        style={{ 
+                          background: '#fff', 
+                          border: '1px solid #cbd5e1', 
+                          borderRadius: '4px', 
+                          cursor: isRowLocked ? 'not-allowed' : 'pointer', 
+                          opacity: isRowLocked ? 0.35 : 1,
+                          color: isRowLocked ? '#94a3b8' : '#3b82f6', 
+                          padding: '4px 6px' 
+                        }} 
+                        title={isRowLocked ? "Record is locked. Please unlock to edit." : "Edit"}
+                      >
                         <Edit2 size={13} />
                       </button>
-                      <button onClick={() => setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', color: '#ef4444', padding: '4px 6px' }} title="Delete">
+                      <button 
+                        disabled={isRowLocked}
+                        onClick={() => !isRowLocked && setConfirmDelete({ isOpen: true, id: adj.id, type: adj.repetition })} 
+                        style={{ 
+                          background: '#fff', 
+                          border: '1px solid #fecaca', 
+                          borderRadius: '4px', 
+                          cursor: isRowLocked ? 'not-allowed' : 'pointer', 
+                          opacity: isRowLocked ? 0.35 : 1,
+                          color: isRowLocked ? '#94a3b8' : '#ef4444', 
+                          padding: '4px 6px' 
+                        }} 
+                        title={isRowLocked ? "Record is locked. Please unlock to delete." : "Delete"}
+                      >
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -2643,9 +2928,10 @@ export default function Payroll() {
                       />
                       <button onClick={() => {
                         if (!editStandardValue.trim()) return toast.error('Label cannot be empty');
-                        if (!window.confirm('Are you sure you want to rename this column?')) return;
-                        setBaseColumns(prev => ({ ...prev, [key]: { ...prev[key], label: editStandardValue.trim() } }));
-                        setEditingStandardKey(null);
+                        confirmAction('Are you sure you want to rename this column?', () => {
+                          setBaseColumns(prev => ({ ...prev, [key]: { ...prev[key], label: editStandardValue.trim() } }));
+                          setEditingStandardKey(null);
+                        }, 'Rename');
                       }} style={{ background: 'var(--primary)', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer' }}>Save</button>
                       <button onClick={() => setEditingStandardKey(null)} style={{ background: '#cbd5e1', color: '#1e293b', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button>
                     </div>
@@ -2798,6 +3084,50 @@ export default function Payroll() {
         onUpdated={() => loadPayroll(true)}
         month={selectedMonth}
       />
+
+      {/* Unlock Paid Record Confirmation Modal */}
+      {unlockPromptEmp && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10001, backdropFilter: 'blur(3px)' }}>
+          <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', width: '92%', maxWidth: '440px', boxShadow: '0 20px 40px rgba(0,0,0,0.18)', border: '1px solid #fde68a' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              <div style={{ background: '#fef3c7', padding: '10px', borderRadius: '10px', color: '#b45309', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Lock size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#1e293b' }}>Unlock Paid Record</h3>
+                <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>{unlockPromptEmp.name} • {selectedMonth}</p>
+              </div>
+            </div>
+            
+            <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', padding: '12px 14px', borderRadius: '8px', fontSize: '13px', color: '#92400e', lineHeight: 1.5, marginBottom: '20px' }}>
+              <strong>Important:</strong> Unlocking this record will change its salary status from <strong style={{ color: '#047857' }}>Paid</strong> to <strong style={{ color: '#d97706' }}>Pending</strong> so that all columns, adjustments, and details can be edited.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                type="button" 
+                onClick={() => setUnlockPromptEmp(null)} 
+                style={{ padding: '8px 16px', borderRadius: '7px', background: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                disabled={savingRowId === unlockPromptEmp.id}
+                onClick={() => handleExecuteUnlock(unlockPromptEmp)} 
+                style={{ padding: '8px 18px', borderRadius: '7px', background: 'var(--primary)', border: 'none', color: '#111', fontWeight: 800, fontSize: '13px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                {savingRowId === unlockPromptEmp.id ? (
+                  <RefreshCw size={14} className="spin" />
+                ) : (
+                  <Unlock size={14} />
+                )}
+                Unlock & Set to Pending
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .spin { animation: spin 1s linear infinite; }

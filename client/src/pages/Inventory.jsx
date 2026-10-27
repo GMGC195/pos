@@ -216,7 +216,7 @@ export default function Inventory() {
       toast.success(modal === 'add' ? 'Item Added' : 'Item Updated')
     } catch (err) {
       console.error(err)
-      alert('Failed to save item.')
+      toast.error('Failed to save item.')
     } finally {
       setSaving(false)
     }
@@ -255,7 +255,7 @@ export default function Inventory() {
       setImageToCrop(null)
     } catch (err) {
       console.error('Upload failed:', err)
-      alert('Failed to upload image. Make sure Cloudinary keys are set in the backend.')
+      toast.error('Failed to upload image. Make sure Cloudinary keys are set in the backend.')
     } finally {
       setUploadingImage(false)
     }
