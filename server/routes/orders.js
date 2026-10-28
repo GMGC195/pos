@@ -192,11 +192,37 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
+    // Enforce credit customer discount rules strictly
+    let finalDiscount = parseFloat(discount) || 0;
+    let finalGrandTotal = parseFloat(grand_total) || 0;
+
+    if (payment_method === 'Credit') {
+      if (!credit_customer_id) {
+        finalDiscount = 0;
+        finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+      } else {
+        const custRes = await client.query('SELECT discount_rules FROM credit_customers WHERE id = $1', [credit_customer_id]);
+        if (custRes.rows.length === 0) {
+          finalDiscount = 0;
+          finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+        } else {
+          let rules = custRes.rows[0].discount_rules;
+          if (typeof rules === 'string') {
+            try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+          }
+          if (!Array.isArray(rules) || rules.length === 0) {
+            finalDiscount = 0;
+            finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+          }
+        }
+      }
+    }
+
     // Insert order
     const orderResult = await client.query(
       `INSERT INTO "orders" (id, subtotal, tax, grand_total, status, customer_name, customer_phone, customer_address, discount, client_order_id, cancel_requested, cancel_reason, slip_number, is_edited, order_type, table_number, order_taker, comments, branch, completed_by, completed_at, credit_customer_id, shift_id) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, $11, FALSE, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING *`,
-      [newOrderId, subtotal, tax, grand_total, status, customer_name || null, customer_phone || null, customer_address || null, discount || 0, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt, credit_customer_id || null, shiftId]
+      [newOrderId, subtotal, tax, finalGrandTotal, status, customer_name || null, customer_phone || null, customer_address || null, finalDiscount, client_order_id || null, slipNumber, order_type || null, table_number || null, order_taker || null, comments || null, finalBranch, completedBy, completedAt, credit_customer_id || null, shiftId]
     );
     const order = orderResult.rows[0];
 
@@ -213,7 +239,7 @@ router.post('/', authenticateToken, async (req, res) => {
     await client.query(
       `INSERT INTO transactions (order_id, payment_method, amount) 
        VALUES ($1, $2, $3)`,
-      [order.id, payment_method || 'Cash', grand_total]
+      [order.id, payment_method || 'Cash', finalGrandTotal]
     );
 
     // Handle Credit order logic
@@ -221,10 +247,10 @@ router.post('/', authenticateToken, async (req, res) => {
       // Add the order to their ledger (increases debt)
       await client.query(
         `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
-        [credit_customer_id, order.id, 'CREDIT_ORDER', grand_total]
+        [credit_customer_id, order.id, 'CREDIT_ORDER', finalGrandTotal]
       );
       
-      let balanceChange = parseFloat(grand_total);
+      let balanceChange = parseFloat(finalGrandTotal);
       
       // If they made an inline payment right now
       if (credit_payment_amount && parseFloat(credit_payment_amount) > 0) {
@@ -799,6 +825,30 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
     // Handle Credit order logic
     if (payment_method === 'Credit' && credit_customer_id) {
       const order = orderResult.rows[0];
+      
+      // Enforce discount rules for credit customer
+      const custRes = await client.query('SELECT discount_rules FROM credit_customers WHERE id = $1', [credit_customer_id]);
+      let rules = [];
+      if (custRes.rows.length > 0) {
+        let r = custRes.rows[0].discount_rules;
+        if (typeof r === 'string') {
+          try { r = JSON.parse(r); } catch(e) { r = []; }
+        }
+        rules = Array.isArray(r) ? r : [];
+      }
+      if (rules.length === 0 && parseFloat(order.discount || 0) > 0) {
+        const correctedGrandTotal = Math.max(0, (parseFloat(order.subtotal) || 0) + (parseFloat(order.tax) || 0));
+        await client.query(
+          'UPDATE "orders" SET discount = 0, grand_total = $1 WHERE id = $2',
+          [correctedGrandTotal, req.params.id]
+        );
+        await client.query(
+          'UPDATE transactions SET amount = $1 WHERE order_id = $2',
+          [correctedGrandTotal, req.params.id]
+        );
+        order.discount = 0;
+        order.grand_total = correctedGrandTotal;
+      }
       
       // Also update the order table with the credit_customer_id
       await client.query(
@@ -2196,6 +2246,33 @@ router.put('/:id', authenticateToken, async (req, res) => {
       completedAt = null;
     }
 
+    // Enforce credit customer discount rules strictly
+    let finalDiscount = parseFloat(discount) || 0;
+    let finalGrandTotal = parseFloat(grand_total) || 0;
+    const targetCreditId = credit_customer_id || existingOrder.credit_customer_id;
+
+    if (payment_method === 'Credit') {
+      if (!targetCreditId) {
+        finalDiscount = 0;
+        finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+      } else {
+        const custRes = await client.query('SELECT discount_rules FROM credit_customers WHERE id = $1', [targetCreditId]);
+        if (custRes.rows.length === 0) {
+          finalDiscount = 0;
+          finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+        } else {
+          let rules = custRes.rows[0].discount_rules;
+          if (typeof rules === 'string') {
+            try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+          }
+          if (!Array.isArray(rules) || rules.length === 0) {
+            finalDiscount = 0;
+            finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+          }
+        }
+      }
+    }
+
     // Update order details
     const orderResult = await client.query(
       `UPDATE "orders" 
@@ -2212,8 +2289,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
            shift_id = COALESCE($18, shift_id)
        WHERE id = $19 RETURNING *`,
       [
-        subtotal, tax, grand_total, status, 
-        customer_name || null, customer_phone || null, customer_address || null, discount || 0, 
+        subtotal, tax, finalGrandTotal, status, 
+        customer_name || null, customer_phone || null, customer_address || null, finalDiscount, 
         client_order_id || null, order_type || null, table_number || null, order_taker || null, comments || null, 
         JSON.stringify(editHistory), 
         finalEditReason || null,
@@ -2239,11 +2316,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
       `UPDATE transactions 
        SET payment_method = $1, amount = $2 
        WHERE order_id = $3`,
-      [payment_method || 'Cash', grand_total, req.params.id]
+      [payment_method || 'Cash', finalGrandTotal, req.params.id]
     );
 
     // Handle Credit customer logic if Credit
-    const targetCreditId = credit_customer_id || existingOrder.credit_customer_id;
     if (payment_method === 'Credit' && targetCreditId) {
       await client.query(
         `UPDATE "orders" SET credit_customer_id = $1 WHERE id = $2`,
@@ -2252,9 +2328,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
       if (existingOrder.status !== 'Completed') {
         await client.query(
           `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
-          [targetCreditId, req.params.id, 'CREDIT_ORDER', grand_total]
+          [targetCreditId, req.params.id, 'CREDIT_ORDER', finalGrandTotal]
         );
-        let balanceChange = parseFloat(grand_total);
+        let balanceChange = parseFloat(finalGrandTotal);
         if (credit_payment_amount && parseFloat(credit_payment_amount) > 0) {
           const paymentAmt = parseFloat(credit_payment_amount);
           await client.query(

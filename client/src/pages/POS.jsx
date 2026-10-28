@@ -71,11 +71,70 @@ const getTimeElapsed = (dateString) => {
   const m = diffMinutes % 60;
   return `${h}h ${m}m ago`;
 };
+const getCustomerDiscountRules = (customer) => {
+  if (!customer) return [];
+  let rules = customer.discount_rules;
+  if (typeof rules === 'string') {
+    try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+  }
+  return Array.isArray(rules) ? rules : [];
+};
+
+const calculateCreditCustomerDiscount = (customer, currentCart) => {
+  const rules = getCustomerDiscountRules(customer);
+  if (!rules || rules.length === 0 || !Array.isArray(currentCart) || currentCart.length === 0) {
+    return 0;
+  }
+
+  let totalDiscount = 0;
+  currentCart.forEach(item => {
+    let applicableRule = null;
+    const itemIdStr = (item.id || '').toString();
+
+    // 1. Check item level first
+    const itemRule = rules.find(r => r.targetType === 'item' && r.targetId && r.targetId.toString() === itemIdStr);
+    if (itemRule) {
+      applicableRule = itemRule;
+    } else {
+      // 2. Check category level
+      const catRule = rules.find(r => r.targetType === 'category' && 
+        ((item.category_names && item.category_names.includes(r.targetName)) || 
+         item.category_name === r.targetName || item.category === r.targetName ||
+         (item.category_id && r.targetId && item.category_id.toString() === r.targetId.toString())
+        )
+      );
+      if (catRule) {
+        applicableRule = catRule;
+      } else {
+        // 3. Check all level
+        const allRule = rules.find(r => r.targetType === 'all');
+        if (allRule) applicableRule = allRule;
+      }
+    }
+
+    if (applicableRule) {
+      const itemPrice = parseFloat(item.price) || 0;
+      const itemQty = parseInt(item.qty) || 1;
+      const itemTotal = itemPrice * itemQty;
+      const discVal = parseFloat(applicableRule.discountValue) || 0;
+
+      if (applicableRule.discountType === 'percentage') {
+        totalDiscount += itemTotal * (discVal / 100);
+      } else if (applicableRule.discountType === 'fixed') {
+        totalDiscount += discVal * itemQty;
+      }
+    }
+  });
+
+  return Math.round(totalDiscount * 100) / 100;
+};
+
 const CreditCustomerDropdown = ({ 
   creditCustomers, 
   selectedCreditCustomer, 
   setSelectedCreditCustomer, 
   setCustomerInfo, 
+  cart,
   total, 
   discount, 
   creditPaymentAmount, 
@@ -96,6 +155,28 @@ const CreditCustomerDropdown = ({
   const limitExceeded = selectedCust && Number(selectedCust.balance) > effectiveLimit;
   const newBalanceExceeded = selectedCust && (Number(selectedCust.balance) + (total - parseFloat(discount || 0)) - parseFloat(creditPaymentAmount || 0)) > effectiveLimit;
   const isExceeded = limitExceeded || newBalanceExceeded;
+
+  const handleSelectCustomer = (c) => {
+    setSelectedCreditCustomer(c ? c.id.toString() : '');
+    if (setCustomerInfo) {
+      if (c) {
+        const allowedDisc = calculateCreditCustomerDiscount(c, cart || []);
+        setCustomerInfo(prev => ({ 
+          ...prev, 
+          name: c.name, 
+          phone: c.phone || '',
+          discount: allowedDisc > 0 ? allowedDisc.toFixed(2) : ''
+        }));
+      } else {
+        setCustomerInfo(prev => ({ 
+          ...prev, 
+          discount: '' 
+        }));
+      }
+    }
+    setIsOpen(false);
+    setSearchTerm('');
+  };
 
   return (
     <div style={{ padding: 12, background: isExceeded ? 'rgba(255,0,0,0.05)' : 'rgba(59,130,246,0.05)', borderRadius: 8, border: isExceeded ? '1px solid rgba(255,0,0,0.3)' : '1px solid rgba(59,130,246,0.2)', marginTop: 8 }}>
@@ -126,26 +207,37 @@ const CreditCustomerDropdown = ({
               />
             </div>
             <div style={{ overflowY: 'auto', flex: 1 }}>
+              {selectedCreditCustomer && (
+                <div 
+                  onClick={() => handleSelectCustomer(null)}
+                  style={{ padding: '8px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', color: 'var(--red)', fontWeight: 600, background: '#fff5f5' }}
+                >
+                  ✕ Clear Selected Customer
+                </div>
+              )}
               {filteredCustomers.length === 0 ? (
                 <div style={{ padding: 8, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>No results found</div>
               ) : (
                 filteredCustomers.map(c => {
                   const effLim = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 100;
                   const isLimitExceeded = Number(c.balance) > effLim;
+                  const cRules = getCustomerDiscountRules(c);
+                  const hasDiscount = cRules.length > 0;
                   return (
                     <div 
                       key={c.id} 
-                      onClick={() => {
-                        setSelectedCreditCustomer(c.id.toString());
-                        if (setCustomerInfo) {
-                          setCustomerInfo(prev => ({ ...prev, name: c.name, phone: c.phone || '' }));
-                        }
-                        setIsOpen(false);
-                        setSearchTerm('');
-                      }}
+                      onClick={() => handleSelectCustomer(c)}
                       style={{ padding: '8px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', background: isLimitExceeded ? 'rgba(255,0,0,0.05)' : 'transparent', color: isLimitExceeded ? 'var(--red)' : 'inherit' }}
                     >
-                      <div style={{ fontWeight: 600 }}>{c.name} {isLimitExceeded && <span style={{fontSize: 10, background: 'var(--red)', color: 'white', padding: '2px 4px', borderRadius: 4, marginLeft: 4}}>Limit Exceeded</span>}</div>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                        <span>{c.name}</span>
+                        {hasDiscount ? (
+                          <span style={{ fontSize: 9.5, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>Discount Allowed</span>
+                        ) : (
+                          <span style={{ fontSize: 9.5, background: '#f1f5f9', color: '#64748b', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>No Discount</span>
+                        )}
+                        {isLimitExceeded && <span style={{fontSize: 10, background: 'var(--red)', color: 'white', padding: '2px 4px', borderRadius: 4, marginLeft: 4}}>Limit Exceeded</span>}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.phone || 'N/A'} • Bal: {CURRENCY} {Math.abs(c.balance).toFixed(2)} • Limit: {Number(c.credit_limit) > 0 ? `${CURRENCY} ${Number(c.credit_limit).toFixed(2)}` : 'None'}</div>
                     </div>
                   )
@@ -294,49 +386,35 @@ export default function POS() {
     fetchCreditCustomers()
   }, [fetchCreditCustomers])
 
-  // Auto-calculate discount for credit customer
+  // Auto-calculate discount for credit customer and strictly unapply if customer not allowed discount
+  const creditAutoDiscountRef = useRef(false);
+
   useEffect(() => {
-    if (paymentMethod === 'Credit' && selectedCreditCustomer) {
-      const cust = creditCustomers.find(c => c.id.toString() === selectedCreditCustomer);
-      if (cust && cust.discount_rules && cust.discount_rules.length > 0) {
-        let totalDiscount = 0;
-        cart.forEach(item => {
-          let applicableRule = null;
-          
-          // Check item level first
-          const itemRule = cust.discount_rules.find(r => r.targetType === 'item' && r.targetId.toString() === item.id.toString());
-          if (itemRule) {
-            applicableRule = itemRule;
-          } else {
-            // Check category level
-            const catRule = cust.discount_rules.find(r => r.targetType === 'category' && 
-              ((item.category_names && item.category_names.includes(r.targetName)) || 
-               item.category_name === r.targetName || item.category === r.targetName ||
-               (item.category_id && item.category_id.toString() === r.targetId.toString())
-              )
-            );
-            if (catRule) {
-              applicableRule = catRule;
-            } else {
-              // Check all level
-              const allRule = cust.discount_rules.find(r => r.targetType === 'all');
-              if (allRule) applicableRule = allRule;
-            }
-          }
+    if (paymentMethod === 'Credit') {
+      if (selectedCreditCustomer) {
+        const cust = creditCustomers.find(c => c.id.toString() === selectedCreditCustomer);
+        const allowedDiscount = calculateCreditCustomerDiscount(cust, cart);
+        const targetDiscountStr = allowedDiscount > 0 ? allowedDiscount.toFixed(2) : '';
 
-          if (applicableRule) {
-            let itemTotal = item.price * item.qty;
-            if (applicableRule.discountType === 'percentage') {
-              totalDiscount += itemTotal * (applicableRule.discountValue / 100);
-            } else if (applicableRule.discountType === 'fixed') {
-              totalDiscount += applicableRule.discountValue * item.qty;
-            }
-          }
-        });
+        const currentVal = parseFloat(customerInfo.discount || 0);
+        const targetVal = parseFloat(targetDiscountStr || 0);
 
-        if (parseFloat(customerInfo.discount || 0).toFixed(2) !== totalDiscount.toFixed(2)) {
-          setCustomerInfo(prev => ({ ...prev, discount: totalDiscount.toFixed(2) }));
+        if (currentVal.toFixed(2) !== targetVal.toFixed(2)) {
+          setCustomerInfo(prev => ({ ...prev, discount: targetDiscountStr }));
         }
+        creditAutoDiscountRef.current = allowedDiscount > 0;
+      } else {
+        // No credit customer selected in Credit mode -> unapply any discount
+        if (creditAutoDiscountRef.current || customerInfo.discount) {
+          setCustomerInfo(prev => ({ ...prev, discount: '' }));
+          creditAutoDiscountRef.current = false;
+        }
+      }
+    } else {
+      // Switched away from Credit -> if discount was set for a credit customer, unapply it
+      if (creditAutoDiscountRef.current) {
+        setCustomerInfo(prev => ({ ...prev, discount: '' }));
+        creditAutoDiscountRef.current = false;
       }
     }
   }, [paymentMethod, selectedCreditCustomer, cart, creditCustomers, setCustomerInfo]);
@@ -695,7 +773,20 @@ export default function POS() {
     if (cart.length === 0) return
     
     setProcessing(actionType || (shouldPrint ? 'print' : 'punch'))
-    const finalDiscount = parseFloat(customerInfo.discount) || 0;
+    let finalDiscount = parseFloat(customerInfo.discount) || 0;
+    if (method === 'Credit') {
+      if (!selectedCreditCustomer) {
+        finalDiscount = 0;
+      } else {
+        const cust = creditCustomers.find(c => c.id.toString() === selectedCreditCustomer);
+        const allowedDiscount = calculateCreditCustomerDiscount(cust, cart);
+        if (allowedDiscount <= 0) {
+          finalDiscount = 0;
+        } else if (finalDiscount > allowedDiscount) {
+          finalDiscount = allowedDiscount;
+        }
+      }
+    }
     const finalTotal = total - finalDiscount;
 
     try {
@@ -1919,8 +2010,23 @@ export default function POS() {
                       </div>
                       <div style={{ display: 'flex', gap: 4, marginBottom: 1 }}>
                         <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Discount Amount</label>
-                          <input className="form-control" type="number" step="0.01" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Discount Amount</label>
+                            {paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0 && (
+                              <span style={{ fontSize: 9.5, color: '#dc2626', fontWeight: 700 }}>Not Allowed</span>
+                            )}
+                          </div>
+                          <input 
+                            className="form-control" 
+                            type="number" 
+                            step="0.01" 
+                            style={{ padding: '4px 6px', fontSize: 13, background: (paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0) ? '#f8fafc' : '#fff' }} 
+                            placeholder="0.00" 
+                            disabled={paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0}
+                            title={paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0 ? "Discount is not allowed for this customer" : ""}
+                            value={customerInfo.discount} 
+                            onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} 
+                          />
                         </div>
                         <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
                           <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Comments</label>
@@ -1943,8 +2049,23 @@ export default function POS() {
                           <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
                         </div>
                         <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Discount Amount</label>
-                          <input className="form-control" type="number" step="0.01" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 0, display: 'block' }}>Discount Amount</label>
+                            {paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0 && (
+                              <span style={{ fontSize: 9.5, color: '#dc2626', fontWeight: 700 }}>Not Allowed</span>
+                            )}
+                          </div>
+                          <input 
+                            className="form-control" 
+                            type="number" 
+                            step="0.01" 
+                            style={{ padding: '4px 6px', fontSize: 13, background: (paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0) ? '#f8fafc' : '#fff' }} 
+                            placeholder="0.00" 
+                            disabled={paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0}
+                            title={paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0 ? "Discount is not allowed for this customer" : ""}
+                            value={customerInfo.discount} 
+                            onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} 
+                          />
                         </div>
                       </div>
                       <div className="form-group" style={{ marginBottom: 1 }}>
@@ -1967,8 +2088,23 @@ export default function POS() {
                           <input type="text" className="form-control" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0300-0000000" value={customerInfo.phone} onChange={e => setCustomerInfo(p => ({ ...p, phone: e.target.value }))} />
                         </div>
                         <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label style={{ display: 'block', fontSize: 11, marginBottom: 0, color: 'var(--text-secondary)' }}>Discount Amount</label>
-                          <input className="form-control" type="number" step="0.01" style={{ padding: '4px 6px', fontSize: 13 }} placeholder="0.00" value={customerInfo.discount} onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label style={{ display: 'block', fontSize: 11, marginBottom: 0, color: 'var(--text-secondary)' }}>Discount Amount</label>
+                            {paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0 && (
+                              <span style={{ fontSize: 9.5, color: '#dc2626', fontWeight: 700 }}>Not Allowed</span>
+                            )}
+                          </div>
+                          <input 
+                            className="form-control" 
+                            type="number" 
+                            step="0.01" 
+                            style={{ padding: '4px 6px', fontSize: 13, background: (paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0) ? '#f8fafc' : '#fff' }} 
+                            placeholder="0.00" 
+                            disabled={paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0}
+                            title={paymentMethod === 'Credit' && selectedCreditCustomer && getCustomerDiscountRules(creditCustomers.find(c => c.id.toString() === selectedCreditCustomer)).length === 0 ? "Discount is not allowed for this customer" : ""}
+                            value={customerInfo.discount} 
+                            onChange={e => setCustomerInfo(p => ({ ...p, discount: e.target.value }))} 
+                          />
                         </div>
                       </div>
                     </>
@@ -2011,6 +2147,7 @@ export default function POS() {
                       selectedCreditCustomer={selectedCreditCustomer}
                       setSelectedCreditCustomer={setSelectedCreditCustomer}
                       setCustomerInfo={setCustomerInfo}
+                      cart={cart}
                       total={total}
                       discount={customerInfo.discount}
                       creditPaymentAmount={creditPaymentAmount}
