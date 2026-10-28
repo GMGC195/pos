@@ -187,6 +187,24 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       prevRecordsMap[r.employee_id] = r;
     });
 
+    // Calculate next month string (YYYY-MM) to check if already carried forward to next month
+    let nextYear = year;
+    let nextMonthNum = monthNum + 1;
+    if (nextMonthNum > 12) {
+      nextMonthNum = 1;
+      nextYear = year + 1;
+    }
+    const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
+
+    const nextRecordsRes = await pool.query(
+      'SELECT employee_id, last_month_balance FROM employee_payroll_records WHERE month = $1',
+      [nextMonthStr]
+    );
+    const nextRecordsMap = {};
+    nextRecordsRes.rows.forEach(r => {
+      nextRecordsMap[r.employee_id] = r;
+    });
+
     // Get recurring adjustments
     const recurringRes = await pool.query('SELECT * FROM employee_recurring_adjustments');
     const recurringMap = {};
@@ -535,7 +553,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
       // Last month balance calculation (unpaid balance or overpaid carryover)
       let lastMonthBalance = 0;
-      if (savedRecord && savedRecord.last_month_balance !== undefined && savedRecord.last_month_balance !== null) {
+      if (savedRecord && savedRecord.last_month_balance !== undefined && savedRecord.last_month_balance !== null && parseFloat(savedRecord.last_month_balance) !== 0) {
         lastMonthBalance = parseFloat(savedRecord.last_month_balance || 0);
       } else {
         const prevRecord = prevRecordsMap[emp.id];
@@ -543,14 +561,16 @@ router.get('/calculate', authenticateToken, async (req, res) => {
           const prevNet = parseFloat(prevRecord.net_salary || 0);
           const prevPaid = parseFloat(prevRecord.paid_amount || 0);
           lastMonthBalance = Math.round((prevNet - prevPaid) * 100) / 100;
+        } else if (savedRecord && savedRecord.last_month_balance !== undefined && savedRecord.last_month_balance !== null) {
+          lastMonthBalance = parseFloat(savedRecord.last_month_balance || 0);
         }
       }
 
       // Total adjustments (Expenses / Deductions & Additions)
       const totalAdjustments = Math.round((lastMonthBalance + bonus + lastMonthAdj - internet - kafalat - advanceDeduction + otherAdjustments + dynamicAdjustmentsTotal) * 100) / 100;
 
-      // Net salary = Payable salary (earnedSalary) + totalAdjustments
-      const dynamicNetSalary = Math.max(0, Math.round((earnedSalary + totalAdjustments) * 100) / 100);
+      // Net salary = Payable salary (earnedSalary) + totalAdjustments (can be negative if deductions exceed earnings)
+      const dynamicNetSalary = Math.round((earnedSalary + totalAdjustments) * 100) / 100;
 
       // Auto-sync database employee_payroll_records for pending records so it never holds stale data
       if (savedRecord && !isSavedPaid) {
@@ -642,6 +662,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         cash_paid: parseFloat(cashPaid.toFixed(2)),
         bank_paid: parseFloat(bankPaid.toFixed(2)),
         paid_amount: parseFloat(paidAmount.toFixed(2)),
+        carried_forward_to_next: parseFloat(savedRecordsMap[emp.id]?.carried_forward_to_next || nextRecordsMap[emp.id]?.last_month_balance || 0),
         status: paymentStatus,
         notes: notes,
         branch: emp.branch || '',
@@ -942,6 +963,128 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST carry forward remaining unpaid salary to next month
+router.post('/carry-forward', authenticateToken, async (req, res) => {
+  const { employee_id, month, cash_paid, bank_paid, remaining_amount, notes } = req.body;
+  if (!employee_id || !month) {
+    return res.status(400).json({ error: 'employee_id and month are required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Calculate next month (YYYY-MM)
+    const [year, monthNum] = month.split('-').map(Number);
+    let nextYear = year;
+    let nextMonthNum = monthNum + 1;
+    if (nextMonthNum > 12) {
+      nextMonthNum = 1;
+      nextYear = year + 1;
+    }
+    const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
+
+    // 2. Fetch or update current month's record
+    const curRecordRes = await client.query(
+      'SELECT * FROM employee_payroll_records WHERE employee_id = $1 AND month = $2',
+      [employee_id, month]
+    );
+
+    const cashVal = parseFloat(cash_paid || 0);
+    const bankVal = parseFloat(bank_paid || 0);
+    const totalPaid = Math.round((cashVal + bankVal) * 100) / 100;
+    
+    let curNet = 0;
+    if (curRecordRes.rows.length > 0) {
+      curNet = parseFloat(curRecordRes.rows[0].net_salary || 0);
+    }
+
+    const carryAmount = remaining_amount !== undefined 
+      ? parseFloat(remaining_amount) 
+      : Math.round((curNet - totalPaid) * 100) / 100;
+
+    if (curRecordRes.rows.length > 0) {
+      await client.query(
+        `UPDATE employee_payroll_records SET
+           cash_paid = $1,
+           bank_paid = $2,
+           paid_amount = $3,
+           carried_forward_to_next = $4,
+           status = 'Paid',
+           paid_date = COALESCE(paid_date, NOW()),
+           notes = COALESCE($5, notes)
+         WHERE employee_id = $6 AND month = $7`,
+        [cashVal, bankVal, totalPaid, carryAmount, notes || null, employee_id, month]
+      );
+    } else {
+      const empRes = await client.query('SELECT salary FROM employees WHERE id = $1', [employee_id]);
+      const baseSalary = parseFloat(empRes.rows[0]?.salary || 0);
+      curNet = baseSalary;
+      await client.query(
+        `INSERT INTO employee_payroll_records (
+           employee_id, month, base_salary, payable_salary, net_salary,
+           cash_paid, bank_paid, paid_amount, carried_forward_to_next, status, paid_date
+         ) VALUES ($1, $2, $3, $3, $3, $4, $5, $6, $7, 'Paid', NOW())
+         ON CONFLICT (employee_id, month) DO UPDATE SET
+           cash_paid = EXCLUDED.cash_paid,
+           bank_paid = EXCLUDED.bank_paid,
+           paid_amount = EXCLUDED.paid_amount,
+           carried_forward_to_next = EXCLUDED.carried_forward_to_next,
+           status = 'Paid'`,
+        [employee_id, month, baseSalary, cashVal, bankVal, totalPaid, carryAmount]
+      );
+    }
+
+    // 3. Update next month's record if it exists, or insert placeholder
+    const nextRecordRes = await client.query(
+      'SELECT * FROM employee_payroll_records WHERE employee_id = $1 AND month = $2',
+      [employee_id, nextMonthStr]
+    );
+
+    if (nextRecordRes.rows.length > 0) {
+      const nextRec = nextRecordRes.rows[0];
+      const prevBal = parseFloat(nextRec.last_month_balance || 0);
+      const diff = carryAmount - prevBal;
+      const newTotalAdj = Math.round((parseFloat(nextRec.total_adjustments || 0) + diff) * 100) / 100;
+      const newNet = Math.round((parseFloat(nextRec.payable_salary || 0) + newTotalAdj) * 100) / 100;
+
+      await client.query(
+        `UPDATE employee_payroll_records SET
+           last_month_balance = $1,
+           total_adjustments = $2,
+           net_salary = $3
+         WHERE employee_id = $4 AND month = $5`,
+        [carryAmount, newTotalAdj, newNet, employee_id, nextMonthStr]
+      );
+    } else {
+      const empRes = await client.query('SELECT salary FROM employees WHERE id = $1', [employee_id]);
+      const baseSalary = parseFloat(empRes.rows[0]?.salary || 0);
+      await client.query(
+        `INSERT INTO employee_payroll_records (
+           employee_id, month, base_salary, payable_salary, last_month_balance,
+           net_salary, total_adjustments, status
+         ) VALUES ($1, $2, $3, $3, $4, $5, $4, 'Pending')
+         ON CONFLICT (employee_id, month) DO UPDATE SET
+           last_month_balance = EXCLUDED.last_month_balance`,
+        [employee_id, nextMonthStr, baseSalary, carryAmount, (baseSalary + carryAmount)]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ 
+      success: true, 
+      message: `Carried forward SAR ${carryAmount.toFixed(2)} to ${nextMonthStr}`,
+      remaining: carryAmount,
+      next_month: nextMonthStr
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

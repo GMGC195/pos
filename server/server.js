@@ -568,6 +568,7 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS bank_paid NUMERIC(10, 2) DEFAULT 0');
       await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS last_month_balance NUMERIC(10, 2) DEFAULT 0');
       await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS payable_salary NUMERIC(10, 2) DEFAULT 0');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS carried_forward_to_next NUMERIC(10, 2) DEFAULT 0');
     } catch (e) {}
 
     // Create payroll adjustment types table for dynamic columns

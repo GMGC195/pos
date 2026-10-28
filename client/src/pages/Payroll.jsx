@@ -4,7 +4,7 @@ import {
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
   TrendingUp, Search, RefreshCw, X, AlertTriangle, FileText, Percent, 
   CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock,
-  Table, Unlock, RotateCcw
+  Table, Unlock, RotateCcw, ArrowRightCircle
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
@@ -110,13 +110,27 @@ export default function Payroll() {
   const [employeesList, setEmployeesList] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedMonth, setSelectedMonth] = useState(getLastMonth())
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    try {
+      return sessionStorage.getItem('payroll_selected_month') || getLastMonth()
+    } catch {
+      return getLastMonth()
+    }
+  })
   const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail'
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('ALL') // 'ALL' | 'R1' | 'R2' | 'R3'
   const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(null)
   const [showEmpModal, setShowEmpModal] = useState(false)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
   const [mobileSheetViewMode, setMobileSheetViewMode] = useState('cards') // 'cards' | 'table'
+
+  useEffect(() => {
+    if (selectedMonth) {
+      try {
+        sessionStorage.setItem('payroll_selected_month', selectedMonth)
+      } catch (e) {}
+    }
+  }, [selectedMonth])
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768)
@@ -210,6 +224,11 @@ export default function Payroll() {
   const [customAdjTotalLimit, setCustomAdjTotalLimit] = useState('')
   const [customAdjNotes, setCustomAdjNotes] = useState('')
   const [savingCustomAdj, setSavingCustomAdj] = useState(false)
+  const [activeInlineForm, setActiveInlineForm] = useState(null) // 'give' | 'deduct' | null
+  const [savingCarryForwardId, setSavingCarryForwardId] = useState(null)
+  const [carryForwardModal, setCarryForwardModal] = useState({ isOpen: false, emp: null, amount: null })
+  const [carryInputValues, setCarryInputValues] = useState({})
+  const [activeCarryEmpId, setActiveCarryEmpId] = useState(null)
 
   const loadAdjustmentTypes = async () => {
     try {
@@ -266,7 +285,8 @@ export default function Payroll() {
   // Load calculations
   const loadPayroll = async (silent = false) => {
     if (!selectedMonth) return
-    if (!silent) setLoading(true)
+    const isSilent = silent === true;
+    if (!isSilent) setLoading(true)
     try {
       const res = await axios.get('/api/payroll/calculate', {
         params: { month: selectedMonth }
@@ -274,8 +294,16 @@ export default function Payroll() {
       
       const newEditableData = {}
       res.data.forEach(item => {
-        const cashVal = item.cash_paid !== undefined && item.cash_paid !== null ? item.cash_paid : (item.paid_amount !== null ? item.paid_amount : item.net_salary);
+        const hasSavedCash = item.cash_paid !== undefined && item.cash_paid !== null;
+        const hasSavedPaid = item.paid_amount !== null && item.paid_amount !== undefined;
+        const isPaid = item.status === 'Paid';
+
+        // Do not default unpaid rows to net_salary. Only set to net_salary if record is already Paid.
+        const cashVal = hasSavedCash 
+          ? item.cash_paid 
+          : (hasSavedPaid ? item.paid_amount : (isPaid ? item.net_salary : 0));
         const bankVal = item.bank_paid !== undefined && item.bank_paid !== null ? item.bank_paid : 0;
+        const totalPaidVal = hasSavedPaid ? item.paid_amount : (hasSavedCash ? (cashVal + bankVal) : (isPaid ? item.net_salary : 0));
 
         newEditableData[item.id] = {
           ...item,
@@ -293,7 +321,7 @@ export default function Payroll() {
           calc_kafalat: item.calc_kafalat || 0,
           cash_paid: cashVal,
           bank_paid: bankVal,
-          paid_amount: item.paid_amount !== null ? item.paid_amount : (cashVal + bankVal),
+          paid_amount: totalPaidVal,
           overtime_pay: item.overtime_pay || 0,
           status: item.status || 'Pending',
           dynamic_adjustments: item.dynamic_adjustments || {}
@@ -305,8 +333,17 @@ export default function Payroll() {
       toast.error('Error loading payroll calculations')
       console.error(err)
     } finally {
-      if (!silent) setLoading(false)
+      if (!isSilent) setLoading(false)
     }
+  }
+
+  const handleManualRefresh = () => {
+    if (selectedMonth) {
+      try {
+        sessionStorage.setItem('payroll_selected_month', selectedMonth);
+      } catch (e) {}
+    }
+    window.location.reload();
   }
 
   // Load employees
@@ -377,7 +414,7 @@ export default function Payroll() {
     const baseSal = parseFloat(row.base_salary || 0);
     const payable = parseFloat(row.payable_salary !== undefined ? row.payable_salary : (baseSal - parseFloat(row.deductions || 0)));
     const totalAdj = calculateTotalAdjustments(row);
-    const dynamicNet = Math.max(0, Math.round((payable + totalAdj) * 100) / 100);
+    const dynamicNet = Math.round((payable + totalAdj) * 100) / 100;
     return dynamicNet;
   }
 
@@ -486,9 +523,95 @@ export default function Payroll() {
       row[field] = value;
       const cash = parseFloat(field === 'cash_paid' ? value : row.cash_paid) || 0;
       const bank = parseFloat(field === 'bank_paid' ? value : row.bank_paid) || 0;
-      row.paid_amount = Math.round((cash + bank) * 100) / 100;
+      const totalPaid = Math.round((cash + bank) * 100) / 100;
+      row.paid_amount = totalPaid;
+
+      const net = parseFloat(row.net_salary || 0);
+      const rem = Math.round((net - totalPaid) * 100) / 100;
+
+      // Do NOT auto-set status = 'Paid' or auto-lock!
+      // Status remains fully under user control, or is finalized via "Pay Now" button.
+      if (totalPaid > 0 && rem > 0 && row.status !== 'Paid') {
+        row.status = 'Partial';
+      } else if (totalPaid === 0 && row.status === 'Partial') {
+        row.status = 'Pending';
+      }
+
       return { ...prev, [empId]: row }
     })
+  }
+
+  const handleQuickPayRemaining = (emp) => {
+    if (!emp) return;
+    const isLocked = emp.status === 'Paid' && !unlockedRowIds.has(emp.id);
+    if (isLocked) {
+      toast.error('Record is marked as Paid and locked. Please unlock first.');
+      return;
+    }
+
+    const net = parseFloat(emp.net_salary || 0);
+    const curBank = parseFloat(emp.bank_paid || 0);
+    const newCash = Math.round((net - curBank) * 100) / 100;
+
+    setEditableData(prev => ({
+      ...prev,
+      [emp.id]: {
+        ...prev[emp.id],
+        cash_paid: newCash,
+        paid_amount: net
+      }
+    }));
+    toast.success(`Remaining salary filled (${CURRENCY} ${newCash.toFixed(2)} in Cash). Click "Pay Now" to confirm payment.`);
+  }
+
+  const handlePayNow = async (empId) => {
+    const row = editableData[empId];
+    if (!row) return;
+
+    let cash = parseFloat(row.cash_paid || 0);
+    let bank = parseFloat(row.bank_paid || 0);
+    const net = parseFloat(row.net_salary || 0);
+
+    // If both are 0, default to paying the remaining amount in Cash
+    if (cash === 0 && bank === 0) {
+      cash = net;
+    }
+
+    const totalPaid = Math.round((cash + bank) * 100) / 100;
+    const isFull = totalPaid >= net && net > 0;
+    const newStatus = isFull ? 'Paid' : (totalPaid > 0 ? 'Partial' : (row.status || 'Pending'));
+
+    const updatedRow = {
+      ...row,
+      cash_paid: cash,
+      bank_paid: bank,
+      paid_amount: totalPaid,
+      status: newStatus
+    };
+
+    setEditableData(prev => ({
+      ...prev,
+      [empId]: updatedRow
+    }));
+    setSelectedEmployeeForModal(curr => (curr?.id === empId ? updatedRow : curr));
+
+    setSavingRowId(empId);
+    try {
+      await saveRowRecord(updatedRow);
+      toast.success(`Payment of ${CURRENCY} ${totalPaid.toFixed(2)} recorded for ${row.name}! (${newStatus})`);
+      setUnlockedRowIds(prev => {
+        const next = new Set(prev);
+        next.delete(empId);
+        return next;
+      });
+      await loadPayroll(true);
+    } catch (error) {
+      console.error(error);
+      const errMsg = error?.response?.data?.error || error.message || 'Failed to record payment.';
+      toast.error(errMsg);
+    } finally {
+      setSavingRowId(null);
+    }
   }
 
   const handleTextChange = (empId, field, value) => {
@@ -780,6 +903,7 @@ export default function Payroll() {
   const resetAdjForm = () => {
     setEditingAdjId(null)
     setEditingAdjType(null)
+    setActiveInlineForm(null)
     setCustomAdjAction('Deduct')
     setCustomAdjLabel('Advance Salary / Loan')
     setCustomAdjOtherLabel('')
@@ -789,10 +913,30 @@ export default function Payroll() {
     setCustomAdjNotes('')
   }
 
+  const openInlineAddForm = (action) => {
+    setEditingAdjId(null);
+    setEditingAdjType(null);
+    setActiveInlineForm(action);
+    setCustomAdjAction(action === 'give' ? 'Give' : 'Deduct');
+    setCustomAdjType('Repeated Monthly');
+    if (action === 'give') {
+      setCustomAdjLabel(baseColumns.bonus?.label || 'Bonus');
+    } else {
+      setCustomAdjLabel('Advance Salary / Loan');
+    }
+    setCustomAdjOtherLabel('');
+    setCustomAdjAmount('');
+    setCustomAdjTotalLimit('');
+    setCustomAdjNotes('');
+  }
+
   const handleEditAdj = (adj, type) => {
     setEditingAdjId(adj.id)
     setEditingAdjType(type)
-    setCustomAdjAction(adj.action_type === 'Add' ? 'Give' : adj.action_type)
+    const isGive = (adj.action_type === 'Add' || adj.action_type === 'Give');
+    const act = isGive ? 'Give' : 'Deduct';
+    setCustomAdjAction(act);
+    setActiveInlineForm(isGive ? 'give' : 'deduct');
     
     // Check if label is one of the presets
     const presets = ['Advance Salary / Loan', 'Bonus', 'Last Month Adjustment', 'Kafalat', 'Internet']
@@ -808,6 +952,435 @@ export default function Payroll() {
     setCustomAdjAmount(adj.amount || '')
     setCustomAdjTotalLimit(adj.remaining_amount || '')
     setCustomAdjNotes(adj.notes || '')
+  }
+
+  // Carry Forward Remaining Salary to Next Month (Opens Confirmation Modal)
+  const handleCarryForward = (emp, customAmount) => {
+    if (!emp) return;
+    const cash = parseFloat(emp.cash_paid || 0);
+    const bank = parseFloat(emp.bank_paid || 0);
+    const totalPaid = Math.round((cash + bank) * 100) / 100;
+    const netSalary = parseFloat(emp.net_salary || 0);
+    const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+
+    const amountToCarry = (customAmount !== undefined && !isNaN(customAmount) && customAmount !== 0)
+      ? customAmount
+      : remaining;
+
+    if (amountToCarry === 0) {
+      toast.info('No remaining balance to carry forward for this employee.');
+      return;
+    }
+
+    setCarryForwardModal({ isOpen: true, emp, amount: amountToCarry });
+  }
+
+  const executeCarryForwardFromModal = async () => {
+    const emp = carryForwardModal.emp;
+    if (!emp) return;
+    const cash = parseFloat(emp.cash_paid || 0);
+    const bank = parseFloat(emp.bank_paid || 0);
+    const totalPaid = Math.round((cash + bank) * 100) / 100;
+    const netSalary = parseFloat(emp.net_salary || 0);
+    const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+    const carryAmount = (carryForwardModal.amount !== undefined && carryForwardModal.amount !== null && !isNaN(parseFloat(carryForwardModal.amount)))
+      ? parseFloat(carryForwardModal.amount)
+      : remaining;
+
+    const [year, monthNum] = selectedMonth.split('-').map(Number);
+    let nextYear = year;
+    let nextMonthNum = monthNum + 1;
+    if (nextMonthNum > 12) {
+      nextMonthNum = 1;
+      nextYear = year + 1;
+    }
+    const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
+
+    setSavingCarryForwardId(emp.id);
+    try {
+      const res = await axios.post('/api/payroll/carry-forward', {
+        employee_id: emp.id,
+        month: selectedMonth,
+        cash_paid: cash,
+        bank_paid: bank,
+        remaining_amount: carryAmount
+      });
+      toast.success(res.data?.message || `Carried forward ${CURRENCY} ${carryAmount.toFixed(2)} to ${nextMonthStr} and locked ${selectedMonth}!`);
+      setCarryForwardModal({ isOpen: false, emp: null, amount: null });
+      setActiveCarryEmpId(null);
+      await loadPayroll(true);
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.response?.data?.error || 'Failed to carry forward salary');
+    } finally {
+      setSavingCarryForwardId(null);
+    }
+  }
+
+  // Print Official Employee Salary Slip (Optimized for 80mm Thermal Receipt Printers)
+  const handlePrintSalarySlip = (emp) => {
+    if (!emp) return;
+    const baseSal = parseFloat(emp.base_salary || 0);
+    const payableSal = parseFloat(emp.payable_salary !== undefined ? emp.payable_salary : (baseSal - parseFloat(emp.deductions || 0)));
+    const cashPaid = parseFloat(emp.cash_paid || 0);
+    const bankPaid = parseFloat(emp.bank_paid || 0);
+    const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
+    const netSalary = parseFloat(emp.net_salary || 0);
+    const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+    const lastMonthBal = parseFloat(emp.last_month_balance || 0);
+    const bonus = parseFloat(emp.bonus || 0);
+    const advDeduct = parseFloat(emp.this_month_adv || 0);
+    const advBalance = parseFloat(emp.advance_balance || 0);
+    const internet = parseFloat(emp.internet || 0);
+    const kafalat = parseFloat(emp.kafalat || 0);
+    const otherAdj = parseFloat(emp.other_adjustments || 0);
+    const totalAdj = calculateTotalAdjustments(emp);
+    const deductions = parseFloat(emp.deductions || 0);
+
+    // Overtime & Only Overtime (OOT) calculations
+    const onlyOtDays = parseInt(emp.only_overtime_days || 0);
+    const onlyOtHours = parseFloat(emp.only_overtime_hours || 0);
+    const simpleOtHours = parseFloat(emp.other_overtime_hours || 0);
+    
+    // Total overtime hours = simple overtime + only overtime (OOT)
+    const rawTotalOtHours = Math.round((onlyOtHours + simpleOtHours) * 100) / 100;
+    const netOtHours = emp.net_overtime_hours !== undefined 
+      ? parseFloat(emp.net_overtime_hours || 0) 
+      : parseFloat(emp.overtime_hours || rawTotalOtHours);
+    const displayTotalOtHours = rawTotalOtHours > 0 ? rawTotalOtHours : Math.max(0, netOtHours);
+
+    // Expected hours and per-minute rate
+    const expHours = parseFloat(emp.expected_hours || 0);
+    const expMins = emp.expected_minutes !== undefined ? emp.expected_minutes : (expHours * 60);
+    const perMinRate = expMins > 0 ? (baseSal / expMins) : parseFloat(emp.per_minute_rate || 0);
+
+    // Overtime pay calculated based on basic salary per minute / backend overtime_pay
+    const calcOtPay = Math.round(Math.round(displayTotalOtHours * 60) * perMinRate * 100) / 100;
+    const totalOtPay = (emp.overtime_pay !== undefined && emp.overtime_pay !== null && parseFloat(emp.overtime_pay) > 0)
+      ? parseFloat(emp.overtime_pay)
+      : calcOtPay;
+
+    const dateObj = new Date(`${selectedMonth}-01T00:00:00`);
+    const monthFormatted = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const printDate = new Date().toLocaleString('en-US', { 
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' 
+    });
+
+    const dynamicAdditions = [];
+    const dynamicDeductions = [];
+    adjustmentTypes.forEach(adj => {
+      const val = parseFloat(emp.dynamic_adjustments?.[adj.label] || 0);
+      if (val !== 0) {
+        if (adj.action === 'Add' || (adj.action === 'Both' && val > 0)) {
+          dynamicAdditions.push({ label: adj.label, amount: val });
+        } else if (adj.action === 'Deduct' || (adj.action === 'Both' && val < 0)) {
+          dynamicDeductions.push({ label: adj.label, amount: Math.abs(val) });
+        }
+      }
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Salary Slip - ${emp.name} - ${monthFormatted}</title>
+        <style>
+          @page {
+            size: 80mm auto;
+            margin: 0;
+          }
+          @media print {
+            html, body {
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 2mm 3mm !important;
+            }
+            * {
+              page-break-inside: avoid;
+              break-inside: avoid;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+          }
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            color: #000 !important;
+          }
+          body {
+            width: 80mm;
+            max-width: 80mm;
+            font-family: 'Courier New', Courier, monospace, system-ui;
+            font-size: 11px;
+            line-height: 1.35;
+            padding: 2mm 3mm;
+            margin: 0 auto;
+            background: #fff;
+          }
+          .center { text-align: center; }
+          .bold { font-weight: bold; }
+          .divider-solid {
+            border-top: 1px solid #000;
+            margin: 4px 0;
+          }
+          .divider-double {
+            border-top: 2px solid #000;
+            margin: 5px 0;
+          }
+          .divider-dashed {
+            border-top: 1px dashed #000;
+            margin: 4px 0;
+          }
+          .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 1.5px 0;
+            font-size: 11px;
+          }
+          .row-title {
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-top: 3px;
+          }
+          .right { text-align: right; }
+        </style>
+      </head>
+      <body>
+        <div class="center">
+          <div class="bold" style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">EMPLOYEE SALARY SLIP</div>
+          <div style="font-size: 10px; margin-top: 2px;">Printed: ${printDate}</div>
+        </div>
+
+        <div class="divider-double"></div>
+
+        <div class="row">
+          <span class="bold">Employee:</span>
+          <span class="bold right">${emp.name}</span>
+        </div>
+        <div class="row">
+          <span>ID / Role:</span>
+          <span class="right">${emp.employee_id} • ${emp.role || 'Staff'}</span>
+        </div>
+        <div class="row">
+          <span>Branch / Shift:</span>
+          <span class="right">${emp.branch || 'Main'} ${emp.shift ? `(${emp.shift})` : ''}</span>
+        </div>
+        <div class="row">
+          <span>Pay Period:</span>
+          <span class="bold right">${monthFormatted}</span>
+        </div>
+
+        <div class="divider-dashed"></div>
+
+        <div class="bold" style="font-size: 10.5px; text-transform: uppercase;">ATTENDANCE SUMMARY</div>
+        <div class="row" style="font-size: 10.5px;">
+          <span>P:${emp.presents || 0}  A:${emp.absents || 0}  L:${emp.leaves || 0}</span>
+          <span class="right">H:${emp.holidays || 0}  OOT:${onlyOtDays}  Late:${emp.late_days || 0}</span>
+        </div>
+        <div class="row" style="font-size: 10.5px;">
+          <span>Worked Duty:</span>
+          <span class="right">${formatDuration(emp.actual_minutes !== undefined ? emp.actual_minutes : (parseFloat(emp.actual_hours || 0) * 60))}</span>
+        </div>
+        ${(displayTotalOtHours > 0 || onlyOtDays > 0 || totalOtPay > 0) ? `
+          ${(simpleOtHours > 0 && onlyOtHours > 0) ? `
+            <div class="row" style="font-size: 10px;">
+              <span>Simple Overtime:</span>
+              <span class="right">+${formatDuration(Math.round(simpleOtHours * 60))}</span>
+            </div>
+            <div class="row" style="font-size: 10px;">
+              <span>Only Overtime (OOT):</span>
+              <span class="right">${onlyOtDays > 0 ? `${onlyOtDays}d ` : ''}(+${formatDuration(Math.round(onlyOtHours * 60))})</span>
+            </div>
+          ` : onlyOtHours > 0 ? `
+            <div class="row" style="font-size: 10px;">
+              <span>Only Overtime (OOT):</span>
+              <span class="right">${onlyOtDays > 0 ? `${onlyOtDays}d ` : ''}(+${formatDuration(Math.round(onlyOtHours * 60))})</span>
+            </div>
+          ` : simpleOtHours > 0 ? `
+            <div class="row" style="font-size: 10px;">
+              <span>Simple Overtime:</span>
+              <span class="right">+${formatDuration(Math.round(simpleOtHours * 60))}</span>
+            </div>
+          ` : ''}
+          <div class="row bold" style="font-size: 10.5px;">
+            <span>Total Overtime (OT + OOT):</span>
+            <span class="right">+${formatDuration(Math.round(displayTotalOtHours * 60))} (${displayTotalOtHours.toFixed(1)} hrs)</span>
+          </div>
+          ${totalOtPay > 0 ? `
+            <div class="row bold" style="font-size: 10.5px;">
+              <span>Total Overtime Pay:</span>
+              <span class="right">+${CURRENCY} ${totalOtPay.toFixed(2)}</span>
+            </div>
+          ` : ''}
+        ` : ''}
+
+        <div class="divider-dashed"></div>
+
+        <div class="row-title">EARNINGS / ADDITIONS (+)</div>
+        <div class="row">
+          <span>Payable (Worked Duty)</span>
+          <span class="right">${CURRENCY} ${payableSal.toFixed(2)}</span>
+        </div>
+        ${lastMonthBal > 0 ? `
+          <div class="row">
+            <span>Prev M. Remaining</span>
+            <span class="right">+${CURRENCY} ${lastMonthBal.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${bonus > 0 ? `
+          <div class="row">
+            <span>Bonus</span>
+            <span class="right">+${CURRENCY} ${bonus.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${dynamicAdditions.map(a => `
+          <div class="row">
+            <span>${a.label}</span>
+            <span class="right">+${CURRENCY} ${a.amount.toFixed(2)}</span>
+          </div>
+        `).join('')}
+        ${otherAdj > 0 ? `
+          <div class="row">
+            <span>Other Additions</span>
+            <span class="right">+${CURRENCY} ${otherAdj.toFixed(2)}</span>
+          </div>
+        ` : ''}
+
+        <div class="divider-dashed"></div>
+
+        <div class="row-title">DEDUCTIONS / CUTS (-)</div>
+        ${deductions > 0 ? `
+          <div class="row">
+            <span>Short / Absence Cuts</span>
+            <span class="right">-${CURRENCY} ${deductions.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${advDeduct > 0 ? `
+          <div class="row">
+            <span>Advance / Loan Cut</span>
+            <span class="right">-${CURRENCY} ${advDeduct.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${lastMonthBal < 0 ? `
+          <div class="row">
+            <span>Past Balance Cut</span>
+            <span class="right">-${CURRENCY} ${Math.abs(lastMonthBal).toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${internet > 0 ? `
+          <div class="row">
+            <span>Internet</span>
+            <span class="right">-${CURRENCY} ${internet.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${kafalat > 0 ? `
+          <div class="row">
+            <span>Kafalat</span>
+            <span class="right">-${CURRENCY} ${kafalat.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${dynamicDeductions.map(d => `
+          <div class="row">
+            <span>${d.label}</span>
+            <span class="right">-${CURRENCY} ${d.amount.toFixed(2)}</span>
+          </div>
+        `).join('')}
+        ${otherAdj < 0 ? `
+          <div class="row">
+            <span>Other Deductions</span>
+            <span class="right">-${CURRENCY} ${Math.abs(otherAdj).toFixed(2)}</span>
+          </div>
+        ` : ''}
+
+        <div class="divider-solid"></div>
+
+        <div class="row">
+          <span>Basic Base Salary:</span>
+          <span class="right">${CURRENCY} ${baseSal.toFixed(2)}</span>
+        </div>
+        <div class="row">
+          <span>Net Adjustments:</span>
+          <span class="right">${totalAdj >= 0 ? `+${totalAdj.toFixed(2)}` : totalAdj.toFixed(2)}</span>
+        </div>
+        <div class="row bold" style="font-size: 13px; margin: 3px 0;">
+          <span>NET PAYABLE SALARY:</span>
+          <span class="right">${CURRENCY} ${netSalary.toFixed(2)}</span>
+        </div>
+
+        <div class="divider-double"></div>
+
+        <div class="row-title">PAYMENT DISTRIBUTION</div>
+        <div class="row">
+          <span>Cash Paid:</span>
+          <span class="right bold">${CURRENCY} ${cashPaid.toFixed(2)}</span>
+        </div>
+        <div class="row">
+          <span>Bank Paid:</span>
+          <span class="right bold">${CURRENCY} ${bankPaid.toFixed(2)}</span>
+        </div>
+        <div class="row bold" style="font-size: 12px; border-top: 1px dashed #000; padding-top: 2px; margin-top: 2px;">
+          <span>TOTAL PAID:</span>
+          <span class="right">${CURRENCY} ${totalPaid.toFixed(2)}</span>
+        </div>
+        <div class="row bold" style="font-size: 12px; margin-top: 2px;">
+          <span>REMAINING SALARY:</span>
+          <span class="right">${CURRENCY} ${remaining.toFixed(2)}</span>
+        </div>
+        <div class="row" style="font-size: 10px; margin-top: 1px;">
+          <span>Payment Status:</span>
+          <span class="right bold">${remaining === 0 ? 'FULLY SETTLED' : (remaining < 0 ? 'NEGATIVE BALANCE / OWED' : (totalPaid > 0 ? 'PARTIALLY PAID / CARRIED' : 'PENDING'))}</span>
+        </div>
+
+        ${advBalance > 0 ? `
+          <div class="divider-dashed"></div>
+          <div class="row" style="font-size: 10px;">
+            <span>Remaining Loan Balance:</span>
+            <span class="right">${CURRENCY} ${advBalance.toFixed(2)}</span>
+          </div>
+        ` : ''}
+
+        <div class="divider-solid"></div>
+
+        <div style="margin-top: 28px; display: flex; justify-content: space-between; font-size: 10px;">
+          <div style="width: 45%; text-align: center;">
+            <div style="border-top: 1px solid #000; padding-top: 2px;">Employee Signature</div>
+          </div>
+          <div style="width: 45%; text-align: center;">
+            <div style="border-top: 1px solid #000; padding-top: 2px;">Manager Signature</div>
+          </div>
+        </div>
+
+        <div class="center bold" style="margin-top: 15px; font-size: 11px; letter-spacing: 0.5px;">
+          Thank You
+        </div>
+      </body>
+      </html>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    iframe.contentDocument.write(htmlContent);
+    iframe.contentDocument.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 1000);
+    }, 400);
   }
 
   const handleAddCustomAdj = async (e) => {
@@ -1089,10 +1662,10 @@ export default function Payroll() {
             </div>
           </div>
 
-          {/* Financial Metrics Grid - 2x2 on Mobile, 4 in row on Desktop */}
+          {/* Financial Metrics Grid - 2x2 on Mobile, 5 in row on Desktop */}
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, minmax(0, 1fr))', 
+            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, minmax(0, 1fr))', 
             gap: '8px', 
             marginBottom: '8px' 
           }}>
@@ -1114,6 +1687,16 @@ export default function Payroll() {
               </span>
             </div>
 
+            <div style={{ background: '#f5f3ff', padding: '8px 10px', borderRadius: '6px', border: '1.5px solid #ddd6fe' }}>
+              <span style={{ fontSize: '10px', color: '#6b21a8', fontWeight: 700, display: 'block' }}>Last Month Carry Forward</span>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: lastMonthBal > 0 ? 'var(--green)' : lastMonthBal < 0 ? '#ef4444' : '#64748b', marginTop: '2px' }}>
+                {lastMonthBal > 0 ? `+${CURRENCY} ${lastMonthBal.toFixed(2)}` : lastMonthBal < 0 ? `-${CURRENCY} ${Math.abs(lastMonthBal).toFixed(2)}` : `${CURRENCY} 0.00`}
+              </div>
+              <span style={{ fontSize: '9px', color: '#7c3aed', display: 'block' }}>
+                {lastMonthBal !== 0 ? 'Carried from past month' : 'No past carryover'}
+              </span>
+            </div>
+
             <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
               <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, display: 'block' }}>Advance Balance (Loan)</span>
               <div style={{ fontSize: '13px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
@@ -1121,20 +1704,20 @@ export default function Payroll() {
             </div>
 
             <div style={{ 
-              background: '#ecfdf5', 
+              background: targetEmpData.net_salary < 0 ? '#fef2f2' : '#ecfdf5', 
               padding: '8px 10px', 
               borderRadius: '6px', 
-              border: '1.5px solid #a7f3d0',
+              border: '1.5px solid ' + (targetEmpData.net_salary < 0 ? '#fecaca' : '#a7f3d0'),
               gridColumn: isMobile ? 'span 2' : 'auto',
               display: isMobile ? 'flex' : 'block',
               justifyContent: isMobile ? 'space-between' : 'initial',
               alignItems: isMobile ? 'center' : 'initial'
             }}>
               <div>
-                <span style={{ fontSize: '11px', color: '#047857', fontWeight: 800, display: 'block' }}>Net Payable Salary</span>
-                <span style={{ fontSize: '9px', color: '#047857', display: 'block' }}>Payable + Adj</span>
+                <span style={{ fontSize: '11px', color: targetEmpData.net_salary < 0 ? '#b91c1c' : '#047857', fontWeight: 800, display: 'block' }}>Net Payable Salary</span>
+                <span style={{ fontSize: '9px', color: targetEmpData.net_salary < 0 ? '#b91c1c' : '#047857', display: 'block' }}>Payable + Adj</span>
               </div>
-              <div style={{ fontSize: isMobile ? '16px' : '13px', fontWeight: 900, color: '#059669', marginTop: isMobile ? 0 : '1px' }}>
+              <div style={{ fontSize: isMobile ? '16px' : '13px', fontWeight: 900, color: targetEmpData.net_salary < 0 ? '#dc2626' : '#059669', marginTop: isMobile ? 0 : '1px' }}>
                 {CURRENCY} {Number(targetEmpData.net_salary || 0).toFixed(2)}
               </div>
             </div>
@@ -1200,106 +1783,380 @@ export default function Payroll() {
             </div>
           </div>
 
-          {/* Payment Execution Controls (Cash, Bank, Status, Save) */}
+          {/* Payment Execution Controls (Structured Two-Row Layout) */}
           <div style={{ 
-            background: '#f1f5f9', 
-            padding: isMobile ? '10px' : '8px 12px', 
-            borderRadius: '8px', 
-            border: '1px solid #cbd5e1', 
+            background: '#f8fafc', 
+            padding: isMobile ? '12px' : '10px 14px', 
+            borderRadius: '10px', 
+            border: '1.5px solid #e2e8f0', 
             display: 'flex', 
-            flexDirection: isMobile ? 'column' : 'row',
-            alignItems: isMobile ? 'stretch' : 'center', 
-            justifyContent: 'space-between', 
-            gap: '10px' 
+            flexDirection: 'column',
+            gap: '10px',
+            marginBottom: '10px'
           }}>
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'auto auto auto', 
-              gap: isMobile ? '8px' : '12px', 
-              alignItems: 'center' 
-            }}>
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: '4px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#0369a1' }}>Cash Paid:</label>
-                <input 
-                  type="text"
-                  inputMode="decimal"
-                  disabled={isRowLocked}
-                  value={targetEmpData.cash_paid}
-                  onChange={e => handlePaidChange(targetEmpData.id, 'cash_paid', e.target.value)}
-                  style={{ width: isMobile ? '100%' : '80px', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#0369a1', background: '#fff' }}
-                />
-              </div>
+            {(() => {
+              const cash = parseFloat(targetEmpData.cash_paid || 0);
+              const bank = parseFloat(targetEmpData.bank_paid || 0);
+              const totalPaid = Math.round((cash + bank) * 100) / 100;
+              const netSal = parseFloat(targetEmpData.net_salary || 0);
+              const rem = Math.round((netSal - totalPaid) * 100) / 100;
+              const carryVal = carryInputValues[targetEmpData.id] !== undefined 
+                ? carryInputValues[targetEmpData.id] 
+                : (rem > 0 ? rem.toFixed(2) : '');
 
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: '4px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#4338ca' }}>Bank Paid:</label>
-                <input 
-                  type="text"
-                  inputMode="decimal"
-                  disabled={isRowLocked}
-                  value={targetEmpData.bank_paid}
-                  onChange={e => handlePaidChange(targetEmpData.id, 'bank_paid', e.target.value)}
-                  style={{ width: isMobile ? '100%' : '80px', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: '#4338ca', background: '#fff' }}
-                />
-              </div>
+              return (
+                <>
+                  {/* ROW 1: Cash Paid, Bank Paid, Pay Now, Print Slip (80mm) ---> Paid, Remaining */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '10px'
+                  }}>
+                    {/* Left: Inputs & Primary Action Buttons */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      {/* Cash Paid */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 800, color: '#0369a1', whiteSpace: 'nowrap' }}>Cash Paid:</label>
+                        <input 
+                          type="text"
+                          inputMode="decimal"
+                          disabled={isRowLocked}
+                          value={targetEmpData.cash_paid}
+                          onChange={e => handlePaidChange(targetEmpData.id, 'cash_paid', e.target.value)}
+                          placeholder="0.00"
+                          style={{ width: '80px', padding: '5px 8px', borderRadius: '6px', border: '1.5px solid #cbd5e1', fontSize: '12px', fontWeight: 800, color: '#0369a1', background: isRowLocked ? '#f1f5f9' : '#fff' }}
+                        />
+                      </div>
 
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: '4px', gridColumn: isMobile ? 'span 2' : 'auto' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Status:</label>
-                <select 
-                  disabled={isRowLocked}
-                  value={targetEmpData.status}
-                  onChange={e => handleTextChange(targetEmpData.id, 'status', e.target.value)}
-                  style={{ width: isMobile ? '100%' : 'auto', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, color: targetEmpData.status === 'Paid' ? 'var(--green)' : '#d97706', background: '#fff' }}
-                >
-                  <option value="Pending">Pending</option>
-                  <option value="Paid">Paid</option>
-                </select>
-              </div>
-            </div>
+                      {/* Bank Paid */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 800, color: '#4338ca', whiteSpace: 'nowrap' }}>Bank Paid:</label>
+                        <input 
+                          type="text"
+                          inputMode="decimal"
+                          disabled={isRowLocked}
+                          value={targetEmpData.bank_paid}
+                          onChange={e => handlePaidChange(targetEmpData.id, 'bank_paid', e.target.value)}
+                          placeholder="0.00"
+                          style={{ width: '80px', padding: '5px 8px', borderRadius: '6px', border: '1.5px solid #cbd5e1', fontSize: '12px', fontWeight: 800, color: '#4338ca', background: isRowLocked ? '#f1f5f9' : '#fff' }}
+                        />
+                      </div>
 
-            {showActions && (
-              <div style={{ display: 'flex', justifyContent: isMobile ? 'stretch' : 'flex-end', marginTop: isMobile ? '4px' : '0' }}>
-                {isRowLocked ? (
-                  <button 
-                    type="button"
-                    onClick={() => setUnlockPromptEmp(targetEmpData)}
-                    className="btn"
-                    style={{ 
-                      width: isMobile ? '100%' : 'auto',
-                      display: 'inline-flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center',
-                      gap: '5px', 
-                      padding: '8px 14px', 
-                      borderRadius: '6px', 
-                      fontSize: '12px', 
-                      fontWeight: 800, 
-                      background: '#fef3c7', 
-                      color: '#b45309', 
-                      border: '1.5px solid #fde68a',
-                      cursor: 'pointer'
-                    }}
-                    title="Record is marked as Paid and locked. Click to unlock."
-                  >
-                    <Lock size={12} style={{ color: '#d97706' }} />
-                    Locked
-                  </button>
-                ) : (
-                  <button 
-                    onClick={() => handleSaveRow(targetEmpData.id)}
-                    disabled={savingRowId === targetEmpData.id}
-                    className="btn btn-primary"
-                    style={{ width: isMobile ? '100%' : 'auto', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: 'var(--primary)' }}
-                  >
-                    {savingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
-                    Save Record
-                  </button>
-                )}
-              </div>
-            )}
+                      {/* Pay Now Button */}
+                      {!isRowLocked && showActions && (
+                        <button 
+                          type="button"
+                          onClick={() => handlePayNow(targetEmpData.id)}
+                          disabled={savingRowId === targetEmpData.id}
+                          style={{ 
+                            padding: '6px 14px', 
+                            borderRadius: '6px', 
+                            fontSize: '12px', 
+                            fontWeight: 800, 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            gap: '5px', 
+                            background: '#16a34a', 
+                            color: '#fff', 
+                            border: 'none', 
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                            whiteSpace: 'nowrap'
+                          }}
+                          title="Record payment and update Paid & Remaining"
+                        >
+                          {savingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle size={13} />}
+                          Pay Now
+                        </button>
+                      )}
+
+                      {/* Print Salary Slip (80mm Thermal Receipt) */}
+                      <button 
+                        type="button" 
+                        onClick={() => handlePrintSalarySlip(targetEmpData)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          background: '#fff',
+                          border: '1.5px solid #cbd5e1',
+                          color: '#334155',
+                          cursor: 'pointer',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                          whiteSpace: 'nowrap'
+                        }}
+                        title="Print 80mm Thermal Salary Slip"
+                      >
+                        <Printer size={13} style={{ color: '#0284c7' }} />
+                        <span>Print Slip (80mm)</span>
+                      </button>
+                    </div>
+
+                    {/* Right: Paid & Remaining Badges */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: isMobile ? '0' : 'auto' }}>
+                      {/* Paid Badge */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 800, color: '#059669' }}>Paid:</label>
+                        <span style={{ 
+                          fontSize: '12px', 
+                          fontWeight: 800, 
+                          padding: '4px 10px', 
+                          borderRadius: '6px', 
+                          background: '#ecfdf5', 
+                          color: '#059669',
+                          border: '1.5px solid #a7f3d0'
+                        }}>
+                          {CURRENCY} {totalPaid.toFixed(2)}
+                        </span>
+                      </div>
+
+                      {/* Remaining Badge */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 800, color: rem < 0 ? '#dc2626' : '#ea580c' }}>Remaining:</label>
+                        <span style={{ 
+                          fontSize: '12px', 
+                          fontWeight: 800, 
+                          padding: '4px 10px', 
+                          borderRadius: '6px', 
+                          background: rem > 0 ? '#ffedd5' : rem < 0 ? '#fef2f2' : '#ecfdf5', 
+                          color: rem > 0 ? '#c2410c' : rem < 0 ? '#dc2626' : '#059669',
+                          border: '1.5px solid ' + (rem > 0 ? '#fdba74' : rem < 0 ? '#fecaca' : '#a7f3d0')
+                        }}>
+                          {CURRENCY} {rem.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ROW 2: Carry Forward (Amount Input + Button) ---> Status + Save Record / Locked */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                    paddingTop: '8px',
+                    borderTop: '1px solid #e2e8f0'
+                  }}>
+                    {/* Left: Carry Forward Controls */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      {rem !== 0 && showActions && !isRowLocked ? (
+                        activeCarryEmpId === targetEmpData.id ? (
+                          /* Active State: Input + Forward Now Button + Cancel Button */
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: 800, color: '#c2410c', whiteSpace: 'nowrap' }}>Carry Forward:</label>
+                            <input 
+                              type="number"
+                              step="any"
+                              autoFocus
+                              value={carryVal}
+                              onChange={e => setCarryInputValues(prev => ({ ...prev, [targetEmpData.id]: e.target.value }))}
+                              placeholder={rem.toFixed(2)}
+                              style={{ 
+                                width: '90px', 
+                                padding: '5px 8px', 
+                                borderRadius: '6px', 
+                                border: '1.5px solid #ea580c', 
+                                fontSize: '12px', 
+                                fontWeight: 800, 
+                                color: '#c2410c', 
+                                background: '#fff', 
+                                outline: 'none',
+                                boxShadow: '0 0 0 2px rgba(234, 88, 12, 0.15)'
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={savingCarryForwardId === targetEmpData.id}
+                              onClick={() => {
+                                const customAmt = parseFloat(carryVal || rem);
+                                handleCarryForward(targetEmpData, customAmt);
+                              }}
+                              style={{
+                                padding: '6px 14px',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: 800,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: '#ea580c',
+                                border: '1.5px solid #c2410c',
+                                color: '#ffffff',
+                                cursor: 'pointer',
+                                boxShadow: '0 2px 4px rgba(234, 88, 12, 0.25)',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s ease'
+                              }}
+                              title={`Carry forward ${CURRENCY} ${(parseFloat(carryVal) || rem).toFixed(2)} to next month`}
+                            >
+                              {savingCarryForwardId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <ArrowRightCircle size={13} />}
+                              <span>Forward Now</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveCarryEmpId(null)}
+                              style={{
+                                padding: '5px 8px',
+                                borderRadius: '6px',
+                                border: '1px solid #cbd5e1',
+                                background: '#f8fafc',
+                                color: '#64748b',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center'
+                              }}
+                              title="Cancel"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          /* Initially Inactive: ONLY Carry Forward Button */
+                          <button
+                            type="button"
+                            disabled={savingCarryForwardId === targetEmpData.id}
+                            onClick={() => {
+                              setActiveCarryEmpId(targetEmpData.id);
+                              if (!carryInputValues[targetEmpData.id]) {
+                                setCarryInputValues(prev => ({ ...prev, [targetEmpData.id]: rem.toFixed(2) }));
+                              }
+                            }}
+                            style={{
+                              padding: '6px 14px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: '#fff7ed',
+                              border: '1.5px solid #fdba74',
+                              color: '#c2410c',
+                              cursor: 'pointer',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.15s ease'
+                            }}
+                            title={`Click to set carry forward for remaining ${CURRENCY} ${rem.toFixed(2)}`}
+                          >
+                            <ArrowRightCircle size={13} />
+                            <span>Carry Forward</span>
+                          </button>
+                        )
+                      ) : (
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: rem === 0 ? '#059669' : '#64748b' }}>
+                          {parseFloat(targetEmpData.carried_forward_to_next || 0) !== 0 
+                            ? '✓ Balance carried forward to next month' 
+                            : rem === 0 
+                              ? '✓ Salary fully paid / Settled' 
+                              : (isRowLocked ? '🔒 Record is locked' : '')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Right: Status Dropdown + Save Record / Locked */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: isMobile ? '0' : 'auto' }}>
+                      {/* Audio 2: Forward to Next Month badge shown right before Status */}
+                      {parseFloat(targetEmpData.carried_forward_to_next || 0) > 0 && (
+                        <div style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          background: '#fff7ed',
+                          color: '#c2410c',
+                          border: '1.5px solid #fed7aa',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: 800,
+                          whiteSpace: 'nowrap',
+                          boxShadow: '0 1px 2px rgba(234, 88, 12, 0.08)'
+                        }}>
+                          <ArrowRightCircle size={13} color="#ea580c" />
+                          <span>Forward to Next Month: {CURRENCY} {parseFloat(targetEmpData.carried_forward_to_next).toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {/* Status Dropdown */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Status:</label>
+                        <select 
+                          disabled={isRowLocked}
+                          value={targetEmpData.status || 'Pending'}
+                          onChange={e => handleTextChange(targetEmpData.id, 'status', e.target.value)}
+                          style={{ 
+                            padding: '5px 8px', 
+                            borderRadius: '6px', 
+                            border: '1.5px solid #cbd5e1', 
+                            fontSize: '12px', 
+                            fontWeight: 700, 
+                            color: targetEmpData.status === 'Paid' ? 'var(--green)' : targetEmpData.status === 'Partial' ? '#2563eb' : '#d97706', 
+                            background: '#fff',
+                            cursor: isRowLocked ? 'not-allowed' : 'pointer'
+                          }}
+                        >
+                          <option value="Pending">Pending</option>
+                          <option value="Partial">Partial</option>
+                          <option value="Paid">Paid</option>
+                        </select>
+                      </div>
+
+                      {/* Save Record / Locked Button */}
+                      {showActions && (
+                        isRowLocked ? (
+                          <button 
+                            type="button"
+                            onClick={() => setUnlockPromptEmp(targetEmpData)}
+                            className="btn"
+                            style={{ 
+                              width: isMobile ? '100%' : 'auto',
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'center', 
+                              gap: '5px', 
+                              padding: '6px 14px', 
+                              borderRadius: '6px', 
+                              fontSize: '12px', 
+                              fontWeight: 800, 
+                              background: '#fef3c7', 
+                              color: '#b45309', 
+                              border: '1.5px solid #fde68a',
+                              cursor: 'pointer'
+                            }}
+                            title="Record is marked as Paid and locked. Click to unlock."
+                          >
+                            <Lock size={12} style={{ color: '#d97706' }} />
+                            Locked
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => handleSaveRow(targetEmpData.id)}
+                            disabled={savingRowId === targetEmpData.id}
+                            className="btn btn-primary"
+                            style={{ width: isMobile ? '100%' : 'auto', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: 'var(--primary)', color: 'var(--text-primary)' }}
+                          >
+                            {savingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
+                            Save Record
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
 
-        {/* 4. Top Form: Add / Edit Adjustment */}
+        {/* Locked Warning banner */}
         {isRowLocked && (
           <div style={{ 
             display: 'flex', 
@@ -1343,252 +2200,194 @@ export default function Payroll() {
           </div>
         )}
 
-        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '14px', opacity: isRowLocked ? 0.7 : 1 }}>
-          <form onSubmit={handleAddCustomAdj} autoComplete="off">
-            <fieldset disabled={isRowLocked} style={{ border: 'none', padding: 0, margin: 0 }}>
-              {/* Row 1: Heading (Left) + Action & Repetition Radios (Centered) + Submit Button (Right) */}
-              <div style={{ 
-                display: 'flex', 
-                flexDirection: isMobile ? 'column' : 'row',
-                justifyContent: 'space-between', 
-                alignItems: isMobile ? 'stretch' : 'center', 
-                flexWrap: 'wrap', 
-                gap: '8px', 
-                marginBottom: '10px' 
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '13px', fontWeight: 800, margin: 0, color: '#1e293b', whiteSpace: 'nowrap' }}>
-                    {editingAdjId ? 'Edit Adjustment' : 'Add Adjustment / Loan'}
-                  </h3>
-                  {isMobile && editingAdjId && (
-                    <button 
-                      type="button" 
-                      onClick={resetAdjForm} 
-                      style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-
-                {/* Center: Action & Repetition Radios */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: isMobile ? '12px' : '16px', flexWrap: 'wrap', margin: isMobile ? '2px 0' : '0 10px' }}>
-                  {/* Action Radios */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Action:</span>
-                    <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--green)', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: isRowLocked ? 'not-allowed' : 'pointer' }}>
-                      <input 
-                        type="radio" 
-                        name="adjAction" 
-                        value="Give" 
-                        disabled={isRowLocked}
-                        checked={customAdjAction === 'Give'} 
-                        onChange={() => setCustomAdjAction('Give')} 
-                      />
-                      Give (+)
-                    </label>
-                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: isRowLocked ? 'not-allowed' : 'pointer' }}>
-                      <input 
-                        type="radio" 
-                        name="adjAction" 
-                        value="Deduct" 
-                        disabled={isRowLocked}
-                        checked={customAdjAction === 'Deduct'} 
-                        onChange={() => setCustomAdjAction('Deduct')} 
-                      />
-                      Deduct (-)
-                    </label>
-                  </div>
-
-                  {/* Repetition Radios */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Repetition:</span>
-                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: (editingAdjId || isRowLocked) ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
-                      <input 
-                        type="radio" 
-                        name="adjRepetition" 
-                        value="Repeated Monthly" 
-                        checked={customAdjType === 'Repeated Monthly'} 
-                        onChange={() => setCustomAdjType('Repeated Monthly')} 
-                        disabled={editingAdjId !== null || isRowLocked} 
-                      />
-                      Repeat
-                    </label>
-                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: (editingAdjId || isRowLocked) ? 'not-allowed' : 'pointer', opacity: editingAdjId ? 0.6 : 1 }}>
-                      <input 
-                        type="radio" 
-                        name="adjRepetition" 
-                        value="One-Time" 
-                        checked={customAdjType === 'One-Time'} 
-                        onChange={() => setCustomAdjType('One-Time')} 
-                        disabled={editingAdjId !== null || isRowLocked} 
-                      />
-                      One Time
-                    </label>
-                  </div>
-                </div>
-
-                {/* Submit Button on Right */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: isMobile ? 'stretch' : 'flex-end' }}>
-                  {!isMobile && editingAdjId && (
-                    <button 
-                      type="button" 
-                      onClick={resetAdjForm} 
-                      style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                  <button 
-                    type="submit" 
-                    disabled={savingCustomAdj || isRowLocked} 
-                    className="btn btn-primary" 
-                    title={isRowLocked ? "Record is marked as Paid and locked. Please unlock to add or edit adjustments." : ""}
-                    style={{ 
-                      width: isMobile ? '100%' : 'auto', 
-                      padding: isMobile ? '8px 14px' : '6px 14px', 
-                      borderRadius: '6px', 
-                      fontWeight: 700, 
-                      fontSize: '12px', 
-                      background: isRowLocked ? '#cbd5e1' : 'var(--primary)', 
-                      color: isRowLocked ? '#64748b' : '#111', 
-                      border: 'none', 
-                      cursor: isRowLocked ? 'not-allowed' : 'pointer', 
-                      whiteSpace: 'nowrap' 
-                    }}
-                  >
-                    {isRowLocked ? 'Locked (Please Unlock)' : savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Adjustment' : '+ Add Adjustment'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Row 2: 4 Inputs in One Row (or 2x2 on Mobile) */}
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
-                <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
-                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Adjustment Name</label>
-                  {customAdjLabel === 'Other Custom' ? (
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <input 
-                        type="text" 
-                        disabled={isRowLocked}
-                        value={customAdjOtherLabel} 
-                        onChange={e => setCustomAdjOtherLabel(e.target.value)} 
-                        placeholder="Custom Name" 
-                        required 
-                        style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'text' }} 
-                      />
-                      <button 
-                        type="button" 
-                        disabled={isRowLocked}
-                        onClick={() => setCustomAdjLabel('')} 
-                        style={{ padding: '0 6px', fontSize: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', background: '#f1f5f9', cursor: isRowLocked ? 'not-allowed' : 'pointer' }} 
-                        title="Back to list"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <select 
-                      disabled={isRowLocked}
-                      value={customAdjLabel} 
-                      onChange={e => {
-                        const val = e.target.value;
-                        setCustomAdjLabel(val);
-                        if (val === 'Advance Salary / Loan') {
-                          setCustomAdjAction('Deduct');
-                          setCustomAdjType('Repeated Monthly');
-                        } else if (val === 'Bonus') {
-                          setCustomAdjAction('Give');
-                          setCustomAdjType('One-Time');
-                        } else if (val === 'Internet' || val === 'Kafalat') {
-                          setCustomAdjAction('Deduct');
-                          setCustomAdjType('Repeated Monthly');
-                        } else {
-                          const dynamicAdj = adjustmentTypes.find(a => a.label === val);
-                          if (dynamicAdj) {
-                            setCustomAdjAction(dynamicAdj.action === 'Add' ? 'Give' : dynamicAdj.action === 'Deduct' ? 'Deduct' : customAdjAction);
-                            setCustomAdjType('One-Time');
-                          }
-                        }
-                      }} 
-                      required 
-                      style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'pointer' }}
-                    >
-                      <option value="">Select Adjustment Name</option>
-                      <optgroup label="Standard Adjustments">
-                        {(baseColumns.this_month_adv?.action === customAdjAction || baseColumns.this_month_adv?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>}
-                        {(baseColumns.bonus?.action === customAdjAction || baseColumns.bonus?.action === 'Both' || (customAdjAction === 'Give')) && <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>}
-                        {(baseColumns.internet?.action === customAdjAction || baseColumns.internet?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>}
-                        {(baseColumns.kafalat?.action === customAdjAction || baseColumns.kafalat?.action === 'Both' || (customAdjAction === 'Deduct')) && <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>}
-                      </optgroup>
-                      {adjustmentTypes.length > 0 && (
-                        <optgroup label="Custom Columns">
-                          {adjustmentTypes
-                            .filter(adj => adj.action === customAdjAction || adj.action === 'Both' || (adj.action === 'Add' && customAdjAction === 'Give'))
-                            .map(adj => (
-                            <option key={adj.id} value={adj.label}>{adj.label}</option>
-                          ))}
-                        </optgroup>
-                      )}
-                      <option value="Other Custom">Other Custom...</option>
-                    </select>
-                  )}
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                    {customAdjType === 'Repeated Monthly' ? (customAdjAction === 'Give' ? 'Monthly Pay Amount' : 'Monthly Cut Amount') : 'Current Month Amount'}
-                  </label>
-                  <input 
-                    type="number" 
-                    disabled={isRowLocked}
-                    value={customAdjAmount} 
-                    onChange={e => setCustomAdjAmount(e.target.value)} 
-                    placeholder="e.g. 500" 
-                    required 
-                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'text' }} 
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Total Limit Amount (Optional)</label>
-                  <input 
-                    type="number" 
-                    value={customAdjTotalLimit} 
-                    onChange={e => setCustomAdjTotalLimit(e.target.value)} 
-                    placeholder={customAdjType === 'Repeated Monthly' ? 'e.g. 5000' : 'N/A for One-Time'} 
-                    disabled={customAdjType !== 'Repeated Monthly' || isRowLocked}
-                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: (customAdjType !== 'Repeated Monthly' || isRowLocked) ? '#f1f5f9' : '#fff', cursor: (customAdjType !== 'Repeated Monthly' || isRowLocked) ? 'not-allowed' : 'text' }} 
-                  />
-                </div>
-
-                <div style={{ gridColumn: isMobile ? 'span 2' : 'auto' }}>
-                  <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Note (Optional)</label>
-                  <input 
-                    type="text" 
-                    disabled={isRowLocked}
-                    value={customAdjNotes} 
-                    onChange={e => setCustomAdjNotes(e.target.value)} 
-                    placeholder="Reason / Note" 
-                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', background: isRowLocked ? '#f1f5f9' : '#fff', cursor: isRowLocked ? 'not-allowed' : 'text' }} 
-                  />
-                </div>
-              </div>
-            </fieldset>
-          </form>
-        </div>
-
-        {/* 5. Two Distinct Columns: Given (+) vs Deductions (-) (1-col on mobile) */}
+        {/* Two Distinct Columns: Given (+) vs Deductions (-) with inline Add Adjustment forms */}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
           
           {/* Left Column: Given / Additions (+) */}
           <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #a7f3d0', overflow: 'hidden' }}>
-            <div style={{ background: '#ecfdf5', padding: '12px 16px', borderBottom: '1px solid #a7f3d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ background: '#ecfdf5', padding: '10px 14px', borderBottom: '1px solid #a7f3d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
               <span style={{ fontSize: '13px', fontWeight: 800, color: '#047857' }}>Given / Additions (+)</span>
-              <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#d1fae5', color: '#065f46' }}>
-                {givenAdjs.length} Active
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#d1fae5', color: '#065f46' }}>
+                  {givenAdjs.length} Active
+                </span>
+                {!isRowLocked && showActions && (
+                  <button
+                    type="button"
+                    onClick={() => openInlineAddForm('give')}
+                    style={{
+                      background: '#059669',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '5px',
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Plus size={12} /> Add Adjustment
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Inline Addition Form */}
+            {activeInlineForm === 'give' && (
+              <div style={{ background: '#f0fdf4', padding: '12px 14px', borderBottom: '1px solid #bbf7d0' }}>
+                <form onSubmit={handleAddCustomAdj} autoComplete="off">
+                  <fieldset disabled={isRowLocked} style={{ border: 'none', padding: 0, margin: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 800, color: '#047857' }}>
+                        {editingAdjId ? 'Edit Addition' : '+ Add Addition'}
+                      </span>
+                      {/* Repetition Radios */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 700, color: '#475569' }}>Repetition:</span>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '3px', cursor: editingAdjId ? 'not-allowed' : 'pointer' }}>
+                          <input 
+                            type="radio" 
+                            name="inlineGiveRepetition" 
+                            value="Repeated Monthly" 
+                            checked={customAdjType === 'Repeated Monthly'} 
+                            onChange={() => setCustomAdjType('Repeated Monthly')} 
+                            disabled={editingAdjId !== null || isRowLocked} 
+                          />
+                          Repeat
+                        </label>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '3px', cursor: editingAdjId ? 'not-allowed' : 'pointer' }}>
+                          <input 
+                            type="radio" 
+                            name="inlineGiveRepetition" 
+                            value="One-Time" 
+                            checked={customAdjType === 'One-Time'} 
+                            onChange={() => setCustomAdjType('One-Time')} 
+                            disabled={editingAdjId !== null || isRowLocked} 
+                          />
+                          One Time
+                        </label>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '8px' }}>
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Adjustment Name</label>
+                        {customAdjLabel === 'Other Custom' ? (
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <input 
+                              type="text" 
+                              disabled={isRowLocked}
+                              value={customAdjOtherLabel} 
+                              onChange={e => setCustomAdjOtherLabel(e.target.value)} 
+                              placeholder="Custom Name" 
+                              required 
+                              style={{ flex: 1, padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
+                            />
+                            <button 
+                              type="button" 
+                              disabled={isRowLocked}
+                              onClick={() => setCustomAdjLabel('')} 
+                              style={{ padding: '0 6px', fontSize: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', background: '#f1f5f9', cursor: 'pointer' }} 
+                              title="Back to list"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <select 
+                            disabled={isRowLocked}
+                            value={customAdjLabel} 
+                            onChange={e => {
+                              const val = e.target.value;
+                              setCustomAdjLabel(val);
+                              setCustomAdjAction('Give');
+                              if (val === 'Bonus') {
+                                setCustomAdjType('One-Time');
+                              } else {
+                                const dynamicAdj = adjustmentTypes.find(a => a.label === val);
+                                if (dynamicAdj) {
+                                  setCustomAdjType('One-Time');
+                                }
+                              }
+                            }} 
+                            required 
+                            style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }}
+                          >
+                            <option value="">Select Addition</option>
+                            <option value="Bonus">{baseColumns.bonus?.label || 'Bonus'}</option>
+                            {adjustmentTypes
+                              .filter(adj => adj.action === 'Add' || adj.action === 'Both')
+                              .map(adj => (
+                              <option key={adj.id} value={adj.label}>{adj.label}</option>
+                            ))}
+                            <option value="Other Custom">Other Custom...</option>
+                          </select>
+                        )}
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                          {customAdjType === 'Repeated Monthly' ? 'Monthly Add Amount' : 'Current Month Amount'}
+                        </label>
+                        <input 
+                          type="number" 
+                          disabled={isRowLocked}
+                          value={customAdjAmount} 
+                          onChange={e => setCustomAdjAmount(e.target.value)} 
+                          placeholder="e.g. 500" 
+                          required 
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Total Limit Amount (Optional)</label>
+                        <input 
+                          type="number" 
+                          value={customAdjTotalLimit} 
+                          onChange={e => setCustomAdjTotalLimit(e.target.value)} 
+                          placeholder={customAdjType === 'Repeated Monthly' ? 'e.g. 5000' : 'N/A for One-Time'} 
+                          disabled={customAdjType !== 'Repeated Monthly' || isRowLocked}
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: customAdjType !== 'Repeated Monthly' ? '#f1f5f9' : '#fff' }} 
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Note (Optional)</label>
+                        <input 
+                          type="text" 
+                          disabled={isRowLocked}
+                          value={customAdjNotes} 
+                          onChange={e => setCustomAdjNotes(e.target.value)} 
+                          placeholder="Reason / Note" 
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button 
+                        type="button" 
+                        onClick={resetAdjForm} 
+                        style={{ padding: '5px 12px', fontSize: '11px', color: '#64748b', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '5px', cursor: 'pointer' }}
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        type="submit" 
+                        disabled={savingCustomAdj || isRowLocked} 
+                        style={{ padding: '5px 14px', fontSize: '11px', fontWeight: 700, background: '#059669', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
+                      >
+                        {savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Addition' : '+ Add Addition'}
+                      </button>
+                    </div>
+                  </fieldset>
+                </form>
+              </div>
+            )}
 
             <div style={{ padding: '14px', maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {loadingAdjs ? (
@@ -1653,12 +2452,191 @@ export default function Payroll() {
 
           {/* Right Column: Deductions / Cuts (-) */}
           <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #fecaca', overflow: 'hidden' }}>
-            <div style={{ background: '#fef2f2', padding: '12px 16px', borderBottom: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ background: '#fef2f2', padding: '10px 14px', borderBottom: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
               <span style={{ fontSize: '13px', fontWeight: 800, color: '#b91c1c' }}>Deductions / Cuts (-)</span>
-              <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#fee2e2', color: '#991b1b' }}>
-                {deductAdjs.length} Active
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: '#fee2e2', color: '#991b1b' }}>
+                  {deductAdjs.length} Active
+                </span>
+                {!isRowLocked && showActions && (
+                  <button
+                    type="button"
+                    onClick={() => openInlineAddForm('deduct')}
+                    style={{
+                      background: '#dc2626',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '5px',
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Plus size={12} /> Add Adjustment
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Inline Deduction Form */}
+            {activeInlineForm === 'deduct' && (
+              <div style={{ background: '#fff5f5', padding: '12px 14px', borderBottom: '1px solid #fecaca' }}>
+                <form onSubmit={handleAddCustomAdj} autoComplete="off">
+                  <fieldset disabled={isRowLocked} style={{ border: 'none', padding: 0, margin: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 800, color: '#b91c1c' }}>
+                        {editingAdjId ? 'Edit Deduction' : '+ Add Deduction'}
+                      </span>
+                      {/* Repetition Radios */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 700, color: '#475569' }}>Repetition:</span>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '3px', cursor: editingAdjId ? 'not-allowed' : 'pointer' }}>
+                          <input 
+                            type="radio" 
+                            name="inlineDeductRepetition" 
+                            value="Repeated Monthly" 
+                            checked={customAdjType === 'Repeated Monthly'} 
+                            onChange={() => setCustomAdjType('Repeated Monthly')} 
+                            disabled={editingAdjId !== null || isRowLocked} 
+                          />
+                          Repeat
+                        </label>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '3px', cursor: editingAdjId ? 'not-allowed' : 'pointer' }}>
+                          <input 
+                            type="radio" 
+                            name="inlineDeductRepetition" 
+                            value="One-Time" 
+                            checked={customAdjType === 'One-Time'} 
+                            onChange={() => setCustomAdjType('One-Time')} 
+                            disabled={editingAdjId !== null || isRowLocked} 
+                          />
+                          One Time
+                        </label>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '8px' }}>
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Adjustment Name</label>
+                        {customAdjLabel === 'Other Custom' ? (
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <input 
+                              type="text" 
+                              disabled={isRowLocked}
+                              value={customAdjOtherLabel} 
+                              onChange={e => setCustomAdjOtherLabel(e.target.value)} 
+                              placeholder="Custom Name" 
+                              required 
+                              style={{ flex: 1, padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
+                            />
+                            <button 
+                              type="button" 
+                              disabled={isRowLocked}
+                              onClick={() => setCustomAdjLabel('')} 
+                              style={{ padding: '0 6px', fontSize: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', background: '#f1f5f9', cursor: 'pointer' }} 
+                              title="Back to list"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <select 
+                            disabled={isRowLocked}
+                            value={customAdjLabel} 
+                            onChange={e => {
+                              const val = e.target.value;
+                              setCustomAdjLabel(val);
+                              setCustomAdjAction('Deduct');
+                              if (val === 'Advance Salary / Loan' || val === 'Internet' || val === 'Kafalat') {
+                                setCustomAdjType('Repeated Monthly');
+                              } else {
+                                const dynamicAdj = adjustmentTypes.find(a => a.label === val);
+                                if (dynamicAdj) {
+                                  setCustomAdjType('One-Time');
+                                }
+                              }
+                            }} 
+                            required 
+                            style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }}
+                          >
+                            <option value="">Select Deduction</option>
+                            <option value="Advance Salary / Loan">{baseColumns.this_month_adv?.label || 'This M. Adv'}</option>
+                            <option value="Internet">{baseColumns.internet?.label || 'Internet'}</option>
+                            <option value="Kafalat">{baseColumns.kafalat?.label || 'Kafalat'}</option>
+                            {adjustmentTypes
+                              .filter(adj => adj.action === 'Deduct' || adj.action === 'Both')
+                              .map(adj => (
+                              <option key={adj.id} value={adj.label}>{adj.label}</option>
+                            ))}
+                            <option value="Other Custom">Other Custom...</option>
+                          </select>
+                        )}
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                          {customAdjType === 'Repeated Monthly' ? 'Monthly Cut Amount' : 'Current Month Amount'}
+                        </label>
+                        <input 
+                          type="number" 
+                          disabled={isRowLocked}
+                          value={customAdjAmount} 
+                          onChange={e => setCustomAdjAmount(e.target.value)} 
+                          placeholder="e.g. 500" 
+                          required 
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Total Limit Amount (Optional)</label>
+                        <input 
+                          type="number" 
+                          value={customAdjTotalLimit} 
+                          onChange={e => setCustomAdjTotalLimit(e.target.value)} 
+                          placeholder={customAdjType === 'Repeated Monthly' ? 'e.g. 5000' : 'N/A for One-Time'} 
+                          disabled={customAdjType !== 'Repeated Monthly' || isRowLocked}
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: customAdjType !== 'Repeated Monthly' ? '#f1f5f9' : '#fff' }} 
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '10px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '2px' }}>Note (Optional)</label>
+                        <input 
+                          type="text" 
+                          disabled={isRowLocked}
+                          value={customAdjNotes} 
+                          onChange={e => setCustomAdjNotes(e.target.value)} 
+                          placeholder="Reason / Note" 
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '11px', background: '#fff' }} 
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button 
+                        type="button" 
+                        onClick={resetAdjForm} 
+                        style={{ padding: '5px 12px', fontSize: '11px', color: '#64748b', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '5px', cursor: 'pointer' }}
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        type="submit" 
+                        disabled={savingCustomAdj || isRowLocked} 
+                        style={{ padding: '5px 14px', fontSize: '11px', fontWeight: 700, background: '#dc2626', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
+                      >
+                        {savingCustomAdj ? 'Saving...' : editingAdjId ? 'Update Deduction' : '+ Add Deduction'}
+                      </button>
+                    </div>
+                  </fieldset>
+                </form>
+              </div>
+            )}
 
             <div style={{ padding: '14px', maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {loadingAdjs ? (
@@ -2037,9 +3015,9 @@ export default function Payroll() {
 
           {/* 5. Refresh Button (Icon Only - After Save All) */}
           <button 
-            onClick={loadPayroll}
-            disabled={loading}
-            title={loading ? 'Refreshing...' : 'Refresh'}
+            type="button"
+            onClick={handleManualRefresh}
+            title="Refresh Page"
             style={{ 
               display: 'flex', 
               alignItems: 'center', 
@@ -2050,13 +3028,12 @@ export default function Payroll() {
               background: 'var(--surface-2)', 
               color: 'var(--text-primary)', 
               border: 'none', 
-              cursor: loading ? 'not-allowed' : 'pointer', 
+              cursor: 'pointer', 
               transition: 'all 0.2s', 
-              opacity: loading ? 0.7 : 1,
               flexShrink: 0
             }}
           >
-            <RefreshCw size={16} className={loading ? "spin" : ""} />
+            <RefreshCw size={16} />
           </button>
         </div>
       </div>
@@ -2095,23 +3072,57 @@ export default function Payroll() {
                   No payroll records found for this month.
                 </div>
               ) : (
-                filteredEmployees.map(item => (
-                  <div key={item.id} style={{ background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: '10px', padding: '12px', boxShadow: 'var(--shadow-sm)' }}>
+                filteredEmployees.map(item => {
+                  const cash = parseFloat(item.cash_paid || 0);
+                  const bank = parseFloat(item.bank_paid || 0);
+                  const totalPaid = Math.round((cash + bank) * 100) / 100;
+                  const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                  const isPaid = item.status === 'Paid' || (totalPaid > 0 && rem <= 0);
+                  const isPartial = !isPaid && totalPaid > 0 && rem > 0;
+
+                  return (
+                  <div key={item.id} style={{ 
+                    background: isPaid ? '#f0fdf4' : isPartial ? '#eff6ff' : 'var(--surface)', 
+                    border: '1.5px solid ' + (isPaid ? '#bbf7d0' : isPartial ? '#bfdbfe' : 'var(--surface-2)'), 
+                    borderRadius: '10px', 
+                    padding: '12px', 
+                    boxShadow: 'var(--shadow-sm)' 
+                  }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                       <div>
                         <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>{item.name}</div>
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ID: {item.employee_id} • {item.role || 'Staff'}</div>
                       </div>
-                      <span style={{ 
-                        fontSize: '10px', 
-                        fontWeight: 700, 
-                        padding: '2px 8px', 
-                        borderRadius: '4px', 
-                        background: item.status === 'Paid' ? '#ecfdf5' : '#fffbeb',
-                        color: item.status === 'Paid' ? '#059669' : '#d97706'
-                      }}>
-                        {item.status || 'Pending'}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {parseFloat(item.carried_forward_to_next || 0) > 0 && (
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: 800,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: '#fff7ed',
+                            color: '#c2410c',
+                            border: '1px solid #fed7aa',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}>
+                            <ArrowRightCircle size={10} color="#ea580c" />
+                            <span>Fwd: {parseFloat(item.carried_forward_to_next).toFixed(2)}</span>
+                          </span>
+                        )}
+                        <span style={{ 
+                          fontSize: '10px', 
+                          fontWeight: 700, 
+                          padding: '2px 8px', 
+                          borderRadius: '4px', 
+                          background: isPaid ? '#ecfdf5' : isPartial ? '#dbeafe' : '#fffbeb',
+                          color: isPaid ? '#059669' : isPartial ? '#1d4ed8' : '#d97706',
+                          border: '1px solid ' + (isPaid ? '#a7f3d0' : isPartial ? '#93c5fd' : '#fde68a')
+                        }}>
+                          {isPaid ? 'Paid' : isPartial ? 'Partial' : 'Pending'}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Attendance Badges */}
@@ -2125,7 +3136,7 @@ export default function Payroll() {
                     </div>
 
                     {/* Financial Summary */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', background: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', background: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '8px' }}>
                       <div>
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Salary</div>
                         <div style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>{CURRENCY} {item.base_salary || 0}</div>
@@ -2138,44 +3149,116 @@ export default function Payroll() {
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#047857', textTransform: 'uppercase' }}>Net Pay</div>
                         <div style={{ fontSize: '13px', fontWeight: 900, color: '#059669' }}>{CURRENCY} {Number(item.net_salary || 0).toFixed(2)}</div>
                       </div>
+                      <div>
+                        <div style={{ fontSize: '9px', fontWeight: 700, color: '#c2410c', textTransform: 'uppercase' }}>Remaining</div>
+                        {(() => {
+                          const cash = parseFloat(item.cash_paid || 0);
+                          const bank = parseFloat(item.bank_paid || 0);
+                          const totalPaid = Math.round((cash + bank) * 100) / 100;
+                          const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                          return (
+                            <div style={{ fontSize: '13px', fontWeight: 900, color: rem > 0 ? '#ea580c' : rem < 0 ? '#0284c7' : '#16a34a' }}>
+                              {CURRENCY} {rem.toFixed(2)}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     {/* Action buttons */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <button 
-                        onClick={() => {
-                          handleSelectDetailEmp(item);
-                          setViewMode('detail');
-                        }}
-                        style={{ fontSize: '11px', fontWeight: 700, color: 'var(--primary-dark, #b45309)', background: '#fef3c7', border: '1px solid #fde68a', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer' }}
-                      >
-                        View / Edit Adjustments →
-                      </button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button 
+                          onClick={() => {
+                            handleSelectDetailEmp(item);
+                            setViewMode('detail');
+                          }}
+                          style={{ fontSize: '11px', fontWeight: 700, color: 'var(--primary-dark, #b45309)', background: '#fef3c7', border: '1px solid #fde68a', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer' }}
+                        >
+                          View / Edit Adjustments →
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSalarySlip(item)}
+                          style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '5px 8px', cursor: 'pointer', color: '#0284c7', display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', fontWeight: 700 }}
+                          title="Print Salary Slip"
+                        >
+                          <Printer size={12} /> Slip
+                        </button>
+                      </div>
                       {showActions && (
-                        (item.status === 'Paid' && !unlockedRowIds.has(item.id)) ? (
-                          <button 
-                            type="button"
-                            onClick={() => setUnlockPromptEmp(item)}
-                            style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
-                            title="Click to unlock this record"
-                          >
-                            <Lock size={11} style={{ color: '#d97706' }} />
-                            Locked
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => handleSaveRow(item.id)}
-                            disabled={savingRowId === item.id}
-                            className="btn btn-primary"
-                            style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 700, borderRadius: '6px' }}
-                          >
-                            {savingRowId === item.id ? 'Saving...' : 'Save'}
-                          </button>
-                        )
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          {(() => {
+                            const cash = parseFloat(item.cash_paid || 0);
+                            const bank = parseFloat(item.bank_paid || 0);
+                            const totalPaid = Math.round((cash + bank) * 100) / 100;
+                            const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                            if (rem > 0) {
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={savingCarryForwardId === item.id}
+                                  onClick={() => handleCarryForward(item)}
+                                  style={{
+                                    background: '#fff7ed',
+                                    border: '1px solid #fdba74',
+                                    borderRadius: '6px',
+                                    padding: '5px 8px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    color: '#c2410c',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px'
+                                  }}
+                                  title={`Carry forward remaining ${CURRENCY} ${rem.toFixed(2)} to next month`}
+                                >
+                                  {savingCarryForwardId === item.id ? <RefreshCw size={11} className="spin" /> : <ArrowRightCircle size={11} />}
+                                  Carry
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()}
+                          {(item.status === 'Paid' && !unlockedRowIds.has(item.id)) ? (
+                            <button 
+                              type="button"
+                              onClick={() => setUnlockPromptEmp(item)}
+                              style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                              title="Click to unlock this record"
+                            >
+                              <Lock size={11} style={{ color: '#d97706' }} />
+                              Locked
+                            </button>
+                          ) : (
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              <button 
+                                type="button"
+                                onClick={() => handlePayNow(item.id)}
+                                disabled={savingRowId === item.id}
+                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 800, borderRadius: '6px', background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                title="Pay Now and set status to Paid"
+                              >
+                                {savingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
+                                Pay
+                              </button>
+                              <button 
+                                onClick={() => handleSaveRow(item.id)}
+                                disabled={savingRowId === item.id}
+                                className="btn btn-primary"
+                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '6px' }}
+                              >
+                                {savingRowId === item.id ? '...' : 'Save'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
-                ))
+                );
+              })
               )}
             </div>
           ) : (
@@ -2194,7 +3277,7 @@ export default function Payroll() {
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Actual</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Salary</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Payable</th>
-                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#ede9fe' }}>Last M. Balance</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#ede9fe' }} title="Previous Month Remaining Salary / Balance">Prev M. Remaining</th>
                 
                 {/* Default Editable Columns */}
                 {Object.entries(baseColumns).map(([key, config]) => !config.hidden && (
@@ -2212,6 +3295,7 @@ export default function Payroll() {
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--primary)', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#f0fdf4' }}>Net Pay</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#0369a1', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#e0f2fe' }}>Cash Paid</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#4338ca', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#e0e7ff' }}>Bank Paid</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#c2410c', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#ffedd5' }}>Remaining</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
                 {showActions && <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>}
               </tr>
@@ -2219,14 +3303,14 @@ export default function Payroll() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={19 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={20 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     <div style={{ animation: 'spin 1s linear infinite', margin: '0 auto 16px', border: '3px solid var(--surface-2)', borderTopColor: 'var(--primary)', borderRadius: '50%', width: '28px', height: '28px' }} />
                     Calculating Payroll...
                   </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={19 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={20 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No payroll records found for this month.
                   </td>
                 </tr>
@@ -2238,11 +3322,25 @@ export default function Payroll() {
                   const isRowLocked = item.status === 'Paid' && !unlockedRowIds.has(item.id);
                   const totalAdj = calculateTotalAdjustments(item);
 
+                  const cash = parseFloat(item.cash_paid || 0);
+                  const bank = parseFloat(item.bank_paid || 0);
+                  const totalPaid = Math.round((cash + bank) * 100) / 100;
+                  const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                  const isPaid = item.status === 'Paid' || (totalPaid > 0 && rem <= 0);
+                  const isPartial = !isPaid && totalPaid > 0 && rem > 0;
+
+                  let rowBg = index % 2 === 0 ? 'var(--white)' : 'var(--surface)';
+                  if (isPaid) {
+                    rowBg = index % 2 === 0 ? '#f0fdf4' : '#ecfdf5';
+                  } else if (isPartial) {
+                    rowBg = index % 2 === 0 ? '#eff6ff' : '#e0f2fe';
+                  }
+
                   return (
-                    <tr key={item.id} style={{ borderBottom: '1px solid var(--surface-2)', background: index % 2 === 0 ? 'var(--white)' : 'var(--surface)', transition: 'background 0.2s', ...(isRowLocked ? { opacity: 0.88 } : {}) }}>
+                    <tr key={item.id} style={{ borderBottom: '1px solid var(--surface-2)', background: rowBg, transition: 'background 0.2s', ...(isRowLocked ? { opacity: 0.88 } : {}) }}>
                       <td 
                         onClick={() => openEmployeeModal(item)}
-                        style={{ ...stickyStyle, left: 0, zIndex: 10, background: index % 2 === 0 ? 'var(--white)' : 'var(--surface)', padding: '8px', borderRight: '1px solid var(--surface-2)', cursor: 'pointer' }}
+                        style={{ ...stickyStyle, left: 0, zIndex: 10, background: rowBg, padding: '8px', borderRight: '1px solid var(--surface-2)', cursor: 'pointer' }}
                         className="employee-cell-hover"
                       >
                         <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -2401,7 +3499,14 @@ export default function Payroll() {
                       </td>
 
                       {/* Net Pay */}
-                      <td style={{ padding: '8px', fontSize: '13px', fontWeight: 800, color: 'var(--primary)', background: '#f0fdf4', whiteSpace: 'nowrap' }}>
+                      <td style={{ 
+                        padding: '8px', 
+                        fontSize: '13px', 
+                        fontWeight: 800, 
+                        color: item.net_salary < 0 ? '#dc2626' : 'var(--primary)', 
+                        background: item.net_salary < 0 ? '#fef2f2' : '#f0fdf4', 
+                        whiteSpace: 'nowrap' 
+                      }}>
                         {item.net_salary.toFixed(2)}
                       </td>
                       
@@ -2430,56 +3535,163 @@ export default function Payroll() {
                           onChange={e => handlePaidChange(item.id, 'bank_paid', e.target.value)} 
                         />
                       </td>
+
+                      {/* Remaining Salary */}
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 800, background: '#fff7ed', whiteSpace: 'nowrap' }}>
+                        {(() => {
+                          const cash = parseFloat(item.cash_paid || 0);
+                          const bank = parseFloat(item.bank_paid || 0);
+                          const totalPaid = Math.round((cash + bank) * 100) / 100;
+                          const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                          if (rem > 0) {
+                            return <span style={{ color: '#ea580c' }}>{rem.toFixed(2)}</span>;
+                          } else if (rem < 0) {
+                            return <span style={{ color: '#dc2626', fontWeight: 800 }} title="Negative Balance / Deductions exceed salary">{rem.toFixed(2)}</span>;
+                          }
+                          return <span style={{ color: '#16a34a' }}>0.00</span>;
+                        })()}
+                      </td>
                       
                       {/* Status */}
                       <td style={{ padding: '4px' }}>
-                        <select 
-                          className="cell-input" 
-                          disabled={isRowLocked}
-                          value={item.status} 
-                          onChange={e => handleTextChange(item.id, 'status', e.target.value)} 
-                          style={{ width: '85px', fontWeight: 700, color: item.status === 'Paid' ? 'var(--green)' : '#d97706', opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'pointer' }}
-                        >
-                          <option value="Pending">Pending</option>
-                          <option value="Paid">Paid</option>
-                        </select>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
+                          <select 
+                            className="cell-input" 
+                            disabled={isRowLocked}
+                            value={item.status || 'Pending'} 
+                            onChange={e => handleTextChange(item.id, 'status', e.target.value)} 
+                            style={{ 
+                              width: '85px', 
+                              fontWeight: 700, 
+                              color: item.status === 'Paid' ? 'var(--green)' : item.status === 'Partial' ? '#2563eb' : '#d97706', 
+                              opacity: isRowLocked ? 0.7 : 1, 
+                              cursor: isRowLocked ? 'not-allowed' : 'pointer' 
+                            }}
+                          >
+                            <option value="Pending">Pending</option>
+                            <option value="Partial">Partial</option>
+                            <option value="Paid">Paid</option>
+                          </select>
+                          {parseFloat(item.carried_forward_to_next || 0) > 0 && (
+                            <span 
+                              style={{ 
+                                fontSize: '9px', 
+                                fontWeight: 800, 
+                                color: '#c2410c', 
+                                background: '#fff7ed', 
+                                border: '1px solid #fed7aa', 
+                                borderRadius: '3px', 
+                                padding: '1px 4px', 
+                                whiteSpace: 'nowrap',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '2px'
+                              }}
+                              title={`Carried forward to next month: ${CURRENCY} ${parseFloat(item.carried_forward_to_next).toFixed(2)}`}
+                            >
+                              ➔ Fwd: {parseFloat(item.carried_forward_to_next).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {showActions && (
                         <td style={{ padding: '4px', textAlign: 'center' }}>
-                          {isRowLocked ? (
-                            <button 
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <button
                               type="button"
-                              onClick={() => setUnlockPromptEmp(item)}
-                              style={{ 
-                                display: 'inline-flex', 
-                                alignItems: 'center', 
-                                gap: '4px', 
-                                padding: '4px 8px', 
-                                borderRadius: '4px', 
-                                fontSize: '11px', 
-                                fontWeight: 700, 
-                                background: '#fef3c7', 
-                                color: '#b45309', 
-                                border: '1px solid #fde68a', 
-                                cursor: 'pointer' 
+                              onClick={() => handlePrintSalarySlip(item)}
+                              style={{
+                                background: '#fff',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '4px',
+                                padding: '4px 6px',
+                                cursor: 'pointer',
+                                color: '#0284c7',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
                               }}
-                              title="Record is marked as Paid and locked. Click to unlock."
+                              title="Print Salary Slip"
                             >
-                              <Lock size={11} style={{ color: '#d97706' }} />
-                              Locked
+                              <Printer size={12} />
                             </button>
-                          ) : (
-                            <button 
-                              onClick={() => handleSaveRow(item.id)}
-                              disabled={savingRowId === item.id}
-                              className="btn btn-primary"
-                              style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
-                              Save
-                            </button>
-                          )}
+                            {(() => {
+                              const cash = parseFloat(item.cash_paid || 0);
+                              const bank = parseFloat(item.bank_paid || 0);
+                              const totalPaid = Math.round((cash + bank) * 100) / 100;
+                              const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                              if (rem > 0) {
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={savingCarryForwardId === item.id}
+                                    onClick={() => handleCarryForward(item)}
+                                    style={{
+                                      background: '#fff7ed',
+                                      border: '1px solid #fdba74',
+                                      borderRadius: '4px',
+                                      padding: '4px 6px',
+                                      cursor: 'pointer',
+                                      color: '#c2410c',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center'
+                                    }}
+                                    title={`Carry forward remaining ${CURRENCY} ${rem.toFixed(2)} to next month`}
+                                  >
+                                    {savingCarryForwardId === item.id ? <RefreshCw size={11} className="spin" /> : <ArrowRightCircle size={11} />}
+                                  </button>
+                                );
+                              }
+                              return null;
+                            })()}
+                            {isRowLocked ? (
+                              <button 
+                                type="button"
+                                onClick={() => setUnlockPromptEmp(item)}
+                                style={{ 
+                                  display: 'inline-flex', 
+                                  alignItems: 'center', 
+                                  gap: '4px', 
+                                  padding: '4px 8px', 
+                                  borderRadius: '4px', 
+                                  fontSize: '11px', 
+                                  fontWeight: 700, 
+                                  background: '#fef3c7', 
+                                  color: '#b45309', 
+                                  border: '1px solid #fde68a', 
+                                  cursor: 'pointer' 
+                                }}
+                                title="Record is marked as Paid and locked. Click to unlock."
+                              >
+                                <Lock size={11} style={{ color: '#d97706' }} />
+                                Locked
+                              </button>
+                            ) : (
+                              <>
+                                <button 
+                                  type="button"
+                                  onClick={() => handlePayNow(item.id)}
+                                  disabled={savingRowId === item.id}
+                                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 800, background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                  title="Pay Now and set status to Paid"
+                                >
+                                  {savingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
+                                  Pay
+                                </button>
+                                <button 
+                                  onClick={() => handleSaveRow(item.id)}
+                                  disabled={savingRowId === item.id}
+                                  className="btn btn-primary"
+                                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                >
+                                  {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
+                                  Save
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -2520,15 +3732,24 @@ export default function Payroll() {
             {/* List of Employees with Accordion Collapse/Expand */}
             {filteredEmployees.map(emp => {
               const isSelected = (currentEmpData?.id === emp.id);
-              const isPaid = emp.status === 'Paid';
+              const cash = parseFloat(emp.cash_paid || 0);
+              const bank = parseFloat(emp.bank_paid || 0);
+              const totalPaid = Math.round((cash + bank) * 100) / 100;
+              const rem = Math.round((parseFloat(emp.net_salary || 0) - totalPaid) * 100) / 100;
+              const isPaid = emp.status === 'Paid' || (totalPaid > 0 && rem <= 0);
+              const isPartial = !isPaid && totalPaid > 0 && rem > 0;
+
+              let cardBg = isSelected ? '#fffbeb' : isPaid ? '#f0fdf4' : isPartial ? '#eff6ff' : 'var(--surface)';
+              let border = isSelected ? '1.5px solid var(--primary, #f59e0b)' : isPaid ? '1px solid #bbf7d0' : isPartial ? '1px solid #bfdbfe' : '1px solid var(--surface-2)';
+
               return (
                 <div 
                   key={emp.id}
                   data-mobile-card="true"
                   style={{
                     borderRadius: '10px',
-                    border: isSelected ? '1.5px solid var(--primary, #f59e0b)' : '1px solid var(--surface-2)',
-                    background: 'var(--surface)',
+                    border: border,
+                    background: cardBg,
                     overflow: 'hidden',
                     boxShadow: isSelected ? '0 2px 10px rgba(245, 158, 11, 0.15)' : 'var(--shadow-sm)',
                     scrollMarginTop: '80px'
@@ -2552,7 +3773,7 @@ export default function Payroll() {
                     style={{
                       padding: '10px 12px',
                       cursor: 'pointer',
-                      background: isSelected ? '#fffbeb' : 'var(--surface)',
+                      background: cardBg,
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '4px',
@@ -2568,10 +3789,11 @@ export default function Payroll() {
                         fontWeight: 700, 
                         padding: '2px 7px', 
                         borderRadius: '4px',
-                        background: isPaid ? '#ecfdf5' : '#fffbeb',
-                        color: isPaid ? '#059669' : '#d97706'
+                        background: isPaid ? '#ecfdf5' : isPartial ? '#dbeafe' : '#fffbeb',
+                        color: isPaid ? '#059669' : isPartial ? '#1d4ed8' : '#d97706',
+                        border: '1px solid ' + (isPaid ? '#a7f3d0' : isPartial ? '#93c5fd' : '#fde68a')
                       }}>
-                        {isPaid ? 'Paid' : 'Pending'}
+                        {isPaid ? 'Paid' : isPartial ? 'Partial' : 'Pending'}
                       </span>
                     </div>
 
@@ -2642,7 +3864,16 @@ export default function Payroll() {
             <div style={{ overflowY: 'auto', flex: 1, padding: '8px' }}>
               {filteredEmployees.map(emp => {
                 const isSelected = (currentEmpData?.id === emp.id);
-                const isPaid = emp.status === 'Paid';
+                const cash = parseFloat(emp.cash_paid || 0);
+                const bank = parseFloat(emp.bank_paid || 0);
+                const totalPaid = Math.round((cash + bank) * 100) / 100;
+                const rem = Math.round((parseFloat(emp.net_salary || 0) - totalPaid) * 100) / 100;
+                const isPaid = emp.status === 'Paid' || (totalPaid > 0 && rem <= 0);
+                const isPartial = !isPaid && totalPaid > 0 && rem > 0;
+
+                let bg = isSelected ? '#fef3c7' : isPaid ? '#f0fdf4' : isPartial ? '#eff6ff' : 'transparent';
+                let border = isSelected ? '1.5px solid #f59e0b' : isPaid ? '1px solid #bbf7d0' : isPartial ? '1px solid #bfdbfe' : '1px solid var(--surface-2)';
+
                 return (
                   <div 
                     key={emp.id}
@@ -2652,8 +3883,8 @@ export default function Payroll() {
                       borderRadius: '8px',
                       marginBottom: '5px',
                       cursor: 'pointer',
-                      background: isSelected ? '#fef3c7' : 'transparent',
-                      border: isSelected ? '1.5px solid #f59e0b' : '1px solid var(--surface-2)',
+                      background: bg,
+                      border: border,
                       transition: 'all 0.15s ease',
                       display: 'flex',
                       flexDirection: 'column',
@@ -2669,10 +3900,11 @@ export default function Payroll() {
                         fontWeight: 700, 
                         padding: '1px 6px', 
                         borderRadius: '4px',
-                        background: isPaid ? '#ecfdf5' : '#fffbeb',
-                        color: isPaid ? '#059669' : '#d97706'
+                        background: isPaid ? '#ecfdf5' : isPartial ? '#dbeafe' : '#fffbeb',
+                        color: isPaid ? '#059669' : isPartial ? '#1d4ed8' : '#d97706',
+                        border: '1px solid ' + (isPaid ? '#a7f3d0' : isPartial ? '#93c5fd' : '#fde68a')
                       }}>
-                        {isPaid ? 'Paid' : 'Pending'}
+                        {isPaid ? 'Paid' : isPartial ? 'Partial' : 'Pending'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-secondary)' }}>
@@ -3128,6 +4360,289 @@ export default function Payroll() {
           </div>
         </div>
       )}
+
+      {/* Carry Forward Remaining Salary Confirmation Modal */}
+      {carryForwardModal.isOpen && carryForwardModal.emp && (() => {
+        const emp = carryForwardModal.emp;
+        const cash = parseFloat(emp.cash_paid || 0);
+        const bank = parseFloat(emp.bank_paid || 0);
+        const totalPaid = Math.round((cash + bank) * 100) / 100;
+        const net = parseFloat(emp.net_salary || 0);
+        const rem = Math.round((net - totalPaid) * 100) / 100;
+        const finalCarryAmt = (carryForwardModal.amount !== undefined && carryForwardModal.amount !== null && !isNaN(parseFloat(carryForwardModal.amount))) 
+          ? parseFloat(carryForwardModal.amount) 
+          : rem;
+
+        const [year, monthNum] = selectedMonth.split('-').map(Number);
+        let nextYear = year;
+        let nextMonthNum = monthNum + 1;
+        if (nextMonthNum > 12) {
+          nextMonthNum = 1;
+          nextYear = year + 1;
+        }
+        const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
+        
+        const curMonthName = new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const nextMonthName = new Date(`${nextMonthStr}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+        return (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10002,
+            padding: '16px'
+          }}>
+            <div style={{
+              background: '#fff',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '460px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+              border: '1px solid #fed7aa',
+              overflow: 'hidden'
+            }}>
+              {/* Modal Header */}
+              <div style={{
+                background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                padding: '16px 20px',
+                borderBottom: '1px solid #fed7aa',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '8px',
+                    background: '#ea580c',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <ArrowRightCircle size={20} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '15px', fontWeight: 800, color: '#9a3412' }}>
+                      Carry Forward Remaining Salary
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#c2410c' }}>
+                      Transfer balance to next month & lock current
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCarryForwardModal({ isOpen: false, emp: null, amount: null })}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#9a3412',
+                    padding: '4px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Employee Info */}
+                <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
+                    {emp.name}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    ID: {emp.employee_id} • {emp.role || 'Staff'} • {emp.branch || 'Main'}
+                  </div>
+                </div>
+
+                {/* Transfer Flow Pill */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: '#fff7ed',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  border: '1px dashed #fdba74',
+                  fontSize: '12px',
+                  fontWeight: 700
+                }}>
+                  <span style={{ color: '#9a3412' }}>{curMonthName}</span>
+                  <span style={{ color: '#ea580c' }}>➔</span>
+                  <span style={{ color: '#047857', fontWeight: 800 }}>{nextMonthName}</span>
+                </div>
+
+                {/* Balance Breakdown */}
+                <div style={{
+                  background: '#fff',
+                  border: '1.5px solid #fed7aa',
+                  borderRadius: '10px',
+                  padding: '14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                    <span style={{ color: '#64748b' }}>Total Net Payable:</span>
+                    <span style={{ fontWeight: 700, color: '#1e293b' }}>{CURRENCY} {net.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                    <span style={{ color: '#64748b' }}>Paid This Month ({cash > 0 ? `Cash ${cash}` : ''} {bank > 0 ? `Bank ${bank}` : ''}):</span>
+                    <span style={{ fontWeight: 700, color: '#059669' }}>{CURRENCY} {totalPaid.toFixed(2)}</span>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderTop: '1px solid #fde68a',
+                    paddingTop: '8px',
+                    marginTop: '4px'
+                  }}>
+                    <span style={{ fontSize: '13px', fontWeight: 800, color: '#c2410c' }}>
+                      Unpaid Remaining Balance:
+                    </span>
+                    <span style={{
+                      fontSize: '15px',
+                      fontWeight: 900,
+                      color: '#ea580c',
+                      background: '#ffedd5',
+                      padding: '2px 8px',
+                      borderRadius: '6px'
+                    }}>
+                      {CURRENCY} {rem.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Amount to Carry Forward Input */}
+                <div style={{
+                  background: '#fff7ed',
+                  border: '1.5px solid #fdba74',
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}>
+                  <label style={{ fontSize: '12px', fontWeight: 800, color: '#9a3412' }}>
+                    Amount to Carry Forward ({CURRENCY}):
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input 
+                      type="number"
+                      step="any"
+                      value={carryForwardModal.amount !== null && carryForwardModal.amount !== undefined ? carryForwardModal.amount : rem.toFixed(2)}
+                      onChange={e => setCarryForwardModal(prev => ({ ...prev, amount: e.target.value }))}
+                      style={{
+                        flex: 1,
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1.5px solid #ea580c',
+                        fontSize: '15px',
+                        fontWeight: 800,
+                        color: '#9a3412',
+                        background: '#fff',
+                        outline: 'none',
+                        boxShadow: '0 0 0 2px rgba(234, 88, 12, 0.1)'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCarryForwardModal(prev => ({ ...prev, amount: rem.toFixed(2) }))}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #fdba74',
+                        background: '#fff',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: '#c2410c',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                      title="Reset to full remaining balance"
+                    >
+                      Full Remaining
+                    </button>
+                  </div>
+                </div>
+
+                {/* Explanation Alert */}
+                <div style={{
+                  fontSize: '12px',
+                  color: '#78350f',
+                  background: '#fefce8',
+                  border: '1px solid #fef08a',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  lineHeight: 1.45
+                }}>
+                  <strong>Notice:</strong> This amount <strong>{CURRENCY} {finalCarryAmt.toFixed(2)}</strong> will be carried forward to <strong>{nextMonthName}</strong> as <strong>Prev M. Remaining</strong>. Current month (<strong>{curMonthName}</strong>) will be saved and <strong>LOCKED</strong>.
+                </div>
+              </div>
+
+              {/* Modal Footer Actions */}
+              <div style={{
+                background: '#f8fafc',
+                padding: '12px 20px',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setCarryForwardModal({ isOpen: false, emp: null, amount: null })}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: '#fff',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#64748b',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={savingCarryForwardId === emp.id}
+                  onClick={executeCarryForwardFromModal}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#ea580c',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)'
+                  }}
+                >
+                  {savingCarryForwardId === emp.id ? <RefreshCw size={13} className="spin" /> : <Lock size={13} />}
+                  Confirm & Lock Month
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <style>{`
         .spin { animation: spin 1s linear infinite; }
