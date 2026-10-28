@@ -473,9 +473,45 @@ export default function AttendanceReports() {
 
   // Detailed Modal State
   const [selectedEmployeeLogs, setSelectedEmployeeLogs] = useState(null)
+  const [targetScrollDate, setTargetScrollDate] = useState(null)
+  const modalScrollContainerRef = useRef(null)
+
+  const handleOpenEmployeeLogs = (emp, dateStr = null) => {
+    setSelectedEmployeeLogs(emp)
+    setTargetScrollDate(dateStr)
+  }
+
+  useEffect(() => {
+    if (selectedEmployeeLogs && targetScrollDate) {
+      const scrollAttempt = () => {
+        const container = modalScrollContainerRef.current
+        const row = container?.querySelector(`[data-modal-date="${targetScrollDate}"]`)
+        if (row && container) {
+          const rowOffset = row.offsetTop
+          container.scrollTo({
+            top: Math.max(0, rowOffset - 100),
+            behavior: 'smooth'
+          })
+          try {
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          } catch (e) {}
+        }
+      }
+
+      const t1 = setTimeout(scrollAttempt, 60)
+      const t2 = setTimeout(scrollAttempt, 250)
+      const t3 = setTimeout(scrollAttempt, 500)
+      return () => {
+        clearTimeout(t1)
+        clearTimeout(t2)
+        clearTimeout(t3)
+      }
+    }
+  }, [selectedEmployeeLogs, targetScrollDate])
 
   const handleEditFromPopup = (empId, dateStr, forceMode = null) => {
     setSelectedEmployeeLogs(null)
+    setTargetScrollDate(null)
     openEditModal(empId, dateStr, forceMode)
   }
 
@@ -1432,7 +1468,7 @@ export default function AttendanceReports() {
                     return (
                       <tr
                         key={emp.employee_id}
-                        onClick={() => setSelectedEmployeeLogs(emp)}
+                        onClick={() => handleOpenEmployeeLogs(emp)}
                         style={{
                           background: rowBg,
                           borderBottom: '1px solid var(--surface-2)',
@@ -1594,7 +1630,7 @@ export default function AttendanceReports() {
                           const hasDutyInfo = sessions.length > 0 && sessions[0].status !== 'Holiday' && sessions[0].status !== 'Leave'
 
                           return (
-                            <td key={dateStr} style={{
+                            <td key={dateStr} onClick={(e) => { e.stopPropagation(); handleOpenEmployeeLogs(emp, dateStr); }} title={`Click to view details for ${dateStr}`} style={{ cursor: 'pointer',
                               borderRight: '1px solid var(--surface-2)',
                               background: cellBg,
                               textAlign: 'center',
@@ -1750,8 +1786,8 @@ export default function AttendanceReports() {
       {/* Individual Employee Log Details Modal */}
       {selectedEmployeeLogs && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }}>
-          <div className="card" style={{ width: 680, maxWidth: '90%', padding: 24, position: 'relative', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
-            <button onClick={() => setSelectedEmployeeLogs(null)} style={{ position: 'absolute', right: 16, top: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
+          <div className="card" style={{ width: 1120, maxWidth: '96vw', padding: 20, position: 'relative', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+            <button onClick={() => { setSelectedEmployeeLogs(null); setTargetScrollDate(null); }} style={{ position: 'absolute', right: 16, top: 16, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>
               <X size={20} />
             </button>
             
@@ -1778,64 +1814,66 @@ export default function AttendanceReports() {
               </span>
             </div>
 
-            {/* Metrics stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))', gap: 10, marginBottom: 20 }}>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Presents</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{selectedEmployeeLogs.presents} days</h4>
+            {/* Metrics stats - Single row compact layout */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, minmax(0, 1fr))', gap: 6, marginBottom: 16 }}>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Presents</span>
+                <h4 style={{ margin: '2px 0 0 0', color: 'var(--green)', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{selectedEmployeeLogs.presents} d</h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Absents</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--red)', fontWeight: 800 }}>{selectedEmployeeLogs.absents} days</h4>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Absents</span>
+                <h4 style={{ margin: '2px 0 0 0', color: 'var(--red)', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{selectedEmployeeLogs.absents} d</h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>OOT Days (&lt;6h)</span>
-                <h4 style={{ margin: '4px 0 0 0', color: '#8B5CF6', fontWeight: 800 }}>{selectedEmployeeLogs.onlyOvertimeDays || 0} days</h4>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>OOT (&lt;6h)</span>
+                <h4 style={{ margin: '2px 0 0 0', color: '#8B5CF6', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{selectedEmployeeLogs.onlyOvertimeDays || 0} d</h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Req. Duty</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--text)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.expectedDutyHours || 0)}</h4>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Req. Duty</span>
+                <h4 style={{ margin: '2px 0 0 0', color: 'var(--text)', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{formatHoursToText(selectedEmployeeLogs.expectedDutyHours || 0)}</h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Worked Duty</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.totalHours || 0)}</h4>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Worked</span>
+                <h4 style={{ margin: '2px 0 0 0', color: 'var(--green)', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{formatHoursToText(selectedEmployeeLogs.totalHours || 0)}</h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Short Duty</span>
-                <h4 style={{ margin: '4px 0 0 0', color: (selectedEmployeeLogs.shortDutyHours || 0) > 0 ? 'var(--red)' : 'var(--text-muted)', fontWeight: 800 }}>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Short Duty</span>
+                <h4 style={{ margin: '2px 0 0 0', color: (selectedEmployeeLogs.shortDutyHours || 0) > 0 ? 'var(--red)' : 'var(--text-muted)', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>
                   {(selectedEmployeeLogs.shortDutyHours || 0) > 0 ? `-${formatHoursToText(selectedEmployeeLogs.shortDutyHours)}` : '--'}
                 </h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Only OT</span>
-                <h4 style={{ margin: '4px 0 0 0', color: '#8B5CF6', fontWeight: 800 }}>{formatHoursToText(selectedEmployeeLogs.onlyOvertimeHours || 0)}</h4>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Only OT</span>
+                <h4 style={{ margin: '2px 0 0 0', color: '#8B5CF6', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{formatHoursToText(selectedEmployeeLogs.onlyOvertimeHours || 0)}</h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Other OT</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--green)', fontWeight: 800 }}>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Other OT</span>
+                <h4 style={{ margin: '2px 0 0 0', color: 'var(--green)', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>
                   {(selectedEmployeeLogs.otherOvertimeHours || 0) > 0 ? `+${formatHoursToText(selectedEmployeeLogs.otherOvertimeHours)}` : '--'}
                 </h4>
               </div>
-              <div style={{ background: 'var(--surface-1)', padding: 10, borderRadius: 8, textAlign: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Total OT (±)</span>
+              <div style={{ background: 'var(--surface-1)', padding: '6px 4px', borderRadius: 6, textAlign: 'center' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap' }}>Total OT (±)</span>
                 <h4 style={{ 
-                  margin: '4px 0 0 0', 
+                  margin: '2px 0 0 0', 
                   color: (selectedEmployeeLogs.totalOvertime || 0) > 0 ? 'var(--green)' : (selectedEmployeeLogs.totalOvertime || 0) < 0 ? 'var(--red)' : 'var(--text)', 
-                  fontWeight: 800 
+                  fontWeight: 800,
+                  fontSize: 12,
+                  whiteSpace: 'nowrap'
                 }}>
                   {(selectedEmployeeLogs.totalOvertime || 0) > 0 ? `+${formatHoursToText(selectedEmployeeLogs.totalOvertime)}` : (selectedEmployeeLogs.totalOvertime || 0) < 0 ? `-${formatHoursToText(Math.abs(selectedEmployeeLogs.totalOvertime))}` : '--'}
                 </h4>
               </div>
-              <div style={{ background: 'rgba(var(--primary-rgb), 0.08)', padding: 10, borderRadius: 8, textAlign: 'center', border: '1px solid rgba(var(--primary-rgb), 0.25)' }}>
-                <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700 }}>Total (Duty ± OT)</span>
-                <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary)', fontWeight: 850 }}>
+              <div style={{ background: 'rgba(var(--primary-rgb), 0.08)', padding: '6px 4px', borderRadius: 6, textAlign: 'center', border: '1px solid rgba(var(--primary-rgb), 0.25)' }}>
+                <span style={{ fontSize: 9.5, color: 'var(--primary)', fontWeight: 700, display: 'block', whiteSpace: 'nowrap' }}>Total Duty±OT</span>
+                <h4 style={{ margin: '2px 0 0 0', color: 'var(--primary)', fontWeight: 850, fontSize: 12, whiteSpace: 'nowrap' }}>
                   {formatHoursToText(((selectedEmployeeLogs.expectedDutyHours || 0) + (selectedEmployeeLogs.totalOvertime || 0)))}
                 </h4>
               </div>
             </div>
 
             {/* Scrollable logs list */}
-            <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+            <div ref={modalScrollContainerRef} style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--surface-2)', background: 'var(--surface-1)', textAlign: 'left' }}>
@@ -1864,7 +1902,7 @@ export default function AttendanceReports() {
                       const todayStr = formatLocalDate(new Date())
                       const isPast = dateStr < todayStr
                       return (
-                        <tr key={dateStr} style={{ borderBottom: '1px solid var(--surface-2)', opacity: isPast ? 1 : 0.45 }}>
+                        <tr key={dateStr} data-modal-date={dateStr} style={{ borderBottom: '1px solid var(--surface-2)', opacity: isPast ? 1 : 0.45, background: targetScrollDate === dateStr ? 'rgba(var(--primary-rgb), 0.18)' : 'transparent', outline: targetScrollDate === dateStr ? '2px solid var(--primary)' : 'none', transition: 'all 0.3s' }}>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>{day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'short', day: 'numeric' })}</td>
                           <td colSpan={6} style={{ padding: 10, fontSize: 12, color: isPast ? 'var(--red)' : 'var(--text-muted)' }}>
                             {isPast ? 'Absent / Unmarked' : 'Future Day'}
@@ -1922,7 +1960,7 @@ export default function AttendanceReports() {
                       }
 
                       return (
-                        <tr key={`${dateStr}-${sIdx}`} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                        <tr key={`${dateStr}-${sIdx}`} data-modal-date={sIdx === 0 ? dateStr : undefined} style={{ borderBottom: '1px solid var(--surface-2)', background: targetScrollDate === dateStr ? 'rgba(var(--primary-rgb), 0.18)' : 'transparent', outline: targetScrollDate === dateStr ? '2px solid var(--primary)' : 'none', transition: 'all 0.3s' }}>
                           <td style={{ padding: 10, fontSize: 12, fontWeight: 600 }}>
                             {sIdx === 0 ? day.toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'short', day: 'numeric' }) : ''}
                           </td>
