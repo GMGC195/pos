@@ -177,9 +177,9 @@ router.get('/calculate', authenticateToken, async (req, res) => {
     }
     const prevMonthStr = `${prevYear}-${String(prevMonthNum).padStart(2, '0')}`;
 
-    // Get previous month's saved records to calculate unpaid balance / overpaid adjustment
+    // Get previous month's saved records to calculate unpaid balance / overpaid adjustment / carry forward
     const prevRecordsRes = await pool.query(
-      'SELECT employee_id, net_salary, paid_amount, status FROM employee_payroll_records WHERE month = $1',
+      'SELECT employee_id, net_salary, paid_amount, status, carried_forward_to_next FROM employee_payroll_records WHERE month = $1',
       [prevMonthStr]
     );
     const prevRecordsMap = {};
@@ -223,6 +223,36 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       if (!financialMap[r.employee_id]) financialMap[r.employee_id] = [];
       financialMap[r.employee_id].push(r);
     });
+
+    // Get individual payment logs / installments for the month
+    let paymentsMap = {};
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS employee_payroll_payments (
+          id SERIAL PRIMARY KEY,
+          employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+          month VARCHAR(7) NOT NULL,
+          payment_method VARCHAR(20) NOT NULL,
+          amount NUMERIC(10, 2) NOT NULL,
+          paid_by VARCHAR(100),
+          notes TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+      const paymentsRes = await pool.query(
+        'SELECT * FROM employee_payroll_payments WHERE month = $1 ORDER BY created_at ASC',
+        [month]
+      );
+      paymentsRes.rows.forEach(p => {
+        if (!paymentsMap[p.employee_id]) paymentsMap[p.employee_id] = [];
+        paymentsMap[p.employee_id].push({
+          ...p,
+          amount: parseFloat(p.amount)
+        });
+      });
+    } catch (payErr) {
+      console.error('Notice loading payments:', payErr.message);
+    }
 
     // Get attendance/leave logs for the selected month
     const logsRes = await pool.query(
@@ -551,12 +581,19 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         }
       });
 
-      // Last month balance calculation (unpaid balance or overpaid carryover)
+      // Last month balance calculation (unpaid balance or overpaid carryover / carry forward)
       let lastMonthBalance = 0;
+      const prevRecord = prevRecordsMap[emp.id];
+      const prevCarried = (prevRecord && prevRecord.carried_forward_to_next !== undefined && prevRecord.carried_forward_to_next !== null && parseFloat(prevRecord.carried_forward_to_next) !== 0)
+        ? parseFloat(prevRecord.carried_forward_to_next)
+        : null;
+
       if (savedRecord && savedRecord.last_month_balance !== undefined && savedRecord.last_month_balance !== null && parseFloat(savedRecord.last_month_balance) !== 0) {
         lastMonthBalance = parseFloat(savedRecord.last_month_balance || 0);
+      } else if (prevCarried !== null) {
+        // Prioritize the exact carry-forward amount from the previous month
+        lastMonthBalance = prevCarried;
       } else {
-        const prevRecord = prevRecordsMap[emp.id];
         if (prevRecord) {
           const prevNet = parseFloat(prevRecord.net_salary || 0);
           const prevPaid = parseFloat(prevRecord.paid_amount || 0);
@@ -592,9 +629,20 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       }
 
       // Cash and Bank paid defaults
+      const empPayments = paymentsMap[emp.id] || [];
       let cashPaid = dynamicNetSalary;
       let bankPaid = 0;
-      if (savedRecord) {
+
+      if (empPayments.length > 0) {
+        const recordedCash = empPayments
+          .filter(p => (p.payment_method || '').toLowerCase() === 'cash')
+          .reduce((sum, p) => sum + p.amount, 0);
+        const recordedBank = empPayments
+          .filter(p => (p.payment_method || '').toLowerCase() === 'bank')
+          .reduce((sum, p) => sum + p.amount, 0);
+        cashPaid = Math.round(recordedCash * 100) / 100;
+        bankPaid = Math.round(recordedBank * 100) / 100;
+      } else if (savedRecord) {
         if (savedRecord.cash_paid !== undefined && savedRecord.cash_paid !== null) {
           cashPaid = parseFloat(savedRecord.cash_paid);
         } else if (savedRecord.paid_amount !== undefined && savedRecord.paid_amount !== null) {
@@ -665,6 +713,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         carried_forward_to_next: parseFloat(savedRecordsMap[emp.id]?.carried_forward_to_next || nextRecordsMap[emp.id]?.last_month_balance || 0),
         status: paymentStatus,
         notes: notes,
+        payments: empPayments,
         branch: emp.branch || '',
         department: emp.department || '',
         daily_breakdown: dailyBreakdown,
@@ -978,6 +1027,15 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'employee_id and month are required' });
   }
 
+  try {
+    await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS total_adjustments NUMERIC(10, 2) DEFAULT 0');
+    await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS carried_forward_to_next NUMERIC(10, 2) DEFAULT 0');
+    await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS last_month_balance NUMERIC(10, 2) DEFAULT 0');
+    await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS payable_salary NUMERIC(10, 2) DEFAULT 0');
+  } catch (schemaErr) {
+    console.error('Schema check notice in carry-forward:', schemaErr.message);
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1053,7 +1111,7 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
       const nextRec = nextRecordRes.rows[0];
       const prevBal = parseFloat(nextRec.last_month_balance || 0);
       const diff = carryAmount - prevBal;
-      const newTotalAdj = Math.round((parseFloat(nextRec.total_adjustments || 0) + diff) * 100) / 100;
+      const newTotalAdj = Math.round((parseFloat(nextRec.total_adjustments || nextRec.other_adjustments || 0) + diff) * 100) / 100;
       const newNet = Math.round((parseFloat(nextRec.payable_salary || 0) + newTotalAdj) * 100) / 100;
 
       await client.query(
@@ -1073,7 +1131,9 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
            net_salary, total_adjustments, status
          ) VALUES ($1, $2, $3, $3, $4, $5, $4, 'Pending')
          ON CONFLICT (employee_id, month) DO UPDATE SET
-           last_month_balance = EXCLUDED.last_month_balance`,
+           last_month_balance = EXCLUDED.last_month_balance,
+           total_adjustments = EXCLUDED.total_adjustments,
+           net_salary = EXCLUDED.net_salary`,
         [employee_id, nextMonthStr, baseSalary, carryAmount, (baseSalary + carryAmount)]
       );
     }
@@ -1132,6 +1192,213 @@ router.post('/clear-balance', authenticateToken, isAdmin, async (req, res) => {
 
     await client.query('COMMIT');
     res.json({ success: true, message: 'Past balance cleared to 0.00' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ==================== PAYROLL PAYMENT LOGS (INSTALLMENTS) ====================
+
+// GET payment logs for an employee and month
+router.get('/payments/:employee_id/:month', authenticateToken, async (req, res) => {
+  const { employee_id, month } = req.params;
+  try {
+    const result = await pool.query(
+      'SELECT * FROM employee_payroll_payments WHERE employee_id = $1 AND month = $2 ORDER BY created_at ASC',
+      [employee_id, month]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST record payment installment (Cash or Bank)
+router.post('/payments', authenticateToken, async (req, res) => {
+  const { employee_id, month, cash_amount, bank_amount, notes } = req.body;
+  if (!employee_id || !month) {
+    return res.status(400).json({ error: 'employee_id and month are required' });
+  }
+
+  const cashVal = parseFloat(cash_amount || 0);
+  const bankVal = parseFloat(bank_amount || 0);
+
+  if (cashVal <= 0 && bankVal <= 0) {
+    return res.status(400).json({ error: 'Please enter a valid Cash or Bank payment amount' });
+  }
+
+  const paidBy = req.user?.username || req.user?.email || 'Admin';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Insert Cash payment log if > 0
+    if (cashVal > 0) {
+      await client.query(
+        `INSERT INTO employee_payroll_payments (employee_id, month, payment_method, amount, paid_by, notes, created_at)
+         VALUES ($1, $2, 'Cash', $3, $4, $5, NOW())`,
+        [employee_id, month, cashVal, paidBy, notes || null]
+      );
+    }
+
+    // 2. Insert Bank payment log if > 0
+    if (bankVal > 0) {
+      await client.query(
+        `INSERT INTO employee_payroll_payments (employee_id, month, payment_method, amount, paid_by, notes, created_at)
+         VALUES ($1, $2, 'Bank', $3, $4, $5, NOW())`,
+        [employee_id, month, bankVal, paidBy, notes || null]
+      );
+    }
+
+    // 3. Recalculate total cash & total bank from all payment logs for this employee & month
+    const totalsRes = await client.query(
+      `SELECT 
+         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'cash' THEN amount ELSE 0 END), 0) as total_cash,
+         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'bank' THEN amount ELSE 0 END), 0) as total_bank
+       FROM employee_payroll_payments
+       WHERE employee_id = $1 AND month = $2`,
+      [employee_id, month]
+    );
+
+    const totalCash = parseFloat(totalsRes.rows[0].total_cash || 0);
+    const totalBank = parseFloat(totalsRes.rows[0].total_bank || 0);
+    const totalPaid = Math.round((totalCash + totalBank) * 100) / 100;
+
+    // 4. Update or insert into employee_payroll_records
+    const curRecordRes = await client.query(
+      'SELECT * FROM employee_payroll_records WHERE employee_id = $1 AND month = $2',
+      [employee_id, month]
+    );
+
+    let netSalary = 0;
+    if (curRecordRes.rows.length > 0) {
+      netSalary = parseFloat(curRecordRes.rows[0].net_salary || 0);
+    } else {
+      const empRes = await client.query('SELECT salary FROM employees WHERE id = $1', [employee_id]);
+      netSalary = parseFloat(empRes.rows[0]?.salary || 0);
+    }
+
+    const isFull = totalPaid >= netSalary && netSalary > 0;
+    const newStatus = isFull ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending');
+
+    if (curRecordRes.rows.length > 0) {
+      await client.query(
+        `UPDATE employee_payroll_records SET
+           cash_paid = $1,
+           bank_paid = $2,
+           paid_amount = $3,
+           status = $4,
+           paid_date = CASE WHEN $4 = 'Paid' THEN COALESCE(paid_date, NOW()) ELSE paid_date END
+         WHERE employee_id = $5 AND month = $6`,
+        [totalCash, totalBank, totalPaid, newStatus, employee_id, month]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO employee_payroll_records (
+           employee_id, month, base_salary, payable_salary, net_salary,
+           cash_paid, bank_paid, paid_amount, status, paid_date
+         ) VALUES ($1, $2, $3, $3, $3, $4, $5, $6, $7, CASE WHEN $7 = 'Paid' THEN NOW() ELSE NULL END)
+         ON CONFLICT (employee_id, month) DO UPDATE SET
+           cash_paid = EXCLUDED.cash_paid,
+           bank_paid = EXCLUDED.bank_paid,
+           paid_amount = EXCLUDED.paid_amount,
+           status = EXCLUDED.status,
+           paid_date = EXCLUDED.paid_date`,
+        [employee_id, month, netSalary, totalCash, totalBank, totalPaid, newStatus]
+      );
+    }
+
+    // 5. Get all updated payment rows
+    const allPaymentsRes = await client.query(
+      'SELECT * FROM employee_payroll_payments WHERE employee_id = $1 AND month = $2 ORDER BY created_at ASC',
+      [employee_id, month]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: `Payment of SAR ${Math.round((cashVal + bankVal) * 100) / 100} recorded by ${paidBy}`,
+      payments: allPaymentsRes.rows,
+      cash_paid: totalCash,
+      bank_paid: totalBank,
+      paid_amount: totalPaid,
+      status: newStatus
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE a payment log entry
+router.delete('/payments/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const payRes = await client.query('SELECT * FROM employee_payroll_payments WHERE id = $1', [id]);
+    if (payRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Payment record not found' });
+    }
+
+    const { employee_id, month } = payRes.rows[0];
+
+    // Delete the entry
+    await client.query('DELETE FROM employee_payroll_payments WHERE id = $1', [id]);
+
+    // Recalculate totals
+    const totalsRes = await client.query(
+      `SELECT 
+         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'cash' THEN amount ELSE 0 END), 0) as total_cash,
+         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'bank' THEN amount ELSE 0 END), 0) as total_bank
+       FROM employee_payroll_payments
+       WHERE employee_id = $1 AND month = $2`,
+      [employee_id, month]
+    );
+
+    const totalCash = parseFloat(totalsRes.rows[0].total_cash || 0);
+    const totalBank = parseFloat(totalsRes.rows[0].total_bank || 0);
+    const totalPaid = Math.round((totalCash + totalBank) * 100) / 100;
+
+    const curRecRes = await client.query(
+      'SELECT net_salary FROM employee_payroll_records WHERE employee_id = $1 AND month = $2',
+      [employee_id, month]
+    );
+    const netSalary = parseFloat(curRecRes.rows[0]?.net_salary || 0);
+    const newStatus = (totalPaid >= netSalary && netSalary > 0) ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending');
+
+    await client.query(
+      `UPDATE employee_payroll_records SET
+         cash_paid = $1,
+         bank_paid = $2,
+         paid_amount = $3,
+         status = $4
+       WHERE employee_id = $5 AND month = $6`,
+      [totalCash, totalBank, totalPaid, newStatus, employee_id, month]
+    );
+
+    const allPaymentsRes = await client.query(
+      'SELECT * FROM employee_payroll_payments WHERE employee_id = $1 AND month = $2 ORDER BY created_at ASC',
+      [employee_id, month]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Payment log deleted successfully',
+      payments: allPaymentsRes.rows,
+      cash_paid: totalCash,
+      bank_paid: totalBank,
+      paid_amount: totalPaid,
+      status: newStatus
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

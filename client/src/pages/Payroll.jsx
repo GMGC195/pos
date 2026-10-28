@@ -147,6 +147,7 @@ export default function Payroll() {
   const [editableData, setEditableData] = useState({})
   const [savingAll, setSavingAll] = useState(false)
   const [savingRowId, setSavingRowId] = useState(null)
+  const [payInputs, setPayInputs] = useState({})
 
   // Leave Modal State
   const [showLeaveModal, setShowLeaveModal] = useState(false)
@@ -568,42 +569,71 @@ export default function Payroll() {
     const row = editableData[empId];
     if (!row) return;
 
-    let cash = parseFloat(row.cash_paid || 0);
-    let bank = parseFloat(row.bank_paid || 0);
+    const inputVal = payInputs[empId] || {};
+    let cashVal = inputVal.cash !== undefined 
+      ? parseFloat(inputVal.cash || 0) 
+      : (row.payments && row.payments.length > 0 ? 0 : parseFloat(row.cash_paid || 0));
+    let bankVal = inputVal.bank !== undefined 
+      ? parseFloat(inputVal.bank || 0) 
+      : (row.payments && row.payments.length > 0 ? 0 : parseFloat(row.bank_paid || 0));
+
     const net = parseFloat(row.net_salary || 0);
 
-    // If both are 0, default to paying the remaining amount in Cash
-    if (cash === 0 && bank === 0) {
-      cash = net;
+    // If both inputs are 0 or empty, and no payments yet, default to full remaining in cash
+    if (cashVal <= 0 && bankVal <= 0) {
+      const curPaid = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
+      const rem = Math.round((net - curPaid) * 100) / 100;
+      if (rem > 0) {
+        cashVal = rem;
+      } else {
+        toast.info('Please enter an amount in Cash or Bank to pay.');
+        return;
+      }
     }
-
-    const totalPaid = Math.round((cash + bank) * 100) / 100;
-    const isFull = totalPaid >= net && net > 0;
-    const newStatus = isFull ? 'Paid' : (totalPaid > 0 ? 'Partial' : (row.status || 'Pending'));
-
-    const updatedRow = {
-      ...row,
-      cash_paid: cash,
-      bank_paid: bank,
-      paid_amount: totalPaid,
-      status: newStatus
-    };
-
-    setEditableData(prev => ({
-      ...prev,
-      [empId]: updatedRow
-    }));
-    setSelectedEmployeeForModal(curr => (curr?.id === empId ? updatedRow : curr));
 
     setSavingRowId(empId);
     try {
-      await saveRowRecord(updatedRow);
-      toast.success(`Payment of ${CURRENCY} ${totalPaid.toFixed(2)} recorded for ${row.name}! (${newStatus})`);
-      setUnlockedRowIds(prev => {
-        const next = new Set(prev);
-        next.delete(empId);
-        return next;
+      const res = await axios.post('/api/payroll/payments', {
+        employee_id: empId,
+        month: selectedMonth,
+        cash_amount: cashVal,
+        bank_amount: bankVal
       });
+
+      const { payments, cash_paid, bank_paid, paid_amount, status, message } = res.data;
+      toast.success(message || `Payment recorded successfully!`);
+
+      // Clear local payment input for this employee
+      setPayInputs(prev => ({
+        ...prev,
+        [empId]: { cash: '', bank: '' }
+      }));
+
+      // Update editableData with new payments and totals
+      const updatedRow = {
+        ...row,
+        payments: payments || [],
+        cash_paid,
+        bank_paid,
+        paid_amount,
+        status
+      };
+
+      setEditableData(prev => ({
+        ...prev,
+        [empId]: updatedRow
+      }));
+
+      setSelectedEmployeeForModal(curr => (curr?.id === empId ? updatedRow : curr));
+
+      if (status === 'Paid') {
+        setUnlockedRowIds(prev => {
+          const next = new Set(prev);
+          next.delete(empId);
+          return next;
+        });
+      }
+
       await loadPayroll(true);
     } catch (error) {
       console.error(error);
@@ -612,7 +642,53 @@ export default function Payroll() {
     } finally {
       setSavingRowId(null);
     }
-  }
+  };
+
+  const handleDeletePayment = (paymentId, empId) => {
+    confirmAction('Are you sure you want to delete this payment record?', async () => {
+      setSavingRowId(empId);
+      try {
+        const res = await axios.delete(`/api/payroll/payments/${paymentId}`);
+        const { payments, cash_paid, bank_paid, paid_amount, status, message } = res.data;
+        toast.success(message || 'Payment deleted');
+
+        setEditableData(prev => {
+          const r = prev[empId];
+          if (!r) return prev;
+          const updatedRow = {
+            ...r,
+            payments: payments || [],
+            cash_paid,
+            bank_paid,
+            paid_amount,
+            status
+          };
+          return { ...prev, [empId]: updatedRow };
+        });
+
+        setSelectedEmployeeForModal(curr => {
+          if (curr?.id === empId) {
+            return {
+              ...curr,
+              payments: payments || [],
+              cash_paid,
+              bank_paid,
+              paid_amount,
+              status
+            };
+          }
+          return curr;
+        });
+
+        await loadPayroll(true);
+      } catch (err) {
+        console.error(err);
+        toast.error(err?.response?.data?.error || 'Failed to delete payment');
+      } finally {
+        setSavingRowId(null);
+      }
+    }, 'Delete Payment');
+  };
 
   const handleTextChange = (empId, field, value) => {
     setEditableData(prev => {
@@ -1183,6 +1259,15 @@ export default function Payroll() {
           <span class="right">H:${emp.holidays || 0}  OOT:${onlyOtDays}  Late:${emp.late_days || 0}</span>
         </div>
         <div class="row" style="font-size: 10.5px;">
+          <span>Required Duty:</span>
+          <span class="right">${(() => {
+            const reqMins = emp.expected_minutes !== undefined ? emp.expected_minutes : (emp.req_duty_hours ? Math.round(parseFloat(emp.req_duty_hours) * 60) : (parseFloat(emp.expected_hours || 0) * 60));
+            const h = Math.floor(reqMins / 60);
+            const m = Math.round(reqMins % 60);
+            return m > 0 ? `${h}h ${m}m` : `${h}h 00m`;
+          })()}</span>
+        </div>
+        <div class="row" style="font-size: 10.5px;">
           <span>Worked Duty:</span>
           <span class="right">${formatDuration(emp.actual_minutes !== undefined ? emp.actual_minutes : (parseFloat(emp.actual_hours || 0) * 60))}</span>
         </div>
@@ -1688,12 +1773,12 @@ export default function Payroll() {
             </div>
 
             <div style={{ background: '#f5f3ff', padding: '8px 10px', borderRadius: '6px', border: '1.5px solid #ddd6fe' }}>
-              <span style={{ fontSize: '10px', color: '#6b21a8', fontWeight: 700, display: 'block' }}>Last Month Carry Forward</span>
+              <span style={{ fontSize: '10px', color: '#6b21a8', fontWeight: 700, display: 'block' }}>Prev M. Remaining</span>
               <div style={{ fontSize: '13px', fontWeight: 800, color: lastMonthBal > 0 ? 'var(--green)' : lastMonthBal < 0 ? '#ef4444' : '#64748b', marginTop: '2px' }}>
                 {lastMonthBal > 0 ? `+${CURRENCY} ${lastMonthBal.toFixed(2)}` : lastMonthBal < 0 ? `-${CURRENCY} ${Math.abs(lastMonthBal).toFixed(2)}` : `${CURRENCY} 0.00`}
               </div>
               <span style={{ fontSize: '9px', color: '#7c3aed', display: 'block' }}>
-                {lastMonthBal !== 0 ? 'Carried from past month' : 'No past carryover'}
+                {lastMonthBal !== 0 ? 'Carried from last month' : 'No past carryover'}
               </span>
             </div>
 
@@ -1806,6 +1891,101 @@ export default function Payroll() {
 
               return (
                 <>
+                  {/* Payment History Log Table (Installments) */}
+                  {targetEmpData.payments && targetEmpData.payments.length > 0 && (
+                    <div style={{
+                      background: '#ffffff',
+                      border: '1.5px solid #e2e8f0',
+                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      marginBottom: '4px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 800, color: '#334155', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <Clock size={13} color="#0284c7" />
+                          Payment History / Installments ({targetEmpData.payments.length})
+                        </span>
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'left', borderBottom: '1.5px solid #e2e8f0' }}>
+                              <th style={{ padding: '5px 8px', fontWeight: 700, width: '25px' }}>#</th>
+                              <th style={{ padding: '5px 8px', fontWeight: 700 }}>Date & Time</th>
+                              <th style={{ padding: '5px 8px', fontWeight: 700 }}>Paid By</th>
+                              <th style={{ padding: '5px 8px', fontWeight: 700 }}>Method</th>
+                              <th style={{ padding: '5px 8px', fontWeight: 700, textAlign: 'right' }}>Amount</th>
+                              {!isRowLocked && <th style={{ padding: '5px 8px', textAlign: 'center', width: '30px' }}></th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {targetEmpData.payments.map((p, idx) => (
+                              <tr key={p.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '5px 8px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
+                                <td style={{ padding: '5px 8px', color: '#1e293b', fontWeight: 600 }}>
+                                  {new Date(p.created_at).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                                <td style={{ padding: '5px 8px', color: '#0369a1', fontWeight: 700 }}>
+                                  {p.paid_by || 'Admin'}
+                                </td>
+                                <td style={{ padding: '5px 8px' }}>
+                                  <span style={{
+                                    padding: '2px 7px',
+                                    borderRadius: '4px',
+                                    fontWeight: 700,
+                                    fontSize: '10px',
+                                    background: (p.payment_method || '').toLowerCase() === 'cash' ? '#ecfdf5' : '#e0e7ff',
+                                    color: (p.payment_method || '').toLowerCase() === 'cash' ? '#059669' : '#4338ca',
+                                    border: '1px solid ' + ((p.payment_method || '').toLowerCase() === 'cash' ? '#a7f3d0' : '#c7d2fe')
+                                  }}>
+                                    {p.payment_method}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 800, color: '#059669' }}>
+                                  {CURRENCY} {parseFloat(p.amount || 0).toFixed(2)}
+                                </td>
+                                {!isRowLocked && (
+                                  <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeletePayment(p.id, targetEmpData.id)}
+                                      title="Delete this payment entry"
+                                      style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
+                                      onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                                      onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '1.5px solid #cbd5e1' }}>
+                              <td colSpan={3} style={{ padding: '6px 8px', color: '#334155' }}>
+                                Total Summary:
+                              </td>
+                              <td colSpan={!isRowLocked ? 3 : 2} style={{ padding: '6px 8px', textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end', fontSize: '11px' }}>
+                                  <span style={{ color: '#0369a1' }}>
+                                    Total Cash: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'cash').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                                  </span>
+                                  <span style={{ color: '#4338ca' }}>
+                                    Total Bank: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'bank').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                                  </span>
+                                  <span style={{ color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '4px', border: '1px solid #a7f3d0' }}>
+                                    Total Paid Sum: <b>{CURRENCY} {targetEmpData.payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   {/* ROW 1: Cash Paid, Bank Paid, Pay Now, Print Slip (80mm) ---> Paid, Remaining */}
                   <div style={{
                     display: 'flex',
@@ -1823,9 +2003,20 @@ export default function Payroll() {
                           type="text"
                           inputMode="decimal"
                           disabled={isRowLocked}
-                          value={targetEmpData.cash_paid}
-                          onChange={e => handlePaidChange(targetEmpData.id, 'cash_paid', e.target.value)}
-                          placeholder="0.00"
+                          value={payInputs[targetEmpData.id]?.cash !== undefined 
+                            ? payInputs[targetEmpData.id].cash 
+                            : (targetEmpData.payments && targetEmpData.payments.length > 0 ? '' : (targetEmpData.cash_paid || ''))}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setPayInputs(prev => ({
+                              ...prev,
+                              [targetEmpData.id]: {
+                                ...(prev[targetEmpData.id] || {}),
+                                cash: val
+                              }
+                            }));
+                          }}
+                          placeholder={rem > 0 && (!targetEmpData.payments || targetEmpData.payments.length === 0) ? rem.toFixed(2) : "0.00"}
                           style={{ width: '80px', padding: '5px 8px', borderRadius: '6px', border: '1.5px solid #cbd5e1', fontSize: '12px', fontWeight: 800, color: '#0369a1', background: isRowLocked ? '#f1f5f9' : '#fff' }}
                         />
                       </div>
@@ -1837,8 +2028,19 @@ export default function Payroll() {
                           type="text"
                           inputMode="decimal"
                           disabled={isRowLocked}
-                          value={targetEmpData.bank_paid}
-                          onChange={e => handlePaidChange(targetEmpData.id, 'bank_paid', e.target.value)}
+                          value={payInputs[targetEmpData.id]?.bank !== undefined 
+                            ? payInputs[targetEmpData.id].bank 
+                            : (targetEmpData.payments && targetEmpData.payments.length > 0 ? '' : (targetEmpData.bank_paid || ''))}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setPayInputs(prev => ({
+                              ...prev,
+                              [targetEmpData.id]: {
+                                ...(prev[targetEmpData.id] || {}),
+                                bank: val
+                              }
+                            }));
+                          }}
                           placeholder="0.00"
                           style={{ width: '80px', padding: '5px 8px', borderRadius: '6px', border: '1.5px solid #cbd5e1', fontSize: '12px', fontWeight: 800, color: '#4338ca', background: isRowLocked ? '#f1f5f9' : '#fff' }}
                         />

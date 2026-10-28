@@ -552,6 +552,14 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         expected_hours NUMERIC(10, 2) DEFAULT 0,
         actual_hours NUMERIC(10, 2) DEFAULT 0,
         dynamic_adjustments JSONB DEFAULT '{}'::jsonb,
+        payable_salary NUMERIC(10, 2) DEFAULT 0,
+        total_adjustments NUMERIC(10, 2) DEFAULT 0,
+        advance_deduction NUMERIC(10, 2) DEFAULT 0,
+        recurring_adjustments NUMERIC(10, 2) DEFAULT 0,
+        last_month_balance NUMERIC(10, 2) DEFAULT 0,
+        carried_forward_to_next NUMERIC(10, 2) DEFAULT 0,
+        cash_paid NUMERIC(10, 2) DEFAULT 0,
+        bank_paid NUMERIC(10, 2) DEFAULT 0,
         net_salary NUMERIC(10, 2) NOT NULL,
         paid_amount NUMERIC(10, 2) DEFAULT 0,
         status VARCHAR(20) DEFAULT 'Pending',
@@ -569,6 +577,9 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS last_month_balance NUMERIC(10, 2) DEFAULT 0');
       await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS payable_salary NUMERIC(10, 2) DEFAULT 0');
       await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS carried_forward_to_next NUMERIC(10, 2) DEFAULT 0');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS total_adjustments NUMERIC(10, 2) DEFAULT 0');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS advance_deduction NUMERIC(10, 2) DEFAULT 0');
+      await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS recurring_adjustments NUMERIC(10, 2) DEFAULT 0');
     } catch (e) {}
 
     // Create payroll adjustment types table for dynamic columns
@@ -614,6 +625,23 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // Create employee_payroll_payments table for individual payment logs / installments
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS employee_payroll_payments (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        month VARCHAR(7) NOT NULL,
+        payment_method VARCHAR(20) NOT NULL, -- 'Cash' or 'Bank'
+        amount NUMERIC(10, 2) NOT NULL,
+        paid_by VARCHAR(100),
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    try {
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_employee_payroll_payments_emp_month ON employee_payroll_payments(employee_id, month)');
+    } catch (e) {}
 
     // Ensure columns exist if table was created previously without them
     try {
