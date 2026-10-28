@@ -52,6 +52,12 @@ export default function Reports({ isTodaySales = false }) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [branch, setBranch] = useState((isAdminOrDev || isManagement) ? 'All' : (user?.branch || 'All'))
+  const [fromTime, setFromTime] = useState('')
+  const [toTime, setToTime] = useState('')
+  const [cashierFilter, setCashierFilter] = useState('All')
+  const [closingFilter, setClosingFilter] = useState('All')
+  const [availableClosings, setAvailableClosings] = useState([])
+  const [availableCashiers, setAvailableCashiers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showTodaySummary, setShowTodaySummary] = useState(false)
   const [showDetailsInModal, setShowDetailsInModal] = useState(false)
@@ -102,10 +108,20 @@ export default function Reports({ isTodaySales = false }) {
 
   const load = () => {
     setLoading(true)
+    const params = {
+      from,
+      to,
+      branch,
+      from_time: fromTime || undefined,
+      to_time: toTime || undefined,
+      cashier: cashierFilter !== 'All' ? cashierFilter : undefined,
+      closing_id: closingFilter !== 'All' ? closingFilter : undefined,
+      unclosed_only: isTodaySales
+    }
     Promise.all([
-      axios.get('/api/transactions', { params: { from, to, branch, unclosed_only: isTodaySales } }),
-      axios.get('/api/transactions/summary', { params: { from, to, branch, unclosed_only: isTodaySales } }),
-      axios.get('/api/transactions/credit-summary', { params: { from, to, branch, unclosed_only: isTodaySales } })
+      axios.get('/api/transactions', { params }),
+      axios.get('/api/transactions/summary', { params }),
+      axios.get('/api/transactions/credit-summary', { params })
     ])
       .then(([txRes, sumRes, credRes]) => {
         setTransactions(txRes.data)
@@ -123,6 +139,20 @@ export default function Reports({ isTodaySales = false }) {
     load()
     const interval = setInterval(load, 300000) // Auto-refresh every 5 mins
     return () => clearInterval(interval)
+  }, [from, to, branch, fromTime, toTime, cashierFilter, closingFilter])
+
+  // Fetch available cashiers list on mount
+  useEffect(() => {
+    axios.get('/api/transactions/cashiers')
+      .then(res => setAvailableCashiers(res.data || []))
+      .catch(() => {})
+  }, [])
+
+  // Fetch closings for selected date range and branch
+  useEffect(() => {
+    axios.get('/api/orders/closings', { params: { from, to, branch } })
+      .then(res => setAvailableClosings(res.data || []))
+      .catch(() => setAvailableClosings([]))
   }, [from, to, branch])
 
   // Fetch and sync active shift for Cashier
@@ -1248,6 +1278,11 @@ export default function Reports({ isTodaySales = false }) {
 
   const uniquePlacedBy = ['All', ...new Set(transactions.map(t => t.order_taker).filter(Boolean))];
   const uniqueCompletedBy = ['All', ...new Set(transactions.map(t => t.completed_by).filter(Boolean))];
+  const allCashierOptions = ['All', ...new Set([
+    ...availableCashiers,
+    ...transactions.map(t => t.completed_by).filter(Boolean),
+    ...transactions.map(t => t.order_taker).filter(Boolean)
+  ])].sort((a, b) => a === 'All' ? -1 : b === 'All' ? 1 : a.localeCompare(b));
   const uniqueBranch = ['All', ...new Set(transactions.map(t => t.branch).filter(Boolean))];
   const uniqueType = ['All', ...new Set(transactions.map(t => t.order_type).filter(Boolean))];
 
@@ -1262,10 +1297,11 @@ export default function Reports({ isTodaySales = false }) {
     
     const matchesPlacedBy = tableFilters.placedBy === 'All' || t.order_taker === tableFilters.placedBy;
     const matchesCompletedBy = tableFilters.completedBy === 'All' || t.completed_by === tableFilters.completedBy;
+    const matchesCashier = cashierFilter === 'All' || t.completed_by === cashierFilter || t.order_taker === cashierFilter;
     const matchesBranch = tableFilters.branch === 'All' || t.branch === tableFilters.branch;
     const matchesType = tableFilters.type === 'All' || t.order_type === tableFilters.type;
 
-    return matchesSearch && matchesStatus && matchesPlacedBy && matchesCompletedBy && matchesBranch && matchesType;
+    return matchesSearch && matchesStatus && matchesPlacedBy && matchesCompletedBy && matchesCashier && matchesBranch && matchesType;
   })
 
   const paginatedTransactions = filteredTransactions.slice(
@@ -1441,6 +1477,36 @@ export default function Reports({ isTodaySales = false }) {
                           <label style={{ fontSize: '12px', margin: 0, fontWeight: 600 }}>To:</label>
                           <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ padding: '4px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', minWidth: '95px' }} />
                         </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <label style={{ fontSize: '12px', margin: 0, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 2 }}>
+                            <Clock size={12} /> Time:
+                          </label>
+                          <input 
+                            type="time" 
+                            value={fromTime} 
+                            onChange={e => setFromTime(e.target.value)} 
+                            title="From Time (KSA)"
+                            style={{ padding: '3px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)' }} 
+                          />
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>-</span>
+                          <input 
+                            type="time" 
+                            value={toTime} 
+                            onChange={e => setToTime(e.target.value)} 
+                            title="To Time (KSA)"
+                            style={{ padding: '3px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)' }} 
+                          />
+                          {(fromTime || toTime) && (
+                            <button 
+                              type="button" 
+                              onClick={() => { setFromTime(''); setToTime(''); }}
+                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--text-muted)' }}
+                              title="Clear Time Filter"
+                            >
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
                         <button className="btn" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '12px', background: 'var(--surface)', border: '1px solid var(--surface-2)', color: 'var(--text-primary)', borderRadius: '6px' }}>
@@ -1474,39 +1540,76 @@ export default function Reports({ isTodaySales = false }) {
               </div>
             </div>
 
-            {/* Row 1: Branches on Left + Action Icons on Right */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
-              {(isAdminOrDev || isManagement) ? (
-                <div style={{ display: 'inline-flex', background: 'var(--surface-2)', borderRadius: 6, padding: 2, alignItems: 'center', gap: 2 }}>
-                  {[
-                    { id: 'All', label: 'All' },
-                    { id: 'Branch 1', label: 'B1' },
-                    { id: 'Branch 2', label: 'B2' },
-                    { id: 'Branch 3', label: 'B3' }
-                  ].map(b => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => setBranch(b.id)}
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        border: 'none',
-                        borderRadius: 5,
-                        background: branch === b.id ? 'var(--surface)' : 'transparent',
-                        color: branch === b.id ? 'var(--primary)' : 'var(--text-muted)',
-                        boxShadow: branch === b.id ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {b.label}
-                    </button>
-                  ))}
+            {/* Row 1: Branches on Left + Cashier & Closing Filters + Action Icons on Right */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                {(isAdminOrDev || isManagement) ? (
+                  <div style={{ display: 'inline-flex', background: 'var(--surface-2)', borderRadius: 6, padding: 2, alignItems: 'center', gap: 2 }}>
+                    {[
+                      { id: 'All', label: 'All' },
+                      { id: 'Branch 1', label: 'B1' },
+                      { id: 'Branch 2', label: 'B2' },
+                      { id: 'Branch 3', label: 'B3' }
+                    ].map(b => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setBranch(b.id)}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          border: 'none',
+                          borderRadius: 5,
+                          background: branch === b.id ? 'var(--surface)' : 'transparent',
+                          color: branch === b.id ? 'var(--primary)' : 'var(--text-muted)',
+                          boxShadow: branch === b.id ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : <div />}
+
+                {/* Cashier Filter Dropdown */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <label style={{ fontSize: '12px', margin: 0, fontWeight: 600, color: 'var(--text-secondary)' }}>Cashier:</label>
+                  <select
+                    value={cashierFilter}
+                    onChange={e => setCashierFilter(e.target.value)}
+                    style={{ padding: '4px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', maxWidth: 140 }}
+                  >
+                    {allCashierOptions.map(c => (
+                      <option key={c} value={c}>{c === 'All' ? 'All Cashiers' : c}</option>
+                    ))}
+                  </select>
                 </div>
-              ) : <div />}
+
+                {/* Closing Filter Dropdown */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <label style={{ fontSize: '12px', margin: 0, fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <Lock size={12} /> Closing:
+                  </label>
+                  <select
+                    value={closingFilter}
+                    onChange={e => setClosingFilter(e.target.value)}
+                    style={{ padding: '4px 8px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', maxWidth: 200 }}
+                  >
+                    <option value="All">All Closings</option>
+                    <option value="unclosed">Live / Unclosed Only</option>
+                    <option value="closed">Closed Only</option>
+                    {availableClosings.map(c => (
+                      <option key={c.id} value={c.id}>
+                        [{c.closing_type}] {c.cashier_name} {String(c.id).startsWith('live_') ? '' : `(#${c.id})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <button 
@@ -1540,13 +1643,17 @@ export default function Reports({ isTodaySales = false }) {
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                   {isTodaySales && isCashier ? (activeShift ? `Shift: ${formatSaudiTime(activeShift.start_time)}` : 'Active Shift') : `${from} → ${to}`}
                 </span>
-                {(tableFilters.placedBy !== 'All' || tableFilters.completedBy !== 'All' || tableFilters.branch !== 'All' || tableFilters.type !== 'All' || statusFilter !== 'All' || search !== '') && (
+                {(tableFilters.placedBy !== 'All' || tableFilters.completedBy !== 'All' || tableFilters.branch !== 'All' || tableFilters.type !== 'All' || statusFilter !== 'All' || search !== '' || fromTime !== '' || toTime !== '' || cashierFilter !== 'All' || closingFilter !== 'All') && (
                   <button 
                     className="btn btn-sm btn-secondary" 
                     onClick={() => {
                       setTableFilters({ placedBy: 'All', completedBy: 'All', branch: 'All', type: 'All' })
                       setStatusFilter('All')
                       setSearch('')
+                      setFromTime('')
+                      setToTime('')
+                      setCashierFilter('All')
+                      setClosingFilter('All')
                     }}
                     style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '3px 8px' }}
                     title="Clear All Filters"

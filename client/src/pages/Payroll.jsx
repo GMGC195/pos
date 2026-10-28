@@ -988,7 +988,7 @@ export default function Payroll() {
     setEditingAdjType(null)
     setActiveInlineForm(null)
     setCustomAdjAction('Deduct')
-    setCustomAdjLabel('Advance Salary / Loan')
+    setCustomAdjLabel('')
     setCustomAdjOtherLabel('')
     setCustomAdjType('Repeated Monthly')
     setCustomAdjAmount('')
@@ -1499,7 +1499,22 @@ export default function Payroll() {
       const baseSal = parseFloat(current.base_salary || 0);
       const payableSal = parseFloat(current.payable_salary !== undefined ? current.payable_salary : (baseSal - parseFloat(current.deductions || 0)));
       const lastMonthBal = parseFloat(current.last_month_balance || 0);
-      const newTotalAdj = Math.round((lastMonthBal + sumGiven - sumDeduct) * 100) / 100;
+
+      let dynamicAdjTotal = 0;
+      adjustmentTypes.forEach(adj => {
+        const inGiven = given.some(a => (a.custom_label || '').toLowerCase() === adj.label.toLowerCase());
+        const inDeduct = deduct.some(a => (a.custom_label || '').toLowerCase() === adj.label.toLowerCase());
+        if (inGiven || inDeduct) return;
+
+        const val = parseFloat(current.dynamic_adjustments?.[adj.label] || 0);
+        if (adj.action === 'Add' || adj.action === 'Both') {
+          dynamicAdjTotal += val;
+        } else if (adj.action === 'Deduct') {
+          dynamicAdjTotal -= val;
+        }
+      });
+
+      const newTotalAdj = Math.round((lastMonthBal + sumGiven - sumDeduct + dynamicAdjTotal) * 100) / 100;
       const newNetSalary = Math.round((payableSal + newTotalAdj) * 100) / 100;
 
       const updatedEmp = {
@@ -1603,24 +1618,20 @@ export default function Payroll() {
         }
       } else {
         if (isRecurring) {
-          const res = await axios.post('/api/payroll/recurring-adjustments', payload);
-          if (res?.data?.id) {
-            setEmpRecurringAdjs(prev => prev.map(item => item.id === tempId ? { ...item, id: res.data.id } : item));
-          }
+          await axios.post('/api/payroll/recurring-adjustments', payload);
         } else {
-          const res = await axios.post('/api/payroll/financial-adjustments', payload);
-          if (res?.data?.id) {
-            setEmpOneTimeAdjs(prev => prev.map(item => item.id === tempId ? { ...item, id: res.data.id } : item));
-          }
+          await axios.post('/api/payroll/financial-adjustments', payload);
         }
       }
 
-      loadPayroll(true);
+      // Fully await refreshing both employee adjustments and payroll calculations
+      await loadEmpAdjs(currentEmpData.id);
+      await loadPayroll(true);
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to save adjustment';
       toast.error(errorMsg);
-      loadEmpAdjs(currentEmpData.id);
-      loadPayroll(true);
+      await loadEmpAdjs(currentEmpData.id);
+      await loadPayroll(true);
     } finally {
       setSavingCustomAdj(false);
     }
@@ -1671,14 +1682,17 @@ export default function Payroll() {
         await loadAdjustmentTypes();
         await loadPayroll(true);
       } else {
-        loadPayroll(true);
+        if (currentEmpData) {
+          await loadEmpAdjs(currentEmpData.id);
+        }
+        await loadPayroll(true);
       }
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to delete';
       toast.error(errorMsg);
       if (type !== 'Adjustment Column' && currentEmpData) {
-        loadEmpAdjs(currentEmpData.id);
-        loadPayroll(true);
+        await loadEmpAdjs(currentEmpData.id);
+        await loadPayroll(true);
       }
     }
   }
@@ -1772,9 +1786,23 @@ export default function Payroll() {
     const totalGiven = givenAdjs.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
     const totalDeduct = deductAdjs.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
 
+    let dynamicAdjTotal = 0;
+    adjustmentTypes.forEach(adj => {
+      const inGiven = givenAdjs.some(a => (a.custom_label || '').toLowerCase() === adj.label.toLowerCase());
+      const inDeduct = deductAdjs.some(a => (a.custom_label || '').toLowerCase() === adj.label.toLowerCase());
+      if (inGiven || inDeduct) return;
+
+      const val = parseFloat(targetEmpData.dynamic_adjustments?.[adj.label] || 0);
+      if (adj.action === 'Add' || adj.action === 'Both') {
+        dynamicAdjTotal += val;
+      } else if (adj.action === 'Deduct') {
+        dynamicAdjTotal -= val;
+      }
+    });
+
     const hasActiveAdjs = givenAdjs.length > 0 || deductAdjs.length > 0;
     const totalAdj = (hasActiveAdjs || isThisEmpLoaded)
-      ? Math.round((lastMonthBal + totalGiven - totalDeduct) * 100) / 100
+      ? Math.round((lastMonthBal + totalGiven - totalDeduct + dynamicAdjTotal) * 100) / 100
       : calculateTotalAdjustments(targetEmpData);
 
     const dynamicNetSalary = Math.round((payableSal + totalAdj) * 100) / 100;
@@ -2035,10 +2063,12 @@ export default function Payroll() {
                 const inDeduct = deductAdjs.some(a => (a.custom_label || '').toLowerCase() === lbl.toLowerCase());
                 if (inGiven || inDeduct) return null;
 
-                const isPositive = num > 0;
+                const adjConfig = adjustmentTypes.find(a => a.label.toLowerCase() === lbl.toLowerCase());
+                const isDeduct = adjConfig ? adjConfig.action === 'Deduct' : (num < 0);
+                const isPositive = !isDeduct && num > 0;
                 return (
                   <span key={`dyn-${lbl}`} style={{ padding: '2px 6px', borderRadius: '4px', background: isPositive ? '#f5f3ff' : '#fef2f2', color: isPositive ? '#7c3aed' : '#dc2626', fontWeight: 600 }}>
-                    {lbl}: {isPositive ? `+${num}` : num}
+                    {lbl}: {isDeduct ? `-${Math.abs(num)}` : `+${num}`}
                   </span>
                 );
               })}

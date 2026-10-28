@@ -6,9 +6,11 @@ const { authenticateToken } = require('../middleware/auth');
 // GET comprehensive stats for Dashboard
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    let { branch, closing_id } = req.query;
+    let { branch, closing_id, date } = req.query;
     const role = req.user.role?.trim().toLowerCase();
     const isPrivileged = role === 'admin' || role === 'developer' || role === 'management';
+    const isAdmin = role === 'admin' || role === 'developer';
+
     if (!isPrivileged) {
       if (!req.user?.branch || req.user.branch === 'All') {
         return res.json({
@@ -33,6 +35,10 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(branch);
     }
 
+    const targetDateExpr = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
+      ? `'${date}'::date`
+      : `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date`;
+
     // Cashier should only see the current unclosed shift
     const isCashier = role === 'cashier';
     let shiftCond = isCashier ? `AND is_shift_closed = FALSE AND completed_by = '${req.user.username}'` : '';
@@ -54,39 +60,46 @@ router.get('/', authenticateToken, async (req, res) => {
         const closing = closingRes.rows[0];
         
         let items = [];
-        try { items = JSON.parse(closing.items_summary); } catch (e) {}
+        try { 
+          const parsed = typeof closing.items_summary === 'string' ? JSON.parse(closing.items_summary) : closing.items_summary;
+          if (Array.isArray(parsed)) items = parsed;
+        } catch (e) {}
         
-        // We might not have full history and guests for a specific shift easily, 
-        // but we can return the exact sales and orders.
         return res.json({
           totalSale: parseFloat(closing.total_sales || 0),
           cashSale: parseFloat(closing.cash_sales || 0),
           cardSale: parseFloat(closing.card_sales || 0),
-          dailyRevenue: parseFloat(closing.total_sales || 0), // approximation or we can leave it
-          totalProductCost: 0, // Not saved in shift_closings yet
+          creditSale: parseFloat(closing.credit_sales || 0),
+          majorPayment: parseFloat(closing.major_payments || 0),
+          dailyRevenue: parseFloat(closing.total_sales || 0),
+          totalProductCost: 0,
           totalOrders: parseInt(closing.total_orders || 0),
           guestsToday: parseInt(closing.total_orders || 0),
           last7Days: [],
-          topItems: items.map(i => ({ name: i.category, value: parseInt(i.qty) }))
+          topItems: items.map(i => ({ 
+            name: i.item_name || i.name || i.category || 'Item', 
+            value: parseInt(i.qty || i.quantity || 0) 
+          })).slice(0, 6)
         });
       }
     }
+
     const totalSaleResult = await pool.query(`
       SELECT 
         COALESCE(SUM(o.grand_total), 0) as total_sale,
-        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN o.grand_total ELSE 0 END), 0) as cash_sale,
-        COALESCE(SUM(CASE WHEN t.payment_method = 'Card' OR t.payment_method = 'Online' THEN o.grand_total ELSE 0 END), 0) as card_sale,
-        COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN o.grand_total ELSE 0 END), 0) as credit_sale
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Cash' THEN t.amount ELSE (CASE WHEN t.id IS NULL AND o.grand_total > 0 THEN o.grand_total ELSE 0 END) END), 0) as cash_sale,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Card' OR t.payment_method = 'Online' THEN t.amount ELSE 0 END), 0) as card_sale,
+        COALESCE(SUM(CASE WHEN t.payment_method = 'Credit' THEN t.amount ELSE 0 END), 0) as credit_sale
       FROM "orders" o
       LEFT JOIN transactions t ON o.id = t.order_id
-      WHERE (o.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
+      WHERE (o.created_at AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr} AND o.status = 'Completed' ${branchCondO} ${shiftCondO}
     `, params);
 
     let mpQuery = `
       SELECT COALESCE(SUM(ct.amount), 0) as major_payment
       FROM credit_transactions ct
       JOIN credit_customers cc ON ct.credit_customer_id = cc.id
-      WHERE ct.type = 'PAYMENT' AND (ct.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date
+      WHERE ct.type = 'PAYMENT' AND (ct.created_at AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr}
     `;
     let mpParams = [];
     if (branch && branch !== 'All') {
@@ -98,7 +111,6 @@ router.get('/', authenticateToken, async (req, res) => {
       mpQuery += ` AND ct.cashier_name = $${mpParams.length}`;
     }
     const majorPaymentResult = await pool.query(mpQuery, mpParams);
-
 
     // Daily Revenue (Today's Sales - Produce Cost)
     const dailyRevenueResult = await pool.query(`
@@ -122,7 +134,7 @@ router.get('/', authenticateToken, async (req, res) => {
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         WHERE o.status = 'Completed'
-          AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date ${branchCondO} ${shiftCondO}
+          AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr} ${branchCondO} ${shiftCondO}
         GROUP BY oi.item_id
       )
       SELECT 
@@ -135,13 +147,13 @@ router.get('/', authenticateToken, async (req, res) => {
     // Total fulfilled orders today
     const totalOrdersResult = await pool.query(`
       SELECT COUNT(*) as count FROM "orders"
-      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND status = 'Completed' ${branchCond} ${shiftCond}
+      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr} AND status = 'Completed' ${branchCond} ${shiftCond}
     `, params);
 
     // Guest Today (Today's total orders excluding cancelled)
     const guestsTodayResult = await pool.query(`
       SELECT COUNT(*) as count FROM "orders"
-      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND status != 'Cancelled' ${branchCond} ${shiftCond}
+      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr} AND status != 'Cancelled' ${branchCond} ${shiftCond}
     `, params);
 
     // Last 7 days sales data guaranteed using Postgres generate_series (Saudi Arabia Asia/Riyadh)
@@ -150,7 +162,7 @@ router.get('/', authenticateToken, async (req, res) => {
         TO_CHAR(d.date, 'Mon DD') as label,
         COALESCE(SUM(o.grand_total), 0) as total
       FROM (
-        SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date - i as date
+        SELECT (${targetDateExpr}) - i as date
         FROM generate_series(6, 0, -1) i
       ) d
       LEFT JOIN orders o 
@@ -231,13 +243,13 @@ router.get('/top-items', authenticateToken, async (req, res) => {
     
     let dateCond = '';
     if (from_date && to_date) {
-      dateCond = `AND DATE(o.created_at) >= $${params.length + 1} AND DATE(o.created_at) <= $${params.length + 2}`;
+      dateCond = `AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date >= $${params.length + 1}::date AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date <= $${params.length + 2}::date`;
       params.push(from_date, to_date);
     } else if (from_date) {
-      dateCond = `AND DATE(o.created_at) >= $${params.length + 1}`;
+      dateCond = `AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date >= $${params.length + 1}::date`;
       params.push(from_date);
     } else if (to_date) {
-      dateCond = `AND DATE(o.created_at) <= $${params.length + 1}`;
+      dateCond = `AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date <= $${params.length + 1}::date`;
       params.push(to_date);
     }
 

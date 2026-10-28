@@ -827,6 +827,7 @@ export default function Dashboard() {
   const [salesSelectedBranch, setSalesSelectedBranch] = useState('All')
   const [salesSelectedClosing, setSalesSelectedClosing] = useState('current')
   const [pastClosings, setPastClosings] = useState([])
+  const [salesSelectedDate, setSalesSelectedDate] = useState(() => getSaudiTodayDate())
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('')
   const [attendanceSelectedDayNight, setAttendanceSelectedDayNight] = useState('All')
   const [attendanceSelectedStatus, setAttendanceSelectedStatus] = useState('All')
@@ -852,7 +853,7 @@ export default function Dashboard() {
 
     // Fetch sales stats if user is developer, admin, or management
     if (canViewPosAndReports) {
-      const statsParams = { branch: salesSelectedBranch }
+      const statsParams = { branch: salesSelectedBranch, date: salesSelectedDate }
       if (salesSelectedClosing !== 'current') {
         statsParams.closing_id = salesSelectedClosing
       }
@@ -866,7 +867,7 @@ export default function Dashboard() {
         }))
         
       // Fetch today's closings for filter dropdown
-      axios.get('/api/orders/closings', { params: { date: getSaudiTodayDate(), branch: salesSelectedBranch } })
+      axios.get('/api/orders/closings', { params: { date: salesSelectedDate, branch: salesSelectedBranch } })
         .then(r => setPastClosings(r.data))
         .catch(() => setPastClosings([]))
     }
@@ -933,7 +934,7 @@ export default function Dashboard() {
         socket.off('orderUpdated', handleOrderEvent)
       }
     }
-  }, [user, navigate, isAdminOrDev, canViewPosAndReports, salesSelectedBranch, salesSelectedClosing])
+  }, [user, navigate, isAdminOrDev, canViewPosAndReports, salesSelectedBranch, salesSelectedClosing, salesSelectedDate])
 
   const exportExcel = async () => {
     if (!canViewPosAndReports) return
@@ -1091,6 +1092,60 @@ export default function Dashboard() {
             )}
             {canViewPosAndReports && dashboardView === 'pos' && (
               <>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--surface-2)', padding: '2px 4px', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <input
+                    type="date"
+                    value={salesSelectedDate}
+                    onChange={e => {
+                      setSalesSelectedDate(e.target.value);
+                      setSalesSelectedClosing('current');
+                    }}
+                    style={{ padding: '4px 6px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', height: 30 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setSalesSelectedDate(getSaudiTodayDate());
+                      setSalesSelectedClosing('current');
+                    }}
+                    style={{
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      height: 28,
+                      background: salesSelectedDate === getSaudiTodayDate() ? 'linear-gradient(135deg, #E31837, #FF6B35)' : 'var(--surface)',
+                      color: salesSelectedDate === getSaudiTodayDate() ? '#fff' : 'var(--text-primary)',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setSalesSelectedDate(getSaudiYesterdayDate());
+                      setSalesSelectedClosing('current');
+                    }}
+                    style={{
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      height: 28,
+                      background: salesSelectedDate === getSaudiYesterdayDate() ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'var(--surface)',
+                      color: salesSelectedDate === getSaudiYesterdayDate() ? '#fff' : 'var(--text-primary)',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Yesterday
+                  </button>
+                </div>
+
                 <select
                   value={salesSelectedBranch}
                   onChange={e => {
@@ -1107,9 +1162,9 @@ export default function Dashboard() {
                 <select
                   value={salesSelectedClosing}
                   onChange={e => setSalesSelectedClosing(e.target.value)}
-                  style={{ padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', height: 38, maxWidth: 200 }}
+                  style={{ padding: '6px 12px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', height: 38, maxWidth: 220 }}
                 >
-                  <option value="current">All Live</option>
+                  <option value="current">All Live / Unclosed</option>
                   {pastClosings.map(c => (
                     <option key={c.id} value={c.id}>
                       [{c.closing_type}] {c.cashier_name} {String(c.id).startsWith('live_') ? '' : `(#${c.id})`}

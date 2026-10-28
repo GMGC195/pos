@@ -415,7 +415,11 @@ router.get('/', authenticateToken, async (req, res) => {
 // GET past closings
 router.get('/closings', authenticateToken, async (req, res) => {
   try {
-    let { from, to, cashier_id, branch: queryBranch } = req.query;
+    let { from, to, date, cashier_id, branch: queryBranch } = req.query;
+    if (date) {
+      from = date;
+      to = date;
+    }
     
     // Determine the branch to filter by
     const role = req.user?.role?.trim().toLowerCase();
@@ -441,12 +445,12 @@ router.get('/closings', authenticateToken, async (req, res) => {
     
     if (from) {
       params.push(from);
-      conditions.push(`created_at >= $${params.length}::date`);
+      conditions.push(`(created_at AT TIME ZONE 'Asia/Riyadh')::date >= $${params.length}::date`);
     }
 
     if (to) {
       params.push(to);
-      conditions.push(`created_at < ($${params.length}::date + INTERVAL '1 day')`);
+      conditions.push(`(created_at AT TIME ZONE 'Asia/Riyadh')::date <= $${params.length}::date`);
     }
     
     if (cashier_id) {
@@ -459,11 +463,14 @@ router.get('/closings', authenticateToken, async (req, res) => {
     }
     
     query += ' ORDER BY created_at DESC';
+    if (!from && !to) {
+      query += ' LIMIT 50';
+    }
     
     const result = await pool.query(query, params);
     const pastClosings = result.rows;
 
-    let liveQuery = `SELECT DISTINCT completed_by as cashier_name FROM "orders" WHERE is_shift_closed = FALSE AND DATE(created_at) = CURRENT_DATE AND status = 'Completed'`;
+    let liveQuery = `SELECT DISTINCT completed_by as cashier_name FROM "orders" WHERE is_shift_closed = FALSE AND (created_at AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date AND status = 'Completed'`;
     let liveParams = [];
     if (branchFilter) {
       liveParams.push(branchFilter);

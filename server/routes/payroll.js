@@ -1283,6 +1283,8 @@ router.post('/payments', authenticateToken, async (req, res) => {
 
     const isFull = totalPaid >= netSalary && netSalary > 0;
     const newStatus = isFull ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending');
+    const paidDateExpr = (newStatus === 'Paid') ? 'COALESCE(paid_date, NOW())' : 'paid_date';
+    const insertPaidDate = (newStatus === 'Paid') ? new Date() : null;
 
     if (curRecordRes.rows.length > 0) {
       await client.query(
@@ -1291,7 +1293,7 @@ router.post('/payments', authenticateToken, async (req, res) => {
            bank_paid = $2,
            paid_amount = $3,
            status = $4,
-           paid_date = CASE WHEN $4 = 'Paid' THEN COALESCE(paid_date, NOW()) ELSE paid_date END
+           paid_date = ${paidDateExpr}
          WHERE employee_id = $5 AND month = $6`,
         [totalCash, totalBank, totalPaid, newStatus, employee_id, month]
       );
@@ -1300,14 +1302,14 @@ router.post('/payments', authenticateToken, async (req, res) => {
         `INSERT INTO employee_payroll_records (
            employee_id, month, base_salary, payable_salary, net_salary,
            cash_paid, bank_paid, paid_amount, status, paid_date
-         ) VALUES ($1, $2, $3, $3, $3, $4, $5, $6, $7, CASE WHEN $7 = 'Paid' THEN NOW() ELSE NULL END)
+         ) VALUES ($1, $2, $3, $3, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (employee_id, month) DO UPDATE SET
            cash_paid = EXCLUDED.cash_paid,
            bank_paid = EXCLUDED.bank_paid,
            paid_amount = EXCLUDED.paid_amount,
            status = EXCLUDED.status,
            paid_date = EXCLUDED.paid_date`,
-        [employee_id, month, netSalary, totalCash, totalBank, totalPaid, newStatus]
+        [employee_id, month, netSalary, totalCash, totalBank, totalPaid, newStatus, insertPaidDate]
       );
     }
 
