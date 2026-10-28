@@ -210,6 +210,7 @@ export default function Payroll() {
   const [empRecurringAdjs, setEmpRecurringAdjs] = useState([])
   const [empOneTimeAdjs, setEmpOneTimeAdjs] = useState([])
   const [loadingAdjs, setLoadingAdjs] = useState(false)
+  const [loadedEmpId, setLoadedEmpId] = useState(null)
 
   // Confirm Delete Modal State
   const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, id: null, type: null })
@@ -401,12 +402,14 @@ export default function Payroll() {
 
     const lastMonthBal = parseFloat(row.last_month_balance || 0);
     const bonus = parseFloat(row.bonus || 0);
-    const thisMonthAdv = parseFloat(row.this_month_adv || 0);
+    const thisMonthAdv = parseFloat(row.this_month_adv !== undefined ? row.this_month_adv : (row.advance_deduction || 0));
     const internet = parseFloat(row.internet || 0);
     const kafalat = parseFloat(row.kafalat || 0);
     const otherAdj = parseFloat(row.other_adjustments || 0);
+    const recurringAdj = parseFloat(row.recurring_adjustments || 0);
+    const lastMonthAdj = parseFloat(row.last_month_adjustment || 0);
 
-    const total = lastMonthBal + bonus - thisMonthAdv - internet - kafalat + otherAdj + dynamicTotal;
+    const total = lastMonthBal + bonus + lastMonthAdj - thisMonthAdv - internet - kafalat + otherAdj + recurringAdj + dynamicTotal;
     return Math.round(total * 100) / 100;
   }
 
@@ -945,8 +948,9 @@ export default function Payroll() {
         axios.get(`/api/payroll/recurring-adjustments/${empId}`),
         axios.get(`/api/payroll/adjustments/${empId}`)
       ])
-      setEmpRecurringAdjs(recRes.data)
-      setEmpOneTimeAdjs(oneRes.data)
+      setEmpRecurringAdjs(recRes.data || [])
+      setEmpOneTimeAdjs(oneRes.data || [])
+      setLoadedEmpId(empId)
     } catch (err) {
       console.error(err)
     } finally {
@@ -957,6 +961,7 @@ export default function Payroll() {
   const openEmployeeModal = (empRow) => {
     setSelectedEmployeeForModal(empRow)
     setSelectedDetailEmpId(empRow.id)
+    setLoadedEmpId(null)
     setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '')
     resetAdjForm()
     loadEmpAdjs(empRow.id)
@@ -967,10 +972,12 @@ export default function Payroll() {
     if (!empRow) {
       setSelectedEmployeeForModal(null);
       setSelectedDetailEmpId(null);
+      setLoadedEmpId(null);
       return;
     }
     setSelectedEmployeeForModal(empRow);
     setSelectedDetailEmpId(empRow.id);
+    setLoadedEmpId(null);
     setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '');
     resetAdjForm();
     loadEmpAdjs(empRow.id);
@@ -1468,6 +1475,53 @@ export default function Payroll() {
     }, 400);
   }
 
+  // Synchronize employee adjustment totals and breakdown across state immediately
+  const updateEmployeeAdjustmentsState = (empId, nextRecurring, nextOneTime) => {
+    const numEmpId = Number(empId);
+    const empRec = (nextRecurring || empRecurringAdjs).filter(a => Number(a.employee_id) === numEmpId);
+    const empOne = (nextOneTime || empOneTimeAdjs).filter(a => Number(a.employee_id) === numEmpId);
+
+    const given = [
+      ...empRec.filter(a => a.action_type === 'Give' || a.action_type === 'Add'),
+      ...empOne.filter(a => a.action_type === 'Give' || a.action_type === 'Add')
+    ];
+    const deduct = [
+      ...empRec.filter(a => a.action_type === 'Deduct'),
+      ...empOne.filter(a => a.action_type === 'Deduct')
+    ];
+
+    const sumGiven = given.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const sumDeduct = deduct.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+
+    setEditableData(prev => {
+      const current = prev[empId];
+      if (!current) return prev;
+      const baseSal = parseFloat(current.base_salary || 0);
+      const payableSal = parseFloat(current.payable_salary !== undefined ? current.payable_salary : (baseSal - parseFloat(current.deductions || 0)));
+      const lastMonthBal = parseFloat(current.last_month_balance || 0);
+      const newTotalAdj = Math.round((lastMonthBal + sumGiven - sumDeduct) * 100) / 100;
+      const newNetSalary = Math.round((payableSal + newTotalAdj) * 100) / 100;
+
+      const updatedEmp = {
+        ...current,
+        total_adjustments: newTotalAdj,
+        net_salary: newNetSalary
+      };
+
+      setSelectedEmployeeForModal(modalPrev => {
+        if (modalPrev && Number(modalPrev.id) === numEmpId) {
+          return updatedEmp;
+        }
+        return modalPrev;
+      });
+
+      return {
+        ...prev,
+        [empId]: updatedEmp
+      };
+    });
+  };
+
   const handleAddCustomAdj = async (e) => {
     e.preventDefault();
     if (!currentEmpData) return;
@@ -1488,46 +1542,85 @@ export default function Payroll() {
       return;
     }
 
+    const wasEditing = !!editingAdjId;
+    const editingType = editingAdjType;
+    const editId = editingAdjId;
+    const isRecurring = (wasEditing ? editingType : customAdjType) === 'Repeated Monthly';
+    const tempId = 'temp_' + Date.now();
+
+    const payload = {
+      employee_id: currentEmpData.id,
+      type: actualLabel === 'Advance Salary / Loan' ? 'Advance Salary / Loan' : 'Custom Adjustment',
+      custom_label: actualLabel,
+      amount: amt,
+      action_type: customAdjAction,
+      date: `${selectedMonth}-15`,
+      start_date: `${selectedMonth}-01`,
+      remaining_amount: customAdjTotalLimit ? parseFloat(customAdjTotalLimit) : null,
+      notes: customAdjNotes
+    };
+
+    // Instant Optimistic Update
+    let nextRecurring = empRecurringAdjs;
+    let nextOneTime = empOneTimeAdjs;
+
+    if (wasEditing) {
+      if (editingType === 'Repeated Monthly') {
+        nextRecurring = empRecurringAdjs.map(item => item.id === editId ? { ...item, ...payload } : item);
+        setEmpRecurringAdjs(nextRecurring);
+      } else {
+        nextOneTime = empOneTimeAdjs.map(item => item.id === editId ? { ...item, ...payload } : item);
+        setEmpOneTimeAdjs(nextOneTime);
+      }
+    } else {
+      const newItem = {
+        id: tempId,
+        ...payload,
+        created_at: new Date().toISOString()
+      };
+      if (customAdjType === 'Repeated Monthly') {
+        nextRecurring = [newItem, ...empRecurringAdjs];
+        setEmpRecurringAdjs(nextRecurring);
+      } else {
+        nextOneTime = [newItem, ...empOneTimeAdjs];
+        setEmpOneTimeAdjs(nextOneTime);
+      }
+    }
+
+    // Immediately synchronize employee totals and breakdown in real-time
+    updateEmployeeAdjustmentsState(currentEmpData.id, nextRecurring, nextOneTime);
+
+    resetAdjForm();
+    toast.success(wasEditing ? 'Adjustment updated successfully!' : 'Adjustment added successfully!');
+
     setSavingCustomAdj(true);
     try {
-      const payload = {
-        employee_id: currentEmpData.id,
-        type: actualLabel === 'Advance Salary / Loan' ? 'Advance Salary / Loan' : 'Custom Adjustment',
-        custom_label: actualLabel,
-        amount: amt,
-        action_type: customAdjAction,
-        date: `${selectedMonth}-15`,
-        start_date: `${selectedMonth}-01`,
-        remaining_amount: customAdjTotalLimit ? parseFloat(customAdjTotalLimit) : null,
-        notes: customAdjNotes
-      }
-
-      if (editingAdjId) {
-        // Edit mode
-        if (editingAdjType === 'Repeated Monthly') {
-          await axios.put(`/api/payroll/recurring-adjustments/${editingAdjId}`, payload);
+      if (wasEditing) {
+        if (isRecurring) {
+          await axios.put(`/api/payroll/recurring-adjustments/${editId}`, payload);
         } else {
-          await axios.put(`/api/payroll/financial-adjustments/${editingAdjId}`, payload);
+          await axios.put(`/api/payroll/financial-adjustments/${editId}`, payload);
         }
-        toast.success('Adjustment updated successfully!');
       } else {
-        // Create mode
-        if (customAdjType === 'Repeated Monthly') {
-          await axios.post('/api/payroll/recurring-adjustments', payload);
+        if (isRecurring) {
+          const res = await axios.post('/api/payroll/recurring-adjustments', payload);
+          if (res?.data?.id) {
+            setEmpRecurringAdjs(prev => prev.map(item => item.id === tempId ? { ...item, id: res.data.id } : item));
+          }
         } else {
-          await axios.post('/api/payroll/financial-adjustments', payload);
+          const res = await axios.post('/api/payroll/financial-adjustments', payload);
+          if (res?.data?.id) {
+            setEmpOneTimeAdjs(prev => prev.map(item => item.id === tempId ? { ...item, id: res.data.id } : item));
+          }
         }
-        toast.success('Adjustment added successfully!');
       }
 
-      resetAdjForm();
-      await Promise.all([
-        loadEmpAdjs(currentEmpData.id),
-        loadPayroll(true)
-      ]);
+      loadPayroll(true);
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to save adjustment';
       toast.error(errorMsg);
+      loadEmpAdjs(currentEmpData.id);
+      loadPayroll(true);
     } finally {
       setSavingCustomAdj(false);
     }
@@ -1545,6 +1638,25 @@ export default function Payroll() {
     // Close confirmation modal immediately for snappy UX
     setConfirmDelete({ isOpen: false, id: null, type: null });
 
+    if (type !== 'Adjustment Column') {
+      // Instant Optimistic Deletion
+      let nextRecurring = empRecurringAdjs;
+      let nextOneTime = empOneTimeAdjs;
+
+      if (type === 'Repeated Monthly') {
+        nextRecurring = empRecurringAdjs.filter(item => item.id !== id);
+        setEmpRecurringAdjs(nextRecurring);
+      } else {
+        nextOneTime = empOneTimeAdjs.filter(item => item.id !== id);
+        setEmpOneTimeAdjs(nextOneTime);
+      }
+
+      if (currentEmpData) {
+        updateEmployeeAdjustmentsState(currentEmpData.id, nextRecurring, nextOneTime);
+      }
+      toast.success('Deleted successfully');
+    }
+
     try {
       if (type === 'Repeated Monthly') {
         await axios.delete(`/api/payroll/recurring-adjustments/${id}`);
@@ -1553,20 +1665,21 @@ export default function Payroll() {
       } else {
         await axios.delete(`/api/payroll/adjustments/${id}`);
       }
-      toast.success('Deleted successfully');
-      
+
       if (type === 'Adjustment Column') {
+        toast.success('Deleted successfully');
         await loadAdjustmentTypes();
         await loadPayroll(true);
       } else {
-        await Promise.all([
-          loadEmpAdjs(currentEmpData?.id),
-          loadPayroll(true)
-        ]);
+        loadPayroll(true);
       }
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to delete';
       toast.error(errorMsg);
+      if (type !== 'Adjustment Column' && currentEmpData) {
+        loadEmpAdjs(currentEmpData.id);
+        loadPayroll(true);
+      }
     }
   }
 
@@ -1638,23 +1751,37 @@ export default function Payroll() {
       : calcOtPay;
 
     const payableSal = parseFloat(targetEmpData.payable_salary !== undefined ? targetEmpData.payable_salary : (baseSal - parseFloat(targetEmpData.deductions || 0)));
-    const totalAdj = calculateTotalAdjustments(targetEmpData);
     const advBalance = parseFloat(targetEmpData.advance_balance || 0);
     const lastMonthBal = parseFloat(targetEmpData.last_month_balance || 0);
+
+    const targetEmpId = Number(targetEmpData.id);
+    const isThisEmpLoaded = loadedEmpId === targetEmpId;
+    const empRec = empRecurringAdjs.filter(a => Number(a.employee_id) === targetEmpId);
+    const empOne = empOneTimeAdjs.filter(a => Number(a.employee_id) === targetEmpId);
+
+    const givenAdjs = [
+      ...empRec.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
+      ...empOne.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'One-Time' }))
+    ];
+
+    const deductAdjs = [
+      ...empRec.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
+      ...empOne.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'One-Time' }))
+    ];
+
+    const totalGiven = givenAdjs.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+    const totalDeduct = deductAdjs.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+
+    const hasActiveAdjs = givenAdjs.length > 0 || deductAdjs.length > 0;
+    const totalAdj = (hasActiveAdjs || isThisEmpLoaded)
+      ? Math.round((lastMonthBal + totalGiven - totalDeduct) * 100) / 100
+      : calculateTotalAdjustments(targetEmpData);
+
+    const dynamicNetSalary = Math.round((payableSal + totalAdj) * 100) / 100;
     const bonusVal = parseFloat(targetEmpData.bonus || 0);
     const advVal = parseFloat(targetEmpData.this_month_adv || 0);
     const netVal = parseFloat(targetEmpData.internet || 0);
     const kafVal = parseFloat(targetEmpData.kafalat || 0);
-
-    const givenAdjs = [
-      ...empRecurringAdjs.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
-      ...empOneTimeAdjs.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'One-Time' }))
-    ];
-
-    const deductAdjs = [
-      ...empRecurringAdjs.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
-      ...empOneTimeAdjs.filter(a => a.action_type === 'Deduct').map(a => ({ ...a, repetition: 'One-Time' }))
-    ];
 
     return (
       <>
@@ -1789,21 +1916,21 @@ export default function Payroll() {
             </div>
 
             <div style={{ 
-              background: targetEmpData.net_salary < 0 ? '#fef2f2' : '#ecfdf5', 
+              background: dynamicNetSalary < 0 ? '#fef2f2' : '#ecfdf5', 
               padding: '8px 10px', 
               borderRadius: '6px', 
-              border: '1.5px solid ' + (targetEmpData.net_salary < 0 ? '#fecaca' : '#a7f3d0'),
+              border: '1.5px solid ' + (dynamicNetSalary < 0 ? '#fecaca' : '#a7f3d0'),
               gridColumn: isMobile ? 'span 2' : 'auto',
               display: isMobile ? 'flex' : 'block',
               justifyContent: isMobile ? 'space-between' : 'initial',
               alignItems: isMobile ? 'center' : 'initial'
             }}>
               <div>
-                <span style={{ fontSize: '11px', color: targetEmpData.net_salary < 0 ? '#b91c1c' : '#047857', fontWeight: 800, display: 'block' }}>Net Payable Salary</span>
-                <span style={{ fontSize: '9px', color: targetEmpData.net_salary < 0 ? '#b91c1c' : '#047857', display: 'block' }}>Payable + Adj</span>
+                <span style={{ fontSize: '11px', color: dynamicNetSalary < 0 ? '#b91c1c' : '#047857', fontWeight: 800, display: 'block' }}>Net Payable Salary</span>
+                <span style={{ fontSize: '9px', color: dynamicNetSalary < 0 ? '#b91c1c' : '#047857', display: 'block' }}>Payable + Adj</span>
               </div>
-              <div style={{ fontSize: isMobile ? '16px' : '13px', fontWeight: 900, color: targetEmpData.net_salary < 0 ? '#dc2626' : '#059669', marginTop: isMobile ? 0 : '1px' }}>
-                {CURRENCY} {Number(targetEmpData.net_salary || 0).toFixed(2)}
+              <div style={{ fontSize: isMobile ? '16px' : '13px', fontWeight: 900, color: dynamicNetSalary < 0 ? '#dc2626' : '#059669', marginTop: isMobile ? 0 : '1px' }}>
+                {CURRENCY} {Number(dynamicNetSalary || 0).toFixed(2)}
               </div>
             </div>
           </div>
@@ -1827,42 +1954,96 @@ export default function Payroll() {
                   )}
                 </span>
               )}
-              {bonusVal !== 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: bonusVal > 0 ? '#ecfdf5' : '#fef2f2', color: bonusVal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
-                  Bonus: {bonusVal > 0 ? `+${bonusVal}` : bonusVal}
-                </span>
+
+              {/* Grouped Given / Additions Breakdown */}
+              {(() => {
+                const givenGroups = {};
+                givenAdjs.forEach(a => {
+                  const lbl = a.custom_label || 'Bonus';
+                  const amt = parseFloat(a.amount) || 0;
+                  givenGroups[lbl] = (givenGroups[lbl] || 0) + amt;
+                });
+
+                return Object.entries(givenGroups).map(([lbl, amt]) => {
+                  if (!amt) return null;
+                  return (
+                    <span key={`given-${lbl}`} style={{ padding: '2px 6px', borderRadius: '4px', background: '#ecfdf5', color: '#059669', fontWeight: 600 }}>
+                      {lbl}: +{amt}
+                    </span>
+                  );
+                });
+              })()}
+
+              {/* Grouped Deductions Breakdown */}
+              {(() => {
+                const deductGroups = {};
+                deductAdjs.forEach(a => {
+                  let lbl = a.custom_label || 'Deduction';
+                  if (lbl.toLowerCase().includes('advance') || lbl.toLowerCase().includes('loan')) {
+                    lbl = 'Adv';
+                  }
+                  const amt = parseFloat(a.amount) || 0;
+                  deductGroups[lbl] = (deductGroups[lbl] || 0) + amt;
+                });
+
+                return Object.entries(deductGroups).map(([lbl, amt]) => {
+                  if (!amt) return null;
+                  return (
+                    <span key={`deduct-${lbl}`} style={{ padding: '2px 6px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontWeight: 600 }}>
+                      {lbl}: -{amt}
+                    </span>
+                  );
+                });
+              })()}
+
+              {/* Fallback to cached record values only if no adjustments loaded/active */}
+              {!hasActiveAdjs && !isThisEmpLoaded && (
+                <>
+                  {bonusVal !== 0 && (
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: bonusVal > 0 ? '#ecfdf5' : '#fef2f2', color: bonusVal > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                      Bonus: {bonusVal > 0 ? `+${bonusVal}` : bonusVal}
+                    </span>
+                  )}
+                  {advVal !== 0 && (
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: advVal > 0 ? '#fef2f2' : '#ecfdf5', color: advVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
+                      Adv: {advVal > 0 ? `-${advVal}` : `+${Math.abs(advVal)}`}
+                    </span>
+                  )}
+                  {netVal !== 0 && (
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: netVal > 0 ? '#fef2f2' : '#ecfdf5', color: netVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
+                      Internet: {netVal > 0 ? `-${netVal}` : `+${Math.abs(netVal)}`}
+                    </span>
+                  )}
+                  {kafVal !== 0 && (
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: kafVal > 0 ? '#fef2f2' : '#ecfdf5', color: kafVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
+                      Kafalat: {kafVal > 0 ? `-${kafVal}` : `+${Math.abs(kafVal)}`}
+                    </span>
+                  )}
+                  {parseFloat(targetEmpData.other_adjustments || 0) !== 0 && (
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: parseFloat(targetEmpData.other_adjustments) > 0 ? '#ecfdf5' : '#fef2f2', color: parseFloat(targetEmpData.other_adjustments) > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
+                      Other Adj: {parseFloat(targetEmpData.other_adjustments) > 0 ? `+${parseFloat(targetEmpData.other_adjustments)}` : parseFloat(targetEmpData.other_adjustments)}
+                    </span>
+                  )}
+                </>
               )}
-              {advVal !== 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: advVal > 0 ? '#fef2f2' : '#ecfdf5', color: advVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
-                  Adv: {advVal > 0 ? `-${advVal}` : `+${Math.abs(advVal)}`}
-                </span>
-              )}
-              {netVal !== 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: netVal > 0 ? '#fef2f2' : '#ecfdf5', color: netVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
-                  Internet: {netVal > 0 ? `-${netVal}` : `+${Math.abs(netVal)}`}
-                </span>
-              )}
-              {kafVal !== 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: kafVal > 0 ? '#fef2f2' : '#ecfdf5', color: kafVal > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>
-                  Kafalat: {kafVal > 0 ? `-${kafVal}` : `+${Math.abs(kafVal)}`}
-                </span>
-              )}
-              {parseFloat(targetEmpData.other_adjustments || 0) !== 0 && (
-                <span style={{ padding: '2px 6px', borderRadius: '4px', background: parseFloat(targetEmpData.other_adjustments) > 0 ? '#ecfdf5' : '#fef2f2', color: parseFloat(targetEmpData.other_adjustments) > 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
-                  Other Adj: {parseFloat(targetEmpData.other_adjustments) > 0 ? `+${parseFloat(targetEmpData.other_adjustments)}` : parseFloat(targetEmpData.other_adjustments)}
-                </span>
-              )}
+
+              {/* Dynamic spreadsheet adjustments not already in given or deduct */}
               {Object.entries(targetEmpData.dynamic_adjustments || {}).map(([lbl, val]) => {
                 const num = parseFloat(val) || 0;
                 if (num === 0) return null;
+                const inGiven = givenAdjs.some(a => (a.custom_label || '').toLowerCase() === lbl.toLowerCase());
+                const inDeduct = deductAdjs.some(a => (a.custom_label || '').toLowerCase() === lbl.toLowerCase());
+                if (inGiven || inDeduct) return null;
+
                 const isPositive = num > 0;
                 return (
-                  <span key={lbl} style={{ padding: '2px 6px', borderRadius: '4px', background: isPositive ? '#f5f3ff' : '#fef2f2', color: isPositive ? '#7c3aed' : '#dc2626', fontWeight: 600 }}>
+                  <span key={`dyn-${lbl}`} style={{ padding: '2px 6px', borderRadius: '4px', background: isPositive ? '#f5f3ff' : '#fef2f2', color: isPositive ? '#7c3aed' : '#dc2626', fontWeight: 600 }}>
                     {lbl}: {isPositive ? `+${num}` : num}
                   </span>
                 );
               })}
-              {lastMonthBal === 0 && bonusVal === 0 && advVal === 0 && netVal === 0 && kafVal === 0 && parseFloat(targetEmpData.other_adjustments || 0) === 0 && Object.keys(targetEmpData.dynamic_adjustments || {}).length === 0 && (
+
+              {lastMonthBal === 0 && givenAdjs.length === 0 && deductAdjs.length === 0 && Object.keys(targetEmpData.dynamic_adjustments || {}).length === 0 && (
                 <span style={{ color: '#94a3b8', fontSize: '10px' }}>No active adjustments applied for this month.</span>
               )}
             </div>
@@ -1883,7 +2064,7 @@ export default function Payroll() {
               const cash = parseFloat(targetEmpData.cash_paid || 0);
               const bank = parseFloat(targetEmpData.bank_paid || 0);
               const totalPaid = Math.round((cash + bank) * 100) / 100;
-              const netSal = parseFloat(targetEmpData.net_salary || 0);
+              const netSal = dynamicNetSalary;
               const rem = Math.round((netSal - totalPaid) * 100) / 100;
               const carryVal = carryInputValues[targetEmpData.id] !== undefined 
                 ? carryInputValues[targetEmpData.id] 

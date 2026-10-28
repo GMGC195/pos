@@ -1553,16 +1553,17 @@ router.get('/recurring-adjustments/:employee_id', authenticateToken, async (req,
 
 // POST new recurring adjustment
 router.post('/recurring-adjustments', authenticateToken, isAdmin, async (req, res) => {
-  const { employee_id, type, custom_label, amount, amount_type, action_type, remaining_amount, start_date } = req.body;
+  const { employee_id, type, custom_label, amount, amount_type, action_type, remaining_amount, start_date, notes } = req.body;
   if (!employee_id || !type || !amount || !action_type) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
   try {
+    await pool.query('ALTER TABLE employee_recurring_adjustments ADD COLUMN IF NOT EXISTS notes TEXT');
     const result = await pool.query(
       `INSERT INTO employee_recurring_adjustments 
-       (employee_id, type, custom_label, amount, amount_type, action_type, remaining_amount, start_date) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [employee_id, type, custom_label, parseFloat(amount), amount_type || 'Fixed', action_type, remaining_amount ? parseFloat(remaining_amount) : null, start_date || new Date()]
+       (employee_id, type, custom_label, amount, amount_type, action_type, remaining_amount, start_date, notes) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [employee_id, type, custom_label, parseFloat(amount), amount_type || 'Fixed', action_type, remaining_amount ? parseFloat(remaining_amount) : null, start_date || new Date(), notes || '']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
