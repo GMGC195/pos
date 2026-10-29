@@ -643,6 +643,29 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       await pool.query('CREATE INDEX IF NOT EXISTS idx_employee_payroll_payments_emp_month ON employee_payroll_payments(employee_id, month)');
     } catch (e) {}
 
+    // Create salary_audit_logs table for append-only audit tracking
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS salary_audit_logs (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        employee_name VARCHAR(150),
+        employee_code VARCHAR(50),
+        month VARCHAR(7),
+        action VARCHAR(100) NOT NULL,
+        previous_value TEXT,
+        new_value TEXT,
+        amount NUMERIC(10, 2),
+        description TEXT,
+        performed_by VARCHAR(100),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    try {
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_salary_audit_logs_emp ON salary_audit_logs(employee_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_salary_audit_logs_month ON salary_audit_logs(month)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_salary_audit_logs_created ON salary_audit_logs(created_at DESC)');
+    } catch (e) {}
+
     // Ensure columns exist if table was created previously without them
     try {
       await pool.query('ALTER TABLE employee_financial_adjustments ADD COLUMN custom_label VARCHAR(150)');

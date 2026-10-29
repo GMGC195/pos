@@ -5,12 +5,24 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '',
 })
 
-// Add request interceptor — attach token
+// Add request interceptor — attach token and prevent caching on hosting/proxies
 api.interceptors.request.use(config => {
   const token = localStorage.getItem(STORAGE_TOKEN_KEY)
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+
+  // Prevent Hostinger / Nginx / LiteSpeed proxy from caching GET requests
+  if ((config.method || 'get').toLowerCase() === 'get') {
+    config.params = {
+      ...config.params,
+      _t: Date.now()
+    }
+    config.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    config.headers['Pragma'] = 'no-cache'
+    config.headers['Expires'] = '0'
+  }
+
   return config
 }, error => {
   return Promise.reject(error)
