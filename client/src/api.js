@@ -18,9 +18,6 @@ api.interceptors.request.use(config => {
       ...config.params,
       _t: Date.now()
     }
-    config.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    config.headers['Pragma'] = 'no-cache'
-    config.headers['Expires'] = '0'
   }
 
   return config
