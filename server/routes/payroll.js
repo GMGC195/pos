@@ -4,6 +4,67 @@ const pool = require('../db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { clampBreakLogsToDutyWindow } = require('../utils/attendanceHelper');
 
+/**
+ * Record an append-only salary audit log in salary_audit_logs table.
+ * Supports passing either an existing transactional client or the connection pool.
+ */
+async function recordSalaryAuditLog(clientOrPool, {
+  employee_id,
+  employee_name = null,
+  employee_code = null,
+  month = null,
+  action,
+  previous_value = null,
+  new_value = null,
+  amount = null,
+  description = '',
+  performed_by = 'Admin'
+}) {
+  try {
+    let empName = employee_name;
+    let empCode = employee_code;
+
+    if ((!empName || !empCode) && employee_id) {
+      const empRes = await clientOrPool.query(
+        'SELECT name, employee_id FROM employees WHERE id = $1',
+        [employee_id]
+      );
+      if (empRes.rows.length > 0) {
+        empName = empName || empRes.rows[0].name;
+        empCode = empCode || empRes.rows[0].employee_id || `EMP-${String(employee_id).padStart(4, '0')}`;
+      }
+    }
+
+    const safeAmount = (amount !== undefined && amount !== null && !isNaN(parseFloat(amount)))
+      ? parseFloat(amount)
+      : null;
+
+    const safeMonth = month || new Date().toISOString().substring(0, 7);
+    const safeUser = performed_by || 'Admin';
+
+    await clientOrPool.query(
+      `INSERT INTO salary_audit_logs (
+         employee_id, employee_name, employee_code, month, action,
+         previous_value, new_value, amount, description, performed_by, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
+      [
+        employee_id || null,
+        empName || 'Staff',
+        empCode || (employee_id ? `EMP-${employee_id}` : 'EMP-0000'),
+        safeMonth,
+        action,
+        previous_value !== null && previous_value !== undefined ? String(previous_value) : null,
+        new_value !== null && new_value !== undefined ? String(new_value) : null,
+        safeAmount,
+        description || '',
+        safeUser
+      ]
+    );
+  } catch (err) {
+    console.error('Failed to write salary audit log:', err.message);
+  }
+}
+
 
 
 // GET all payroll settings
@@ -55,10 +116,29 @@ router.get('/overrides', authenticateToken, async (req, res) => {
 // POST save/update employee payroll overrides
 router.post('/overrides/:employee_id', authenticateToken, isAdmin, async (req, res) => {
   const employee_id = req.params.employee_id;
-  const { overtime_rate, base_salary, allowed_leaves } = req.body;
+  const { overtime_rate, base_salary, allowed_leaves, month } = req.body;
+  const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
   try {
     if (base_salary !== undefined && base_salary !== '') {
-      await pool.query('UPDATE employees SET salary = $1 WHERE id = $2', [parseFloat(base_salary), employee_id]);
+      const curEmp = await pool.query('SELECT name, employee_id, salary FROM employees WHERE id = $1', [employee_id]);
+      const oldSal = curEmp.rows.length > 0 ? parseFloat(curEmp.rows[0].salary || 0) : 0;
+      const newSal = parseFloat(base_salary);
+      await pool.query('UPDATE employees SET salary = $1 WHERE id = $2', [newSal, employee_id]);
+
+      if (curEmp.rows.length > 0 && Math.round(oldSal * 100) !== Math.round(newSal * 100)) {
+        await recordSalaryAuditLog(pool, {
+          employee_id,
+          employee_name: curEmp.rows[0]?.name,
+          employee_code: curEmp.rows[0]?.employee_id,
+          month: month || new Date().toISOString().substring(0, 7),
+          action: 'BASE_SALARY_UPDATE',
+          previous_value: `Base Salary: ${oldSal.toFixed(2)}`,
+          new_value: `Base Salary: ${newSal.toFixed(2)}`,
+          amount: newSal,
+          description: `${performedBy} updated employee base salary from SAR ${oldSal.toFixed(2)} to SAR ${newSal.toFixed(2)}`,
+          performed_by: performedBy
+        });
+      }
     }
     const result = await pool.query(
       `INSERT INTO employee_payroll_settings (employee_id, overtime_rate, base_salary, allowed_leaves)
@@ -1010,6 +1090,18 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       );
     }
 
+    const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
+    await recordSalaryAuditLog(client, {
+      employee_id,
+      month,
+      action: 'RECORD_UPDATE',
+      previous_value: oldRecordRes.rows.length > 0 ? `Net: ${oldRecordRes.rows[0].net_salary}, Status: ${oldRecordRes.rows[0].status}` : null,
+      new_value: `Net: ${net_salary}, Status: ${status}, Paid: ${totalPaidAmount}`,
+      amount: parseFloat(net_salary || 0),
+      description: `${performedBy} saved salary record: Net SAR ${parseFloat(net_salary || 0).toFixed(2)}, Paid SAR ${totalPaidAmount.toFixed(2)}, Status: ${status}`,
+      performed_by: performedBy
+    });
+
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
@@ -1026,6 +1118,8 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
   if (!employee_id || !month) {
     return res.status(400).json({ error: 'employee_id and month are required' });
   }
+
+  const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
 
   try {
     await pool.query('ALTER TABLE employee_payroll_records ADD COLUMN IF NOT EXISTS total_adjustments NUMERIC(10, 2) DEFAULT 0');
@@ -1056,18 +1150,66 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
       [employee_id, month]
     );
 
-    const cashVal = parseFloat(cash_paid || 0);
-    const bankVal = parseFloat(bank_paid || 0);
+    // Calculate actual total paid from payments table
+    const paymentsRes = await client.query(
+      `SELECT 
+         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'cash' THEN amount ELSE 0 END), 0) as total_cash,
+         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'bank' THEN amount ELSE 0 END), 0) as total_bank
+       FROM employee_payroll_payments
+       WHERE employee_id = $1 AND month = $2`,
+      [employee_id, month]
+    );
+    let recordedCash = parseFloat(paymentsRes.rows[0].total_cash || 0);
+    let recordedBank = parseFloat(paymentsRes.rows[0].total_bank || 0);
+
+    let cashVal = recordedCash;
+    let bankVal = recordedBank;
+    if (recordedCash === 0 && recordedBank === 0) {
+      if (curRecordRes.rows.length > 0) {
+        cashVal = parseFloat(curRecordRes.rows[0].cash_paid || curRecordRes.rows[0].paid_amount || 0);
+        bankVal = parseFloat(curRecordRes.rows[0].bank_paid || 0);
+      } else {
+        cashVal = parseFloat(cash_paid || 0);
+        bankVal = parseFloat(bank_paid || 0);
+      }
+    }
     const totalPaid = Math.round((cashVal + bankVal) * 100) / 100;
-    
+
     let curNet = 0;
     if (curRecordRes.rows.length > 0) {
       curNet = parseFloat(curRecordRes.rows[0].net_salary || 0);
+    } else {
+      const empRes = await client.query('SELECT salary FROM employees WHERE id = $1', [employee_id]);
+      curNet = parseFloat(empRes.rows[0]?.salary || 0);
     }
 
-    const carryAmount = remaining_amount !== undefined 
-      ? parseFloat(remaining_amount) 
-      : Math.round((curNet - totalPaid) * 100) / 100;
+    // Exact remaining amount derived automatically (supports negative balance!)
+    const calculatedRemaining = Math.round((curNet - totalPaid) * 100) / 100;
+
+    if (calculatedRemaining === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No remaining balance to carry forward for this employee.' });
+    }
+
+    // Strict validation: enforce exact remaining amount
+    const carryAmount = calculatedRemaining;
+
+    // Duplicate check: if already carried forward with this exact amount, prevent duplicate operations
+    if (curRecordRes.rows.length > 0 && curRecordRes.rows[0].carried_forward_to_next !== null) {
+      const existingCarried = parseFloat(curRecordRes.rows[0].carried_forward_to_next);
+      if (Math.round(existingCarried * 100) === Math.round(carryAmount * 100) && existingCarried !== 0) {
+        await client.query('COMMIT');
+        return res.json({
+          success: true,
+          message: `Balance of SAR ${carryAmount.toFixed(2)} is already carried forward to ${nextMonthStr}`,
+          remaining: carryAmount,
+          next_month: nextMonthStr,
+          already_carried: true
+        });
+      }
+    }
+
+    const prevCarried = curRecordRes.rows.length > 0 ? parseFloat(curRecordRes.rows[0].carried_forward_to_next || 0) : 0;
 
     if (curRecordRes.rows.length > 0) {
       await client.query(
@@ -1137,6 +1279,21 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
         [employee_id, nextMonthStr, baseSalary, carryAmount, (baseSalary + carryAmount)]
       );
     }
+
+    // 4. Log audit entry
+    const isNegative = carryAmount < 0;
+    await recordSalaryAuditLog(client, {
+      employee_id,
+      month,
+      action: 'CARRY_FORWARD',
+      previous_value: `Carried forward: ${prevCarried.toFixed(2)}`,
+      new_value: `Carried forward: ${carryAmount.toFixed(2)} to ${nextMonthStr}`,
+      amount: carryAmount,
+      description: isNegative
+        ? `${performedBy} carried forward negative balance of SAR ${carryAmount.toFixed(2)} from ${month} to ${nextMonthStr}`
+        : `${performedBy} carried forward remaining balance of SAR ${carryAmount.toFixed(2)} from ${month} to ${nextMonthStr}`,
+      performed_by: performedBy
+    });
 
     await client.query('COMMIT');
     res.json({ 
@@ -1230,7 +1387,7 @@ router.post('/payments', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Please enter a valid Cash or Bank payment amount' });
   }
 
-  const paidBy = req.user?.username || req.user?.email || 'Admin';
+  const paidBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1281,6 +1438,9 @@ router.post('/payments', authenticateToken, async (req, res) => {
       netSalary = parseFloat(empRes.rows[0]?.salary || 0);
     }
 
+    const remainingBalance = Math.round((netSalary - totalPaid) * 100) / 100;
+    const isOverpaid = totalPaid > netSalary;
+    const overpaymentAmt = isOverpaid ? Math.round((totalPaid - netSalary) * 100) / 100 : 0;
     const isFull = totalPaid >= netSalary && netSalary > 0;
     const newStatus = isFull ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending');
     const paidDateExpr = (newStatus === 'Paid') ? 'COALESCE(paid_date, NOW())' : 'paid_date';
@@ -1313,7 +1473,25 @@ router.post('/payments', authenticateToken, async (req, res) => {
       );
     }
 
-    // 5. Get all updated payment rows
+    // 5. Write audit log entry
+    const previousPaid = Math.round((totalPaid - cashVal - bankVal) * 100) / 100;
+    const paymentAction = isOverpaid ? 'OVERPAYMENT_RECORDED' : 'PAYMENT_RECORDED';
+    const desc = isOverpaid
+      ? `${paidBy} recorded payment of SAR ${(cashVal + bankVal).toFixed(2)} (${cashVal > 0 ? `Cash: ${cashVal.toFixed(2)}` : ''} ${bankVal > 0 ? `Bank: ${bankVal.toFixed(2)}` : ''}) with overpayment of SAR ${overpaymentAmt.toFixed(2)}. Remaining balance: -SAR ${overpaymentAmt.toFixed(2)}.`
+      : `${paidBy} recorded payment of SAR ${(cashVal + bankVal).toFixed(2)} (${cashVal > 0 ? `Cash: ${cashVal.toFixed(2)}` : ''} ${bankVal > 0 ? `Bank: ${bankVal.toFixed(2)}` : ''}). Total paid: SAR ${totalPaid.toFixed(2)}, Remaining: SAR ${remainingBalance.toFixed(2)}.`;
+
+    await recordSalaryAuditLog(client, {
+      employee_id,
+      month,
+      action: paymentAction,
+      previous_value: `Paid: ${previousPaid.toFixed(2)}`,
+      new_value: `Paid: ${totalPaid.toFixed(2)}, Remaining: ${remainingBalance.toFixed(2)}`,
+      amount: cashVal + bankVal,
+      description: desc,
+      performed_by: paidBy
+    });
+
+    // 6. Get all updated payment rows
     const allPaymentsRes = await client.query(
       'SELECT * FROM employee_payroll_payments WHERE employee_id = $1 AND month = $2 ORDER BY created_at ASC',
       [employee_id, month]
@@ -1322,11 +1500,15 @@ router.post('/payments', authenticateToken, async (req, res) => {
     await client.query('COMMIT');
     res.json({
       success: true,
-      message: `Payment of SAR ${Math.round((cashVal + bankVal) * 100) / 100} recorded by ${paidBy}`,
+      message: isOverpaid
+        ? `Payment of SAR ${Math.round((cashVal + bankVal) * 100) / 100} recorded with SAR ${overpaymentAmt.toFixed(2)} overpayment.`
+        : `Payment of SAR ${Math.round((cashVal + bankVal) * 100) / 100} recorded by ${paidBy}`,
       payments: allPaymentsRes.rows,
       cash_paid: totalCash,
       bank_paid: totalBank,
       paid_amount: totalPaid,
+      remaining: remainingBalance,
+      overpayment: overpaymentAmt,
       status: newStatus
     });
   } catch (err) {
@@ -1340,6 +1522,7 @@ router.post('/payments', authenticateToken, async (req, res) => {
 // DELETE a payment log entry
 router.delete('/payments/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
+  const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1350,7 +1533,7 @@ router.delete('/payments/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Payment record not found' });
     }
 
-    const { employee_id, month } = payRes.rows[0];
+    const { employee_id, month, amount, payment_method } = payRes.rows[0];
 
     // Delete the entry
     await client.query('DELETE FROM employee_payroll_payments WHERE id = $1', [id]);
@@ -1386,6 +1569,17 @@ router.delete('/payments/:id', authenticateToken, async (req, res) => {
       [totalCash, totalBank, totalPaid, newStatus, employee_id, month]
     );
 
+    // Record audit log entry
+    await recordSalaryAuditLog(client, {
+      employee_id,
+      month,
+      action: 'PAYMENT_DELETED',
+      previous_value: `${payment_method}: ${parseFloat(amount).toFixed(2)}`,
+      amount: parseFloat(amount),
+      description: `${performedBy} deleted ${payment_method} payment of SAR ${parseFloat(amount).toFixed(2)}`,
+      performed_by: performedBy
+    });
+
     const allPaymentsRes = await client.query(
       'SELECT * FROM employee_payroll_payments WHERE employee_id = $1 AND month = $2 ORDER BY created_at ASC',
       [employee_id, month]
@@ -1411,10 +1605,12 @@ router.delete('/payments/:id', authenticateToken, async (req, res) => {
 
 // POST batch update employee base salaries
 router.post('/salaries/batch', authenticateToken, isAdmin, async (req, res) => {
-  const { salaries } = req.body;
+  const { salaries, month } = req.body;
   if (!Array.isArray(salaries)) {
     return res.status(400).json({ error: 'Salaries array is required' });
   }
+
+  const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
 
   const client = await pool.connect();
   try {
@@ -1422,6 +1618,8 @@ router.post('/salaries/batch', authenticateToken, isAdmin, async (req, res) => {
     for (const item of salaries) {
       if (item.employee_id && item.base_salary !== undefined && item.base_salary !== '') {
         const val = parseFloat(item.base_salary);
+        const curEmp = await client.query('SELECT name, employee_id, salary FROM employees WHERE id = $1', [item.employee_id]);
+        const oldSal = curEmp.rows.length > 0 ? parseFloat(curEmp.rows[0].salary || 0) : 0;
         await client.query('UPDATE employees SET salary = $1 WHERE id = $2', [val, item.employee_id]);
         await client.query(
           `INSERT INTO employee_payroll_settings (employee_id, base_salary)
@@ -1429,6 +1627,20 @@ router.post('/salaries/batch', authenticateToken, isAdmin, async (req, res) => {
            ON CONFLICT (employee_id) DO UPDATE SET base_salary = $2`,
           [item.employee_id, val]
         );
+        if (Math.round(oldSal * 100) !== Math.round(val * 100)) {
+          await recordSalaryAuditLog(client, {
+            employee_id: item.employee_id,
+            employee_name: curEmp.rows[0]?.name,
+            employee_code: curEmp.rows[0]?.employee_id,
+            month: month || new Date().toISOString().substring(0, 7),
+            action: 'BASE_SALARY_UPDATE',
+            previous_value: `Base Salary: ${oldSal.toFixed(2)}`,
+            new_value: `Base Salary: ${val.toFixed(2)}`,
+            amount: val,
+            description: `${performedBy} updated base salary from SAR ${oldSal.toFixed(2)} to SAR ${val.toFixed(2)}`,
+            performed_by: performedBy
+          });
+        }
       }
     }
     await client.query('COMMIT');
@@ -1633,6 +1845,18 @@ const handlePostFinancialAdjustment = async (req, res) => {
       }
     }
 
+    const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
+    const adjTypeDesc = action_type === 'Deduct' ? 'deduction' : 'addition';
+    await recordSalaryAuditLog(client, {
+      employee_id,
+      month: (date || new Date().toISOString().split('T')[0]).substring(0, 7),
+      action: action_type === 'Deduct' ? 'DEDUCTION_CREATE' : 'ADDITION_CREATE',
+      new_value: `${custom_label || type} (${action_type}): ${parseFloat(amount).toFixed(2)}`,
+      amount: parseFloat(amount),
+      description: `${performedBy} added ${custom_label || type} ${adjTypeDesc} of SAR ${parseFloat(amount).toFixed(2)}${notes ? ` (${notes})` : ''}`,
+      performed_by: performedBy
+    });
+
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1673,6 +1897,19 @@ const handleDeleteFinancialAdjustment = async (req, res) => {
     }
 
     await client.query('DELETE FROM employee_financial_adjustments WHERE id = $1', [req.params.id]);
+
+    const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
+    const adjTypeDesc = adj.action_type === 'Deduct' ? 'deduction' : 'addition';
+    await recordSalaryAuditLog(client, {
+      employee_id: adj.employee_id,
+      month: (adj.date ? String(adj.date) : new Date().toISOString().split('T')[0]).substring(0, 7),
+      action: adj.action_type === 'Deduct' ? 'DEDUCTION_DELETE' : 'ADDITION_DELETE',
+      previous_value: `${adj.custom_label || adj.type}: ${parseFloat(adj.amount).toFixed(2)}`,
+      amount: parseFloat(adj.amount),
+      description: `${performedBy} deleted ${adj.custom_label || adj.type} ${adjTypeDesc} of SAR ${parseFloat(adj.amount).toFixed(2)}`,
+      performed_by: performedBy
+    });
+
     await client.query('COMMIT');
     res.json({ message: 'Deleted successfully' });
   } catch (err) {
@@ -1726,6 +1963,19 @@ const handlePutFinancialAdjustment = async (req, res) => {
         await client.query('UPDATE employees SET advance_balance = GREATEST(COALESCE(advance_balance, 0) - $1, 0) WHERE id = $2', [updatedAmount, employee_id]);
       }
     }
+
+    const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
+    const adjTypeDesc = updatedActionType === 'Deduct' ? 'deduction' : 'addition';
+    await recordSalaryAuditLog(client, {
+      employee_id,
+      month: (updatedDate ? String(updatedDate) : new Date().toISOString().split('T')[0]).substring(0, 7),
+      action: updatedActionType === 'Deduct' ? 'DEDUCTION_UPDATE' : 'ADDITION_UPDATE',
+      previous_value: `${oldAdj.custom_label || oldAdj.type}: ${parseFloat(oldAdj.amount).toFixed(2)}`,
+      new_value: `${updatedCustomLabel || updatedType}: ${parseFloat(updatedAmount).toFixed(2)}`,
+      amount: updatedAmount,
+      description: `${performedBy} updated ${updatedCustomLabel || updatedType} ${adjTypeDesc} from SAR ${parseFloat(oldAdj.amount).toFixed(2)} to SAR ${parseFloat(updatedAmount).toFixed(2)}`,
+      performed_by: performedBy
+    });
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
@@ -1823,6 +2073,59 @@ router.delete('/recurring/:id', authenticateToken, isAdmin, async (req, res) => 
     await pool.query('DELETE FROM employee_recurring_adjustments WHERE id = $1', [req.params.id]);
     res.json({ message: 'Deleted successfully' });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET all payment records across employees (for Spreadsheet / Audit)
+router.get('/payments-all', authenticateToken, async (req, res) => {
+  const { month, employee_id } = req.query;
+  try {
+    let query = `
+      SELECT p.*, e.name as employee_name, e.employee_id as employee_code, e.branch, e.role
+      FROM employee_payroll_payments p
+      JOIN employees e ON p.employee_id = e.id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (month) {
+      params.push(month);
+      query += ' AND p.month = $' + params.length;
+    }
+    if (employee_id) {
+      params.push(employee_id);
+      query += ' AND p.employee_id = $' + params.length;
+    }
+    query += ' ORDER BY p.created_at DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error in /payments-all:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET salary audit logs
+router.get('/audit-logs', authenticateToken, async (req, res) => {
+  const { employee_id, month, limit = 200 } = req.query;
+  try {
+    let query = 'SELECT * FROM salary_audit_logs WHERE 1=1';
+    const params = [];
+    if (employee_id) {
+      params.push(employee_id);
+      query += ' AND employee_id = $' + params.length;
+    }
+    if (month) {
+      params.push(month);
+      query += ' AND month = $' + params.length;
+    }
+    params.push(parseInt(limit) || 200);
+    query += ' ORDER BY created_at DESC LIMIT $' + params.length;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error in /audit-logs:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -38,7 +38,8 @@ import {
   Users,
   Fingerprint,
   CalendarRange,
-  BookOpen
+  BookOpen,
+  FileSpreadsheet
 } from 'lucide-react'
 
 const navGroups = [
@@ -76,6 +77,7 @@ const navGroups = [
       { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Management', 'HR Manager', 'Operator'] },
       { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Management', 'HR Manager'] },
       { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Management', 'HR Manager'] },
+      { to: '/salary-spreadsheet', icon: <FileSpreadsheet size={18} strokeWidth={2.2} />, label: 'Salary Spreadsheet', roles: ['Admin', 'Management', 'HR Manager'] },
       { to: '/edited-logs', icon: <AlertTriangle size={18} strokeWidth={2.2} />, label: 'Edit Attendance Logs', roles: ['Admin', 'HR Manager', 'Operator'] },
     ]
   }

@@ -229,6 +229,16 @@ export default function Payroll() {
   const [activeInlineForm, setActiveInlineForm] = useState(null) // 'give' | 'deduct' | null
   const [savingCarryForwardId, setSavingCarryForwardId] = useState(null)
   const [carryForwardModal, setCarryForwardModal] = useState({ isOpen: false, emp: null, amount: null })
+  const [overpaymentModal, setOverpaymentModal] = useState({
+    isOpen: false,
+    empId: null,
+    empName: '',
+    salaryAmount: 0,
+    paymentAmount: 0,
+    overpaymentAmount: 0,
+    cashVal: 0,
+    bankVal: 0
+  })
   const [carryInputValues, setCarryInputValues] = useState({})
   const [activeCarryEmpId, setActiveCarryEmpId] = useState(null)
 
@@ -568,32 +578,7 @@ export default function Payroll() {
     toast.success(`Remaining salary filled (${CURRENCY} ${newCash.toFixed(2)} in Cash). Click "Pay Now" to confirm payment.`);
   }
 
-  const handlePayNow = async (empId) => {
-    const row = editableData[empId];
-    if (!row) return;
-
-    const inputVal = payInputs[empId] || {};
-    let cashVal = inputVal.cash !== undefined 
-      ? parseFloat(inputVal.cash || 0) 
-      : (row.payments && row.payments.length > 0 ? 0 : parseFloat(row.cash_paid || 0));
-    let bankVal = inputVal.bank !== undefined 
-      ? parseFloat(inputVal.bank || 0) 
-      : (row.payments && row.payments.length > 0 ? 0 : parseFloat(row.bank_paid || 0));
-
-    const net = parseFloat(row.net_salary || 0);
-
-    // If both inputs are 0 or empty, and no payments yet, default to full remaining in cash
-    if (cashVal <= 0 && bankVal <= 0) {
-      const curPaid = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
-      const rem = Math.round((net - curPaid) * 100) / 100;
-      if (rem > 0) {
-        cashVal = rem;
-      } else {
-        toast.info('Please enter an amount in Cash or Bank to pay.');
-        return;
-      }
-    }
-
+  const executePayment = async (empId, cashVal, bankVal) => {
     setSavingRowId(empId);
     try {
       const res = await axios.post('/api/payroll/payments', {
@@ -604,15 +589,14 @@ export default function Payroll() {
       });
 
       const { payments, cash_paid, bank_paid, paid_amount, status, message } = res.data;
-      toast.success(message || `Payment recorded successfully!`);
+      toast.success(message || 'Payment recorded successfully!');
 
-      // Clear local payment input for this employee
       setPayInputs(prev => ({
         ...prev,
         [empId]: { cash: '', bank: '' }
       }));
 
-      // Update editableData with new payments and totals
+      const row = editableData[empId];
       const updatedRow = {
         ...row,
         payments: payments || [],
@@ -645,6 +629,56 @@ export default function Payroll() {
     } finally {
       setSavingRowId(null);
     }
+  };
+
+  const handlePayNow = async (empId) => {
+    const row = editableData[empId];
+    if (!row) return;
+
+    const inputVal = payInputs[empId] || {};
+    let cashVal = inputVal.cash !== undefined 
+      ? parseFloat(inputVal.cash || 0) 
+      : (row.payments && row.payments.length > 0 ? 0 : parseFloat(row.cash_paid || 0));
+    let bankVal = inputVal.bank !== undefined 
+      ? parseFloat(inputVal.bank || 0) 
+      : (row.payments && row.payments.length > 0 ? 0 : parseFloat(row.bank_paid || 0));
+
+    const net = parseFloat(row.net_salary || 0);
+
+    // If both inputs are 0 or empty, and no payments yet, default to full remaining in cash
+    if (cashVal <= 0 && bankVal <= 0) {
+      const curPaid = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
+      const rem = Math.round((net - curPaid) * 100) / 100;
+      if (rem > 0) {
+        cashVal = rem;
+      } else {
+        toast.info('Please enter an amount in Cash or Bank to pay.');
+        return;
+      }
+    }
+
+    const totalEntered = Math.round((cashVal + bankVal) * 100) / 100;
+    const curPaid = Math.round((parseFloat(row.cash_paid || 0) + parseFloat(row.bank_paid || 0)) * 100) / 100;
+    const currentRem = Math.round((net - curPaid) * 100) / 100;
+
+    // Overpayment check: if total entered exceeds remaining balance (or if balance already 0 or negative)
+    const threshold = currentRem > 0 ? currentRem : 0;
+    if (totalEntered > threshold) {
+      const overpaymentAmt = Math.round((totalEntered - threshold) * 100) / 100;
+      setOverpaymentModal({
+        isOpen: true,
+        empId,
+        empName: row.name,
+        salaryAmount: currentRem > 0 ? currentRem : net,
+        paymentAmount: totalEntered,
+        overpaymentAmount: overpaymentAmt,
+        cashVal,
+        bankVal
+      });
+      return;
+    }
+
+    await executePayment(empId, cashVal, bankVal);
   };
 
   const handleDeletePayment = (paymentId, empId) => {
@@ -1038,7 +1072,7 @@ export default function Payroll() {
   }
 
   // Carry Forward Remaining Salary to Next Month (Opens Confirmation Modal)
-  const handleCarryForward = (emp, customAmount) => {
+  const handleCarryForward = (emp) => {
     if (!emp) return;
     const cash = parseFloat(emp.cash_paid || 0);
     const bank = parseFloat(emp.bank_paid || 0);
@@ -1046,29 +1080,26 @@ export default function Payroll() {
     const netSalary = parseFloat(emp.net_salary || 0);
     const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
 
-    const amountToCarry = (customAmount !== undefined && !isNaN(customAmount) && customAmount !== 0)
-      ? customAmount
-      : remaining;
-
-    if (amountToCarry === 0) {
+    if (remaining === 0) {
       toast.info('No remaining balance to carry forward for this employee.');
       return;
     }
 
-    setCarryForwardModal({ isOpen: true, emp, amount: amountToCarry });
-  }
+    // Modal directly uses calculated remaining amount - non editable
+    setCarryForwardModal({ isOpen: true, emp, amount: remaining });
+  };
 
   const executeCarryForwardFromModal = async () => {
     const emp = carryForwardModal.emp;
-    if (!emp) return;
+    if (!emp || savingCarryForwardId) return; // Prevent duplicate clicks
     const cash = parseFloat(emp.cash_paid || 0);
     const bank = parseFloat(emp.bank_paid || 0);
     const totalPaid = Math.round((cash + bank) * 100) / 100;
     const netSalary = parseFloat(emp.net_salary || 0);
     const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
-    const carryAmount = (carryForwardModal.amount !== undefined && carryForwardModal.amount !== null && !isNaN(parseFloat(carryForwardModal.amount)))
-      ? parseFloat(carryForwardModal.amount)
-      : remaining;
+
+    // Strict validation: amount must be exactly remaining
+    const carryAmount = remaining;
 
     const [year, monthNum] = selectedMonth.split('-').map(Number);
     let nextYear = year;
@@ -1098,7 +1129,7 @@ export default function Payroll() {
     } finally {
       setSavingCarryForwardId(null);
     }
-  }
+  };
 
   // Print Official Employee Salary Slip (Optimized for 80mm Thermal Receipt Printers)
   const handlePrintSalarySlip = (emp) => {
@@ -1244,14 +1275,6 @@ export default function Payroll() {
         <div class="row">
           <span class="bold">Employee:</span>
           <span class="bold right">${emp.name}</span>
-        </div>
-        <div class="row">
-          <span>ID / Role:</span>
-          <span class="right">${emp.employee_id} • ${emp.role || 'Staff'}</span>
-        </div>
-        <div class="row">
-          <span>Branch / Shift:</span>
-          <span class="right">${emp.branch || 'Main'} ${emp.shift ? `(${emp.shift})` : ''}</span>
         </div>
         <div class="row">
           <span>Pay Period:</span>
@@ -1427,6 +1450,30 @@ export default function Payroll() {
           <span>Payment Status:</span>
           <span class="right bold">${remaining === 0 ? 'FULLY SETTLED' : (remaining < 0 ? 'NEGATIVE BALANCE / OWED' : (totalPaid > 0 ? 'PARTIALLY PAID / CARRIED' : 'PENDING'))}</span>
         </div>
+
+        ${emp.payments && emp.payments.length > 0 ? `
+          <div class="divider-dashed"></div>
+          <div class="row-title" style="font-size: 10px;">PAYMENT RECORDS (${emp.payments.length})</div>
+          ${emp.payments.map((p, idx) => {
+            const pDate = p.created_at ? new Date(p.created_at).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+            const pMonth = p.month || selectedMonth;
+            const pUser = p.paid_by || 'Admin';
+            const pAmt = parseFloat(p.amount || 0).toFixed(2);
+            const pMethod = p.payment_method || 'Payment';
+            return `
+              <div style="font-size: 9.5px; padding: 2px 0; border-bottom: 1px dotted #888;">
+                <div class="row bold">
+                  <span>#${idx + 1} ${pMethod} (${pMonth})</span>
+                  <span class="right">${CURRENCY} ${pAmt}</span>
+                </div>
+                <div class="row" style="font-size: 9px; color: #333;">
+                  <span>Paid By: ${pUser}</span>
+                  <span class="right">${pDate}</span>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        ` : ''}
 
         ${advBalance > 0 ? `
           <div class="divider-dashed"></div>
@@ -2308,7 +2355,7 @@ export default function Payroll() {
                         title="Print 80mm Thermal Salary Slip"
                       >
                         <Printer size={13} style={{ color: '#0284c7' }} />
-                        <span>Print Slip (80mm)</span>
+                        <span>Print</span>
                       </button>
                     </div>
 
@@ -2361,109 +2408,31 @@ export default function Payroll() {
                     {/* Left: Carry Forward Controls */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       {rem !== 0 && showActions && !isRowLocked ? (
-                        activeCarryEmpId === targetEmpData.id ? (
-                          /* Active State: Input + Forward Now Button + Cancel Button */
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <label style={{ fontSize: '11px', fontWeight: 800, color: '#c2410c', whiteSpace: 'nowrap' }}>Carry Forward:</label>
-                            <input 
-                              type="number"
-                              step="any"
-                              autoFocus
-                              value={carryVal}
-                              onChange={e => setCarryInputValues(prev => ({ ...prev, [targetEmpData.id]: e.target.value }))}
-                              placeholder={rem.toFixed(2)}
-                              style={{ 
-                                width: '90px', 
-                                padding: '5px 8px', 
-                                borderRadius: '6px', 
-                                border: '1.5px solid #ea580c', 
-                                fontSize: '12px', 
-                                fontWeight: 800, 
-                                color: '#c2410c', 
-                                background: '#fff', 
-                                outline: 'none',
-                                boxShadow: '0 0 0 2px rgba(234, 88, 12, 0.15)'
-                              }}
-                            />
-                            <button
-                              type="button"
-                              disabled={savingCarryForwardId === targetEmpData.id}
-                              onClick={() => {
-                                const customAmt = parseFloat(carryVal || rem);
-                                handleCarryForward(targetEmpData, customAmt);
-                              }}
-                              style={{
-                                padding: '6px 14px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: 800,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '5px',
-                                background: '#ea580c',
-                                border: '1.5px solid #c2410c',
-                                color: '#ffffff',
-                                cursor: 'pointer',
-                                boxShadow: '0 2px 4px rgba(234, 88, 12, 0.25)',
-                                whiteSpace: 'nowrap',
-                                transition: 'all 0.15s ease'
-                              }}
-                              title={`Carry forward ${CURRENCY} ${(parseFloat(carryVal) || rem).toFixed(2)} to next month`}
-                            >
-                              {savingCarryForwardId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <ArrowRightCircle size={13} />}
-                              <span>Forward Now</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setActiveCarryEmpId(null)}
-                              style={{
-                                padding: '5px 8px',
-                                borderRadius: '6px',
-                                border: '1px solid #cbd5e1',
-                                background: '#f8fafc',
-                                color: '#64748b',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center'
-                              }}
-                              title="Cancel"
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          /* Initially Inactive: ONLY Carry Forward Button */
-                          <button
-                            type="button"
-                            disabled={savingCarryForwardId === targetEmpData.id}
-                            onClick={() => {
-                              setActiveCarryEmpId(targetEmpData.id);
-                              if (!carryInputValues[targetEmpData.id]) {
-                                setCarryInputValues(prev => ({ ...prev, [targetEmpData.id]: rem.toFixed(2) }));
-                              }
-                            }}
-                            style={{
-                              padding: '6px 14px',
-                              borderRadius: '6px',
-                              fontSize: '12px',
-                              fontWeight: 800,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              background: '#fff7ed',
-                              border: '1.5px solid #fdba74',
-                              color: '#c2410c',
-                              cursor: 'pointer',
-                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                              whiteSpace: 'nowrap',
-                              transition: 'all 0.15s ease'
-                            }}
-                            title={`Click to set carry forward for remaining ${CURRENCY} ${rem.toFixed(2)}`}
-                          >
-                            <ArrowRightCircle size={13} />
-                            <span>Carry Forward</span>
-                          </button>
-                        )
+                        <button
+                          type="button"
+                          disabled={savingCarryForwardId === targetEmpData.id}
+                          onClick={() => handleCarryForward(targetEmpData)}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: '#fff7ed',
+                            border: '1.5px solid #fdba74',
+                            color: '#c2410c',
+                            cursor: 'pointer',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                            whiteSpace: 'nowrap',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title={`Carry forward remaining balance of ${CURRENCY} ${rem.toFixed(2)} to next month`}
+                        >
+                          {savingCarryForwardId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <ArrowRightCircle size={13} />}
+                          <span>Carry Forward</span>
+                        </button>
                       ) : (
                         <span style={{ fontSize: '11px', fontWeight: 600, color: rem === 0 ? '#059669' : '#64748b' }}>
                           {parseFloat(targetEmpData.carried_forward_to_next || 0) !== 0 
@@ -2475,10 +2444,10 @@ export default function Payroll() {
                       )}
                     </div>
 
-                    {/* Right: Status Dropdown + Save Record / Locked */}
+                    {/* Right: Auto-calculated Status Badge + Locked Action (Save Record removed as actions auto-persist) */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: isMobile ? '0' : 'auto' }}>
                       {/* Audio 2: Forward to Next Month badge shown right before Status */}
-                      {parseFloat(targetEmpData.carried_forward_to_next || 0) > 0 && (
+                      {parseFloat(targetEmpData.carried_forward_to_next || 0) !== 0 && (
                         <div style={{
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -2498,68 +2467,62 @@ export default function Payroll() {
                         </div>
                       )}
 
-                      {/* Status Dropdown */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Status:</label>
-                        <select 
-                          disabled={isRowLocked}
-                          value={targetEmpData.status || 'Pending'}
-                          onChange={e => handleTextChange(targetEmpData.id, 'status', e.target.value)}
-                          style={{ 
-                            padding: '5px 8px', 
-                            borderRadius: '6px', 
-                            border: '1.5px solid #cbd5e1', 
-                            fontSize: '12px', 
-                            fontWeight: 700, 
-                            color: targetEmpData.status === 'Paid' ? 'var(--green)' : targetEmpData.status === 'Partial' ? '#2563eb' : '#d97706', 
-                            background: '#fff',
-                            cursor: isRowLocked ? 'not-allowed' : 'pointer'
-                          }}
-                        >
-                          <option value="Pending">Pending</option>
-                          <option value="Partial">Partial</option>
-                          <option value="Paid">Paid</option>
-                        </select>
-                      </div>
+                      {/* Auto-Calculated Payment Status Badge (Pending & Partial cannot be manually selected) */}
+                      {(() => {
+                        const autoStatus = rem <= 0 && (totalPaid > 0 || netSal === 0) 
+                          ? 'Paid' 
+                          : (totalPaid > 0 ? 'Partial' : 'Pending');
+                        const statusColor = autoStatus === 'Paid' ? '#059669' : autoStatus === 'Partial' ? '#2563eb' : '#d97706';
+                        const statusBg = autoStatus === 'Paid' ? '#ecfdf5' : autoStatus === 'Partial' ? '#eff6ff' : '#fffbeb';
+                        const statusBorder = autoStatus === 'Paid' ? '#a7f3d0' : autoStatus === 'Partial' ? '#bfdbfe' : '#fde68a';
+                        
+                        return (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Status:</label>
+                            <span style={{
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 800,
+                              color: statusColor,
+                              background: statusBg,
+                              border: `1.5px solid ${statusBorder}`,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              {autoStatus}
+                            </span>
+                          </div>
+                        );
+                      })()}
 
-                      {/* Save Record / Locked Button */}
-                      {showActions && (
-                        isRowLocked ? (
-                          <button 
-                            type="button"
-                            onClick={() => setUnlockPromptEmp(targetEmpData)}
-                            className="btn"
-                            style={{ 
-                              width: isMobile ? '100%' : 'auto',
-                              display: 'inline-flex', 
-                              alignItems: 'center', 
-                              justifyContent: 'center', 
-                              gap: '5px', 
-                              padding: '6px 14px', 
-                              borderRadius: '6px', 
-                              fontSize: '12px', 
-                              fontWeight: 800, 
-                              background: '#fef3c7', 
-                              color: '#b45309', 
-                              border: '1.5px solid #fde68a',
-                              cursor: 'pointer'
-                            }}
-                            title="Record is marked as Paid and locked. Click to unlock."
-                          >
-                            <Lock size={12} style={{ color: '#d97706' }} />
-                            Locked
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => handleSaveRow(targetEmpData.id)}
-                            disabled={savingRowId === targetEmpData.id}
-                            className="btn btn-primary"
-                            style={{ width: isMobile ? '100%' : 'auto', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: 'var(--primary)', color: 'var(--text-primary)' }}
-                          >
-                            {savingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
-                            Save Record
-                          </button>
-                        )
+                      {/* Locked Button if locked */}
+                      {showActions && isRowLocked && (
+                        <button 
+                          type="button"
+                          onClick={() => setUnlockPromptEmp(targetEmpData)}
+                          className="btn"
+                          style={{ 
+                            width: isMobile ? '100%' : 'auto',
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            gap: '5px', 
+                            padding: '6px 14px', 
+                            borderRadius: '6px', 
+                            fontSize: '12px', 
+                            fontWeight: 800, 
+                            background: '#fef3c7', 
+                            color: '#b45309', 
+                            border: '1.5px solid #fde68a',
+                            cursor: 'pointer'
+                          }}
+                          title="Record is marked as Paid and locked. Click to unlock."
+                        >
+                          <Lock size={12} style={{ color: '#d97706' }} />
+                          Locked
+                        </button>
                       )}
                     </div>
                   </div>
@@ -4775,6 +4738,167 @@ export default function Payroll() {
       )}
 
       {/* Carry Forward Remaining Salary Confirmation Modal */}
+      {/* Overpayment Confirmation Modal */}
+      {overpaymentModal.isOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            maxWidth: '480px',
+            width: '100%',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            overflow: 'hidden',
+            border: '1.5px solid #fecaca'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+              padding: '16px 20px',
+              borderBottom: '1.5px solid #fecaca',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  background: '#ef4444',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)'
+                }}>
+                  <AlertCircle size={20} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '15px', fontWeight: 800, color: '#991b1b' }}>
+                    Overpayment Confirmation
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#b91c1c' }}>
+                    Payment exceeds salary or outstanding balance
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOverpaymentModal({ isOpen: false, empId: null })}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#991b1b', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <p style={{ fontSize: '13px', color: '#334155', lineHeight: 1.5, margin: 0 }}>
+                The salary amount is <strong>{CURRENCY} {overpaymentModal.salaryAmount?.toFixed(2)}</strong>, but you are about to pay <strong>{CURRENCY} {overpaymentModal.paymentAmount?.toFixed(2)}</strong>. This will create an overpayment of <strong style={{ color: '#dc2626' }}>{CURRENCY} {overpaymentModal.overpaymentAmount?.toFixed(2)}</strong>.
+              </p>
+
+              <div style={{
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+                fontSize: '12px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Original / Outstanding Salary:</span>
+                  <span style={{ fontWeight: 700, color: '#1e293b' }}>{CURRENCY} {overpaymentModal.salaryAmount?.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Entered Payment:</span>
+                  <span style={{ fontWeight: 700, color: '#059669' }}>{CURRENCY} {overpaymentModal.paymentAmount?.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #fee2e2', paddingTop: '6px', fontWeight: 800 }}>
+                  <span style={{ color: '#b91c1c' }}>Overpayment Amount:</span>
+                  <span style={{ color: '#dc2626' }}>+{CURRENCY} {overpaymentModal.overpaymentAmount?.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f1d1d' }}>
+                  <span>Resulting Remaining Balance:</span>
+                  <span style={{ fontWeight: 800 }}>-{CURRENCY} {overpaymentModal.overpaymentAmount?.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <p style={{ fontSize: '12px', color: '#64748b', margin: 0, fontStyle: 'italic' }}>
+                Do you want to continue and record this overpayment?
+              </p>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              background: '#f8fafc',
+              padding: '12px 20px',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setOverpaymentModal({ isOpen: false, empId: null })}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#475569',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingRowId === overpaymentModal.empId}
+                onClick={async () => {
+                  const { empId, cashVal, bankVal } = overpaymentModal;
+                  setOverpaymentModal({ isOpen: false, empId: null });
+                  await executePayment(empId, cashVal, bankVal);
+                }}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #dc2626',
+                  background: '#dc2626',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 4px rgba(220, 38, 38, 0.25)'
+                }}
+              >
+                {savingRowId === overpaymentModal.empId ? <RefreshCw size={13} className="spin" /> : <CheckCircle size={13} />}
+                <span>Confirm Payment</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {carryForwardModal.isOpen && carryForwardModal.emp && (() => {
         const emp = carryForwardModal.emp;
         const cash = parseFloat(emp.cash_paid || 0);
@@ -4937,56 +5061,21 @@ export default function Payroll() {
                   </div>
                 </div>
 
-                {/* Amount to Carry Forward Input */}
+                {/* Carry Forward Confirmation Message */}
                 <div style={{
                   background: '#fff7ed',
                   border: '1.5px solid #fdba74',
                   borderRadius: '10px',
-                  padding: '12px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px'
+                  padding: '16px',
+                  textAlign: 'center'
                 }}>
-                  <label style={{ fontSize: '12px', fontWeight: 800, color: '#9a3412' }}>
-                    Amount to Carry Forward ({CURRENCY}):
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input 
-                      type="number"
-                      step="any"
-                      value={carryForwardModal.amount !== null && carryForwardModal.amount !== undefined ? carryForwardModal.amount : rem.toFixed(2)}
-                      onChange={e => setCarryForwardModal(prev => ({ ...prev, amount: e.target.value }))}
-                      style={{
-                        flex: 1,
-                        padding: '8px 12px',
-                        borderRadius: '6px',
-                        border: '1.5px solid #ea580c',
-                        fontSize: '15px',
-                        fontWeight: 800,
-                        color: '#9a3412',
-                        background: '#fff',
-                        outline: 'none',
-                        boxShadow: '0 0 0 2px rgba(234, 88, 12, 0.1)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setCarryForwardModal(prev => ({ ...prev, amount: rem.toFixed(2) }))}
-                      style={{
-                        padding: '8px 12px',
-                        borderRadius: '6px',
-                        border: '1px solid #fdba74',
-                        background: '#fff',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        color: '#c2410c',
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap'
-                      }}
-                      title="Reset to full remaining balance"
-                    >
-                      Full Remaining
-                    </button>
+                  <div style={{ fontSize: '14px', color: '#7c2d12', fontWeight: 600, lineHeight: 1.5 }}>
+                    Your remaining salary amount is <strong style={{ color: '#ea580c', fontSize: '16px' }}>{CURRENCY} {rem.toFixed(2)}</strong>.
+                    <br />
+                    Do you want to carry forward this amount to the next month (<strong style={{ color: '#047857' }}>{nextMonthName}</strong>)?
+                  </div>
+                  <div style={{ marginTop: '8px', fontSize: '11px', color: '#9a3412', fontWeight: 600 }}>
+                    • Amount is automatically derived from the actual remaining balance and cannot be modified.
                   </div>
                 </div>
 
@@ -5000,7 +5089,7 @@ export default function Payroll() {
                   borderRadius: '8px',
                   lineHeight: 1.45
                 }}>
-                  <strong>Notice:</strong> This amount <strong>{CURRENCY} {finalCarryAmt.toFixed(2)}</strong> will be carried forward to <strong>{nextMonthName}</strong> as <strong>Prev M. Remaining</strong>. Current month (<strong>{curMonthName}</strong>) will be saved and <strong>LOCKED</strong>.
+                  <strong>Notice:</strong> Exactly <strong>{CURRENCY} {rem.toFixed(2)}</strong> will be transferred to <strong>{nextMonthName}</strong> as <strong>Prev M. Remaining</strong>. Current month (<strong>{curMonthName}</strong>) will be saved and <strong>LOCKED</strong>.
                 </div>
               </div>
 
@@ -5049,7 +5138,7 @@ export default function Payroll() {
                   }}
                 >
                   {savingCarryForwardId === emp.id ? <RefreshCw size={13} className="spin" /> : <Lock size={13} />}
-                  Confirm & Lock Month
+                  Confirm
                 </button>
               </div>
             </div>
