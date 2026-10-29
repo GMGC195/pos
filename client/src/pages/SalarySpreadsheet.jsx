@@ -23,9 +23,14 @@ import {
   TrendingUp,
   TrendingDown,
   Layers,
-  Save
+  Save,
+  Trash2,
+  AlertTriangle,
+  RotateCcw,
+  ShieldAlert
 } from 'lucide-react';
 import { CURRENCY } from '../config';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function SalarySpreadsheet() {
   const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'paid' | 'audit'
@@ -46,6 +51,20 @@ export default function SalarySpreadsheet() {
   const [empAuditLogs, setEmpAuditLogs] = useState([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
 
+  // Clear & Delete records modal state
+  const { user } = useAuth();
+  const isAdmin = useMemo(() => {
+    const r = (user?.role || '').toLowerCase();
+    return r === 'admin' || r === 'developer' || r === 'management' || r === 'hr manager';
+  }, [user]);
+
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [clearScope, setClearScope] = useState('current_month'); // 'current_month' | 'previous_months' | 'all'
+  const [confirmStep, setConfirmStep] = useState(false);
+  const [confirmKeyword, setConfirmKeyword] = useState('');
+  const [clearing, setClearing] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState(null);
+
   // Load payroll calculations and payment logs for current month
   const loadData = async () => {
     setLoading(true);
@@ -63,6 +82,56 @@ export default function SalarySpreadsheet() {
       toast.error('Failed to load salary spreadsheet data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Delete individual payment entry from Salary Paid tab
+  const handleDeletePayment = async (payment) => {
+    const empName = payment.employee_name || 'Staff';
+    const formattedAmt = `${CURRENCY} ${parseFloat(payment.amount || 0).toFixed(2)}`;
+    if (!window.confirm(`Are you sure you want to delete this payment of ${formattedAmt} for ${empName}?`)) {
+      return;
+    }
+    setDeletingPaymentId(payment.id);
+    try {
+      await axios.delete(`/api/payroll/payments/${payment.id}`);
+      toast.success('Payment transaction deleted successfully');
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.error || 'Failed to delete payment');
+    } finally {
+      setDeletingPaymentId(null);
+    }
+  };
+
+  // Clear / Delete salary records handler
+  const handleExecuteClear = async () => {
+    if (clearScope === 'all' && confirmKeyword.trim().toUpperCase() !== 'DELETE ALL') {
+      toast.error('Please type "DELETE ALL" to confirm');
+      return;
+    }
+    if (clearScope === 'previous_months' && confirmKeyword.trim().toUpperCase() !== 'DELETE') {
+      toast.error('Please type "DELETE" to confirm');
+      return;
+    }
+
+    setClearing(true);
+    try {
+      const res = await axios.post('/api/payroll/records/clear', {
+        scope: clearScope,
+        month: selectedMonth
+      });
+      toast.success(res.data?.message || 'Records cleared successfully');
+      setShowClearModal(false);
+      setConfirmStep(false);
+      setConfirmKeyword('');
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.error || 'Failed to clear records');
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -354,6 +423,34 @@ export default function SalarySpreadsheet() {
             <Printer size={14} />
             <span>Print</span>
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setShowClearModal(true);
+                setConfirmStep(false);
+                setConfirmKeyword('');
+                setClearScope('current_month');
+              }}
+              style={{
+                padding: '8px 14px',
+                borderRadius: '8px',
+                border: '1.5px solid #fecdd3',
+                background: '#fff1f2',
+                color: '#e11d48',
+                fontWeight: 700,
+                fontSize: '12px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+              title="Clear current month or delete previous salary records"
+            >
+              <Trash2 size={14} />
+              <span>Clear & Delete Records</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -886,21 +983,47 @@ export default function SalarySpreadsheet() {
                         {p.notes || '—'}
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        <button
-                          onClick={() => handleOpenEmpHistory({ id: p.employee_id, name: p.employee_name, employee_id: p.employee_code })}
-                          style={{
-                            padding: '4px 8px',
-                            borderRadius: '5px',
-                            border: '1px solid #cbd5e1',
-                            background: '#fff',
-                            color: '#0284c7',
-                            fontWeight: 700,
-                            fontSize: '11px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          History
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                          <button
+                            onClick={() => handleOpenEmpHistory({ id: p.employee_id, name: p.employee_name, employee_id: p.employee_code })}
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: '5px',
+                              border: '1px solid #cbd5e1',
+                              background: '#fff',
+                              color: '#0284c7',
+                              fontWeight: 700,
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                            title="View Employee History"
+                          >
+                            History
+                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDeletePayment(p)}
+                              disabled={deletingPaymentId === p.id}
+                              style={{
+                                padding: '4px 8px',
+                                borderRadius: '5px',
+                                border: '1px solid #fecdd3',
+                                background: '#fff1f2',
+                                color: '#e11d48',
+                                fontWeight: 700,
+                                fontSize: '11px',
+                                cursor: deletingPaymentId === p.id ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}
+                              title="Delete this payment transaction"
+                            >
+                              <Trash2 size={11} />
+                              {deletingPaymentId === p.id ? '...' : 'Delete'}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1191,6 +1314,446 @@ export default function SalarySpreadsheet() {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CLEAR / DELETE SALARY RECORDS MODAL */}
+      {showClearModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(3px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: '16px',
+            maxWidth: '620px',
+            width: '100%',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            overflow: 'hidden',
+            border: '1px solid #e2e8f0',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #fecdd3',
+              background: '#fff1f2',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  background: '#ffe4e6',
+                  color: '#e11d48',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#9f1239' }}>
+                    Salary Records Management & Deletion
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '12px', color: '#be123c' }}>
+                    Select an action to clear current month records or purge previous history
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowClearModal(false);
+                  setConfirmStep(false);
+                  setConfirmKeyword('');
+                }}
+                disabled={clearing}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#9f1239',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px' }}>
+              {!confirmStep ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* Option 1: Clear Current Month */}
+                  <div 
+                    onClick={() => {
+                      setClearScope('current_month');
+                      setConfirmStep(true);
+                      setConfirmKeyword('');
+                    }}
+                    style={{
+                      border: '1.5px solid #cbd5e1',
+                      borderRadius: '12px',
+                      padding: '14px 16px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '14px',
+                      background: '#fff'
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = '#0284c7';
+                      e.currentTarget.style.background = '#f0f9ff';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = '#cbd5e1';
+                      e.currentTarget.style.background = '#fff';
+                    }}
+                  >
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '10px',
+                      background: '#e0f2fe',
+                      color: '#0284c7',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <RotateCcw size={20} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <strong style={{ fontSize: '14px', color: '#0f172a' }}>
+                          Clear Current Month Records ({selectedMonth})
+                        </strong>
+                        <span style={{
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          background: '#e0f2fe',
+                          color: '#0369a1',
+                          padding: '2px 8px',
+                          borderRadius: '4px'
+                        }}>
+                          Recalculate
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.4 }}>
+                        Deletes payment transactions and resets finalized records for <strong>{selectedMonth}</strong> back to unfinalized/pending status (0 paid). Live calculations will refresh cleanly.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Option 2: Delete All Previous Months Records */}
+                  <div 
+                    onClick={() => {
+                      setClearScope('previous_months');
+                      setConfirmStep(true);
+                      setConfirmKeyword('');
+                    }}
+                    style={{
+                      border: '1.5px solid #cbd5e1',
+                      borderRadius: '12px',
+                      padding: '14px 16px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '14px',
+                      background: '#fff'
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = '#f59e0b';
+                      e.currentTarget.style.background = '#fffbeb';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = '#cbd5e1';
+                      e.currentTarget.style.background = '#fff';
+                    }}
+                  >
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '10px',
+                      background: '#fef3c7',
+                      color: '#d97706',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <Trash2 size={20} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <strong style={{ fontSize: '14px', color: '#0f172a' }}>
+                          Delete All Previous Records (Prior to {selectedMonth})
+                        </strong>
+                        <span style={{
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          background: '#fef3c7',
+                          color: '#b45309',
+                          padding: '2px 8px',
+                          borderRadius: '4px'
+                        }}>
+                          History Purge
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.4 }}>
+                        Permanently deletes all historical salary records and payments for months before <strong>{selectedMonth}</strong>. Resets previous carry-over balance in {selectedMonth} to 0.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Option 3: Complete Reset (All Months) */}
+                  <div 
+                    onClick={() => {
+                      setClearScope('all');
+                      setConfirmStep(true);
+                      setConfirmKeyword('');
+                    }}
+                    style={{
+                      border: '1.5px solid #cbd5e1',
+                      borderRadius: '12px',
+                      padding: '14px 16px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '14px',
+                      background: '#fff'
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = '#e11d48';
+                      e.currentTarget.style.background = '#fff1f2';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = '#cbd5e1';
+                      e.currentTarget.style.background = '#fff';
+                    }}
+                  >
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '10px',
+                      background: '#ffe4e6',
+                      color: '#e11d48',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <AlertTriangle size={20} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <strong style={{ fontSize: '14px', color: '#0f172a' }}>
+                          Delete All Records (All Time Reset)
+                        </strong>
+                        <span style={{
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          background: '#ffe4e6',
+                          color: '#be123c',
+                          padding: '2px 8px',
+                          borderRadius: '4px'
+                        }}>
+                          Full Wipe
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.4 }}>
+                        Permanently deletes all salary records and payment transactions across <strong>all months</strong>. Useful for demo data cleanup or total reset.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Confirmation Screen (Step 2) */
+                <div>
+                  <div style={{
+                    padding: '14px 16px',
+                    borderRadius: '10px',
+                    background: clearScope === 'current_month' ? '#eff6ff' : clearScope === 'previous_months' ? '#fffbeb' : '#fff1f2',
+                    border: '1px solid ' + (clearScope === 'current_month' ? '#bfdbfe' : clearScope === 'previous_months' ? '#fde68a' : '#fecdd3'),
+                    marginBottom: '16px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px'
+                  }}>
+                    <ShieldAlert size={22} style={{
+                      color: clearScope === 'current_month' ? '#2563eb' : clearScope === 'previous_months' ? '#d97706' : '#e11d48',
+                      flexShrink: 0,
+                      marginTop: '2px'
+                    }} />
+                    <div style={{ fontSize: '13px', lineHeight: 1.4 }}>
+                      <strong style={{
+                        display: 'block',
+                        marginBottom: '4px',
+                        color: clearScope === 'current_month' ? '#1e40af' : clearScope === 'previous_months' ? '#92400e' : '#9f1239'
+                      }}>
+                        {clearScope === 'current_month' && `Confirm Resetting ${selectedMonth} Records`}
+                        {clearScope === 'previous_months' && `Confirm Permanent Deletion of Records Prior to ${selectedMonth}`}
+                        {clearScope === 'all' && `CRITICAL: Complete Deletion Across All Months`}
+                      </strong>
+                      <p style={{ margin: 0, color: '#475569' }}>
+                        {clearScope === 'current_month' && (
+                          `This will delete all cash and bank payment transactions for ${selectedMonth} and reset saved records. Employees will return to unfinalized state with 0 paid.`
+                        )}
+                        {clearScope === 'previous_months' && (
+                          `All salary payment entries and saved records for months prior to ${selectedMonth} will be permanently removed from the database. This cannot be undone.`
+                        )}
+                        {clearScope === 'all' && (
+                          `ALL salary records, payments, and balances across every month will be wiped completely from the database. This action is irreversible.`
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Typing confirmation for dangerous operations */}
+                  {clearScope !== 'current_month' && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                        {clearScope === 'previous_months' ? (
+                          <>Please type <strong style={{ color: '#d97706' }}>DELETE</strong> to confirm:</>
+                        ) : (
+                          <>Please type <strong style={{ color: '#e11d48' }}>DELETE ALL</strong> to confirm:</>
+                        )}
+                      </label>
+                      <input
+                        type="text"
+                        value={confirmKeyword}
+                        onChange={e => setConfirmKeyword(e.target.value)}
+                        placeholder={clearScope === 'previous_months' ? 'DELETE' : 'DELETE ALL'}
+                        disabled={clearing}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #cbd5e1',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          color: '#0f172a',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Buttons */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button
+                      onClick={() => {
+                        setConfirmStep(false);
+                        setConfirmKeyword('');
+                      }}
+                      disabled={clearing}
+                      style={{
+                        padding: '9px 16px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        background: '#fff',
+                        color: '#475569',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                        cursor: clearing ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={handleExecuteClear}
+                      disabled={
+                        clearing ||
+                        (clearScope === 'previous_months' && confirmKeyword.trim().toUpperCase() !== 'DELETE') ||
+                        (clearScope === 'all' && confirmKeyword.trim().toUpperCase() !== 'DELETE ALL')
+                      }
+                      style={{
+                        padding: '9px 20px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: (clearScope === 'current_month' 
+                          ? '#0284c7' 
+                          : clearScope === 'previous_months' 
+                            ? '#d97706' 
+                            : '#e11d48'),
+                        color: '#fff',
+                        fontWeight: 800,
+                        fontSize: '12px',
+                        cursor: (
+                          clearing ||
+                          (clearScope === 'previous_months' && confirmKeyword.trim().toUpperCase() !== 'DELETE') ||
+                          (clearScope === 'all' && confirmKeyword.trim().toUpperCase() !== 'DELETE ALL')
+                        ) ? 'not-allowed' : 'pointer',
+                        opacity: (
+                          (clearScope === 'previous_months' && confirmKeyword.trim().toUpperCase() !== 'DELETE') ||
+                          (clearScope === 'all' && confirmKeyword.trim().toUpperCase() !== 'DELETE ALL')
+                        ) ? 0.5 : 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      {clearing ? (
+                        <>
+                          <RefreshCw size={14} className="spin" />
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 size={14} />
+                          <span>
+                            {clearScope === 'current_month' && `Clear ${selectedMonth} Records`}
+                            {clearScope === 'previous_months' && 'Delete Previous Records'}
+                            {clearScope === 'all' && 'Confirm Wipe All Records'}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer when not on confirm step */}
+            {!confirmStep && (
+              <div style={{
+                padding: '12px 20px',
+                borderTop: '1px solid #e2e8f0',
+                background: '#f8fafc',
+                display: 'flex',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  onClick={() => setShowClearModal(false)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    background: '#fff',
+                    color: '#475569',
+                    fontWeight: 700,
+                    fontSize: '12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

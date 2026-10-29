@@ -147,6 +147,7 @@ export default function Payroll() {
   const [editableData, setEditableData] = useState({})
   const [savingAll, setSavingAll] = useState(false)
   const [savingRowId, setSavingRowId] = useState(null)
+  const [payingRowId, setPayingRowId] = useState(null)
   const [payInputs, setPayInputs] = useState({})
 
   // Leave Modal State
@@ -432,7 +433,7 @@ export default function Payroll() {
     return dynamicNet;
   }
 
-  // Clear previous month carryover balance to 0.00
+  // Clear previous month carryover balance & advance/loan balance to 0.00
   const handleClearPastBalance = (empId, empName) => {
     const isLocked = editableData[empId]?.status === 'Paid' && !unlockedRowIds.has(empId);
     if (isLocked) {
@@ -441,7 +442,7 @@ export default function Payroll() {
     }
 
     const name = empName || editableData[empId]?.name || 'this employee';
-    const confirmMsg = `Clear previous carryover balance for ${name}? This will settle previous month's balance and set past balance to 0.00.`;
+    const confirmMsg = `Clear previous carryover balance and Advance Balance (Loan) for ${name}? This will reset past balance and any outstanding loan to 0.00.`;
     
     confirmAction(confirmMsg, async () => {
       try {
@@ -455,7 +456,11 @@ export default function Payroll() {
           if (!emp) return prev;
           const newEmp = {
             ...emp,
-            last_month_balance: 0
+            last_month_balance: 0,
+            advance_balance: 0,
+            this_month_adv: 0,
+            advance_deduction: 0,
+            last_month_adjustment: 0
           };
           const dynamicNet = recalculateNetSalary(newEmp);
           newEmp.net_salary = dynamicNet;
@@ -468,14 +473,22 @@ export default function Payroll() {
           };
         });
 
-        setSelectedEmployeeForModal(curr => (curr?.id === empId ? { ...curr, last_month_balance: 0 } : curr));
-        toast.success(`Previous balance cleared to 0.00 for ${name}`);
+        setSelectedEmployeeForModal(curr => (curr?.id === empId ? {
+          ...curr,
+          last_month_balance: 0,
+          advance_balance: 0,
+          this_month_adv: 0,
+          advance_deduction: 0,
+          last_month_adjustment: 0
+        } : curr));
+
+        toast.success(`Previous balance and Advance Balance (Loan) cleared to 0.00 for ${name}`);
         await loadPayroll(true);
       } catch (err) {
         console.error('Error clearing balance:', err);
         toast.error(err.response?.data?.error || 'Failed to clear past balance');
       }
-    }, 'Clear Balance');
+    }, 'Clear Balance & Loan');
   };
 
   // Recalculate Net Salary dynamically when standard fields change
@@ -579,7 +592,7 @@ export default function Payroll() {
   }
 
   const executePayment = async (empId, cashVal, bankVal) => {
-    setSavingRowId(empId);
+    setPayingRowId(empId);
     try {
       const res = await axios.post('/api/payroll/payments', {
         employee_id: empId,
@@ -627,7 +640,7 @@ export default function Payroll() {
       const errMsg = error?.response?.data?.error || error.message || 'Failed to record payment.';
       toast.error(errMsg);
     } finally {
-      setSavingRowId(null);
+      setPayingRowId(null);
     }
   };
 
@@ -2309,7 +2322,7 @@ export default function Payroll() {
                         <button 
                           type="button"
                           onClick={() => handlePayNow(targetEmpData.id)}
-                          disabled={savingRowId === targetEmpData.id}
+                          disabled={payingRowId === targetEmpData.id}
                           style={{ 
                             padding: '6px 14px', 
                             borderRadius: '6px', 
@@ -2328,7 +2341,7 @@ export default function Payroll() {
                           }}
                           title="Record payment and update Paid & Remaining"
                         >
-                          {savingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle size={13} />}
+                          {payingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle size={13} />}
                           Pay Now
                         </button>
                       )}
@@ -3612,18 +3625,18 @@ export default function Payroll() {
                               <button 
                                 type="button"
                                 onClick={() => handlePayNow(item.id)}
-                                disabled={savingRowId === item.id}
-                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 800, borderRadius: '6px', background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                disabled={payingRowId === item.id || savingRowId === item.id}
+                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 800, borderRadius: '6px', background: '#16a34a', color: '#fff', border: 'none', cursor: (payingRowId === item.id || savingRowId === item.id) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                                 title="Pay Now and set status to Paid"
                               >
-                                {savingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
+                                {payingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
                                 Pay
                               </button>
                               <button 
                                 onClick={() => handleSaveRow(item.id)}
-                                disabled={savingRowId === item.id}
+                                disabled={savingRowId === item.id || payingRowId === item.id}
                                 className="btn btn-primary"
-                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '6px' }}
+                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', cursor: (savingRowId === item.id || payingRowId === item.id) ? 'not-allowed' : 'pointer' }}
                               >
                                 {savingRowId === item.id ? '...' : 'Save'}
                               </button>
@@ -4049,18 +4062,18 @@ export default function Payroll() {
                                 <button 
                                   type="button"
                                   onClick={() => handlePayNow(item.id)}
-                                  disabled={savingRowId === item.id}
-                                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 800, background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                  disabled={payingRowId === item.id || savingRowId === item.id}
+                                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 800, background: '#16a34a', color: '#fff', border: 'none', cursor: (payingRowId === item.id || savingRowId === item.id) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                                   title="Pay Now and set status to Paid"
                                 >
-                                  {savingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
+                                  {payingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
                                   Pay
                                 </button>
                                 <button 
                                   onClick={() => handleSaveRow(item.id)}
-                                  disabled={savingRowId === item.id}
+                                  disabled={savingRowId === item.id || payingRowId === item.id}
                                   className="btn btn-primary"
-                                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: (savingRowId === item.id || payingRowId === item.id) ? 'not-allowed' : 'pointer' }}
                                 >
                                   {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
                                   Save
@@ -4870,7 +4883,7 @@ export default function Payroll() {
               </button>
               <button
                 type="button"
-                disabled={savingRowId === overpaymentModal.empId}
+                disabled={payingRowId === overpaymentModal.empId}
                 onClick={async () => {
                   const { empId, cashVal, bankVal } = overpaymentModal;
                   setOverpaymentModal({ isOpen: false, empId: null });
@@ -4884,14 +4897,14 @@ export default function Payroll() {
                   color: '#fff',
                   fontWeight: 800,
                   fontSize: '12px',
-                  cursor: 'pointer',
+                  cursor: payingRowId === overpaymentModal.empId ? 'not-allowed' : 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px',
                   boxShadow: '0 2px 4px rgba(220, 38, 38, 0.25)'
                 }}
               >
-                {savingRowId === overpaymentModal.empId ? <RefreshCw size={13} className="spin" /> : <CheckCircle size={13} />}
+                {payingRowId === overpaymentModal.empId ? <RefreshCw size={13} className="spin" /> : <CheckCircle size={13} />}
                 <span>Confirm Payment</span>
               </button>
             </div>

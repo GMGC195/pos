@@ -942,9 +942,10 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Fetch old record to see if it was already Paid (lock check)
-    const oldRecRes = await client.query('SELECT status FROM employee_payroll_records WHERE employee_id = $1 AND month = $2', [employee_id, month]);
-    const oldStatus = oldRecRes.rows.length > 0 ? oldRecRes.rows[0].status : null;
+    // Fetch old record (if it exists) to check if already Paid and for audit logging
+    const oldRecRes = await client.query('SELECT status, net_salary, paid_amount FROM employee_payroll_records WHERE employee_id = $1 AND month = $2', [employee_id, month]);
+    const oldRow = oldRecRes.rows.length > 0 ? oldRecRes.rows[0] : null;
+    const oldStatus = oldRow ? oldRow.status : null;
     const userRole = req.user?.role?.trim().toLowerCase();
 
     // If already marked as Paid, only a user with Developer or Admin role can edit or unlock it
@@ -1091,14 +1092,17 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
     }
 
     const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
+    const isNewRecord = !oldRow;
     await recordSalaryAuditLog(client, {
       employee_id,
       month,
-      action: 'RECORD_UPDATE',
-      previous_value: oldRecordRes.rows.length > 0 ? `Net: ${oldRecordRes.rows[0].net_salary}, Status: ${oldRecordRes.rows[0].status}` : null,
-      new_value: `Net: ${net_salary}, Status: ${status}, Paid: ${totalPaidAmount}`,
+      action: isNewRecord ? 'RECORD_CREATED' : 'RECORD_UPDATE',
+      previous_value: oldRow ? `Net: ${parseFloat(oldRow.net_salary || 0).toFixed(2)}, Status: ${oldRow.status || 'Pending'}, Paid: ${parseFloat(oldRow.paid_amount || 0).toFixed(2)}` : null,
+      new_value: `Net: ${parseFloat(net_salary || 0).toFixed(2)}, Status: ${status}, Paid: ${totalPaidAmount.toFixed(2)}`,
       amount: parseFloat(net_salary || 0),
-      description: `${performedBy} saved salary record: Net SAR ${parseFloat(net_salary || 0).toFixed(2)}, Paid SAR ${totalPaidAmount.toFixed(2)}, Status: ${status}`,
+      description: isNewRecord
+        ? `${performedBy} created salary record: Net SAR ${parseFloat(net_salary || 0).toFixed(2)}, Status: ${status}`
+        : `${performedBy} saved salary record: Net SAR ${parseFloat(net_salary || 0).toFixed(2)}, Paid SAR ${totalPaidAmount.toFixed(2)}, Status: ${status}`,
       performed_by: performedBy
     });
 
@@ -1336,19 +1340,50 @@ router.post('/clear-balance', authenticateToken, isAdmin, async (req, res) => {
       SET paid_amount = net_salary,
           cash_paid = net_salary,
           bank_paid = 0,
-          status = 'Paid'
+          status = 'Paid',
+          carried_forward_to_next = 0
       WHERE employee_id = $1 AND month = $2
     `, [employee_id, prevMonthStr]);
 
-    // 2. Set current month's last_month_balance to 0 if record exists
+    // 2. Set current month's last_month_balance, last_month_adjustment, and advance_deduction to 0
     await client.query(`
       UPDATE employee_payroll_records
-      SET last_month_balance = 0
+      SET last_month_balance = 0,
+          last_month_adjustment = 0,
+          advance_deduction = 0
       WHERE employee_id = $1 AND month = $2
     `, [employee_id, month]);
 
+    // 3. Clear Advance Balance (Loan) on employee master record to 0
+    await client.query(`
+      UPDATE employees 
+      SET advance_balance = 0 
+      WHERE id = $1
+    `, [employee_id]);
+
+    // 4. Also clear remaining loan / advance recurring adjustments
+    await client.query(`
+      UPDATE employee_recurring_adjustments
+      SET remaining_amount = 0
+      WHERE employee_id = $1 AND (
+        type ILIKE '%advance%' OR type ILIKE '%loan%' OR 
+        label ILIKE '%advance%' OR label ILIKE '%loan%' OR
+        custom_label ILIKE '%advance%' OR custom_label ILIKE '%loan%'
+      )
+    `, [employee_id]);
+
+    // 5. Audit log
+    const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
+    await recordSalaryAuditLog(client, {
+      employee_id,
+      month,
+      action: 'PAST_BALANCE_AND_LOAN_CLEARED',
+      description: `${performedBy} cleared past balance and reset Advance Balance (Loan) to 0.00 for employee`,
+      performed_by: performedBy
+    });
+
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Past balance cleared to 0.00' });
+    res.json({ success: true, message: 'Past balance and Advance Balance (Loan) cleared to 0.00' });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -1594,6 +1629,129 @@ router.delete('/payments/:id', authenticateToken, async (req, res) => {
       bank_paid: totalBank,
       paid_amount: totalPaid,
       status: newStatus
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/payroll/records/clear - Bulk clear/delete salary records
+router.post('/records/clear', authenticateToken, async (req, res) => {
+  const role = req.user?.role?.trim().toLowerCase();
+  const allowedRoles = ['admin', 'developer', 'management', 'hr manager'];
+  if (!allowedRoles.includes(role)) {
+    return res.status(403).json({ error: 'Unauthorized: Admin or Management access required' });
+  }
+
+  const { scope, month } = req.body;
+  if (!scope || !['current_month', 'previous_months', 'all'].includes(scope)) {
+    return res.status(400).json({ error: 'Invalid scope. Must be "current_month", "previous_months", or "all".' });
+  }
+
+  if ((scope === 'current_month' || scope === 'previous_months') && !month) {
+    return res.status(400).json({ error: 'Month parameter is required for the chosen scope.' });
+  }
+
+  const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    let deletedPaymentsCount = 0;
+    let deletedRecordsCount = 0;
+    let message = '';
+
+    if (scope === 'current_month') {
+      // 1. Calculate next month to reset any carry forward balance that was pushed
+      const [year, monthNum] = month.split('-').map(Number);
+      let nextYear = year;
+      let nextMonthNum = monthNum + 1;
+      if (nextMonthNum > 12) {
+        nextMonthNum = 1;
+        nextYear = year + 1;
+      }
+      const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
+
+      // Reset next month's last_month_balance
+      await client.query(`
+        UPDATE employee_payroll_records
+        SET last_month_balance = 0
+        WHERE month = $1
+      `, [nextMonthStr]);
+
+      // 2. Delete all payments for this month
+      const payDel = await client.query('DELETE FROM employee_payroll_payments WHERE month = $1', [month]);
+      deletedPaymentsCount = payDel.rowCount || 0;
+
+      // 3. Delete saved payroll records for this month (GET /calculate will compute fresh live data)
+      const recDel = await client.query('DELETE FROM employee_payroll_records WHERE month = $1', [month]);
+      deletedRecordsCount = recDel.rowCount || 0;
+
+      // 4. Record audit log entry
+      await recordSalaryAuditLog(client, {
+        month,
+        action: 'MONTH_RECORDS_CLEARED',
+        description: `${performedBy} cleared all salary records (${deletedRecordsCount} records, ${deletedPaymentsCount} payments) for month ${month}`,
+        performed_by: performedBy
+      });
+
+      message = `Successfully cleared ${deletedRecordsCount} salary records and ${deletedPaymentsCount} payments for ${month}. Calculations reset cleanly.`;
+    } else if (scope === 'previous_months') {
+      // Delete all payments prior to this month
+      const payDel = await client.query('DELETE FROM employee_payroll_payments WHERE month < $1', [month]);
+      deletedPaymentsCount = payDel.rowCount || 0;
+
+      // Delete all records prior to this month
+      const recDel = await client.query('DELETE FROM employee_payroll_records WHERE month < $1', [month]);
+      deletedRecordsCount = recDel.rowCount || 0;
+
+      // Reset current month's last_month_balance to 0 so past balances do not carry over
+      await client.query(`
+        UPDATE employee_payroll_records
+        SET last_month_balance = 0
+        WHERE month = $1
+      `, [month]);
+
+      // Record audit log entry
+      await recordSalaryAuditLog(client, {
+        month,
+        action: 'PREVIOUS_RECORDS_DELETED',
+        description: `${performedBy} deleted all historical salary records (${deletedRecordsCount} records, ${deletedPaymentsCount} payments) prior to ${month}`,
+        performed_by: performedBy
+      });
+
+      message = `Successfully deleted ${deletedRecordsCount} previous records and ${deletedPaymentsCount} previous payments prior to ${month}.`;
+    } else if (scope === 'all') {
+      // Delete all payments across all months
+      const payDel = await client.query('DELETE FROM employee_payroll_payments');
+      deletedPaymentsCount = payDel.rowCount || 0;
+
+      // Delete all records across all months
+      const recDel = await client.query('DELETE FROM employee_payroll_records');
+      deletedRecordsCount = recDel.rowCount || 0;
+
+      // Record audit log entry
+      await recordSalaryAuditLog(client, {
+        action: 'ALL_SALARY_RECORDS_WIPED',
+        description: `${performedBy} wiped all salary records (${deletedRecordsCount} records, ${deletedPaymentsCount} payments) across all months`,
+        performed_by: performedBy
+      });
+
+      message = `Successfully deleted all ${deletedRecordsCount} salary records and ${deletedPaymentsCount} payments across all months.`;
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message,
+      scope,
+      month,
+      deleted_payments: deletedPaymentsCount,
+      deleted_records: deletedRecordsCount
     });
   } catch (err) {
     await client.query('ROLLBACK');
