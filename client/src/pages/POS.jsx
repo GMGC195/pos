@@ -701,7 +701,7 @@ export default function POS() {
   });
 
   // Cart computations
-  const subtotal = cart.reduce((sum, i) => sum + i.price * i.qty, 0)
+  const subtotal = cart.reduce((sum, i) => sum + (parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 0), 0)
   const tax = subtotal * TAX_RATE
   const total = subtotal + tax
 
@@ -723,7 +723,7 @@ export default function POS() {
       }
 
       const ex = prev.find(c => c.cartId === cartId)
-      if (ex) return prev.map(c => c.cartId === cartId ? { ...c, qty: c.qty + 1 } : c)
+      if (ex) return prev.map(c => c.cartId === cartId ? { ...c, qty: (parseInt(c.qty, 10) || 0) + 1 } : c)
       return [...prev, { ...item, cartId, name: finalName, price: finalPrice, qty: 1 }]
     })
     // Auto-open cart when item is added
@@ -737,10 +737,30 @@ export default function POS() {
   const updateQty = (cartId, delta) => {
     if (isManagement) return;
     setCart(prev => prev
-      .map(c => c.cartId === cartId ? { ...c, qty: c.qty + delta } : c)
-      .filter(c => c.qty > 0)
+      .map(c => c.cartId === cartId ? { ...c, qty: Math.max(0, (parseInt(c.qty, 10) || 0) + delta) } : c)
+      .filter(c => (parseInt(c.qty, 10) || 0) > 0)
     )
   }
+
+  const handleQtyChange = (cartId, val) => {
+    if (isManagement) return;
+    if (val === '') {
+      setCart(prev => prev.map(c => c.cartId === cartId ? { ...c, qty: '' } : c));
+      return;
+    }
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed) && parsed >= 0) {
+      setCart(prev => prev.map(c => c.cartId === cartId ? { ...c, qty: parsed } : c));
+    }
+  };
+
+  const handleQtyBlur = (cartId, currentQty) => {
+    if (isManagement) return;
+    const parsed = parseInt(currentQty, 10);
+    if (isNaN(parsed) || parsed < 1) {
+      setCart(prev => prev.map(c => c.cartId === cartId ? { ...c, qty: 1 } : c));
+    }
+  };
 
   // clearCart is now handled by POSContext
 
@@ -1579,7 +1599,7 @@ export default function POS() {
           </button>
           <button className="mobile-fab cart" onClick={() => setMobilePane(mobilePane === 'cart' ? 'none' : 'cart')}>
             <ShoppingCart size={24} />
-            {cart.reduce((s, c) => s + c.qty, 0) > 0 && <span className="cart-badge-dot">{cart.reduce((s, c) => s + c.qty, 0)}</span>}
+            {cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 0), 0) > 0 && <span className="cart-badge-dot">{cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 0), 0)}</span>}
           </button>
         </div>
 
@@ -1599,7 +1619,7 @@ export default function POS() {
             }}
           >
             <ShoppingCart size={20} />
-            {cart.reduce((s, c) => s + c.qty, 0) > 0 && <span className="cart-badge-dot" style={{ top: -4, right: -4 }}>{cart.reduce((s, c) => s + c.qty, 0)}</span>}
+            {cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 0), 0) > 0 && <span className="cart-badge-dot" style={{ top: -4, right: -4 }}>{cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 0), 0)}</span>}
           </button>
           <div className="active-orders-panel">
               <div className="active-orders-list" style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflow: 'hidden', padding: '8px 12px 12px' }}>
@@ -1704,7 +1724,7 @@ export default function POS() {
                   </span>
                 ) : 'Cart'}
               </h3>
-              <span className="cart-count" style={{ fontSize: 12, padding: '4px 8px' }}>{cart.reduce((s, c) => s + c.qty, 0)} items</span>
+              <span className="cart-count" style={{ fontSize: 12, padding: '4px 8px' }}>{cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 0), 0)} items</span>
             </div>
             {editingOrderId && (
               <div>
@@ -1752,11 +1772,36 @@ export default function POS() {
                     <p>{CURRENCY}{parseFloat(item.price).toFixed(2)} each</p>
                   </div>
                   <div className="qty-controls">
-                    <button className="qty-btn" disabled={isManagement} style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} onClick={() => updateQty(item.cartId, -1)}>−</button>
-                    <span className="qty-num">{item.qty}</span>
-                    <button className="qty-btn" disabled={isManagement} style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} onClick={() => updateQty(item.cartId, +1)}>+</button>
+                    <button 
+                      type="button"
+                      className="qty-btn" 
+                      disabled={isManagement} 
+                      style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} 
+                      onClick={() => updateQty(item.cartId, -1)}
+                      title="Decrease quantity"
+                    >−</button>
+                    <input 
+                      type="number"
+                      min="1"
+                      className="qty-input"
+                      disabled={isManagement}
+                      value={item.qty}
+                      onChange={(e) => handleQtyChange(item.cartId, e.target.value)}
+                      onBlur={(e) => handleQtyBlur(item.cartId, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                      onFocus={(e) => e.target.select()}
+                      title="Type quantity directly from keyboard"
+                    />
+                    <button 
+                      type="button"
+                      className="qty-btn" 
+                      disabled={isManagement} 
+                      style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} 
+                      onClick={() => updateQty(item.cartId, +1)}
+                      title="Increase quantity"
+                    >+</button>
                   </div>
-                  <span className="item-total">{CURRENCY}{(item.price * item.qty).toFixed(2)}</span>
+                  <span className="item-total">{CURRENCY}{((parseFloat(item.price) || 0) * (parseInt(item.qty, 10) || 0)).toFixed(2)}</span>
                   <button className="remove-btn" disabled={isManagement} style={isManagement ? { cursor: 'not-allowed', opacity: 0.5 } : {}} onClick={() => updateQty(item.cartId, -item.qty)}>✕</button>
                 </div>
               ))
@@ -1977,7 +2022,7 @@ export default function POS() {
                     <div style={{ borderTop: '1px dashed #ccc', margin: '12px 0' }} />
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Total Items</span>
-                      <span>{cart.reduce((s, c) => s + c.qty, 0)}</span>
+                      <span>{cart.reduce((s, c) => s + (parseInt(c.qty, 10) || 0), 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Subtotal</span>

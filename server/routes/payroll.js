@@ -285,8 +285,13 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       nextRecordsMap[r.employee_id] = r;
     });
 
-    // Get recurring adjustments
-    const recurringRes = await pool.query('SELECT * FROM employee_recurring_adjustments');
+    // Get recurring adjustments (only active for this month: started on or before this month, and not ended before this month)
+    const recurringRes = await pool.query(
+      `SELECT * FROM employee_recurring_adjustments 
+       WHERE TO_CHAR(COALESCE(start_date, created_at::date), 'YYYY-MM') <= $1 
+         AND (end_date IS NULL OR TO_CHAR(end_date, 'YYYY-MM') >= $1)`,
+      [month]
+    );
     const recurringMap = {};
     recurringRes.rows.forEach(r => {
       if (!recurringMap[r.employee_id]) recurringMap[r.employee_id] = [];
@@ -295,7 +300,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
 
     // Get financial adjustments (one-time) for the month
     const financialRes = await pool.query(
-      "SELECT * FROM employee_financial_adjustments WHERE TO_CHAR(date, 'YYYY-MM') = $1",
+      "SELECT * FROM employee_financial_adjustments WHERE TO_CHAR(COALESCE(date, created_at::date), 'YYYY-MM') = $1",
       [month]
     );
     const financialMap = {};
@@ -1913,10 +1918,19 @@ router.post('/advance/:employee_id', authenticateToken, isAdmin, async (req, res
 // GET recurring adjustments for an employee
 router.get('/recurring-adjustments/:employee_id', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM employee_recurring_adjustments WHERE employee_id = $1 ORDER BY created_at DESC',
-      [req.params.employee_id]
-    );
+    const { month } = req.query;
+    let query = 'SELECT * FROM employee_recurring_adjustments WHERE employee_id = $1';
+    const params = [req.params.employee_id];
+
+    if (month) {
+      params.push(month);
+      query += ` AND TO_CHAR(COALESCE(start_date, created_at::date), 'YYYY-MM') <= $2 
+                 AND (end_date IS NULL OR TO_CHAR(end_date, 'YYYY-MM') >= $2)`;
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1935,7 +1949,7 @@ router.post('/recurring-adjustments', authenticateToken, isAdmin, async (req, re
       `INSERT INTO employee_recurring_adjustments 
        (employee_id, type, custom_label, amount, amount_type, action_type, remaining_amount, start_date, notes) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [employee_id, type, custom_label, parseFloat(amount), amount_type || 'Fixed', action_type, remaining_amount ? parseFloat(remaining_amount) : null, start_date || new Date(), notes || '']
+      [employee_id, type, custom_label, parseFloat(amount), amount_type || 'Fixed', action_type, remaining_amount ? parseFloat(remaining_amount) : null, start_date || new Date().toISOString().split('T')[0], notes || '']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1956,13 +1970,14 @@ router.delete('/recurring-adjustments/:id', authenticateToken, isAdmin, async (r
 
 // PUT (Edit) recurring adjustment
 router.put('/recurring-adjustments/:id', authenticateToken, isAdmin, async (req, res) => {
-  const { custom_label, amount, action_type, remaining_amount, notes } = req.body;
+  const { custom_label, amount, action_type, remaining_amount, start_date, notes } = req.body;
   try {
     const result = await pool.query(
       `UPDATE employee_recurring_adjustments 
-       SET custom_label = $1, amount = $2, action_type = $3, remaining_amount = $4, notes = $5
-       WHERE id = $6 RETURNING *`,
-      [custom_label, parseFloat(amount), action_type, remaining_amount ? parseFloat(remaining_amount) : null, notes || '', req.params.id]
+       SET custom_label = $1, amount = $2, action_type = $3, remaining_amount = $4, notes = $5,
+           start_date = COALESCE($6, start_date)
+       WHERE id = $7 RETURNING *`,
+      [custom_label, parseFloat(amount), action_type, remaining_amount ? parseFloat(remaining_amount) : null, notes || '', start_date || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);
@@ -2160,10 +2175,39 @@ router.put('/adjustments/:id', authenticateToken, isAdmin, handlePutFinancialAdj
 // GET financial adjustments for an employee
 router.get('/adjustments/:employee_id', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM employee_financial_adjustments WHERE employee_id = $1 ORDER BY date DESC, created_at DESC',
-      [req.params.employee_id]
-    );
+    const { month } = req.query;
+    let query = 'SELECT * FROM employee_financial_adjustments WHERE employee_id = $1';
+    const params = [req.params.employee_id];
+
+    if (month) {
+      params.push(month);
+      query += ` AND TO_CHAR(COALESCE(date, created_at::date), 'YYYY-MM') = $2`;
+    }
+
+    query += ' ORDER BY date DESC, created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Alias for financial adjustments
+router.get('/financial-adjustments/:employee_id', authenticateToken, async (req, res) => {
+  try {
+    const { month } = req.query;
+    let query = 'SELECT * FROM employee_financial_adjustments WHERE employee_id = $1';
+    const params = [req.params.employee_id];
+
+    if (month) {
+      params.push(month);
+      query += ` AND TO_CHAR(COALESCE(date, created_at::date), 'YYYY-MM') = $2`;
+    }
+
+    query += ' ORDER BY date DESC, created_at DESC';
+
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2173,7 +2217,19 @@ router.get('/adjustments/:employee_id', authenticateToken, async (req, res) => {
 // GET recurring adjustments for an employee
 router.get('/recurring/:employee_id', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM employee_recurring_adjustments WHERE employee_id = $1 ORDER BY created_at DESC', [req.params.employee_id]);
+    const { month } = req.query;
+    let query = 'SELECT * FROM employee_recurring_adjustments WHERE employee_id = $1';
+    const params = [req.params.employee_id];
+
+    if (month) {
+      params.push(month);
+      query += ` AND TO_CHAR(COALESCE(start_date, created_at::date), 'YYYY-MM') <= $2 
+                 AND (end_date IS NULL OR TO_CHAR(end_date, 'YYYY-MM') >= $2)`;
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

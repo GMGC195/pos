@@ -117,12 +117,20 @@ export default function Payroll() {
       return getLastMonth()
     }
   })
-  const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail'
+  const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail' (always defaults to sheet on full page reload)
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('ALL') // 'ALL' | 'R1' | 'R2' | 'R3'
-  const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(null)
+  const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('payroll_selected_emp_id');
+      return saved ? Number(saved) : null;
+    } catch {
+      return null;
+    }
+  })
   const [showEmpModal, setShowEmpModal] = useState(false)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
   const [mobileSheetViewMode, setMobileSheetViewMode] = useState('cards') // 'cards' | 'table'
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     if (selectedMonth) {
@@ -131,6 +139,14 @@ export default function Payroll() {
       } catch (e) {}
     }
   }, [selectedMonth])
+
+  useEffect(() => {
+    if (selectedDetailEmpId) {
+      try {
+        sessionStorage.setItem('payroll_selected_emp_id', String(selectedDetailEmpId))
+      } catch (e) {}
+    }
+  }, [selectedDetailEmpId])
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768)
@@ -350,14 +366,44 @@ export default function Payroll() {
     }
   }
 
-  const handleManualRefresh = () => {
-    if (selectedMonth) {
-      try {
-        sessionStorage.setItem('payroll_selected_month', selectedMonth);
-      } catch (e) {}
+  const handleRefreshSheet = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadInitialData(),
+        loadPayroll(false)
+      ]);
+      toast.success('Sheet data refreshed successfully');
+    } catch (err) {
+      console.error('Refresh sheet error:', err);
+      toast.error('Failed to refresh sheet data');
+    } finally {
+      setRefreshing(false);
     }
-    window.location.reload();
-  }
+  };
+
+  const handleRefreshDetail = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadInitialData(),
+        loadPayroll(false)
+      ]);
+      const activeId = selectedDetailEmpId || selectedEmployeeForModal?.id;
+      if (activeId) {
+        await loadEmpAdjs(activeId, selectedMonth);
+      }
+      toast.success('Employee detail refreshed successfully');
+    } catch (err) {
+      console.error('Refresh detail error:', err);
+      toast.error('Failed to refresh employee detail');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Backwards-compatible alias
+  const handleManualRefresh = handleRefreshSheet;
 
   // Load employees
   const loadInitialData = async () => {
@@ -386,8 +432,9 @@ export default function Payroll() {
 
   useEffect(() => {
     loadPayroll()
-    if (selectedEmployeeForModal) {
-      loadEmpAdjs(selectedEmployeeForModal.id)
+    const activeEmpId = selectedDetailEmpId || selectedEmployeeForModal?.id;
+    if (activeEmpId) {
+      loadEmpAdjs(activeEmpId, selectedMonth);
     }
   }, [selectedMonth])
 
@@ -988,32 +1035,34 @@ export default function Payroll() {
 
   // ================= Employee Detail Modal Functions =================
 
-  const loadEmpAdjs = async (empId) => {
-    setLoadingAdjs(true)
+  const loadEmpAdjs = async (empId, month = selectedMonth) => {
+    if (!empId) return;
+    setLoadingAdjs(true);
     try {
+      const monthParam = month ? `?month=${month}` : '';
       const [recRes, oneRes] = await Promise.all([
-        axios.get(`/api/payroll/recurring-adjustments/${empId}`),
-        axios.get(`/api/payroll/adjustments/${empId}`)
-      ])
-      setEmpRecurringAdjs(recRes.data || [])
-      setEmpOneTimeAdjs(oneRes.data || [])
-      setLoadedEmpId(empId)
+        axios.get(`/api/payroll/recurring-adjustments/${empId}${monthParam}`),
+        axios.get(`/api/payroll/adjustments/${empId}${monthParam}`)
+      ]);
+      setEmpRecurringAdjs(recRes.data || []);
+      setEmpOneTimeAdjs(oneRes.data || []);
+      setLoadedEmpId(empId);
     } catch (err) {
-      console.error(err)
+      console.error(err);
     } finally {
-      setLoadingAdjs(false)
+      setLoadingAdjs(false);
     }
-  }
+  };
 
   const openEmployeeModal = (empRow) => {
-    setSelectedEmployeeForModal(empRow)
-    setSelectedDetailEmpId(empRow.id)
-    setLoadedEmpId(null)
-    setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '')
-    resetAdjForm()
-    loadEmpAdjs(empRow.id)
-    setShowEmpModal(true)
-  }
+    setSelectedEmployeeForModal(empRow);
+    setSelectedDetailEmpId(empRow.id);
+    setLoadedEmpId(null);
+    setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '');
+    resetAdjForm();
+    loadEmpAdjs(empRow.id, selectedMonth);
+    setShowEmpModal(true);
+  };
 
   const handleSelectDetailEmp = (empRow) => {
     if (!empRow) {
@@ -1027,8 +1076,8 @@ export default function Payroll() {
     setLoadedEmpId(null);
     setModalBaseSalary(empRow.base_salary !== undefined ? String(empRow.base_salary) : '');
     resetAdjForm();
-    loadEmpAdjs(empRow.id);
-  }
+    loadEmpAdjs(empRow.id, selectedMonth);
+  };
 
   const resetAdjForm = () => {
     setEditingAdjId(null)
@@ -1538,8 +1587,19 @@ export default function Payroll() {
   // Synchronize employee adjustment totals and breakdown across state immediately
   const updateEmployeeAdjustmentsState = (empId, nextRecurring, nextOneTime) => {
     const numEmpId = Number(empId);
-    const empRec = (nextRecurring || empRecurringAdjs).filter(a => Number(a.employee_id) === numEmpId);
-    const empOne = (nextOneTime || empOneTimeAdjs).filter(a => Number(a.employee_id) === numEmpId);
+    const empRec = (nextRecurring || empRecurringAdjs).filter(a => {
+      if (Number(a.employee_id) !== numEmpId) return false;
+      const startM = a.start_date ? String(a.start_date).substring(0, 7) : (a.created_at ? String(a.created_at).substring(0, 7) : null);
+      if (startM && startM > selectedMonth) return false;
+      const endM = a.end_date ? String(a.end_date).substring(0, 7) : null;
+      if (endM && endM < selectedMonth) return false;
+      return true;
+    });
+    const empOne = (nextOneTime || empOneTimeAdjs).filter(a => {
+      if (Number(a.employee_id) !== numEmpId) return false;
+      const adjMonth = a.date ? String(a.date).substring(0, 7) : (a.created_at ? String(a.created_at).substring(0, 7) : null);
+      return !adjMonth || adjMonth === selectedMonth;
+    });
 
     const given = [
       ...empRec.filter(a => a.action_type === 'Give' || a.action_type === 'Add'),
@@ -1685,12 +1745,12 @@ export default function Payroll() {
       }
 
       // Fully await refreshing both employee adjustments and payroll calculations
-      await loadEmpAdjs(currentEmpData.id);
+      await loadEmpAdjs(currentEmpData.id, selectedMonth);
       await loadPayroll(true);
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to save adjustment';
       toast.error(errorMsg);
-      await loadEmpAdjs(currentEmpData.id);
+      await loadEmpAdjs(currentEmpData.id, selectedMonth);
       await loadPayroll(true);
     } finally {
       setSavingCustomAdj(false);
@@ -1743,7 +1803,7 @@ export default function Payroll() {
         await loadPayroll(true);
       } else {
         if (currentEmpData) {
-          await loadEmpAdjs(currentEmpData.id);
+          await loadEmpAdjs(currentEmpData.id, selectedMonth);
         }
         await loadPayroll(true);
       }
@@ -1751,7 +1811,7 @@ export default function Payroll() {
       const errorMsg = err.response?.data?.error || err.message || 'Failed to delete';
       toast.error(errorMsg);
       if (type !== 'Adjustment Column' && currentEmpData) {
-        await loadEmpAdjs(currentEmpData.id);
+        await loadEmpAdjs(currentEmpData.id, selectedMonth);
         await loadPayroll(true);
       }
     }
@@ -1830,8 +1890,19 @@ export default function Payroll() {
 
     const targetEmpId = Number(targetEmpData.id);
     const isThisEmpLoaded = loadedEmpId === targetEmpId;
-    const empRec = empRecurringAdjs.filter(a => Number(a.employee_id) === targetEmpId);
-    const empOne = empOneTimeAdjs.filter(a => Number(a.employee_id) === targetEmpId);
+    const empRec = empRecurringAdjs.filter(a => {
+      if (Number(a.employee_id) !== targetEmpId) return false;
+      const startM = a.start_date ? String(a.start_date).substring(0, 7) : (a.created_at ? String(a.created_at).substring(0, 7) : null);
+      if (startM && startM > selectedMonth) return false;
+      const endM = a.end_date ? String(a.end_date).substring(0, 7) : null;
+      if (endM && endM < selectedMonth) return false;
+      return true;
+    });
+    const empOne = empOneTimeAdjs.filter(a => {
+      if (Number(a.employee_id) !== targetEmpId) return false;
+      const adjMonth = a.date ? String(a.date).substring(0, 7) : (a.created_at ? String(a.created_at).substring(0, 7) : null);
+      return !adjMonth || adjMonth === selectedMonth;
+    });
 
     const givenAdjs = [
       ...empRec.filter(a => a.action_type === 'Give' || a.action_type === 'Add').map(a => ({ ...a, repetition: 'Repeated Monthly' })),
@@ -2374,17 +2445,24 @@ export default function Payroll() {
 
                     {/* Right: Paid & Remaining Badges */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: isMobile ? '0' : 'auto' }}>
-                      {/* Paid Badge */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: 800, color: '#059669' }}>Paid:</label>
+                      {/* Salary Paid Badge */}
+                      <div style={{ 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: '6px',
+                        padding: '6px 12px',
+                        borderRadius: '6px', 
+                        background: '#16a34a', 
+                        color: '#fff',
+                        boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                        border: 'none',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        <span style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.3px', color: '#fff' }}>Salary Paid:</span>
                         <span style={{ 
                           fontSize: '12px', 
-                          fontWeight: 800, 
-                          padding: '4px 10px', 
-                          borderRadius: '6px', 
-                          background: '#ecfdf5', 
-                          color: '#059669',
-                          border: '1.5px solid #a7f3d0'
+                          fontWeight: 900, 
+                          color: '#fff'
                         }}>
                           {CURRENCY} {totalPaid.toFixed(2)}
                         </span>
@@ -3390,40 +3468,68 @@ export default function Payroll() {
                 <Settings size={15} />
                 Manage Columns
               </button>
-              <button 
-                onClick={handleSaveAll}
-                disabled={savingAll}
-                className="btn btn-primary"
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(244, 180, 0, 0.2)', whiteSpace: 'nowrap' }}
-              >
-                <Save size={15} />
-                {savingAll ? 'Saving...' : 'Save All'}
-              </button>
+              {viewMode === 'sheet' && (
+                <button 
+                  onClick={handleSaveAll}
+                  disabled={savingAll}
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(244, 180, 0, 0.2)', whiteSpace: 'nowrap' }}
+                >
+                  <Save size={15} />
+                  {savingAll ? 'Saving...' : 'Save All'}
+                </button>
+              )}
             </>
           )}
 
-          {/* 5. Refresh Button (Icon Only - After Save All) */}
-          <button 
-            type="button"
-            onClick={handleManualRefresh}
-            title="Refresh Page"
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              width: '36px', 
-              height: '36px', 
-              borderRadius: '8px', 
-              background: 'var(--surface-2)', 
-              color: 'var(--text-primary)', 
-              border: 'none', 
-              cursor: 'pointer', 
-              transition: 'all 0.2s', 
-              flexShrink: 0
-            }}
-          >
-            <RefreshCw size={16} />
-          </button>
+          {/* 5. Separate Refresh Button: Sheet View vs Detail View */}
+          {viewMode === 'sheet' ? (
+            <button 
+              type="button"
+              onClick={handleRefreshSheet}
+              disabled={refreshing || loading}
+              title="Refresh Sheet View"
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                width: '36px', 
+                height: '36px', 
+                borderRadius: '8px', 
+                background: 'var(--surface-2)', 
+                color: 'var(--text-primary)', 
+                border: 'none', 
+                cursor: (refreshing || loading) ? 'not-allowed' : 'pointer', 
+                transition: 'all 0.2s', 
+                flexShrink: 0
+              }}
+            >
+              <RefreshCw size={16} className={(refreshing || loading) ? 'spin' : ''} />
+            </button>
+          ) : (
+            <button 
+              type="button"
+              onClick={handleRefreshDetail}
+              disabled={refreshing || loading}
+              title="Refresh Detail View"
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                width: '36px', 
+                height: '36px', 
+                borderRadius: '8px', 
+                background: 'var(--surface-2)', 
+                color: 'var(--text-primary)', 
+                border: 'none', 
+                cursor: (refreshing || loading) ? 'not-allowed' : 'pointer', 
+                transition: 'all 0.2s', 
+                flexShrink: 0
+              }}
+            >
+              <RefreshCw size={16} className={(refreshing || loading) ? 'spin' : ''} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -4360,15 +4466,40 @@ export default function Payroll() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '6px' }}>
-                    <CalendarDays size={14} style={{ color: 'var(--primary, #d97706)' }} />
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Month:</span>
-                    <input 
-                      type="month"
-                      value={selectedMonth}
-                      onChange={e => setSelectedMonth(e.target.value)}
-                      style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
-                    />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '6px' }}>
+                      <CalendarDays size={14} style={{ color: 'var(--primary, #d97706)' }} />
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Month:</span>
+                      <input 
+                        type="month"
+                        value={selectedMonth}
+                        onChange={e => setSelectedMonth(e.target.value)}
+                        style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRefreshDetail}
+                      disabled={refreshing || loading}
+                      title="Refresh Employee Detail"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #cbd5e1',
+                        background: '#f1f5f9',
+                        color: '#334155',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: (refreshing || loading) ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <RefreshCw size={12} className={(refreshing || loading) ? 'spin' : ''} />
+                      Refresh
+                    </button>
                   </div>
                 </div>
 
