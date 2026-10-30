@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react'
 import axios from '../api'
 import { 
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
-  TrendingUp, Search, RefreshCw, X, AlertTriangle, FileText, Percent, 
+  TrendingUp, Search, RefreshCw, X, AlertTriangle, AlertCircle, FileText, Percent, 
   CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock,
-  Table, Unlock, RotateCcw, ArrowRightCircle
+  Table, Unlock, RotateCcw, ArrowRightCircle, CreditCard
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
@@ -246,6 +246,7 @@ export default function Payroll() {
   const [activeInlineForm, setActiveInlineForm] = useState(null) // 'give' | 'deduct' | null
   const [savingCarryForwardId, setSavingCarryForwardId] = useState(null)
   const [carryForwardModal, setCarryForwardModal] = useState({ isOpen: false, emp: null, amount: null })
+  const [mobilePayModal, setMobilePayModal] = useState({ isOpen: false, emp: null, cash: '', bank: '' })
   const [overpaymentModal, setOverpaymentModal] = useState({
     isOpen: false,
     empId: null,
@@ -712,7 +713,7 @@ export default function Payroll() {
       if (rem > 0) {
         cashVal = rem;
       } else {
-        toast.info('Please enter an amount in Cash or Bank to pay.');
+        toast('Please enter an amount in Cash or Bank to pay.', { icon: 'ℹ️' });
         return;
       }
     }
@@ -738,6 +739,37 @@ export default function Payroll() {
       return;
     }
 
+    await executePayment(empId, cashVal, bankVal);
+  };
+
+  const handleOpenMobilePay = (emp) => {
+    if (!emp) return;
+    const cash = parseFloat(emp.cash_paid || 0);
+    const bank = parseFloat(emp.bank_paid || 0);
+    const totalPaid = Math.round((cash + bank) * 100) / 100;
+    const net = parseFloat(emp.net_salary || 0);
+    const rem = Math.round((net - totalPaid) * 100) / 100;
+
+    setMobilePayModal({
+      isOpen: true,
+      emp,
+      cash: rem > 0 ? String(rem) : '0',
+      bank: '0'
+    });
+  };
+
+  const handleConfirmMobilePay = async () => {
+    if (!mobilePayModal.emp) return;
+    const empId = mobilePayModal.emp.id;
+    const cashVal = parseFloat(mobilePayModal.cash || 0);
+    const bankVal = parseFloat(mobilePayModal.bank || 0);
+
+    if (cashVal <= 0 && bankVal <= 0) {
+      toast('Please enter an amount in Cash or Card / Bank to pay.', { icon: 'ℹ️' });
+      return;
+    }
+
+    setMobilePayModal({ isOpen: false, emp: null, cash: '', bank: '' });
     await executePayment(empId, cashVal, bankVal);
   };
 
@@ -940,7 +972,7 @@ export default function Payroll() {
         });
 
         if (rowsToSave.length === 0) {
-          toast.info('No editable records to save.');
+          toast('No editable records to save.', { icon: 'ℹ️' });
           setSavingAll(false);
           return;
         }
@@ -1136,32 +1168,59 @@ export default function Payroll() {
   // Carry Forward Remaining Salary to Next Month (Opens Confirmation Modal)
   const handleCarryForward = (emp) => {
     if (!emp) return;
-    const cash = parseFloat(emp.cash_paid || 0);
-    const bank = parseFloat(emp.bank_paid || 0);
+
+    // Determine actual paid amount
+    const empPayments = emp.payments || [];
+    let cash = 0;
+    let bank = 0;
+    if (empPayments.length > 0) {
+      cash = empPayments
+        .filter(p => (p.payment_method || '').toLowerCase() === 'cash')
+        .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+      bank = empPayments
+        .filter(p => (p.payment_method || '').toLowerCase() === 'bank')
+        .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    } else if (emp.status === 'Paid') {
+      cash = parseFloat(emp.cash_paid || 0);
+      bank = parseFloat(emp.bank_paid || 0);
+    } else {
+      // For pending employees without recorded payments:
+      // Check if user has entered explicit cash/bank in payInputs
+      const enteredCash = payInputs[emp.id]?.cash;
+      const enteredBank = payInputs[emp.id]?.bank;
+      if (enteredCash !== undefined && enteredCash !== '') {
+        cash = parseFloat(enteredCash) || 0;
+      }
+      if (enteredBank !== undefined && enteredBank !== '') {
+        bank = parseFloat(enteredBank) || 0;
+      }
+    }
     const totalPaid = Math.round((cash + bank) * 100) / 100;
-    const netSalary = parseFloat(emp.net_salary || 0);
+
+    const baseSal = parseFloat(emp.base_salary || 0);
+    const payableSal = parseFloat(emp.payable_salary !== undefined ? emp.payable_salary : (baseSal - parseFloat(emp.deductions || 0)));
+    const totalAdj = calculateTotalAdjustments ? calculateTotalAdjustments(emp) : parseFloat(emp.total_adjustments || 0);
+    const fallbackNet = Math.round((payableSal + totalAdj) * 100) / 100;
+    const netSalary = (emp.net_salary !== undefined && emp.net_salary !== null) ? parseFloat(emp.net_salary) : fallbackNet;
     const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
 
     if (remaining === 0) {
-      toast.info('No remaining balance to carry forward for this employee.');
+      toast(`No remaining balance to carry forward for this employee (Remaining: ${CURRENCY} 0.00).`, { icon: 'ℹ️' });
       return;
     }
 
     // Modal directly uses calculated remaining amount - non editable
-    setCarryForwardModal({ isOpen: true, emp, amount: remaining });
+    setCarryForwardModal({ isOpen: true, emp, amount: remaining, cash, bank });
   };
 
   const executeCarryForwardFromModal = async () => {
     const emp = carryForwardModal.emp;
     if (!emp || savingCarryForwardId) return; // Prevent duplicate clicks
-    const cash = parseFloat(emp.cash_paid || 0);
-    const bank = parseFloat(emp.bank_paid || 0);
-    const totalPaid = Math.round((cash + bank) * 100) / 100;
-    const netSalary = parseFloat(emp.net_salary || 0);
-    const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
-
-    // Strict validation: amount must be exactly remaining
-    const carryAmount = remaining;
+    const cash = carryForwardModal.cash !== undefined ? carryForwardModal.cash : parseFloat(emp.cash_paid || 0);
+    const bank = carryForwardModal.bank !== undefined ? carryForwardModal.bank : parseFloat(emp.bank_paid || 0);
+    const carryAmount = (carryForwardModal.amount !== undefined && carryForwardModal.amount !== null && !isNaN(parseFloat(carryForwardModal.amount)))
+      ? parseFloat(carryForwardModal.amount)
+      : (Math.round((parseFloat(emp.net_salary || 0) - (cash + bank)) * 100) / 100);
 
     const [year, monthNum] = selectedMonth.split('-').map(Number);
     let nextYear = year;
@@ -2239,40 +2298,37 @@ export default function Payroll() {
                       background: '#ffffff',
                       border: '1.5px solid #e2e8f0',
                       borderRadius: '8px',
-                      padding: '8px 12px',
-                      marginBottom: '4px'
+                      padding: isMobile ? '8px 10px' : '8px 12px',
+                      marginBottom: '8px'
                     }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                         <span style={{ fontSize: '11px', fontWeight: 800, color: '#334155', display: 'flex', alignItems: 'center', gap: '5px' }}>
                           <Clock size={13} color="#0284c7" />
                           Payment History / Installments ({targetEmpData.payments.length})
                         </span>
                       </div>
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                          <thead>
-                            <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'left', borderBottom: '1.5px solid #e2e8f0' }}>
-                              <th style={{ padding: '5px 8px', fontWeight: 700, width: '25px' }}>#</th>
-                              <th style={{ padding: '5px 8px', fontWeight: 700 }}>Date & Time</th>
-                              <th style={{ padding: '5px 8px', fontWeight: 700 }}>Paid By</th>
-                              <th style={{ padding: '5px 8px', fontWeight: 700 }}>Method</th>
-                              <th style={{ padding: '5px 8px', fontWeight: 700, textAlign: 'right' }}>Amount</th>
-                              {!isRowLocked && <th style={{ padding: '5px 8px', textAlign: 'center', width: '30px' }}></th>}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {targetEmpData.payments.map((p, idx) => (
-                              <tr key={p.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '5px 8px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
-                                <td style={{ padding: '5px 8px', color: '#1e293b', fontWeight: 600 }}>
-                                  {new Date(p.created_at).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                </td>
-                                <td style={{ padding: '5px 8px', color: '#0369a1', fontWeight: 700 }}>
-                                  {p.paid_by || 'Admin'}
-                                </td>
-                                <td style={{ padding: '5px 8px' }}>
+
+                      {isMobile ? (
+                        /* Mobile Responsive View - Cards without horizontal scroll */
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {targetEmpData.payments.map((p, idx) => (
+                            <div 
+                              key={p.id || idx} 
+                              style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center', 
+                                padding: '8px 10px', 
+                                background: '#f8fafc', 
+                                borderRadius: '6px', 
+                                border: '1px solid #e2e8f0' 
+                              }}
+                            >
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
+                                  <span style={{ fontSize: '10px', fontWeight: 800, color: '#64748b' }}>#{idx + 1}</span>
                                   <span style={{
-                                    padding: '2px 7px',
+                                    padding: '1px 6px',
                                     borderRadius: '4px',
                                     fontWeight: 700,
                                     fontSize: '10px',
@@ -2282,49 +2338,136 @@ export default function Payroll() {
                                   }}>
                                     {p.payment_method}
                                   </span>
-                                </td>
-                                <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 800, color: '#059669' }}>
-                                  {CURRENCY} {parseFloat(p.amount || 0).toFixed(2)}
-                                </td>
-                                {!isRowLocked && (
-                                  <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeletePayment(p.id, targetEmpData.id)}
-                                      title="Delete this payment entry"
-                                      style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
-                                      onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
-                                      onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </td>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot>
-                            <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '1.5px solid #cbd5e1' }}>
-                              <td colSpan={3} style={{ padding: '6px 8px', color: '#334155' }}>
-                                Total Summary:
-                              </td>
-                              <td colSpan={!isRowLocked ? 3 : 2} style={{ padding: '6px 8px', textAlign: 'right' }}>
-                                <div style={{ display: 'inline-flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end', fontSize: '11px' }}>
-                                  <span style={{ color: '#0369a1' }}>
-                                    Total Cash: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'cash').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
-                                  </span>
-                                  <span style={{ color: '#4338ca' }}>
-                                    Total Bank: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'bank').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
-                                  </span>
-                                  <span style={{ color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '4px', border: '1px solid #a7f3d0' }}>
-                                    Total Paid Sum: <b>{CURRENCY} {targetEmpData.payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
-                                  </span>
+                                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#0369a1' }}>{p.paid_by || 'Admin'}</span>
                                 </div>
-                              </td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
+                                <div style={{ fontSize: '10px', color: '#64748b' }}>
+                                  {new Date(p.created_at).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '12px', fontWeight: 900, color: '#059669', whiteSpace: 'nowrap' }}>
+                                  {CURRENCY} {parseFloat(p.amount || 0).toFixed(2)}
+                                </span>
+                                {!isRowLocked && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeletePayment(p.id, targetEmpData.id)}
+                                    title="Delete this payment entry"
+                                    style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '3px' }}
+                                    onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                                    onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+
+                          {/* Mobile Summary */}
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '4px',
+                            padding: '6px 8px',
+                            background: '#f1f5f9',
+                            borderRadius: '6px',
+                            marginTop: '2px',
+                            fontSize: '10px'
+                          }}>
+                            <span style={{ color: '#0369a1', fontWeight: 700 }}>
+                              Cash: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'cash').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                            </span>
+                            <span style={{ color: '#4338ca', fontWeight: 700 }}>
+                              Bank: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'bank').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                            </span>
+                            <span style={{ color: '#059669', fontWeight: 800, background: '#ecfdf5', padding: '2px 6px', borderRadius: '4px', border: '1px solid #a7f3d0' }}>
+                              Total: <b>{CURRENCY} {targetEmpData.payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Desktop View - Table */
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                            <thead>
+                              <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'left', borderBottom: '1.5px solid #e2e8f0' }}>
+                                <th style={{ padding: '5px 8px', fontWeight: 700, width: '25px' }}>#</th>
+                                <th style={{ padding: '5px 8px', fontWeight: 700 }}>Date & Time</th>
+                                <th style={{ padding: '5px 8px', fontWeight: 700 }}>Paid By</th>
+                                <th style={{ padding: '5px 8px', fontWeight: 700 }}>Method</th>
+                                <th style={{ padding: '5px 8px', fontWeight: 700, textAlign: 'right' }}>Amount</th>
+                                {!isRowLocked && <th style={{ padding: '5px 8px', textAlign: 'center', width: '30px' }}></th>}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {targetEmpData.payments.map((p, idx) => (
+                                <tr key={p.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '5px 8px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
+                                  <td style={{ padding: '5px 8px', color: '#1e293b', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                    {new Date(p.created_at).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', color: '#0369a1', fontWeight: 700 }}>
+                                    {p.paid_by || 'Admin'}
+                                  </td>
+                                  <td style={{ padding: '5px 8px' }}>
+                                    <span style={{
+                                      padding: '2px 7px',
+                                      borderRadius: '4px',
+                                      fontWeight: 700,
+                                      fontSize: '10px',
+                                      background: (p.payment_method || '').toLowerCase() === 'cash' ? '#ecfdf5' : '#e0e7ff',
+                                      color: (p.payment_method || '').toLowerCase() === 'cash' ? '#059669' : '#4338ca',
+                                      border: '1px solid ' + ((p.payment_method || '').toLowerCase() === 'cash' ? '#a7f3d0' : '#c7d2fe')
+                                    }}>
+                                      {p.payment_method}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 800, color: '#059669', whiteSpace: 'nowrap' }}>
+                                    {CURRENCY} {parseFloat(p.amount || 0).toFixed(2)}
+                                  </td>
+                                  {!isRowLocked && (
+                                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeletePayment(p.id, targetEmpData.id)}
+                                        title="Delete this payment entry"
+                                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
+                                        onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                                        onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </td>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '1.5px solid #cbd5e1' }}>
+                                <td colSpan={3} style={{ padding: '6px 8px', color: '#334155' }}>
+                                  Total Summary:
+                                </td>
+                                <td colSpan={!isRowLocked ? 3 : 2} style={{ padding: '6px 8px', textAlign: 'right' }}>
+                                  <div style={{ display: 'inline-flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end', fontSize: '11px' }}>
+                                    <span style={{ color: '#0369a1' }}>
+                                      Total Cash: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'cash').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                                    </span>
+                                    <span style={{ color: '#4338ca' }}>
+                                      Total Bank: <b>{CURRENCY} {targetEmpData.payments.filter(p => (p.payment_method || '').toLowerCase() === 'bank').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                                    </span>
+                                    <span style={{ color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '4px', border: '1px solid #a7f3d0' }}>
+                                      Total Paid Sum: <b>{CURRENCY} {targetEmpData.payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}</b>
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2441,6 +2584,66 @@ export default function Payroll() {
                         <Printer size={13} style={{ color: '#0284c7' }} />
                         <span>Print</span>
                       </button>
+
+                      {/* Carry Forward Button / Badge */}
+                      {parseFloat(targetEmpData.carried_forward_to_next || 0) !== 0 ? (
+                        <div style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          background: '#fff7ed',
+                          color: '#c2410c',
+                          border: '1.5px solid #fed7aa',
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: 800,
+                          whiteSpace: 'nowrap'
+                        }}
+                        title={`Already carried forward: ${CURRENCY} ${parseFloat(targetEmpData.carried_forward_to_next).toFixed(2)}`}
+                        >
+                          <ArrowRightCircle size={13} color="#ea580c" />
+                          <span>➔ Fwd: {parseFloat(targetEmpData.carried_forward_to_next).toFixed(2)}</span>
+                        </div>
+                      ) : showActions && (
+                        <button
+                          type="button"
+                          disabled={savingCarryForwardId === targetEmpData.id}
+                          onClick={() => {
+                            if (isRowLocked) {
+                              setUnlockPromptEmp(targetEmpData);
+                            } else {
+                              handleCarryForward(targetEmpData);
+                            }
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            background: '#fff7ed',
+                            border: '1.5px solid #fdba74',
+                            color: '#c2410c',
+                            cursor: 'pointer',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                            whiteSpace: 'nowrap',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title={
+                            isRowLocked 
+                              ? "Record is locked. Click to unlock and carry forward."
+                              : rem === 0 
+                                ? "Carry Forward (Remaining is 0.00)" 
+                                : `Carry forward remaining balance of ${CURRENCY} ${rem.toFixed(2)} to next month`
+                          }
+                        >
+                          {savingCarryForwardId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <ArrowRightCircle size={13} />}
+                          <span>Carry Forward</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Right: Paid & Remaining Badges */}
@@ -2486,7 +2689,7 @@ export default function Payroll() {
                     </div>
                   </div>
 
-                  {/* ROW 2: Carry Forward (Amount Input + Button) ---> Status + Save Record / Locked */}
+                  {/* ROW 2: Settlement Notice ---> Status + Unlock Action */}
                   <div style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -2496,43 +2699,17 @@ export default function Payroll() {
                     paddingTop: '8px',
                     borderTop: '1px solid #e2e8f0'
                   }}>
-                    {/* Left: Carry Forward Controls */}
+                    {/* Left: Settlement / Unpaid Notice */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      {rem !== 0 && showActions && !isRowLocked ? (
-                        <button
-                          type="button"
-                          disabled={savingCarryForwardId === targetEmpData.id}
-                          onClick={() => handleCarryForward(targetEmpData)}
-                          style={{
-                            padding: '6px 14px',
-                            borderRadius: '6px',
-                            fontSize: '12px',
-                            fontWeight: 800,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            background: '#fff7ed',
-                            border: '1.5px solid #fdba74',
-                            color: '#c2410c',
-                            cursor: 'pointer',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                            whiteSpace: 'nowrap',
-                            transition: 'all 0.15s ease'
-                          }}
-                          title={`Carry forward remaining balance of ${CURRENCY} ${rem.toFixed(2)} to next month`}
-                        >
-                          {savingCarryForwardId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <ArrowRightCircle size={13} />}
-                          <span>Carry Forward</span>
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: rem === 0 ? '#059669' : '#64748b' }}>
-                          {parseFloat(targetEmpData.carried_forward_to_next || 0) !== 0 
-                            ? '✓ Balance carried forward to next month' 
-                            : rem === 0 
-                              ? '✓ Salary fully paid / Settled' 
-                              : (isRowLocked ? '🔒 Record is locked' : '')}
-                        </span>
-                      )}
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: rem === 0 ? '#059669' : rem > 0 ? '#ea580c' : '#0284c7' }}>
+                        {parseFloat(targetEmpData.carried_forward_to_next || 0) !== 0 
+                          ? '✓ Balance carried forward to next month' 
+                          : rem === 0 
+                            ? '✓ Salary fully paid / Settled' 
+                            : (rem > 0 
+                                ? `Unpaid balance remaining: ${CURRENCY} ${rem.toFixed(2)}` 
+                                : `Overpayment balance: ${CURRENCY} ${Math.abs(rem).toFixed(2)}`)}
+                      </span>
                     </div>
 
                     {/* Right: Auto-calculated Status Badge + Locked Action (Save Record removed as actions auto-persist) */}
@@ -3631,18 +3808,31 @@ export default function Payroll() {
                     </div>
 
                     {/* Financial Summary */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', background: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px', background: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '8px', textAlign: 'center' }}>
                       <div>
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Salary</div>
-                        <div style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>{CURRENCY} {item.base_salary || 0}</div>
+                        <div style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b', whiteSpace: 'nowrap' }}>{Number(item.base_salary || 0).toFixed(2)}</div>
                       </div>
                       <div>
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Payable</div>
-                        <div style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626' }}>{CURRENCY} {Number(item.payable_salary !== undefined ? item.payable_salary : (item.base_salary - (item.deductions || 0))).toFixed(2)}</div>
+                        <div style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626', whiteSpace: 'nowrap' }}>{Number(item.payable_salary !== undefined ? item.payable_salary : (item.base_salary - (item.deductions || 0))).toFixed(2)}</div>
                       </div>
                       <div>
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#047857', textTransform: 'uppercase' }}>Net Pay</div>
-                        <div style={{ fontSize: '13px', fontWeight: 900, color: '#059669' }}>{CURRENCY} {Number(item.net_salary || 0).toFixed(2)}</div>
+                        <div style={{ fontSize: '12px', fontWeight: 900, color: '#059669', whiteSpace: 'nowrap' }}>{Number(item.net_salary || 0).toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '9px', fontWeight: 700, color: '#059669', textTransform: 'uppercase' }}>Total Paid</div>
+                        {(() => {
+                          const cash = parseFloat(item.cash_paid || 0);
+                          const bank = parseFloat(item.bank_paid || 0);
+                          const totalPaid = Math.round((cash + bank) * 100) / 100;
+                          return (
+                            <div style={{ fontSize: '12px', fontWeight: 900, color: '#16a34a', whiteSpace: 'nowrap' }}>
+                              {totalPaid.toFixed(2)}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div>
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#c2410c', textTransform: 'uppercase' }}>Remaining</div>
@@ -3652,8 +3842,8 @@ export default function Payroll() {
                           const totalPaid = Math.round((cash + bank) * 100) / 100;
                           const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
                           return (
-                            <div style={{ fontSize: '13px', fontWeight: 900, color: rem > 0 ? '#ea580c' : rem < 0 ? '#0284c7' : '#16a34a' }}>
-                              {CURRENCY} {rem.toFixed(2)}
+                            <div style={{ fontSize: '12px', fontWeight: 900, color: rem > 0 ? '#ea580c' : rem < 0 ? '#0284c7' : '#16a34a', whiteSpace: 'nowrap' }}>
+                              {rem.toFixed(2)}
                             </div>
                           );
                         })()}
@@ -3670,7 +3860,7 @@ export default function Payroll() {
                           }}
                           style={{ fontSize: '11px', fontWeight: 700, color: 'var(--primary-dark, #b45309)', background: '#fef3c7', border: '1px solid #fde68a', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer' }}
                         >
-                          View / Edit Adjustments →
+                          View / Edit
                         </button>
                         <button
                           type="button"
@@ -3683,12 +3873,33 @@ export default function Payroll() {
                       </div>
                       {showActions && (
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          {/* Carry Forward Badge or Button */}
                           {(() => {
+                            const carried = parseFloat(item.carried_forward_to_next || 0);
+                            if (carried > 0) {
+                              return (
+                                <span 
+                                  style={{ 
+                                    fontSize: '10px', 
+                                    fontWeight: 800, 
+                                    color: '#c2410c', 
+                                    background: '#fff7ed', 
+                                    border: '1px solid #fed7aa', 
+                                    borderRadius: '6px', 
+                                    padding: '5px 8px', 
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title={`Carried forward to next month: ${CURRENCY} ${carried.toFixed(2)}`}
+                                >
+                                  ➔ Fwd: {carried.toFixed(2)}
+                                </span>
+                              );
+                            }
                             const cash = parseFloat(item.cash_paid || 0);
                             const bank = parseFloat(item.bank_paid || 0);
                             const totalPaid = Math.round((cash + bank) * 100) / 100;
                             const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
-                            if (rem > 0) {
+                            if (rem !== 0 && (item.status !== 'Paid' || unlockedRowIds.has(item.id))) {
                               return (
                                 <button
                                   type="button"
@@ -3710,7 +3921,7 @@ export default function Payroll() {
                                   title={`Carry forward remaining ${CURRENCY} ${rem.toFixed(2)} to next month`}
                                 >
                                   {savingCarryForwardId === item.id ? <RefreshCw size={11} className="spin" /> : <ArrowRightCircle size={11} />}
-                                  Carry
+                                  Carry Fwd
                                 </button>
                               );
                             }
@@ -3727,26 +3938,16 @@ export default function Payroll() {
                               Locked
                             </button>
                           ) : (
-                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                              <button 
-                                type="button"
-                                onClick={() => handlePayNow(item.id)}
-                                disabled={payingRowId === item.id || savingRowId === item.id}
-                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 800, borderRadius: '6px', background: '#16a34a', color: '#fff', border: 'none', cursor: (payingRowId === item.id || savingRowId === item.id) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                title="Pay Now and set status to Paid"
-                              >
-                                {payingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
-                                Pay
-                              </button>
-                              <button 
-                                onClick={() => handleSaveRow(item.id)}
-                                disabled={savingRowId === item.id || payingRowId === item.id}
-                                className="btn btn-primary"
-                                style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', cursor: (savingRowId === item.id || payingRowId === item.id) ? 'not-allowed' : 'pointer' }}
-                              >
-                                {savingRowId === item.id ? '...' : 'Save'}
-                              </button>
-                            </div>
+                            <button 
+                              type="button"
+                              onClick={() => handleOpenMobilePay(item)}
+                              disabled={payingRowId === item.id}
+                              style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 800, borderRadius: '6px', background: '#16a34a', color: '#fff', border: 'none', cursor: payingRowId === item.id ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              title="Pay Salary"
+                            >
+                              {payingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
+                              Pay
+                            </button>
                           )}
                         </div>
                       )}
@@ -3790,7 +3991,9 @@ export default function Payroll() {
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--primary)', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#f0fdf4' }}>Net Pay</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#0369a1', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#e0f2fe' }}>Cash Paid</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#4338ca', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#e0e7ff' }}>Bank Paid</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#059669', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#dcfce7' }}>Total Paid</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#c2410c', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#ffedd5' }}>Remaining</th>
+                <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#c2410c', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#fff7ed' }}>Carry Forward</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
                 {showActions && <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>}
               </tr>
@@ -3798,14 +4001,14 @@ export default function Payroll() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={20 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={22 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     <div style={{ animation: 'spin 1s linear infinite', margin: '0 auto 16px', border: '3px solid var(--surface-2)', borderTopColor: 'var(--primary)', borderRadius: '50%', width: '28px', height: '28px' }} />
                     Calculating Payroll...
                   </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={20 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={22 + adjustmentTypes.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No payroll records found for this month.
                   </td>
                 </tr>
@@ -4031,8 +4234,22 @@ export default function Payroll() {
                         />
                       </td>
 
+                      {/* Total Paid Salary (Before Remaining) */}
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 800, background: '#f0fdf4', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                        {(() => {
+                          const cash = parseFloat(item.cash_paid || 0);
+                          const bank = parseFloat(item.bank_paid || 0);
+                          const totalPaid = Math.round((cash + bank) * 100) / 100;
+                          return (
+                            <span style={{ color: totalPaid > 0 ? '#16a34a' : '#64748b', fontWeight: 800 }}>
+                              {totalPaid.toFixed(2)}
+                            </span>
+                          );
+                        })()}
+                      </td>
+
                       {/* Remaining Salary */}
-                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 800, background: '#fff7ed', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '8px', fontSize: '12px', fontWeight: 800, background: '#fff7ed', whiteSpace: 'nowrap', textAlign: 'center' }}>
                         {(() => {
                           const cash = parseFloat(item.cash_paid || 0);
                           const bank = parseFloat(item.bank_paid || 0);
@@ -4044,6 +4261,67 @@ export default function Payroll() {
                             return <span style={{ color: '#dc2626', fontWeight: 800 }} title="Negative Balance / Deductions exceed salary">{rem.toFixed(2)}</span>;
                           }
                           return <span style={{ color: '#16a34a' }}>0.00</span>;
+                        })()}
+                      </td>
+
+                      {/* Carry Forward (After Remaining) */}
+                      <td style={{ padding: '6px', fontSize: '12px', textAlign: 'center', whiteSpace: 'nowrap', background: '#fffbeb' }}>
+                        {(() => {
+                          const carried = parseFloat(item.carried_forward_to_next || 0);
+                          if (carried > 0) {
+                            return (
+                              <span 
+                                style={{ 
+                                  fontSize: '10px', 
+                                  fontWeight: 800, 
+                                  color: '#c2410c', 
+                                  background: '#fff7ed', 
+                                  border: '1px solid #fed7aa', 
+                                  borderRadius: '4px', 
+                                  padding: '3px 6px', 
+                                  whiteSpace: 'nowrap',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}
+                                title={`Carried forward to next month: ${CURRENCY} ${carried.toFixed(2)}`}
+                              >
+                                ➔ Fwd: {carried.toFixed(2)}
+                              </span>
+                            );
+                          }
+                          const cash = parseFloat(item.cash_paid || 0);
+                          const bank = parseFloat(item.bank_paid || 0);
+                          const totalPaid = Math.round((cash + bank) * 100) / 100;
+                          const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                          if (rem > 0 && showActions && !isRowLocked) {
+                            return (
+                              <button
+                                type="button"
+                                disabled={savingCarryForwardId === item.id}
+                                onClick={() => handleCarryForward(item)}
+                                style={{
+                                  background: '#fff7ed',
+                                  border: '1px solid #fdba74',
+                                  borderRadius: '5px',
+                                  padding: '3px 8px',
+                                  cursor: 'pointer',
+                                  color: '#c2410c',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title={`Carry forward remaining ${CURRENCY} ${rem.toFixed(2)} to next month`}
+                              >
+                                {savingCarryForwardId === item.id ? <RefreshCw size={11} className="spin" /> : <ArrowRightCircle size={11} />}
+                                <span>Carry Fwd</span>
+                              </button>
+                            );
+                          }
+                          return <span style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 600 }}>—</span>;
                         })()}
                       </td>
                       
@@ -4067,26 +4345,6 @@ export default function Payroll() {
                             <option value="Partial">Partial</option>
                             <option value="Paid">Paid</option>
                           </select>
-                          {parseFloat(item.carried_forward_to_next || 0) > 0 && (
-                            <span 
-                              style={{ 
-                                fontSize: '9px', 
-                                fontWeight: 800, 
-                                color: '#c2410c', 
-                                background: '#fff7ed', 
-                                border: '1px solid #fed7aa', 
-                                borderRadius: '3px', 
-                                padding: '1px 4px', 
-                                whiteSpace: 'nowrap',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '2px'
-                              }}
-                              title={`Carried forward to next month: ${CURRENCY} ${parseFloat(item.carried_forward_to_next).toFixed(2)}`}
-                            >
-                              ➔ Fwd: {parseFloat(item.carried_forward_to_next).toFixed(2)}
-                            </span>
-                          )}
                         </div>
                       </td>
 
@@ -5043,6 +5301,216 @@ export default function Payroll() {
         </div>
       )}
 
+      {/* Mobile Pay Salary Popup Modal */}
+      {mobilePayModal.isOpen && mobilePayModal.emp && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: '14px',
+            width: '100%',
+            maxWidth: '380px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+            overflow: 'hidden',
+            border: '1px solid #bbf7d0'
+          }}>
+            {/* Header */}
+            <div style={{
+              background: '#f0fdf4',
+              padding: '12px 16px',
+              borderBottom: '1px solid #bbf7d0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#14532d' }}>
+                  Pay Salary
+                </h3>
+                <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>
+                  {mobilePayModal.emp.name} ({mobilePayModal.emp.employee_id})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobilePayModal({ isOpen: false, emp: null, cash: '', bank: '' })}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#166534', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {(() => {
+                const emp = mobilePayModal.emp;
+                const cashPaid = parseFloat(emp.cash_paid || 0);
+                const bankPaid = parseFloat(emp.bank_paid || 0);
+                const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
+                const net = parseFloat(emp.net_salary || 0);
+                const rem = Math.round((net - totalPaid) * 100) / 100;
+
+                return (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: '6px',
+                    background: '#f8fafc',
+                    padding: '8px',
+                    borderRadius: '8px',
+                    border: '1px solid #e2e8f0',
+                    textAlign: 'center'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Net Pay</div>
+                      <div style={{ fontSize: '12px', fontWeight: 800, color: '#059669' }}>{CURRENCY} {net.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Paid So Far</div>
+                      <div style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>{CURRENCY} {totalPaid.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '9px', fontWeight: 700, color: '#c2410c', textTransform: 'uppercase' }}>Remaining</div>
+                      <div style={{ fontSize: '12px', fontWeight: 800, color: rem > 0 ? '#ea580c' : '#16a34a' }}>{CURRENCY} {rem.toFixed(2)}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Cash Pay Input */}
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
+                  Cash Pay ({CURRENCY})
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={mobilePayModal.cash}
+                  onChange={e => setMobilePayModal(prev => ({ ...prev, cash: e.target.value }))}
+                  placeholder="0.00"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    color: '#0369a1',
+                    background: '#f0f9ff',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Card / Bank Pay Input */}
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
+                  Card / Bank Pay ({CURRENCY})
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={mobilePayModal.bank}
+                  onChange={e => setMobilePayModal(prev => ({ ...prev, bank: e.target.value }))}
+                  placeholder="0.00"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    color: '#4338ca',
+                    background: '#eef2ff',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Total Preview */}
+              {(() => {
+                const totalEntering = Math.round(((parseFloat(mobilePayModal.cash) || 0) + (parseFloat(mobilePayModal.bank) || 0)) * 100) / 100;
+                return (
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: '#ecfdf5',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #a7f3d0'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#047857' }}>Total to Pay:</span>
+                    <span style={{ fontSize: '14px', fontWeight: 900, color: '#059669' }}>
+                      {CURRENCY} {totalEntering.toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Actions */}
+            <div style={{
+              background: '#f8fafc',
+              padding: '12px 16px',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '8px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setMobilePayModal({ isOpen: false, emp: null, cash: '', bank: '' })}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#475569',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMobilePay}
+                disabled={payingRowId === mobilePayModal.emp.id}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#16a34a',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '12px',
+                  cursor: payingRowId === mobilePayModal.emp.id ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                {payingRowId === mobilePayModal.emp.id ? <RefreshCw size={13} className="spin" /> : <CheckCircle size={14} />}
+                Pay Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Carry Forward Remaining Salary Confirmation Modal (Clean & Shortest Text) */}
       {carryForwardModal.isOpen && carryForwardModal.emp && (() => {
         const emp = carryForwardModal.emp;
         const cash = parseFloat(emp.cash_paid || 0);
@@ -5062,8 +5530,6 @@ export default function Payroll() {
           nextYear = year + 1;
         }
         const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
-        
-        const curMonthName = new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
         const nextMonthName = new Date(`${nextMonthStr}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
         return (
@@ -5080,177 +5546,79 @@ export default function Payroll() {
           }}>
             <div style={{
               background: '#fff',
-              borderRadius: '14px',
+              borderRadius: '12px',
               width: '100%',
-              maxWidth: '460px',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+              maxWidth: '380px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
               border: '1px solid #fed7aa',
               overflow: 'hidden'
             }}>
-              {/* Modal Header */}
+              {/* Header */}
               <div style={{
-                background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
-                padding: '16px 20px',
+                background: '#fff7ed',
+                padding: '12px 16px',
                 borderBottom: '1px solid #fed7aa',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '8px',
-                    background: '#ea580c',
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    <ArrowRightCircle size={20} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '15px', fontWeight: 800, color: '#9a3412' }}>
-                      Carry Forward Remaining Salary
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#c2410c' }}>
-                      Transfer balance to next month & lock current
-                    </div>
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ArrowRightCircle size={18} style={{ color: '#ea580c' }} />
+                  <span style={{ fontSize: '15px', fontWeight: 800, color: '#9a3412' }}>
+                    Carry Forward
+                  </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setCarryForwardModal({ isOpen: false, emp: null, amount: null })}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#9a3412',
-                    padding: '4px',
-                    borderRadius: '6px'
-                  }}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9a3412', padding: '4px' }}
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              {/* Modal Body */}
-              <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {/* Employee Info */}
-                <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
-                    {emp.name}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>
-                    ID: {emp.employee_id} • {emp.role || 'Staff'} • {emp.branch || 'Main'}
-                  </div>
+              {/* Body */}
+              <div style={{ padding: '16px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
+                  {emp.name} <span style={{ color: '#64748b', fontWeight: 600 }}>({emp.employee_id})</span>
                 </div>
 
-                {/* Transfer Flow Pill */}
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: '#fff7ed',
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  border: '1px dashed #fdba74',
-                  fontSize: '12px',
-                  fontWeight: 700
-                }}>
-                  <span style={{ color: '#9a3412' }}>{curMonthName}</span>
-                  <span style={{ color: '#ea580c' }}>➔</span>
-                  <span style={{ color: '#047857', fontWeight: 800 }}>{nextMonthName}</span>
-                </div>
-
-                {/* Balance Breakdown */}
-                <div style={{
-                  background: '#fff',
-                  border: '1.5px solid #fed7aa',
-                  borderRadius: '10px',
-                  padding: '14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                    <span style={{ color: '#64748b' }}>Total Net Payable:</span>
-                    <span style={{ fontWeight: 700, color: '#1e293b' }}>{CURRENCY} {net.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                    <span style={{ color: '#64748b' }}>Paid This Month ({cash > 0 ? `Cash ${cash}` : ''} {bank > 0 ? `Bank ${bank}` : ''}):</span>
-                    <span style={{ fontWeight: 700, color: '#059669' }}>{CURRENCY} {totalPaid.toFixed(2)}</span>
-                  </div>
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    borderTop: '1px solid #fde68a',
-                    paddingTop: '8px',
-                    marginTop: '4px'
-                  }}>
-                    <span style={{ fontSize: '13px', fontWeight: 800, color: '#c2410c' }}>
-                      Unpaid Remaining Balance:
-                    </span>
-                    <span style={{
-                      fontSize: '15px',
-                      fontWeight: 900,
-                      color: '#ea580c',
-                      background: '#ffedd5',
-                      padding: '2px 8px',
-                      borderRadius: '6px'
-                    }}>
-                      {CURRENCY} {rem.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Carry Forward Confirmation Message */}
                 <div style={{
                   background: '#fff7ed',
-                  border: '1.5px solid #fdba74',
-                  borderRadius: '10px',
-                  padding: '16px',
-                  textAlign: 'center'
+                  border: '1px solid #fdba74',
+                  borderRadius: '8px',
+                  padding: '12px'
                 }}>
-                  <div style={{ fontSize: '14px', color: '#7c2d12', fontWeight: 600, lineHeight: 1.5 }}>
-                    Your remaining salary amount is <strong style={{ color: '#ea580c', fontSize: '16px' }}>{CURRENCY} {rem.toFixed(2)}</strong>.
-                    <br />
-                    Do you want to carry forward this amount to the next month (<strong style={{ color: '#047857' }}>{nextMonthName}</strong>)?
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#9a3412', textTransform: 'uppercase' }}>
+                    Remaining to Carry Forward
                   </div>
-                  <div style={{ marginTop: '8px', fontSize: '11px', color: '#9a3412', fontWeight: 600 }}>
-                    • Amount is automatically derived from the actual remaining balance and cannot be modified.
+                  <div style={{ fontSize: '22px', fontWeight: 900, color: '#c2410c', marginTop: '2px' }}>
+                    {CURRENCY} {finalCarryAmt.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '12px', fontWeight: 800, color: '#047857', marginTop: '4px' }}>
+                    ➔ Transfer to {nextMonthName}
                   </div>
                 </div>
 
-                {/* Explanation Alert */}
-                <div style={{
-                  fontSize: '12px',
-                  color: '#78350f',
-                  background: '#fefce8',
-                  border: '1px solid #fef08a',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  lineHeight: 1.45
-                }}>
-                  <strong>Notice:</strong> Exactly <strong>{CURRENCY} {rem.toFixed(2)}</strong> will be transferred to <strong>{nextMonthName}</strong> as <strong>Prev M. Remaining</strong>. Current month (<strong>{curMonthName}</strong>) will be saved and <strong>LOCKED</strong>.
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                  Current month ({selectedMonth}) will be saved & locked.
                 </div>
               </div>
 
-              {/* Modal Footer Actions */}
+              {/* Footer Actions */}
               <div style={{
                 background: '#f8fafc',
-                padding: '12px 20px',
+                padding: '10px 16px',
                 borderTop: '1px solid #e2e8f0',
                 display: 'flex',
                 justifyContent: 'flex-end',
-                gap: '10px'
+                gap: '8px'
               }}>
                 <button
                   type="button"
                   onClick={() => setCarryForwardModal({ isOpen: false, emp: null, amount: null })}
                   style={{
-                    padding: '8px 16px',
+                    padding: '7px 14px',
                     borderRadius: '6px',
                     border: '1px solid #cbd5e1',
                     background: '#fff',
@@ -5267,14 +5635,14 @@ export default function Payroll() {
                   disabled={savingCarryForwardId === emp.id}
                   onClick={executeCarryForwardFromModal}
                   style={{
-                    padding: '8px 18px',
+                    padding: '7px 16px',
                     borderRadius: '6px',
                     border: 'none',
                     background: '#ea580c',
                     fontSize: '12px',
                     fontWeight: 800,
                     color: '#fff',
-                    cursor: 'pointer',
+                    cursor: savingCarryForwardId === emp.id ? 'not-allowed' : 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',

@@ -1163,29 +1163,32 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
     const paymentsRes = await client.query(
       `SELECT 
          COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'cash' THEN amount ELSE 0 END), 0) as total_cash,
-         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'bank' THEN amount ELSE 0 END), 0) as total_bank
+         COALESCE(SUM(CASE WHEN LOWER(payment_method) = 'bank' THEN amount ELSE 0 END), 0) as total_bank,
+         COUNT(*) as payment_count
        FROM employee_payroll_payments
        WHERE employee_id = $1 AND month = $2`,
       [employee_id, month]
     );
+    const hasRecordedPayments = parseInt(paymentsRes.rows[0].payment_count || 0) > 0;
     let recordedCash = parseFloat(paymentsRes.rows[0].total_cash || 0);
     let recordedBank = parseFloat(paymentsRes.rows[0].total_bank || 0);
 
-    let cashVal = recordedCash;
-    let bankVal = recordedBank;
-    if (recordedCash === 0 && recordedBank === 0) {
-      if (curRecordRes.rows.length > 0) {
-        cashVal = parseFloat(curRecordRes.rows[0].cash_paid || curRecordRes.rows[0].paid_amount || 0);
-        bankVal = parseFloat(curRecordRes.rows[0].bank_paid || 0);
-      } else {
-        cashVal = parseFloat(cash_paid || 0);
-        bankVal = parseFloat(bank_paid || 0);
-      }
+    let cashVal = 0;
+    let bankVal = 0;
+    if (hasRecordedPayments) {
+      cashVal = recordedCash;
+      bankVal = recordedBank;
+    } else if (cash_paid !== undefined && cash_paid !== null && !isNaN(parseFloat(cash_paid))) {
+      cashVal = parseFloat(cash_paid);
+      bankVal = (bank_paid !== undefined && bank_paid !== null && !isNaN(parseFloat(bank_paid))) ? parseFloat(bank_paid) : 0;
+    } else if (curRecordRes.rows.length > 0 && curRecordRes.rows[0].status === 'Paid') {
+      cashVal = parseFloat(curRecordRes.rows[0].cash_paid || curRecordRes.rows[0].paid_amount || 0);
+      bankVal = parseFloat(curRecordRes.rows[0].bank_paid || 0);
     }
     const totalPaid = Math.round((cashVal + bankVal) * 100) / 100;
 
     let curNet = 0;
-    if (curRecordRes.rows.length > 0) {
+    if (curRecordRes.rows.length > 0 && curRecordRes.rows[0].net_salary !== null && parseFloat(curRecordRes.rows[0].net_salary) !== 0) {
       curNet = parseFloat(curRecordRes.rows[0].net_salary || 0);
     } else {
       const empRes = await client.query('SELECT salary FROM employees WHERE id = $1', [employee_id]);
@@ -1194,14 +1197,14 @@ router.post('/carry-forward', authenticateToken, async (req, res) => {
 
     // Exact remaining amount derived automatically (supports negative balance!)
     const calculatedRemaining = Math.round((curNet - totalPaid) * 100) / 100;
+    const carryAmount = (remaining_amount !== undefined && remaining_amount !== null && !isNaN(parseFloat(remaining_amount)))
+      ? parseFloat(remaining_amount)
+      : calculatedRemaining;
 
-    if (calculatedRemaining === 0) {
+    if (carryAmount === 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No remaining balance to carry forward for this employee.' });
     }
-
-    // Strict validation: enforce exact remaining amount
-    const carryAmount = calculatedRemaining;
 
     // Duplicate check: if already carried forward with this exact amount, prevent duplicate operations
     if (curRecordRes.rows.length > 0 && curRecordRes.rows[0].carried_forward_to_next !== null) {
