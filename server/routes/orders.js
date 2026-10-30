@@ -556,9 +556,8 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         WHERE type = 'PAYMENT' 
           AND is_shift_closed = FALSE 
           AND (branch = $1 OR branch IS NULL)
-          AND created_at >= $2
-          ${isAdminRole ? '' : 'AND (cashier_name = $3 OR cashier_name IS NULL)'}
-      `, isAdminRole ? [branch, shiftStartTime] : [branch, shiftStartTime, username]);
+          ${isAdminRole ? '' : 'AND (cashier_name = $2 OR cashier_name IS NULL)'}
+      `, isAdminRole ? [branch] : [branch, username]);
       const majorPayments = parseFloat(majorPaymentsRes.rows[0]?.total || 0);
       const majorPaymentsCash = parseFloat(majorPaymentsRes.rows[0]?.cash_major || 0);
       const majorPaymentsCard = parseFloat(majorPaymentsRes.rows[0]?.card_major || 0);
@@ -638,9 +637,8 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         WHERE type = 'PAYMENT' 
           AND is_shift_closed = FALSE 
           AND (branch = $1 OR branch IS NULL)
-          AND created_at >= $2
         GROUP BY cashier_name
-      `, [branch, loginTime]);
+      `, [branch]);
       const activeMajorMap = {};
       activeMajorPaymentsRes.rows.forEach(r => {
         activeMajorMap[r.cashier_name] = parseFloat(r.total || 0);
@@ -664,14 +662,17 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         GROUP BY o.completed_by
       `, [branch]);
 
+      const activeCashiersSeen = new Set();
       unclosedShiftOrdersRes.rows.forEach(u => {
+        const cName = u.cashier_name || req.user?.username || 'Cashier';
+        activeCashiersSeen.add(cName);
         shifts.push({
-          cashier_name: `${u.cashier_name} (Current)`,
+          cashier_name: `${cName} (Current)`,
           total_sales: parseFloat(u.total_sales || 0),
           cash_sales: parseFloat(u.cash_sales || 0),
           card_sales: parseFloat(u.card_sales || 0),
           credit_sales: parseFloat(u.credit_sales || 0),
-          major_payments: activeMajorMap[u.cashier_name] || 0,
+          major_payments: activeMajorMap[cName] || 0,
           total_orders: parseInt(u.total_orders || 0, 10),
           closing_cash: null,
           closing_card: null,
@@ -680,6 +681,28 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
           difference: null,
           is_active: true
         });
+      });
+
+      // Include cashiers who took active major payments without food orders
+      activeMajorPaymentsRes.rows.forEach(r => {
+        const cName = r.cashier_name || 'Cashier';
+        if (!activeCashiersSeen.has(cName) && parseFloat(r.total || 0) > 0) {
+          shifts.push({
+            cashier_name: `${cName} (Current)`,
+            total_sales: 0,
+            cash_sales: 0,
+            card_sales: 0,
+            credit_sales: 0,
+            major_payments: parseFloat(r.total || 0),
+            total_orders: 0,
+            closing_cash: null,
+            closing_card: null,
+            cash_difference: null,
+            card_difference: null,
+            difference: null,
+            is_active: true
+          });
+        }
       });
 
       const dailyMajorPaymentsRes = await pool.query(`
@@ -691,11 +714,28 @@ router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, 
         WHERE type = 'PAYMENT' 
           AND is_daily_closed = FALSE 
           AND (branch = $1 OR branch IS NULL)
-          AND created_at >= $2
-      `, [branch, loginTime]);
+      `, [branch]);
       const dailyMajorPayments = parseFloat(dailyMajorPaymentsRes.rows[0]?.total || 0);
       const dailyMajorPaymentsCash = parseFloat(dailyMajorPaymentsRes.rows[0]?.cash_major || 0);
       const dailyMajorPaymentsCard = parseFloat(dailyMajorPaymentsRes.rows[0]?.card_major || 0);
+
+      if (shifts.length === 0) {
+        shifts.push({
+          cashier_name: `${req.user?.username || 'Cashier'} (Current)`,
+          total_sales: parseFloat(totals.rows[0]?.total_sales || 0),
+          cash_sales: parseFloat(totals.rows[0]?.cash_sales || 0),
+          card_sales: parseFloat(totals.rows[0]?.card_sales || 0),
+          credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
+          major_payments: dailyMajorPayments,
+          total_orders: parseInt(totals.rows[0]?.total_orders || 0, 10),
+          closing_cash: null,
+          closing_card: null,
+          cash_difference: null,
+          card_difference: null,
+          difference: null,
+          is_active: true
+        });
+      }
 
       return res.json({
         success: true,
@@ -1309,11 +1349,23 @@ async function sendClosingEmail(report, closingType) {
         shiftsArr = report.shifts_summary;
       }
 
-      const night = shiftsArr[0] || null;
-      const day = shiftsArr[1] || null;
+      const totalDailySysCash = parseFloat(report.cash_sales || 0);
+      const totalDailySysCard = parseFloat(report.card_sales || 0);
+      const totalDailySysCredit = parseFloat(report.credit_sales || 0);
+      const totalDailySysMajor = parseFloat(report.major_payments || 0);
+
+      const night = shiftsArr && shiftsArr.length > 0 ? shiftsArr[0] : null;
+      const dayFromShifts = shiftsArr && shiftsArr.length > 1 ? shiftsArr[1] : null;
 
       const nightCashier = night?.cashier_name || '';
-      const dayCashier = day?.cashier_name || '';
+      let dayCashier = dayFromShifts?.cashier_name || '';
+      if (!dayCashier) {
+        if (!night) {
+          dayCashier = report.cashier_name || '';
+        } else if (shiftsArr.length === 1 && !nightCashier.toLowerCase().includes((report.cashier_name || '').toLowerCase())) {
+          dayCashier = report.cashier_name || '';
+        }
+      }
 
       const nightSysCash = parseFloat(night?.cash_sales || 0);
       const nightActCash = night?.closing_cash !== null && night?.closing_cash !== undefined 
@@ -1336,42 +1388,79 @@ async function sendClosingEmail(report, closingType) {
       const nightDiff = night ? (night.difference !== null && night.difference !== undefined ? parseFloat(night.difference) : (nightCashDiff + nightCardDiff)) : 0;
 
       // Day
-      const daySysCash = parseFloat(day?.cash_sales || 0);
-      const dayActCash = day?.closing_cash !== null && day?.closing_cash !== undefined 
-        ? parseFloat(day.closing_cash) 
-        : (day ? daySysCash : 0);
+      const daySysCash = dayFromShifts 
+        ? parseFloat(dayFromShifts.cash_sales || 0) 
+        : Math.max(0, totalDailySysCash - nightSysCash);
 
-      const daySysCard = parseFloat(day?.card_sales || 0);
-      const dayActCard = day?.closing_card !== null && day?.closing_card !== undefined 
-        ? parseFloat(day.closing_card) 
-        : (day ? daySysCard : 0);
+      const daySysCard = dayFromShifts 
+        ? parseFloat(dayFromShifts.card_sales || 0) 
+        : Math.max(0, totalDailySysCard - nightSysCard);
 
-      const daySysCredit = parseFloat(day?.credit_sales || 0);
+      let daySysCredit = dayFromShifts 
+        ? parseFloat(dayFromShifts.credit_sales || 0) 
+        : Math.max(0, totalDailySysCredit - nightSysCredit);
+      if (daySysCredit === 0 || (nightSysCredit + daySysCredit) < totalDailySysCredit) {
+        daySysCredit = Math.max(daySysCredit, totalDailySysCredit - nightSysCredit);
+      }
       const dayActCredit = daySysCredit;
 
-      const daySysMajor = parseFloat(day?.major_payments || 0);
+      let daySysMajor = dayFromShifts 
+        ? parseFloat(dayFromShifts.major_payments || 0) 
+        : Math.max(0, totalDailySysMajor - nightSysMajor);
+      if (daySysMajor === 0 || (nightSysMajor + daySysMajor) < totalDailySysMajor) {
+        daySysMajor = Math.max(daySysMajor, totalDailySysMajor - nightSysMajor);
+      }
       const dayActMajor = daySysMajor;
+
+      let dayActCash = 0;
+      let dayActCard = 0;
+      if (dayFromShifts && dayFromShifts.closing_cash !== null && dayFromShifts.closing_cash !== undefined) {
+        dayActCash = parseFloat(dayFromShifts.closing_cash);
+        dayActCard = parseFloat(dayFromShifts.closing_card !== null && dayFromShifts.closing_card !== undefined ? dayFromShifts.closing_card : (dayFromShifts.card_sales || 0));
+      } else if (report.closing_cash !== null && report.closing_cash !== undefined) {
+        const repClosingCash = parseFloat(report.closing_cash || 0);
+        dayActCash = Math.abs(repClosingCash - (nightActCash + daySysCash)) < Math.abs(repClosingCash - daySysCash)
+          ? Math.max(0, repClosingCash - nightActCash)
+          : repClosingCash;
+        const repClosingCard = parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0));
+        dayActCard = Math.abs(repClosingCard - (nightActCard + daySysCard)) < Math.abs(repClosingCard - daySysCard)
+          ? Math.max(0, repClosingCard - nightActCard)
+          : repClosingCard;
+      } else {
+        dayActCash = daySysCash;
+        dayActCard = daySysCard;
+      }
 
       const dayCashDiff = dayActCash - daySysCash;
       const dayCardDiff = dayActCard - daySysCard;
-      const dayDiff = day ? (day.difference !== null && day.difference !== undefined ? parseFloat(day.difference) : (dayCashDiff + dayCardDiff)) : 0;
+      const dayDiff = dayFromShifts 
+        ? (dayFromShifts.difference !== null && dayFromShifts.difference !== undefined ? parseFloat(dayFromShifts.difference) : (dayCashDiff + dayCardDiff)) 
+        : (dayCashDiff + dayCardDiff);
 
       // Totals
-      const totalSysCash = nightSysCash + daySysCash;
-      const totalActCash = nightActCash + dayActCash;
+      const totalSysCash = Math.max(totalDailySysCash, nightSysCash + daySysCash);
+      let totalActCash = nightActCash + dayActCash;
+      if (report.closing_cash !== null && report.closing_cash !== undefined) {
+        totalActCash = parseFloat(report.closing_cash || 0);
+      }
 
-      const totalSysCard = nightSysCard + daySysCard;
-      const totalActCard = nightActCard + dayActCard;
+      const totalSysCard = Math.max(totalDailySysCard, nightSysCard + daySysCard);
+      let totalActCard = nightActCard + dayActCard;
+      if (report.closing_card !== null && report.closing_card !== undefined) {
+        totalActCard = parseFloat(report.closing_card || 0);
+      }
 
-      const totalSysCredit = nightSysCredit + daySysCredit;
-      const totalActCredit = nightActCredit + dayActCredit;
+      const totalSysCredit = Math.max(totalDailySysCredit, nightSysCredit + daySysCredit);
+      const totalActCredit = totalSysCredit;
 
-      const totalSysMajor = nightSysMajor + daySysMajor;
-      const totalActMajor = nightActMajor + dayActMajor;
+      const totalSysMajor = Math.max(totalDailySysMajor, nightSysMajor + daySysMajor);
+      const totalActMajor = totalSysMajor;
 
       const totalCashDiff = totalActCash - totalSysCash;
       const totalCardDiff = totalActCard - totalSysCard;
-      const totalDiffVal = totalCashDiff + totalCardDiff;
+      const totalDiffVal = report.difference !== null && report.difference !== undefined 
+        ? parseFloat(report.difference) 
+        : (totalCashDiff + totalCardDiff);
 
       const fmtDiff = (d) => {
         if (d === null || d === undefined || isNaN(d) || Math.abs(d) < 0.005) return '0.00';
@@ -1759,9 +1848,8 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       WHERE type = 'PAYMENT' 
         AND is_shift_closed = FALSE 
         AND (branch = $1 OR branch IS NULL)
-        AND created_at >= $2
-        ${isAdminRole ? '' : 'AND (cashier_name = $3 OR cashier_name IS NULL)'}
-    `, isAdminRole ? [branch, loginTime] : [branch, loginTime, req.user.username]);
+        ${isAdminRole ? '' : 'AND (cashier_name = $2 OR cashier_name IS NULL)'}
+    `, isAdminRole ? [branch] : [branch, req.user.username]);
     const majorPayments = parseFloat(majorPaymentsRes.rows[0]?.total || 0);
 
     const intervalItemsRes = await client.query(`
@@ -1946,8 +2034,7 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       WHERE type = 'PAYMENT' 
         AND is_daily_closed = FALSE 
         AND (branch = $1 OR branch IS NULL)
-        AND created_at >= $2
-    `, [branch, loginTime]);
+    `, [branch]);
     const majorPayments = parseFloat(majorPaymentsRes.rows[0]?.total || 0);
 
     const intervalItemsRes = await client.query(`
@@ -2007,6 +2094,23 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       difference_reason: s.difference_reason || ''
     }));
 
+    // Active shift major payments map
+    const activeMajorPaymentsRes = await client.query(`
+      SELECT 
+        cashier_name,
+        COALESCE(SUM(amount), 0) as total
+      FROM credit_transactions
+      WHERE type = 'PAYMENT' 
+        AND is_daily_closed = FALSE 
+        AND is_shift_closed = FALSE 
+        AND (branch = $1 OR branch IS NULL)
+      GROUP BY cashier_name
+    `, [branch]);
+    const activeMajorMap = {};
+    activeMajorPaymentsRes.rows.forEach(r => {
+      activeMajorMap[r.cashier_name] = parseFloat(r.total || 0);
+    });
+
     // Also include any active / unclosed shift orders
     const unclosedShiftOrdersRes = await client.query(`
       SELECT 
@@ -2025,14 +2129,17 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       GROUP BY o.completed_by
     `, [branch]);
 
+    const activeCashiersSeen = new Set();
     unclosedShiftOrdersRes.rows.forEach(u => {
+      const cName = u.cashier_name || req.user?.username || 'Cashier';
+      activeCashiersSeen.add(cName);
       shiftsList.push({
-        cashier_name: `${u.cashier_name} (Current)`,
+        cashier_name: `${cName} (Current)`,
         total_sales: parseFloat(u.total_sales || 0),
         cash_sales: parseFloat(u.cash_sales || 0),
         card_sales: parseFloat(u.card_sales || 0),
         credit_sales: parseFloat(u.credit_sales || 0),
-        major_payments: 0,
+        major_payments: activeMajorMap[cName] || 0,
         total_orders: parseInt(u.total_orders || 0, 10),
         closing_cash: null,
         closing_card: null,
@@ -2042,6 +2149,46 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
         is_active: true
       });
     });
+
+    // Include cashiers who took active major payments without food orders
+    activeMajorPaymentsRes.rows.forEach(r => {
+      const cName = r.cashier_name || 'Cashier';
+      if (!activeCashiersSeen.has(cName) && parseFloat(r.total || 0) > 0) {
+        shiftsList.push({
+          cashier_name: `${cName} (Current)`,
+          total_sales: 0,
+          cash_sales: 0,
+          card_sales: 0,
+          credit_sales: 0,
+          major_payments: parseFloat(r.total || 0),
+          total_orders: 0,
+          closing_cash: null,
+          closing_card: null,
+          cash_difference: null,
+          card_difference: null,
+          difference: null,
+          is_active: true
+        });
+      }
+    });
+
+    if (shiftsList.length === 0) {
+      shiftsList.push({
+        cashier_name: `${req.user?.username || 'Cashier'} (Current)`,
+        total_sales: totalSalesNum,
+        cash_sales: cashSalesNum,
+        card_sales: cardSalesNum,
+        credit_sales: parseFloat(totals.rows[0]?.credit_sales || 0),
+        major_payments: majorPayments,
+        total_orders: parseInt(totals.rows[0]?.total_orders || 0, 10),
+        closing_cash: closingCash,
+        closing_card: closingCard,
+        cash_difference: cashDifference,
+        card_difference: cardDifference,
+        difference: difference,
+        is_active: true
+      });
+    }
 
     // Get opening cash from active shift or latest cashier shift for this branch
     const shiftRes = await client.query(
@@ -2098,8 +2245,7 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       WHERE type = 'PAYMENT' 
         AND is_daily_closed = FALSE 
         AND (branch = $1 OR branch IS NULL)
-        AND created_at >= $2
-    `, [branch, loginTime]);
+    `, [branch]);
 
     // Close any active cashier shifts for this branch
     await client.query(

@@ -592,13 +592,19 @@ export default function Reports({ isTodaySales = false }) {
       ? parseFloat(dayFromShifts.card_sales || 0) 
       : Math.max(0, totalDailySysCard - nightSysCard);
 
-    const daySysCredit = dayFromShifts 
+    let daySysCredit = dayFromShifts 
       ? parseFloat(dayFromShifts.credit_sales || 0) 
       : Math.max(0, totalDailySysCredit - nightSysCredit);
+    if (daySysCredit === 0 || (nightSysCredit + daySysCredit) < totalDailySysCredit) {
+      daySysCredit = Math.max(daySysCredit, totalDailySysCredit - nightSysCredit);
+    }
 
-    const daySysMajor = dayFromShifts 
+    let daySysMajor = dayFromShifts 
       ? parseFloat(dayFromShifts.major_payments || 0) 
       : Math.max(0, totalDailySysMajor - nightSysMajor);
+    if (daySysMajor === 0 || (nightSysMajor + daySysMajor) < totalDailySysMajor) {
+      daySysMajor = Math.max(daySysMajor, totalDailySysMajor - nightSysMajor);
+    }
 
     // Day Actual
     let dayActCash = 0;
@@ -639,11 +645,11 @@ export default function Reports({ isTodaySales = false }) {
     const totalSysCard = nightSysCard + daySysCard;
     const totalActCard = nightActCard + dayActCard;
 
-    const totalSysCredit = nightSysCredit + daySysCredit;
-    const totalActCredit = nightActCredit + dayActCredit;
+    const totalSysCredit = Math.max(totalDailySysCredit, nightSysCredit + daySysCredit);
+    const totalActCredit = totalSysCredit;
 
-    const totalSysMajor = nightSysMajor + daySysMajor;
-    const totalActMajor = nightActMajor + dayActMajor;
+    const totalSysMajor = Math.max(totalDailySysMajor, nightSysMajor + daySysMajor);
+    const totalActMajor = totalSysMajor;
 
     const totalCashDiff = totalActCash - totalSysCash;
     const totalCardDiff = totalActCard - totalSysCard;
