@@ -3509,51 +3509,52 @@ export default function Payroll() {
       {/* Top Controls Bar */}
       <div style={{ 
         background: 'var(--surface)', 
-        padding: '8px 12px', 
+        padding: isMobile ? '6px 8px' : '8px 12px', 
         borderRadius: '10px', 
         border: '1px solid var(--surface-2)', 
         marginBottom: '10px', 
         display: 'flex', 
-        gap: '10px', 
+        gap: '6px', 
         flexWrap: 'wrap', 
         alignItems: 'center', 
         boxShadow: 'var(--shadow-sm)' 
       }}>
         {/* 1. Search Bar */}
-        <div style={{ position: 'relative', minWidth: '180px', flex: '1 1 200px', maxWidth: '340px' }}>
-          <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+        <div style={{ position: 'relative', minWidth: isMobile ? '130px' : '170px', flex: isMobile ? '1 1 auto' : '1 1 180px', maxWidth: isMobile ? '100%' : '240px' }}>
+          <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input 
             type="text" 
-            placeholder="Search by name or ID..." 
+            placeholder="Search name or ID..." 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ width: '100%', padding: '8px 12px 8px 36px', borderRadius: '8px', border: '1px solid var(--surface-2)', background: 'var(--background)', fontSize: '13px', color: 'var(--text-primary)', outline: 'none' }}
+            style={{ width: '100%', padding: '5px 8px 5px 28px', borderRadius: '6px', border: '1px solid var(--surface-2)', background: 'var(--background)', fontSize: '12px', color: 'var(--text-primary)', outline: 'none' }}
           />
         </div>
 
-        {/* 2. Switching Button: Sheet View vs View Detail */}
-        <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '3px', borderRadius: '8px', border: '1px solid var(--surface-2)', gap: '2px', flexShrink: 0 }}>
+        {/* 2. Switching Button: Sheet vs Detail */}
+        <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '2px', borderRadius: '6px', border: '1px solid var(--surface-2)', gap: '2px', flexShrink: 0 }}>
           <button 
             type="button"
             onClick={() => setViewMode('sheet')}
+            title="Sheet View"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '12px',
+              gap: '4px',
+              padding: '4px 8px',
+              borderRadius: '5px',
+              fontSize: '11px',
               fontWeight: 700,
               border: 'none',
               cursor: 'pointer',
               background: viewMode === 'sheet' ? 'var(--primary)' : 'transparent',
               color: viewMode === 'sheet' ? '#000' : 'var(--text-secondary)',
-              boxShadow: viewMode === 'sheet' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              boxShadow: viewMode === 'sheet' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
               transition: 'all 0.15s ease'
             }}
           >
-            <Table size={14} />
-            Sheet View
+            <Table size={13} />
+            Sheet
           </button>
           <button 
             type="button"
@@ -3563,29 +3564,30 @@ export default function Payroll() {
                 handleSelectDetailEmp(filteredEmployees[0]);
               }
             }}
+            title="Detail View"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '12px',
+              gap: '4px',
+              padding: '4px 8px',
+              borderRadius: '5px',
+              fontSize: '11px',
               fontWeight: 700,
               border: 'none',
               cursor: 'pointer',
               background: viewMode === 'detail' ? 'var(--primary)' : 'transparent',
               color: viewMode === 'detail' ? '#000' : 'var(--text-secondary)',
-              boxShadow: viewMode === 'detail' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              boxShadow: viewMode === 'detail' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
               transition: 'all 0.15s ease'
             }}
           >
-            <FileText size={14} />
-            View Detail
+            <FileText size={13} />
+            Detail
           </button>
         </div>
 
         {/* 3. Branch / Restaurant Filter: ALL, R1, R2, R3 */}
-        <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '3px', borderRadius: '8px', border: '1px solid var(--surface-2)', gap: '2px', flexShrink: 0 }}>
+        <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '2px', borderRadius: '6px', border: '1px solid var(--surface-2)', gap: '1px', flexShrink: 0 }}>
           {['ALL', 'R1', 'R2', 'R3'].map(opt => {
             const isActive = selectedBranchFilter === opt;
             return (
@@ -3594,9 +3596,9 @@ export default function Payroll() {
                 type="button"
                 onClick={() => setSelectedBranchFilter(opt)}
                 style={{
-                  padding: '5px 9px',
-                  borderRadius: '6px',
-                  fontSize: '11px',
+                  padding: '4px 7px',
+                  borderRadius: '5px',
+                  fontSize: '10px',
                   fontWeight: 800,
                   border: 'none',
                   cursor: 'pointer',
@@ -3604,7 +3606,7 @@ export default function Payroll() {
                   color: isActive ? '#000' : 'var(--text-secondary)',
                   boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.12)' : 'none',
                   transition: 'all 0.15s ease',
-                  letterSpacing: '0.3px',
+                  letterSpacing: '0.2px',
                   lineHeight: 1
                 }}
               >
@@ -3615,44 +3617,47 @@ export default function Payroll() {
         </div>
 
         {/* 4. Month Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-          <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Month:</label>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'var(--background)', border: '1px solid var(--surface-2)', padding: '3px 6px', borderRadius: '6px', flexShrink: 0 }}>
+          <CalendarDays size={13} style={{ color: 'var(--primary, #d97706)' }} />
           <input 
             type="month" 
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
-            style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--surface-2)', background: 'var(--background)', fontSize: '13px', color: 'var(--text-primary)', outline: 'none', fontWeight: 600, cursor: 'pointer' }}
+            style={{ border: 'none', background: 'transparent', fontSize: '11px', color: 'var(--text-primary)', outline: 'none', fontWeight: 700, cursor: 'pointer', padding: 0 }}
           />
         </div>
 
-        {/* Action Buttons & Refresh Button on Right */}
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginLeft: 'auto' }}>
+        {/* Action Buttons & Refresh Button */}
+        <div style={{ display: 'inline-flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap', marginLeft: isMobile ? '0' : 'auto' }}>
           {showActions && (
             <>
               <button 
                 onClick={() => setShowSalaryModal(true)}
                 className="btn btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                title="Manage Salary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 8px', borderRadius: '6px', fontWeight: 700, fontSize: '11px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
               >
-                <Banknote size={15} style={{ color: 'var(--primary)' }} />
-                Manage Salary
+                <Banknote size={13} style={{ color: 'var(--primary)' }} />
+                Salary
               </button>
               <button 
                 onClick={() => setShowAdjustmentsModal(true)}
                 className="btn btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                title="Manage Columns"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 8px', borderRadius: '6px', fontWeight: 700, fontSize: '11px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
               >
-                <Settings size={15} />
-                Manage Columns
+                <Settings size={13} />
+                Columns
               </button>
               {viewMode === 'sheet' && (
                 <button 
                   onClick={handleSaveAll}
                   disabled={savingAll}
                   className="btn btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', fontWeight: 700, fontSize: '12px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 4px 12px rgba(244, 180, 0, 0.2)', whiteSpace: 'nowrap' }}
+                  title="Save All Records"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 9px', borderRadius: '6px', fontWeight: 700, fontSize: '11px', background: 'var(--primary)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', boxShadow: '0 2px 6px rgba(244, 180, 0, 0.2)', whiteSpace: 'nowrap' }}
                 >
-                  <Save size={15} />
+                  <Save size={13} />
                   {savingAll ? 'Saving...' : 'Save All'}
                 </button>
               )}
@@ -3667,12 +3672,12 @@ export default function Payroll() {
               disabled={refreshing || loading}
               title="Refresh Sheet View"
               style={{ 
-                display: 'flex', 
+                display: 'inline-flex', 
                 alignItems: 'center', 
                 justifyContent: 'center', 
-                width: '36px', 
-                height: '36px', 
-                borderRadius: '8px', 
+                width: '28px', 
+                height: '28px', 
+                borderRadius: '6px', 
                 background: 'var(--surface-2)', 
                 color: 'var(--text-primary)', 
                 border: 'none', 
@@ -3681,7 +3686,7 @@ export default function Payroll() {
                 flexShrink: 0
               }}
             >
-              <RefreshCw size={16} className={(refreshing || loading) ? 'spin' : ''} />
+              <RefreshCw size={14} className={(refreshing || loading) ? 'spin' : ''} />
             </button>
           ) : (
             <button 
@@ -3690,12 +3695,12 @@ export default function Payroll() {
               disabled={refreshing || loading}
               title="Refresh Detail View"
               style={{ 
-                display: 'flex', 
+                display: 'inline-flex', 
                 alignItems: 'center', 
                 justifyContent: 'center', 
-                width: '36px', 
-                height: '36px', 
-                borderRadius: '8px', 
+                width: '28px', 
+                height: '28px', 
+                borderRadius: '6px', 
                 background: 'var(--surface-2)', 
                 color: 'var(--text-primary)', 
                 border: 'none', 
@@ -3704,14 +3709,48 @@ export default function Payroll() {
                 flexShrink: 0
               }}
             >
-              <RefreshCw size={16} className={(refreshing || loading) ? 'spin' : ''} />
+              <RefreshCw size={14} className={(refreshing || loading) ? 'spin' : ''} />
             </button>
           )}
         </div>
       </div>
 
-      {/* Sheet View */}
-      {viewMode === 'sheet' && (
+      {/* Main Content: Global Loading State vs Views */}
+      {loading ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '380px',
+          background: 'var(--surface, #ffffff)',
+          borderRadius: '16px',
+          border: '1.5px solid var(--surface-2, #e2e8f0)',
+          padding: '50px 20px',
+          margin: '10px 0',
+          boxShadow: 'var(--shadow-sm)',
+          textAlign: 'center'
+        }}>
+          <div style={{
+            animation: 'spin 1s linear infinite',
+            border: '4px solid #f1f5f9',
+            borderTopColor: 'var(--primary, #f59e0b)',
+            borderRadius: '50%',
+            width: '44px',
+            height: '44px',
+            marginBottom: '16px'
+          }} />
+          <h3 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary, #1e293b)', margin: '0 0 6px 0' }}>
+            Calculating & Loading Payroll...
+          </h3>
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)', margin: 0 }}>
+            Please wait while employee salary, attendance, and calculation records are being processed.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Sheet View */}
+          {viewMode === 'sheet' && (
         <>
           {/* Mobile Card / Table Toggle */}
           {isMobile && (
@@ -4572,12 +4611,32 @@ export default function Payroll() {
                   {/* Inline Expanded Detail Section directly underneath */}
                   {isSelected && (
                     <div style={{ padding: '12px', borderTop: '1px solid var(--surface-2)', background: 'var(--white)' }}>
-                      {renderEmployeeDetailBody(emp)}
+                      {loadingAdjs ? (
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '30px 10px',
+                          color: 'var(--text-secondary)'
+                        }}>
+                          <RefreshCw size={20} className="spin" style={{ color: 'var(--primary, #d97706)', marginBottom: '8px' }} />
+                          <span style={{ fontSize: '12px', fontWeight: 700 }}>Loading employee details...</span>
+                        </div>
+                      ) : (
+                        renderEmployeeDetailBody(emp)
+                      )}
                     </div>
                   )}
                 </div>
               );
             })}
+
+            {filteredEmployees.length === 0 && (
+              <div style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface)', borderRadius: '10px', border: '1px solid var(--surface-2)' }}>
+                No employees found matching the criteria.
+              </div>
+            )}
           </div>
         ) : (
           /* Desktop Master-Detail Side-by-Side */
@@ -4762,7 +4821,21 @@ export default function Payroll() {
                 </div>
 
                 <div style={{ padding: '12px 16px', overflowY: 'auto', flex: 1 }}>
-                  {renderEmployeeDetailBody(currentEmpData)}
+                  {loadingAdjs ? (
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '40px 20px',
+                      color: 'var(--text-secondary)'
+                    }}>
+                      <RefreshCw size={24} className="spin" style={{ color: 'var(--primary, #d97706)', marginBottom: '10px' }} />
+                      <span style={{ fontSize: '13px', fontWeight: 700 }}>Loading Employee Details & Adjustments...</span>
+                    </div>
+                  ) : (
+                    renderEmployeeDetailBody(currentEmpData)
+                  )}
                 </div>
               </>
             ) : (
@@ -4773,6 +4846,8 @@ export default function Payroll() {
           </div>
         </div>
         )
+      )}
+        </>
       )}
 
       {/* Popup Modal for Sheet View */}
