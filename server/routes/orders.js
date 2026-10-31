@@ -268,7 +268,13 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Handle Credit order logic with month-allocation and employee classification
     if (payment_method === 'Credit' && credit_customer_id) {
-      const currentMonthStr = new Date().toISOString().slice(0, 7);
+      const currentMonthStr = (function() {
+        const now = new Date();
+        const ksaDate = new Date(now.getTime() + (3 * 60 + now.getTimezoneOffset()) * 60000);
+        const year = ksaDate.getFullYear();
+        const month = String(ksaDate.getMonth() + 1).padStart(2, '0');
+        return `${year}-${month}`;
+      })();
       const custClassification = creditCustInfo?.is_extra_pay ? 'Extra Pay' : 'Regular';
       const txComments = comments ? String(comments).trim() : `Order #${order.id} - ${order.slip_number || ''}`;
 

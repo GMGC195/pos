@@ -2,6 +2,15 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+// KSA (UTC+3) Current Month Helper
+const getKsaCurrentMonthStr = () => {
+  const now = new Date();
+  const ksaDate = new Date(now.getTime() + (3 * 60 + now.getTimezoneOffset()) * 60000);
+  const year = ksaDate.getFullYear();
+  const month = String(ksaDate.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
 
 // Middleware to parse JSON
 router.use(express.json());
@@ -234,12 +243,27 @@ router.get('/', async (req, res) => {
         dp.is_active AS discount_package_active,
         emp.name AS registered_employee_name,
         emp.role AS registered_employee_role,
-        emp.employee_id AS registered_employee_code
+        emp.employee_id AS registered_employee_code,
+        COALESCE((
+          SELECT SUM(
+            CASE 
+              WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount 
+              WHEN type = 'PAYMENT' THEN -amount 
+              WHEN type = 'ORDER_CANCELLED' THEN -amount
+              WHEN type = 'PAYMENT_CANCELLED' THEN amount
+              ELSE 0 
+            END
+          )
+          FROM credit_transactions 
+          WHERE credit_customer_id = cc.id 
+            AND COALESCE(billing_month, TO_CHAR(created_at, 'YYYY-MM')) = $1
+        ), 0) AS current_month_balance
       FROM credit_customers cc
       LEFT JOIN discount_packages dp ON cc.discount_package_id = dp.id
       LEFT JOIN employees emp ON cc.employee_id = emp.id
     `;
-    let params = [];
+    const targetMonth = (req.query.month && req.query.month.trim()) ? req.query.month.trim() : getKsaCurrentMonthStr();
+    let params = [targetMonth];
     let whereClauses = [];
 
     // Branch isolation for non-admin/management

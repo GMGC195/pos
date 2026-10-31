@@ -449,9 +449,10 @@ export default function Credit() {
   const fetchCustomers = async () => {
     setLoading(true);
     try {
+      const curMonth = getCurrentMonthStr();
       const url = (isAdmin || isManagement) && branchFilter !== 'All' 
-        ? `/api/credit?branch=${encodeURIComponent(branchFilter)}` 
-        : '/api/credit';
+        ? `/api/credit?branch=${encodeURIComponent(branchFilter)}&month=${curMonth}` 
+        : `/api/credit?month=${curMonth}`;
       const res = await axios.get(url);
       setCustomers(res.data || []);
     } catch (err) {
@@ -979,7 +980,12 @@ export default function Credit() {
       const balanceChange = action === 'CHARGE' ? finalAmount : -finalAmount;
       setActiveCustomer(prev => ({ ...prev, balance: Number(prev.balance) + balanceChange }));
       
-      reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
+      if (selectedLedgerMonth !== 'All' && selectedLedgerMonth !== billingMonth) {
+        setSelectedLedgerMonth(billingMonth);
+        reloadLedger(billingMonth, ledgerClassificationFilter);
+      } else {
+        reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
+      }
       fetchCustomers(); 
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to process transaction');
@@ -1230,7 +1236,7 @@ export default function Credit() {
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Status</th>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 150 }}>Phone / Ref</th>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 240, whiteSpace: 'nowrap' }}>Discount Package</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 170, whiteSpace: 'nowrap' }}>Balance</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 175, whiteSpace: 'nowrap' }}>Balance (All & Current)</th>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Limit</th>
               {isAdmin && <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 160 }}>Branches</th>}
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right', minWidth: 110 }}>Actions</th>
@@ -1314,8 +1320,35 @@ export default function Credit() {
                       })()}
                     </td>
 
-                    <td style={{ padding: '14px 16px', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', minWidth: 170, color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) }}>
-                      {CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? '(Due)' : (c.balance < 0 ? '(Adv)' : '')}
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', minWidth: 175 }}>
+                      {/* All Balance (Overall Account Total) */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>All Bal:</span>
+                        <span style={{ 
+                          fontWeight: 800, 
+                          fontSize: 14, 
+                          color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) 
+                        }}>
+                          {CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? '(Due)' : (c.balance < 0 ? '(Adv)' : '(0.00)')}
+                        </span>
+                      </div>
+
+                      {/* Current Month Balance */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)' }}>Current Mo:</span>
+                        {(() => {
+                          const curBal = parseFloat(c.current_month_balance || 0);
+                          return (
+                            <span style={{ 
+                              fontSize: 12, 
+                              fontWeight: 700, 
+                              color: curBal > 0 ? '#dc2626' : (curBal < 0 ? '#16a34a' : 'var(--text-muted)') 
+                            }}>
+                              {CURRENCY} {Math.abs(curBal).toFixed(2)} {curBal > 0 ? '(Due)' : (curBal < 0 ? '(Adv)' : '(0.00)')}
+                            </span>
+                          );
+                        })()}
+                      </div>
                     </td>
 
                     <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 13 }}>
@@ -1907,22 +1940,62 @@ export default function Credit() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {/* Prominently Highlighted Overall Balance Badge */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: 8, 
-                  background: activeCustomer.balance > 0 ? '#dc2626' : (activeCustomer.balance < 0 ? '#16a34a' : '#475569'), 
-                  color: '#ffffff',
-                  padding: '5px 14px', 
-                  borderRadius: 8, 
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.18)',
-                  border: '1px solid rgba(255,255,255,0.2)' 
-                }}>
-                  <span style={{ fontSize: 12, color: '#ffffff', fontWeight: 600, opacity: 0.95 }}>Overall Balance:</span>
-                  <span style={{ fontSize: 14.5, fontWeight: 900, color: '#ffffff', letterSpacing: 0.2 }}>
-                    {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(Settled)')}
-                  </span>
+                {/* Header Balances: Both Current/Selected Month Balance AND All Balance (Overall) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {/* Current / Selected Month Balance */}
+                  {(() => {
+                    const curMonthKey = getCurrentMonthStr();
+                    const curMonthSummary = monthlySummary.find(s => (s.billing_month || s.month) === curMonthKey);
+                    const curMonthNet = curMonthSummary ? parseFloat(curMonthSummary.net_balance || curMonthSummary.remaining_balance || 0) : 0;
+
+                    const activeMonthNet = selectedLedgerMonth === 'All'
+                      ? curMonthNet
+                      : parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0);
+
+                    const badgeLabel = selectedLedgerMonth === 'All'
+                      ? 'Current Month Bal:'
+                      : `${formatMonthDisplay(selectedLedgerMonth)} Bal:`;
+
+                    const isDue = activeMonthNet > 0;
+                    const isAdv = activeMonthNet < 0;
+
+                    return (
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 6, 
+                        background: isDue ? '#fef2f2' : (isAdv ? '#ecfdf5' : 'var(--surface-2)'), 
+                        color: isDue ? '#b91c1c' : (isAdv ? '#065f46' : 'var(--text)'),
+                        padding: '5px 12px', 
+                        borderRadius: 8, 
+                        border: `1.5px solid ${isDue ? '#fecaca' : (isAdv ? '#a7f3d0' : 'var(--surface-3)')}`,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                      }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.9 }}>{badgeLabel}</span>
+                        <span style={{ fontSize: 13.5, fontWeight: 900 }}>
+                          {CURRENCY} {Math.abs(activeMonthNet).toFixed(2)} {isDue ? '(DR / Dues)' : (isAdv ? '(CR / Adv)' : '(Settled)')}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* All Balance (Overall Balance Across All Months) */}
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 7, 
+                    background: activeCustomer.balance > 0 ? '#dc2626' : (activeCustomer.balance < 0 ? '#16a34a' : '#475569'), 
+                    color: '#ffffff',
+                    padding: '5px 14px', 
+                    borderRadius: 8, 
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.18)',
+                    border: '1px solid rgba(255,255,255,0.2)' 
+                  }}>
+                    <span style={{ fontSize: 11.5, color: '#ffffff', fontWeight: 700, opacity: 0.95 }}>All Balance (Overall):</span>
+                    <span style={{ fontSize: 14, fontWeight: 900, color: '#ffffff', letterSpacing: 0.2 }}>
+                      {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(Settled)')}
+                    </span>
+                  </div>
                 </div>
 
                 {isAdmin && (
@@ -2151,31 +2224,109 @@ export default function Credit() {
                     <span style={{ color: '#16a34a', fontWeight: 800, fontSize: 12.5 }}>-{CURRENCY} {parseFloat(selectedMonthSummaryData?.credit || selectedMonthSummaryData?.total_credit || 0).toFixed(2)}</span>
                   </div>
 
-                  {/* Net Badge */}
+                  {/* Month Net Badge & Balance Reconciliation */}
                   {(() => {
                     const netVal = parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0);
                     const isDue = netVal > 0;
                     const isAdv = netVal < 0;
+                    const overallTotal = parseFloat(activeCustomer.balance || 0);
+                    const otherMonthsNet = overallTotal - netVal;
+
                     return (
-                      <div style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: 5, 
-                        background: isDue ? '#fff1f2' : (isAdv ? '#ecfdf5' : 'var(--surface-2)'), 
-                        border: `1px solid ${isDue ? '#fecdd3' : (isAdv ? '#a7f3d0' : 'var(--surface-3)')}`, 
-                        padding: '3px 9px', 
-                        borderRadius: 6 
-                      }}>
-                        <span style={{ color: isDue ? '#9f1239' : (isAdv ? '#065f46' : 'var(--text-secondary)'), fontWeight: 600, fontSize: 11.5 }}>Net:</span>
-                        <span style={{ color: isDue ? '#e11d48' : (isAdv ? '#059669' : 'var(--text)'), fontWeight: 900, fontSize: 12.5 }}>
-                          {CURRENCY} {Math.abs(netVal).toFixed(2)} {isDue ? '(DR)' : (isAdv ? '(CR)' : '(0.00)')}
-                        </span>
-                      </div>
+                      <>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: 5, 
+                          background: isDue ? '#fff1f2' : (isAdv ? '#ecfdf5' : 'var(--surface-2)'), 
+                          border: `1px solid ${isDue ? '#fecdd3' : (isAdv ? '#a7f3d0' : 'var(--surface-3)')}`, 
+                          padding: '3px 9px', 
+                          borderRadius: 6 
+                        }}>
+                          <span style={{ color: isDue ? '#9f1239' : (isAdv ? '#065f46' : 'var(--text-secondary)'), fontWeight: 600, fontSize: 11.5 }}>Month Net:</span>
+                          <span style={{ color: isDue ? '#e11d48' : (isAdv ? '#059669' : 'var(--text)'), fontWeight: 900, fontSize: 12.5 }}>
+                            {CURRENCY} {Math.abs(netVal).toFixed(2)} {isDue ? '(DR)' : (isAdv ? '(CR)' : '(0.00)')}
+                          </span>
+                        </div>
+
+                        {/* Other Months Balance Indicator */}
+                        {Math.abs(otherMonthsNet) > 0.001 && (
+                          <div style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 5, 
+                            background: otherMonthsNet > 0 ? '#fffbeb' : '#f0fdf4', 
+                            border: `1px solid ${otherMonthsNet > 0 ? '#fde68a' : '#bbf7d0'}`, 
+                            padding: '3px 8px', 
+                            borderRadius: 6 
+                          }} title="Net balance from all other months">
+                            <span style={{ color: otherMonthsNet > 0 ? '#92400e' : '#166534', fontWeight: 600, fontSize: 11 }}>Other Months:</span>
+                            <span style={{ color: otherMonthsNet > 0 ? '#b45309' : '#15803d', fontWeight: 800, fontSize: 11.5 }}>
+                              {CURRENCY} {Math.abs(otherMonthsNet).toFixed(2)} {otherMonthsNet > 0 ? '(DR)' : '(CR)'}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* All Balance (Overall) */}
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: 5, 
+                          background: '#1e293b', 
+                          color: '#ffffff', 
+                          padding: '3px 9px', 
+                          borderRadius: 6,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.15)' 
+                        }} title="Overall Account Balance across all months">
+                          <span style={{ fontSize: 11, fontWeight: 600, opacity: 0.9 }}>All Bal:</span>
+                          <span style={{ fontSize: 12, fontWeight: 900 }}>
+                            {CURRENCY} {Math.abs(overallTotal).toFixed(2)} {overallTotal > 0 ? '(DR)' : (overallTotal < 0 ? '(CR)' : '(0.00)')}
+                          </span>
+                        </div>
+                      </>
                     );
                   })()}
                 </div>
               ) : (
-                <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Showing all {processedTransactions.length} transactions across all months</span>
+                /* All Months View: Show Overall Debits, Credits, and All Balance */
+                (() => {
+                  const allDebits = processedTransactions
+                    .filter(t => !t.isCancelled && (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE'))
+                    .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+                  const allCredits = processedTransactions
+                    .filter(t => !t.isCancelled && t.type === 'PAYMENT')
+                    .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+                  const allNet = allDebits - allCredits;
+                  const isAllDue = allNet > 0;
+                  const isAllAdv = allNet < 0;
+
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#fef2f2', border: '1px solid #fecaca', padding: '3px 9px', borderRadius: 6 }}>
+                        <span style={{ color: '#991b1b', fontWeight: 600, fontSize: 11.5 }}>All Debits:</span>
+                        <span style={{ color: '#dc2626', fontWeight: 800, fontSize: 12.5 }}>+{CURRENCY} {allDebits.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 9px', borderRadius: 6 }}>
+                        <span style={{ color: '#166534', fontWeight: 600, fontSize: 11.5 }}>All Credits:</span>
+                        <span style={{ color: '#16a34a', fontWeight: 800, fontSize: 12.5 }}>-{CURRENCY} {allCredits.toFixed(2)}</span>
+                      </div>
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 5, 
+                        background: isAllDue ? '#fff1f2' : (isAllAdv ? '#ecfdf5' : 'var(--surface-2)'), 
+                        border: `1px solid ${isAllDue ? '#fecdd3' : (isAllAdv ? '#a7f3d0' : 'var(--surface-3)')}`, 
+                        padding: '3px 9px', 
+                        borderRadius: 6 
+                      }}>
+                        <span style={{ color: isAllDue ? '#9f1239' : (isAllAdv ? '#065f46' : 'var(--text-secondary)'), fontWeight: 600, fontSize: 11.5 }}>All Balance:</span>
+                        <span style={{ color: isAllDue ? '#e11d48' : (isAllAdv ? '#059669' : 'var(--text)'), fontWeight: 900, fontSize: 12.5 }}>
+                          {CURRENCY} {Math.abs(allNet).toFixed(2)} {isAllDue ? '(DR)' : (isAllAdv ? '(CR)' : '(0.00)')}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()
               )}
             </div>
 
@@ -2502,12 +2653,22 @@ export default function Credit() {
                   <tfoot>
                     <tr style={{ background: 'var(--surface-50)', borderTop: '2px solid var(--surface-2)', fontWeight: 700 }}>
                       <td colSpan={4} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text-secondary)' }}>
-                        {selectedLedgerMonth !== 'All' ? `${formatMonthDisplay(selectedLedgerMonth)} Net Balance:` : 'Account Net Total:'}
+                        {selectedLedgerMonth !== 'All' ? `${formatMonthDisplay(selectedLedgerMonth)} Net Balance:` : 'All Balance (Account Net Total):'}
                       </td>
                       <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', color: visibleSubtotal > 0 ? 'var(--red)' : (visibleSubtotal < 0 ? 'var(--green)' : 'var(--text)') }}>
                         {visibleSubtotal > 0 ? '+' : (visibleSubtotal < 0 ? '-' : '')} {CURRENCY} {Math.abs(visibleSubtotal).toFixed(2)}
                       </td>
                     </tr>
+                    {selectedLedgerMonth !== 'All' && (
+                      <tr style={{ background: 'var(--surface-2)', borderTop: '1px solid var(--surface-3)', fontWeight: 800 }}>
+                        <td colSpan={4} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text)' }}>
+                          All Balance (Overall Account Total):
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 900, whiteSpace: 'nowrap', color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
+                          {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(Due)' : (activeCustomer.balance < 0 ? '(Adv)' : '(0.00)')}
+                        </td>
+                      </tr>
+                    )}
                   </tfoot>
                 )}
               </table>
