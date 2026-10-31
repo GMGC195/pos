@@ -423,10 +423,10 @@ router.get('/', authenticateToken, async (req, res) => {
       const ot = req.query.order_type;
       if (ot.includes(',')) {
         params.push(ot.split(',').map(s => s.trim().toLowerCase()));
-        query += ` AND LOWER(COALESCE(o.order_type, '')) = ANY(${params.length})`;
+        query += ` AND LOWER(COALESCE(o.order_type, '')) = ANY($${params.length})`;
       } else {
         params.push(ot.trim().toLowerCase());
-        query += ` AND LOWER(COALESCE(o.order_type, '')) = ${params.length}`;
+        query += ` AND LOWER(COALESCE(o.order_type, '')) = $${params.length}`;
       }
     }
 
