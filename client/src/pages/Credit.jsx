@@ -373,6 +373,8 @@ export default function Credit() {
   const [isExtraPay, setIsExtraPay] = useState(false);
   const [status, setStatus] = useState('Active');
   const [discountPackageId, setDiscountPackageId] = useState('');
+  const [discountMode, setDiscountMode] = useState('none'); // 'none' | 'package' | 'custom'
+  const [customerModalRules, setCustomerModalRules] = useState([]);
 
   // Category Filter & Branch Filter state
   const [categoryFilter, setCategoryFilter] = useState('All');
@@ -516,6 +518,24 @@ export default function Credit() {
     if (!name) return toast.error('Name is required');
     if (saving) return;
 
+    if (discountMode === 'package' && !discountPackageId) {
+      return toast.error('Please select an existing discount package or choose "No Discount".');
+    }
+
+    let finalPkgId = null;
+    let finalRules = [];
+
+    if (discountMode === 'package') {
+      finalPkgId = discountPackageId ? parseInt(discountPackageId, 10) : null;
+      finalRules = [];
+    } else if (discountMode === 'custom') {
+      finalPkgId = null;
+      finalRules = customerModalRules;
+    } else {
+      finalPkgId = null;
+      finalRules = [];
+    }
+
     const payload = {
       name,
       phone,
@@ -526,17 +546,18 @@ export default function Credit() {
       category,
       is_extra_pay: category === 'Employee' ? isExtraPay : false,
       status,
-      discount_package_id: discountPackageId ? parseInt(discountPackageId) : null
+      discount_package_id: finalPkgId,
+      discount_rules: finalRules
     };
 
     setSaving(true);
     try {
       if (editingCustomer) {
         await axios.put(`/api/credit/${editingCustomer.id}`, payload);
-        toast.success('Customer updated');
+        toast.success('Customer updated successfully');
       } else {
         await axios.post('/api/credit', payload);
-        toast.success('Customer added');
+        toast.success('Customer added successfully');
       }
       setShowModal(false);
       fetchCustomers();
@@ -597,7 +618,9 @@ export default function Credit() {
     setCategory('Regular Customer');
     setIsExtraPay(false);
     setStatus('Active');
+    setDiscountMode('none');
     setDiscountPackageId('');
+    setCustomerModalRules([]);
     setShowModal(true);
   };
 
@@ -612,7 +635,27 @@ export default function Credit() {
     setCategory(customer.category || 'Regular Customer');
     setIsExtraPay(Boolean(customer.is_extra_pay));
     setStatus(customer.status || 'Active');
-    setDiscountPackageId(customer.discount_package_id ? customer.discount_package_id.toString() : '');
+
+    let custRules = customer.discount_rules;
+    if (typeof custRules === 'string') {
+      try { custRules = JSON.parse(custRules); } catch(e) { custRules = []; }
+    }
+    const parsedRules = Array.isArray(custRules) ? custRules : [];
+
+    if (customer.discount_package_id) {
+      setDiscountMode('package');
+      setDiscountPackageId(customer.discount_package_id.toString());
+      setCustomerModalRules([]);
+    } else if (parsedRules.length > 0) {
+      setDiscountMode('custom');
+      setDiscountPackageId('');
+      setCustomerModalRules(parsedRules);
+    } else {
+      setDiscountMode('none');
+      setDiscountPackageId('');
+      setCustomerModalRules([]);
+    }
+
     setShowModal(true);
   };
 
@@ -1030,11 +1073,23 @@ export default function Credit() {
                     <td style={{ padding: '14px 16px' }}>
                       {c.discount_package_name ? (
                         <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
-                          {c.discount_package_name} {ruleCount > 0 ? `(${ruleCount} rules)` : ''}
+                          Pkg: {c.discount_package_name} {ruleCount > 0 ? `(${ruleCount} rules)` : ''}
                         </span>
-                      ) : (
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>None</span>
-                      )}
+                      ) : (() => {
+                        let directRules = c.discount_rules;
+                        if (typeof directRules === 'string') {
+                          try { directRules = JSON.parse(directRules); } catch(e) { directRules = []; }
+                        }
+                        const directCount = Array.isArray(directRules) ? directRules.length : 0;
+                        if (directCount > 0) {
+                          return (
+                            <span style={{ fontSize: 12, background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                              Custom ({directCount} rules)
+                            </span>
+                          );
+                        }
+                        return <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>None</span>;
+                      })()}
                     </td>
 
                     <td style={{ padding: '14px 16px', fontWeight: 700, fontSize: 14, color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) }}>
@@ -1098,7 +1153,7 @@ export default function Credit() {
       {/* Customer Add/Edit Modal */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 500, maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, position: 'relative', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 580, maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, position: 'relative', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
             <div style={{ padding: '20px 24px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-2)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{editingCustomer ? 'Edit Khata Customer' : 'Add New Khata Customer'}</h3>
               <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}><X size={20}/></button>
@@ -1165,30 +1220,97 @@ export default function Credit() {
                   </div>
                 </div>
 
-                {/* Assigned Discount Package */}
-                <div>
-                  <label style={{ display: 'block', marginBottom: 4, fontSize: 12, fontWeight: 700 }}>
-                    Assigned Discount Package (Auto-applied in POS)
+                {/* Customer Discount Configuration: Radio Buttons for None / Package / Custom */}
+                <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 10, border: '1px solid var(--surface-3)' }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                    Discount Configuration (Auto-applied in POS) *
                   </label>
-                  <select 
-                    value={discountPackageId} 
-                    onChange={e => setDiscountPackageId(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
-                  >
-                    <option value="">-- No Discount Package --</option>
-                    {discountPackages.map(pkg => {
-                      let rules = pkg.discount_rules;
-                      if (typeof rules === 'string') {
-                        try { rules = JSON.parse(rules); } catch(e) { rules = []; }
-                      }
-                      const rCount = Array.isArray(rules) ? rules.length : 0;
-                      return (
-                        <option key={pkg.id} value={pkg.id} disabled={!pkg.is_active}>
-                          {pkg.name} {rCount > 0 ? `(${rCount} rules)` : ''} {!pkg.is_active ? '[Deactivated]' : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
+
+                  {/* Radio Buttons for Discount Selection */}
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: discountMode === 'none' ? 700 : 500, color: discountMode === 'none' ? 'var(--primary)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="discountMode" 
+                        value="none" 
+                        checked={discountMode === 'none'} 
+                        onChange={() => setDiscountMode('none')} 
+                      />
+                      No Discount
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: discountMode === 'package' ? 700 : 500, color: discountMode === 'package' ? 'var(--primary)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="discountMode" 
+                        value="package" 
+                        checked={discountMode === 'package'} 
+                        onChange={() => setDiscountMode('package')} 
+                      />
+                      Assign Discount Package
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: discountMode === 'custom' ? 700 : 500, color: discountMode === 'custom' ? 'var(--primary)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="discountMode" 
+                        value="custom" 
+                        checked={discountMode === 'custom'} 
+                        onChange={() => setDiscountMode('custom')} 
+                      />
+                      Custom / Manual Discount
+                    </label>
+                  </div>
+
+                  {/* Case 1: No Discount */}
+                  {discountMode === 'none' && (
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      No automatic discount will be applied during order billing for this customer.
+                    </div>
+                  )}
+
+                  {/* Case 2: Assign Existing Package */}
+                  {discountMode === 'package' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <select 
+                        value={discountPackageId} 
+                        onChange={e => setDiscountPackageId(e.target.value)}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1.5px solid var(--primary)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
+                      >
+                        <option value="">-- Select an Existing Discount Package --</option>
+                        {discountPackages.map(pkg => {
+                          let rules = pkg.discount_rules;
+                          if (typeof rules === 'string') {
+                            try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+                          }
+                          const rCount = Array.isArray(rules) ? rules.length : 0;
+                          return (
+                            <option key={pkg.id} value={pkg.id} disabled={!pkg.is_active}>
+                              {pkg.name} {rCount > 0 ? `(${rCount} rules)` : ''} {!pkg.is_active ? '[Deactivated]' : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        Assigned package rules will automatically apply when billing this customer in POS.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Case 3: Direct Custom / Manual Category & Item Discount Rules */}
+                  {discountMode === 'custom' && (
+                    <div style={{ background: 'var(--surface)', padding: 10, borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+                      <DiscountRuleBuilder 
+                        rules={customerModalRules} 
+                        setRules={setCustomerModalRules} 
+                        categories={categories} 
+                        items={items} 
+                      />
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                        These custom discount rules will directly belong to this customer and apply in POS.
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
