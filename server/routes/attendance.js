@@ -518,16 +518,17 @@ router.get('/today', authenticateToken, async (req, res) => {
         totalHoursToday += Math.max(0, sessionMs / (1000 * 60 * 60));
       });
 
-      // Get current active state: last session status
-      const lastSession = empSessions[empSessions.length - 1] || null;
+      // Prioritize active open session (check_out IS NULL) if present, otherwise latest session
+      const activeOpenSession = empSessions.find(s => !s.check_out);
+      const currentSession = activeOpenSession || empSessions[empSessions.length - 1] || null;
       
       let calculatedStatus = 'Absent';
       if (empSessions.length > 0) {
-        const st = lastSession.attendance_status;
+        const st = currentSession.attendance_status;
         if (st === 'Holiday') calculatedStatus = 'Holiday';
         else if (st === 'Leave') calculatedStatus = 'Leave';
-        else if (lastSession.check_out) calculatedStatus = 'Checked Out';
-        else if (lastSession.on_break) calculatedStatus = 'On Break';
+        else if (currentSession.check_out) calculatedStatus = 'Checked Out';
+        else if (currentSession.on_break) calculatedStatus = 'On Break';
         else if (st === 'Late') calculatedStatus = 'Late';
         else calculatedStatus = 'Present';
       } else if (!evaluateShiftStart(emp.shift, shiftsList)) {
@@ -538,20 +539,20 @@ router.get('/today', authenticateToken, async (req, res) => {
         ...emp,
         sessions: empSessions, // Return all sessions to show stacked inside one row
         pending_requests: empRequests, // Include pending requests
-        attendance_id: lastSession ? lastSession.attendance_id : null,
-        check_in: lastSession ? lastSession.check_in : null,
-        check_out: lastSession ? lastSession.check_out : null,
-        shift_start_time: lastSession ? lastSession.shift_start_time : emp.shift_start_time,
-        shift_end_time: lastSession ? lastSession.shift_end_time : emp.shift_end_time,
-        is_split_shift: lastSession ? (lastSession.is_split_shift ?? emp.is_split_shift ?? false) : (emp.is_split_shift ?? false),
-        shift_start_time_2: lastSession ? (lastSession.shift_start_time_2 || emp.start_time_2) : emp.start_time_2,
-        shift_end_time_2: lastSession ? (lastSession.shift_end_time_2 || emp.end_time_2) : emp.end_time_2,
-        date: lastSession ? lastSession.date : null,
-        attendance_status: lastSession ? lastSession.attendance_status : null,
-        on_break: lastSession ? lastSession.on_break : false,
-        break_start: lastSession ? lastSession.break_start : null,
-        created_by: lastSession ? lastSession.created_by : null,
-        checked_out_by: lastSession ? lastSession.checked_out_by : null,
+        attendance_id: currentSession ? currentSession.attendance_id : null,
+        check_in: currentSession ? currentSession.check_in : null,
+        check_out: currentSession ? currentSession.check_out : null,
+        shift_start_time: currentSession ? currentSession.shift_start_time : emp.shift_start_time,
+        shift_end_time: currentSession ? currentSession.shift_end_time : emp.shift_end_time,
+        is_split_shift: currentSession ? (currentSession.is_split_shift ?? emp.is_split_shift ?? false) : (emp.is_split_shift ?? false),
+        shift_start_time_2: currentSession ? (currentSession.shift_start_time_2 || emp.start_time_2) : emp.start_time_2,
+        shift_end_time_2: currentSession ? (currentSession.shift_end_time_2 || emp.end_time_2) : emp.end_time_2,
+        date: currentSession ? currentSession.date : null,
+        attendance_status: currentSession ? currentSession.attendance_status : null,
+        on_break: currentSession ? currentSession.on_break : false,
+        break_start: currentSession ? currentSession.break_start : null,
+        created_by: currentSession ? currentSession.created_by : null,
+        checked_out_by: currentSession ? currentSession.checked_out_by : null,
         total_hours_today: totalHoursToday,
         total_break_seconds_today: totalBreakSecondsToday,
         calculated_status: calculatedStatus
@@ -918,6 +919,9 @@ function calculateShiftScheduleDetails({
   if (scheduledShiftEndMs) {
     expectedCheckoutTime = Math.min(scheduledShiftEndMs, expectedCheckoutTime);
   }
+  if (expectedCheckoutTime < checkInTime) {
+    expectedCheckoutTime = checkInTime;
+  }
 
   return {
     isShift2,
@@ -1030,6 +1034,10 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     if (overtimeMins > 0) {
       // Override final checkout time so attendance sheet initially doesn't show unapproved overtime
       finalCheckoutTime = new Date(expectedCheckoutTime);
+    }
+    if (finalCheckoutTime.getTime() < checkInTime) {
+      finalCheckoutTime = new Date(checkInTime);
+    }
       
       if (!ignore_overtime) {
         // Overtime > 0 mins, require reason to generate a pending request
@@ -1681,6 +1689,29 @@ router.post('/session', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Check-out time cannot be in the future.' });
   }
   
+  if (check_in && check_out && new Date(check_out).getTime() <= new Date(check_in).getTime()) {
+    return res.status(400).json({ error: 'Check-out time must be strictly after check-in time.' });
+  }
+
+  // Check overlap with existing sessions
+  const existingSessions = await pool.query(
+    `SELECT id, check_in, check_out FROM employee_attendance WHERE employee_id = $1 AND date = $2`,
+    [employee_id, date]
+  );
+  const newInMs = new Date(check_in).getTime();
+  const newOutMs = check_out ? new Date(check_out).getTime() : null;
+
+  for (const ex of existingSessions.rows) {
+    const exInMs = new Date(ex.check_in).getTime();
+    const exOutMs = ex.check_out ? new Date(ex.check_out).getTime() : null;
+    if (exOutMs === null && !check_out) {
+      return res.status(400).json({ error: 'This employee already has an active open session. Please check them out before adding a new session.' });
+    }
+    if (newOutMs && exOutMs && (newInMs < exOutMs && newOutMs > exInMs)) {
+      return res.status(400).json({ error: 'The added session overlaps with an existing attendance session for this employee.' });
+    }
+  }
+
   if (!check_out) {
     const activeSession = await pool.query(
       `SELECT id FROM employee_attendance WHERE employee_id = $1 AND check_out IS NULL`,

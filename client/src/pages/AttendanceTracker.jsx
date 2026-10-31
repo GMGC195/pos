@@ -519,6 +519,15 @@ export default function AttendanceTracker() {
   }, [])
 
   const handleCheckIn = async (empId, name) => {
+    // Prevent duplicate check-in if employee is already checked in
+    const currentEmp = employees.find(e => e.employee_id === empId || e.id === empId);
+    const alreadyActive = currentEmp && ((currentEmp.sessions && currentEmp.sessions.some(s => !s.check_out)) || (currentEmp.attendance_id && !currentEmp.check_out));
+    if (alreadyActive) {
+      toast.dismiss();
+      toast.error(`${name} is already checked in and on duty!`, { duration: 2500 });
+      return;
+    }
+
     const actionKey = `check-in-${empId}`;
     if (pendingActions[actionKey]) return;
     setPendingActions(prev => ({ ...prev, [actionKey]: true }));
@@ -750,7 +759,8 @@ export default function AttendanceTracker() {
 
   // Get color and status text for badges
   const getStatusBadge = (emp) => {
-    if (!emp.attendance_id || emp.check_out) {
+    const hasOpenSession = (emp.sessions && emp.sessions.some(s => !s.check_out)) || (emp.attendance_id && !emp.check_out);
+    if (!hasOpenSession) {
       return { text: 'Checked Out', color: '#9CA3AF', bg: 'rgba(156, 163, 175, 0.1)' }
     }
     if (emp.on_break) {
@@ -808,7 +818,8 @@ export default function AttendanceTracker() {
 
     // Status Filter
     let matchesStatus = true;
-    const isCheckedIn = emp.attendance_id && !emp.check_out;
+    const hasOpenSession = emp.sessions && emp.sessions.some(s => !s.check_out);
+    const isCheckedIn = (emp.attendance_id && !emp.check_out) || hasOpenSession;
     const isAbsent = !emp.attendance_id;
     const isLate = emp.attendance_status === 'Late';
     const isCheckedOut = emp.attendance_id && emp.check_out;
@@ -845,7 +856,8 @@ export default function AttendanceTracker() {
           {filteredEmployees.length > 0 && (() => {
             const emp = filteredEmployees[0];
             const badge = getStatusBadge(emp);
-            const isCheckedIn = emp.attendance_id && !emp.check_out;
+            const hasOpenSession = emp.sessions && emp.sessions.some(s => !s.check_out);
+            const isCheckedIn = (emp.attendance_id && !emp.check_out) || hasOpenSession;
             const shiftName = emp.shift || 'R1';
             const matchedShift = shiftsList.find(s => s.name.toUpperCase() === shiftName.toUpperCase());
             
@@ -883,7 +895,7 @@ export default function AttendanceTracker() {
                       </div>
                     </div>
                   )}
-                  {emp.check_out && (
+                  {!isCheckedIn && emp.check_out && (
                     <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                         <span style={{ color: 'var(--text-muted)' }}>Check In - {emp.created_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
@@ -1443,7 +1455,8 @@ export default function AttendanceTracker() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
           {filteredEmployees.map(emp => {
             const badge = getStatusBadge(emp);
-            const isCheckedIn = emp.attendance_id && !emp.check_out;
+            const hasOpenSession = emp.sessions && emp.sessions.some(s => !s.check_out);
+            const isCheckedIn = (emp.attendance_id && !emp.check_out) || hasOpenSession;
             const isOnBreak = emp.on_break;
  
             const staffRole = emp.role && emp.role.toLowerCase() !== 'operator' ? emp.role : 'Staff';
@@ -1602,7 +1615,7 @@ export default function AttendanceTracker() {
                     </div>
                   )}
 
-                  {emp.check_out && (
+                  {!isCheckedIn && emp.check_out && (
                     <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                         <span style={{ color: 'var(--text-muted)' }}>Check In - {emp.created_by || emp.name}{emp.branch ? (emp.branch.includes('1') ? ' - B1' : emp.branch.includes('2') ? ' - B2' : emp.branch.includes('3') ? ' - B3' : ` - ${emp.branch}`) : ''}:</span>
