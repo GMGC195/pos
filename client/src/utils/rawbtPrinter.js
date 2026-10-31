@@ -1,75 +1,86 @@
+function sanitizeThermalText(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/\s*-\s*$/, '')
+    .replace(/^\s*-\s*/, '')
+    .replace(/\s*-\s*-+/g, '-')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\[\s*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Item';
+}
+
 export const printViaRawBT = (orderData) => {
-  // Format the receipt text
   let receiptText = "";
-  const esc = '\x1B'; // ESC byte in hex notation
-  const newLine = '\x0A'; // LF byte in hex notation
-  const cmds = esc + "@"; // Initializes the printer (ESC @)
+  const esc = '\x1B';
+  const gs = '\x1D';
+  const crlf = '\r\n';
+  const cmds = esc + "@" + esc + "2"; // Initialize + standard line spacing
 
   // Header
   receiptText += cmds;
   receiptText += esc + 'a' + '\x01'; // Center align
-  receiptText += esc + '!' + '\x18'; // Double height/width for title
-  receiptText += "PIZZA SHOP\n";
+  receiptText += esc + '!' + '\x18'; // Double height/width
+  receiptText += "PIZZA SHOP" + crlf;
   receiptText += esc + '!' + '\x00'; // Normal text
-  receiptText += "Order Receipt\n";
-  receiptText += "--------------------------------\n";
+  receiptText += "Kitchen Slip" + crlf;
+  receiptText += "--------------------------------" + crlf;
   
   receiptText += esc + 'a' + '\x00'; // Left align
-  receiptText += `Order #: ${orderData.order_id || orderData.id || 'NEW'}\n`;
-  receiptText += `Type: ${orderData.order_type}\n`;
+  receiptText += `Order #: ${orderData.order_id || orderData.id || 'NEW'}` + crlf;
+  if (orderData.order_type) {
+    receiptText += `Type: ${sanitizeThermalText(orderData.order_type)}` + crlf;
+  }
   if (orderData.customer_name) {
-    receiptText += `Customer: ${orderData.customer_name}\n`;
+    receiptText += `Customer: ${sanitizeThermalText(orderData.customer_name)}` + crlf;
   }
   if (orderData.table_no) {
-    receiptText += `Table: ${orderData.table_no}\n`;
+    receiptText += `Table: ${sanitizeThermalText(orderData.table_no)}` + crlf;
   }
-  receiptText += `Date: ${new Date().toLocaleString()}\n`;
-  receiptText += "--------------------------------\n";
+  receiptText += `Date: ${new Date().toLocaleString()}` + crlf;
+  receiptText += "--------------------------------" + crlf;
 
   // Items
   if (orderData.items && Array.isArray(orderData.items)) {
-    orderData.items.forEach(item => {
-      // Format: Qty x Item Name
-      const itemName = item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name;
-      receiptText += `${item.qty} x ${itemName}\n`;
-      // Item price line
+    orderData.items.forEach((item, idx) => {
+      const cleanName = sanitizeThermalText(item.name || item.item_name || '');
+      const qty = item.qty || 1;
+      const unitPrice = parseFloat(item.price || item.unit_price || 0);
+      const lineTotal = item.total_price || (unitPrice * qty);
+      
+      receiptText += `${idx + 1}. ${cleanName}` + crlf;
+      receiptText += `   ${qty} x SAR ${unitPrice.toFixed(2)} = SAR ${Number(lineTotal).toFixed(2)}` + crlf;
       if (item.selected_variations && item.selected_variations.length > 0) {
-        receiptText += `   + ${item.selected_variations.map(v => v.name).join(', ')}\n`;
+        receiptText += `   + ${item.selected_variations.map(v => sanitizeThermalText(v.name)).join(', ')}` + crlf;
       }
-      receiptText += `   SAR ${item.total_price || (item.price * item.qty)}\n`;
     });
   }
-  receiptText += "--------------------------------\n";
+  receiptText += "--------------------------------" + crlf;
 
   // Totals
   receiptText += esc + 'a' + '\x02'; // Right align
-  receiptText += `Subtotal: SAR ${orderData.subtotal}\n`;
+  receiptText += `Subtotal: SAR ${orderData.subtotal}` + crlf;
   if (orderData.tax_amount > 0) {
-    receiptText += `Tax: SAR ${orderData.tax_amount}\n`;
+    receiptText += `Tax: SAR ${orderData.tax_amount}` + crlf;
   }
   if (orderData.discount > 0) {
-    receiptText += `Discount: SAR ${orderData.discount}\n`;
+    receiptText += `Discount: -SAR ${orderData.discount}` + crlf;
   }
   receiptText += esc + '!' + '\x10'; // Double height for Total
-  receiptText += `TOTAL: SAR ${orderData.total_amount}\n`;
+  receiptText += `TOTAL: SAR ${orderData.total_amount}` + crlf;
   receiptText += esc + '!' + '\x00'; // Normal text
 
   // Footer
   receiptText += esc + 'a' + '\x01'; // Center align
-  receiptText += "\nThank you for your order!\nCome back soon\n\n\n";
+  receiptText += crlf + "Thank you for your order!" + crlf;
 
   // Feed and cut
-  receiptText += "\n\n\n\n\n"; // empty lines for tearing
+  receiptText += crlf + crlf + crlf + crlf;
   receiptText += esc + "i"; // partial cut
 
-  // Encode for RawBT intent
-  // RawBT accepts base64 encoded raw commands
   const encodedText = btoa(unescape(encodeURIComponent(receiptText)));
-  
-  // Create and trigger the intent
-  // This will open RawBT instantly, print, and automatically return to the browser
-  // if the user configures "Return back" in RawBT settings.
   const rawbtUrl = `intent:${encodedText}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
-  
   window.location.href = rawbtUrl;
 };

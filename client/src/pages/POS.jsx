@@ -1032,12 +1032,12 @@ export default function POS() {
         const qtyDisplay = qty > 1 ? `${qty} (${uPriceStr})` : `${qty}`;
         const formattedName = formatItemUrdu(item.name || item.item_name);
         return `
-        <div style="padding: 2px 0;">
-          <div style="font-size: 12px; font-weight: normal; word-break: break-word;">${index + 1}. ${formattedName}</div>
-          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+        <div style="padding: 2.5px 0;">
+          <div style="font-size: 12.5px; font-weight: 700; word-break: break-word; color: #000;">${index + 1}. ${formattedName} <span style="font-size: 10px; font-weight: 800; color: #15803d;">[ADDED]</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; padding-top: 1px; color: #000;">
             <span style="flex: 1.5;"></span>
-            <span style="flex: 1; text-align: center; font-weight: bold;">${qtyDisplay}</span>
-            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+            <span style="flex: 1; text-align: center; font-weight: 700;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right; font-weight: 700;">${CURRENCY}${lineTotal.toFixed(2)}</span>
           </div>
         </div>`;
       }).join('');
@@ -1050,12 +1050,12 @@ export default function POS() {
         const qtyDisplay = qty > 1 ? `${qty} (${uPriceStr})` : `${qty}`;
         const formattedName = formatItemUrdu(item.name || item.item_name);
         return `
-        <div style="padding: 2px 0; text-decoration: line-through; color: #555;">
-          <div style="font-size: 12px; word-break: break-word;">${diffData.added.length + index + 1}. ${formattedName} [CANCELLED]</div>
-          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+        <div style="padding: 2.5px 0; text-decoration: line-through; color: #444;">
+          <div style="font-size: 12.5px; font-weight: 700; word-break: break-word;">${diffData.added.length + index + 1}. ${formattedName} [CANCELLED]</div>
+          <div style="display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; padding-top: 1px;">
             <span style="flex: 1.5;"></span>
-            <span style="flex: 1; text-align: center;">${qtyDisplay}</span>
-            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+            <span style="flex: 1; text-align: center; font-weight: 700;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right; font-weight: 700;">${CURRENCY}${lineTotal.toFixed(2)}</span>
           </div>
         </div>`;
       }).join('');
@@ -1068,12 +1068,12 @@ export default function POS() {
         const qtyDisplay = qty > 1 ? `${qty} (${uPriceStr})` : `${qty}`;
         const formattedName = formatItemUrdu(item.name || item.item_name);
         return `
-        <div style="padding: 2px 0;">
-          <div style="font-size: 12px; font-weight: normal; word-break: break-word;">${index + 1}. ${formattedName}</div>
-          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+        <div style="padding: 2.5px 0;">
+          <div style="font-size: 12.5px; font-weight: 700; word-break: break-word; color: #000;">${index + 1}. ${formattedName}</div>
+          <div style="display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; padding-top: 1px; color: #000;">
             <span style="flex: 1.5;"></span>
-            <span style="flex: 1; text-align: center; font-weight: bold;">${qtyDisplay}</span>
-            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+            <span style="flex: 1; text-align: center; font-weight: 700;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right; font-weight: 700;">${CURRENCY}${lineTotal.toFixed(2)}</span>
           </div>
         </div>`;
       }).join('');
@@ -1144,62 +1144,82 @@ export default function POS() {
       size: 80mm auto;
       margin: 0;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-weight: normal; }
+    * { 
+      box-sizing: border-box; 
+      margin: 0; 
+      padding: 0; 
+      -webkit-print-color-adjust: exact !important; 
+      print-color-adjust: exact !important; 
+    }
     html { margin: 0; padding: 0; background: #fff; }
     body {
       width: 100%;
-      font-weight: normal;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 12px;
+      font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, Arial, sans-serif;
+      font-size: 12.5px;
       color: #000;
       background: #fff;
       padding: 0 25px 0 5px; /* Added 20px to the right as requested */
       margin: 0;
+      line-height: 1.35;
+      text-rendering: geometricPrecision;
     }
     .center { text-align: center; }
-    h2 { font-size: 14px; font-weight: normal; margin-bottom: 4px; }
-    .sub { font-size: 11px; color: #000; margin-bottom: 2px; }
+    h2 { font-size: 14px; font-weight: 700; margin-bottom: 4px; color: #000; }
+    .sub { font-size: 11px; font-weight: 600; color: #000; margin-bottom: 2px; }
     .divider {
-      border-top: 1px dashed #000;
-      margin: 4px 0; /* Reduced margin */
+      border-top: 1.5px dashed #000;
+      margin: 5px 0;
     }
     .row {
       display: flex;
       justify-content: space-between;
-      padding: 2px 0;
-      font-size: 12px;
+      padding: 2.5px 0;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #000;
     }
     .item-name {
       flex: 2;
       margin-right: 2px;
       word-break: break-word;
+      font-weight: 700;
+      color: #000;
     }
     .item-qty {
       width: 30px;
       text-align: center;
       margin-right: 2px;
+      font-weight: 700;
+      color: #000;
     }
     .item-price { 
       flex: 1.2;
       text-align: right; 
       white-space: nowrap; 
       overflow: hidden;
+      font-weight: 700;
+      color: #000;
     }
     .total-row {
       display: flex;
       justify-content: space-between;
-      padding: 2px 0;
+      padding: 2.5px 0;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #000;
     }
     .grand {
       font-size: 16px;
-      font-weight: bold;
-      border-top: 1px solid #000;
-      border-bottom: 1px solid #000;
+      font-weight: 800;
+      border-top: 1.5px solid #000;
+      border-bottom: 1.5px solid #000;
       padding: 4px 0;
       margin: 4px 0;
+      color: #000;
     }
-    .footer { margin-top: 4px; margin-bottom: 0; font-size: 11px; color: #000; }
-    .dotted { border-top: 1px dotted #000; margin: 4px 0; }
+    .footer { margin-top: 4px; margin-bottom: 0; font-size: 11px; font-weight: 600; color: #000; }
+    .dotted { border-top: 1.5px dotted #000; margin: 4px 0; }
   </style>
 </head>
 <body>

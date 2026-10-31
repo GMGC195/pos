@@ -123,356 +123,171 @@ function initPusher() {
   }, 30000);
 }
 
-// ================= ITEM URDU TRANSLATOR / CLEANER =================
-const ITEM_URDU_MAP = {
-  'garlic bread': 'گارلک بریڈ',
-  'chicken biryani': 'مرغ بریانی',
-  'mutton biryani': 'مٹن بریانی',
-  'beef biryani': 'بیف بریانی',
-  'veg biryani': 'سبزی بریانی',
-  'chicken karahi': 'مرغ کڑاہی',
-  'mutton karahi': 'مٹن کڑاہی',
-  'chicken handi': 'مرغ ہانڈی',
-  'chicken jalfrezi': 'مرغ جلفریزی',
-  'chicken tikka': 'مرغ تکہ',
-  'chicken boti': 'مرغ بوٹی',
-  'chicken kabab': 'مرغ کباب',
-  'seekh kabab': 'سیخ کباب',
-  'reshmi kabab': 'ریشمی کباب',
-  'chicken roast': 'مرغ روسٹ',
-  'chicken broast': 'مرغ بروسٹ',
-  'chicken burger': 'مرغ برگر',
-  'beef burger': 'بیف برگر',
-  'zinger burger': 'زنگر برگر',
-  'chicken shawarma': 'مرغ شوارما',
-  'chicken roll': 'مرغ رول',
-  'paratha roll': 'پراٹھا رول',
-  'french fries': 'فرینچ فرائز',
-  'loaded fries': 'لوڈڈ فرائز',
-  'cheese pizza': 'چیز پیزا',
-  'chicken pizza': 'مرغ پیزا',
-  'fajita pizza': 'فجیتا پیزا',
-  'tikka pizza': 'تکہ پیزا',
-  'bbq pizza': 'بی بی کیو پیزا',
-  'pepperoni pizza': 'پیپرونی پیزا',
-  'pepperoni supreme': 'پیپرونی سپریم پیزا',
-  'margherita classic': 'مارگریٹا کلاسک پیزا',
-  'four cheese': 'فور چیز پیزا',
-  'veggie garden': 'ویجی گارڈن پیزا',
-  'meat lovers': 'میٹ لورز پیزا',
-  'bbq chicken feast': 'بی بی کیو مرغ پیزا',
-  'family feast deal': 'فیملی فیسٹ ڈیل',
-  'couple combo': 'کپل کومبو ڈیل',
-  'gol gappy': 'گول گپے',
-  'gol gappy (l)': 'گول گپے (L)',
-  'mineral water': 'منرل واٹر',
-  'water': 'منرل واٹر',
-  'coca-cola 500ml': 'کوکا کولا 500 ملی',
-  'coca-cola': 'کوکا کولا',
-  'fresh lemonade': 'تازہ لیمونیڈ',
-  'mango smoothie': 'مینگو سموتھی',
-  'mint margarita': 'منٹ مارگریٹا',
-  'cold drink': 'کولڈ ڈرنک',
-  'karak chai': 'کڑک چائے',
-  'green tea': 'سبز چائے',
-  'garlic naan': 'گارلک نان',
-  'cheese naan': 'چیز نان',
-  'chicken wings': 'مرغ ونگز',
-  'biryani': 'بریانی',
-  'burger': 'برگر',
-  'zinger': 'زنگر',
-  'shawarma': 'شوارما',
-  'roll': 'رول',
-  'fries': 'فرائز',
-  'pizza': 'پیزا',
-  'margherita': 'مارگریٹا پیزا',
-  'coke': 'کوک',
-  'pepsi': 'پیپسی',
-  '7up': 'سیون اپ',
-  'sprite': 'سپرائٹ',
-  'raita': 'رائتہ',
-  'salad': 'سلاد',
-  'roti': 'روٹی',
-  'naan': 'نان',
-  'paratha': 'پراٹھا',
-  'nuggets': 'نگیٹس',
-  'wings': 'ونگز'
-};
-
-const WORD_MAP = [
-  [/chicken/i, 'مرغ'],
-  [/garlic bread/i, 'گارلک بریڈ'],
-  [/garlic/i, 'گارلک'],
-  [/bread/i, 'بریڈ'],
-  [/biryani/i, 'بریانی'],
-  [/karahi/i, 'کڑاہی'],
-  [/handi/i, 'ہانڈی'],
-  [/jalfrezi/i, 'جلفریزی'],
-  [/tikka/i, 'تکہ'],
-  [/boti/i, 'بوٹی'],
-  [/kabab/i, 'کباب'],
-  [/kebab/i, 'کباب'],
-  [/zinger/i, 'زنگر'],
-  [/burger/i, 'برگر'],
-  [/shawarma/i, 'شوارما'],
-  [/pizza/i, 'پیزا'],
-  [/fries/i, 'فرائز'],
-  [/roll/i, 'رول'],
-  [/sandwich/i, 'سینڈوچ'],
-  [/nuggets/i, 'نگیٹس'],
-  [/wings/i, 'ونگز'],
-  [/mutton/i, 'مٹن'],
-  [/beef/i, 'بیف'],
-  [/fish/i, 'مچھلی'],
-  [/cheese/i, 'چیز'],
-  [/water/i, 'منرل واٹر'],
-  [/deal/i, 'ڈیل'],
-  [/special/i, 'اسپیشل'],
-  [/salad/i, 'سلاد'],
-  [/sauce/i, 'ساس'],
-  [/small/i, 'چھوٹا'],
-  [/medium/i, 'درمیانہ'],
-  [/large/i, 'بڑا']
-];
-
-function formatItemUrdu(rawName) {
-  if (!rawName) return '';
-  let str = String(rawName).trim();
-
-  // 1. Clean previous inverted Urdu phrases if present
-  str = str.replace(/بریانی مرغ/g, 'مرغ بریانی');
-  str = str.replace(/بریڈ گارلک/g, 'گارلک بریڈ');
-  str = str.replace(/کڑاہی مرغ/g, 'مرغ کڑاہی');
-  str = str.replace(/ہانڈی مرغ/g, 'مرغ ہانڈی');
-  str = str.replace(/تکہ مرغ/g, 'مرغ تکہ');
-  str = str.replace(/بوٹی مرغ/g, 'مرغ بوٹی');
-  str = str.replace(/کباب مرغ/g, 'مرغ کباب');
-  str = str.replace(/قورمہ مرغ/g, 'مرغ قورمہ');
-  str = str.replace(/پلاؤ مرغ/g, 'مرغ پلاؤ');
-  str = str.replace(/شوارما مرغ/g, 'مرغ شوارما');
-  str = str.replace(/بروسٹ مرغ/g, 'مرغ بروسٹ');
-  str = str.replace(/برگر مرغ/g, 'مرغ برگر');
-  str = str.replace(/پیزا مرغ/g, 'مرغ پیزا');
-  str = str.replace(/ونگز مرغ/g, 'مرغ ونگز');
-  str = str.replace(/رول مرغ/g, 'مرغ رول');
-  str = str.replace(/نان گارلک/g, 'گارلک نان');
-
-  // 2. Replace Arabic phrases with proper Urdu (chicken = مرغ pehle)
-  str = str.replace(/برياني دجاج/g, 'مرغ بریانی');
-  str = str.replace(/دجاج برياني/g, 'مرغ بریانی');
-  str = str.replace(/دجاج جالفريزي/g, 'مرغ جلفریزی');
-  str = str.replace(/شواية دجاج/g, 'مرغ شواية');
-  str = str.replace(/دجاج شواية/g, 'مرغ شواية');
-  str = str.replace(/فحم دجاج/g, 'مرغ فحم');
-  str = str.replace(/دجاج فحم/g, 'مرغ فحم');
-  str = str.replace(/دجاج الفحم/g, 'مرغ الفحم');
-  str = str.replace(/دجاج كراهي/g, 'مرغ کڑاہی');
-  str = str.replace(/كراهي دجاج/g, 'مرغ کڑاہی');
-  str = str.replace(/دجاج تكا/g, 'مرغ تکہ');
-  str = str.replace(/تكا دجاج/g, 'مرغ تکہ');
-  str = str.replace(/دجاج بوتي/g, 'مرغ بوٹی');
-  str = str.replace(/هاندي دجاج/g, 'مرغ ہانڈی');
-  str = str.replace(/دجاج هاندي/g, 'مرغ ہانڈی');
-  str = str.replace(/كباب دجاج/g, 'مرغ کباب');
-  str = str.replace(/دجاج كباب/g, 'مرغ کباب');
-  str = str.replace(/دجاج كورما/g, 'مرغ قورمہ');
-  str = str.replace(/كورما دجاج/g, 'مرغ قورمہ');
-  str = str.replace(/بولاو دجاج/g, 'مرغ پلاؤ');
-  str = str.replace(/دجاج بولاو/g, 'مرغ پلاؤ');
-  str = str.replace(/حليم دجاج/g, 'مرغ حلیم');
-  str = str.replace(/شوارما دجاج/g, 'مرغ شوارما');
-  str = str.replace(/دجاج شوارما/g, 'مرغ شوارما');
-  str = str.replace(/بروست دجاج/g, 'مرغ بروسٹ');
-  str = str.replace(/دجاج بروست/g, 'مرغ بروسٹ');
-  str = str.replace(/دجاج بالزبدة/g, 'بٹر چکن (مرغ)');
-  str = str.replace(/دجاج مشوي/g, 'مرغ مشوی');
-  str = str.replace(/دجاج/g, 'مرغ');
-  str = str.replace(/لحم ضأن/g, 'مٹن');
-  str = str.replace(/لحم/g, 'گوشت');
-  str = str.replace(/أرز/g, 'چاول');
-  str = str.replace(/الرز/g, 'چاول');
-  str = str.replace(/ماء/g, 'پانی');
-  str = str.replace(/نان الثوم/g, 'گارلک نان');
-
-  let result = str;
-
-  // If does not contain Urdu/Arabic characters, find Urdu equivalent
-  if (!/[\u0600-\u06FF]/.test(str)) {
-    const cleanKey = str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-
-    if (ITEM_URDU_MAP[cleanKey]) {
-      result = `${str} - ${ITEM_URDU_MAP[cleanKey]}`;
-    } else {
-      const sortedKeys = Object.keys(ITEM_URDU_MAP).sort((a, b) => b.length - a.length);
-      let matched = false;
-      for (const k of sortedKeys) {
-        if (k.includes(' ') && (cleanKey === k || cleanKey.includes(k))) {
-          result = `${str} - ${ITEM_URDU_MAP[k]}`;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) {
-        let urduWords = [];
-        for (const [regex, urdu] of WORD_MAP) {
-          if (regex.test(str)) {
-            urduWords.push(urdu);
-          }
-        }
-        if (urduWords.length > 0) {
-          result = `${str} - ${[...new Set(urduWords)].join(' ')}`;
-        } else {
-          for (const k of sortedKeys) {
-            if (cleanKey.includes(k)) {
-              result = `${str} - ${ITEM_URDU_MAP[k]}`;
-              break;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return result;
+// ================= THERMAL RECEIPT TEXT SANITIZER =================
+// Thermal printers lack Arabic/Urdu fonts and print raw multi-byte UTF-8 as garbled symbols.
+// This removes Arabic/Urdu characters while preserving clean English/Latin text, numbers, and symbols.
+function sanitizeThermalText(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/\s*-\s*$/, '')
+    .replace(/^\s*-\s*/, '')
+    .replace(/\s*-\s*-+/g, '-')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\[\s*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Item';
 }
 
-// ================= TICKET FORMATTER =================
+// ================= TICKET FORMATTER (ESC/POS 80mm THERMAL) =================
 function buildTicket(data) {
   const ESC = '\x1B';
   const GS = '\x1D';
   const INIT = ESC + '@';
+  const RESET_LINE_SPACING = ESC + '2'; // Standard 1/6-inch line spacing (~34 dots)
   const BOLD_ON = ESC + 'E' + '\x01';
   const BOLD_OFF = ESC + 'E' + '\x00';
   const CENTER = ESC + 'a' + '\x01';
   const LEFT = ESC + 'a' + '\x00';
   const TEXT_NORMAL = GS + '!' + '\x00';
-  const TEXT_DOUBLE = GS + '!' + '\x11';
+  const TEXT_DOUBLE_HEIGHT = GS + '!' + '\x01';
   const CUT = GS + 'V' + '\x41' + '\x03';
-  const UTF8_MODE = ESC + '\x25' + '\x47' + '\x01';
-
-  // 80mm Full Width without extra margin
+  const CRLF = '\r\n';
   const LINE_WIDTH = 42;
 
-  const pad = (str, len) => ((str || '') + ' '.repeat(len)).slice(0, len);
+  const pad = (str, len) => {
+    const s = String(str || '');
+    if (s.length >= len) return s.slice(0, len);
+    return s + ' '.repeat(len - s.length);
+  };
+
   const centerText = (str, width = LINE_WIDTH) => {
     const s = String(str || '').trim();
     if (!s) return '';
-    if (s.length >= width) return s;
+    if (s.length >= width) return s.slice(0, width);
     const leftPad = Math.floor((width - s.length) / 2);
     return ' '.repeat(leftPad) + s;
   };
+
   const rightAlign = (leftStr, rightStr, width = LINE_WIDTH) => {
-    const space = Math.max(1, width - (String(leftStr).length + String(rightStr).length));
-    return leftStr + ' '.repeat(space) + rightStr;
+    const left = String(leftStr || '');
+    const right = String(rightStr || '');
+    const space = Math.max(1, width - (left.length + right.length));
+    return left + ' '.repeat(space) + right;
   };
 
-  let ticket = INIT + UTF8_MODE;
+  let ticket = INIT + RESET_LINE_SPACING;
 
-  // 1. Header: Branch & Order Type (Clean Standard Format - CENTERED)
+  // 1. Header: Branch & Order Type (Clean, Centered, Double-Height)
   const branchPart = data.branchId ? `B${data.branchId}` : `B${BRANCH_ID}`;
-  const orderTypePart = data.orderType || '';
-  let headerTitle = '';
-
-  if (branchPart && orderTypePart) {
-    headerTitle = `${branchPart} - ${orderTypePart}`;
-  } else {
-    headerTitle = branchPart || orderTypePart;
-  }
+  const orderTypePart = sanitizeThermalText(data.orderType || '');
+  const headerTitle = branchPart && orderTypePart ? `${branchPart} - ${orderTypePart}` : (branchPart || orderTypePart);
 
   ticket += CENTER;
   if (headerTitle) {
-    ticket += BOLD_ON + TEXT_DOUBLE + centerText(headerTitle) + '\n' + TEXT_NORMAL + BOLD_OFF;
+    ticket += BOLD_ON + TEXT_DOUBLE_HEIGHT + centerText(headerTitle) + TEXT_NORMAL + BOLD_OFF + CRLF;
   }
 
-  // 2. Kitchen Notice (English + Urdu Notice - CENTERED)
-  ticket += '\n' + centerText('Kitchen slip. Please get original slip from') + '\n';
-  ticket += centerText('counter.') + '\n';
-  ticket += centerText('اصل پرچی کاؤنٹر سے حاصل کریں۔') + '\n\n';
+  // 2. Kitchen Notice (Clean English 2 lines, no corrupted Arabic)
+  ticket += CRLF;
+  ticket += centerText('Kitchen slip. Please get original slip') + CRLF;
+  ticket += centerText('from counter.') + CRLF;
+  ticket += CRLF;
 
-  // 3. Table & Waiter (Dynamic - CENTERED)
+  // 3. Table & Waiter (Centered, Bold)
   const metaParts = [];
-  if (data.tableName) metaParts.push(data.tableName);
-  if (data.waiterName) metaParts.push(`By: ${data.waiterName}`);
+  if (data.tableName) metaParts.push(sanitizeThermalText(data.tableName));
+  if (data.waiterName) metaParts.push(`By: ${sanitizeThermalText(data.waiterName)}`);
   if (metaParts.length > 0) {
-    ticket += BOLD_ON + centerText(metaParts.join(' | ')) + '\n' + BOLD_OFF;
+    ticket += BOLD_ON + centerText(metaParts.join(' | ')) + BOLD_OFF + CRLF;
   }
 
-  // 4. Customer Info (Only if present - CENTERED)
+  // 4. Customer Info (Only if present)
   if (data.customerName || data.customerPhone || data.phone) {
-    const custName = data.customerName || '';
-    const custPhone = data.customerPhone || data.phone || '';
-    const customerText = [custName, custPhone].filter(Boolean).join(' - ');
-    ticket += centerText(`Cust: ${customerText}`) + '\n';
+    const custName = sanitizeThermalText(data.customerName || '');
+    const custPhone = String(data.customerPhone || data.phone || '').trim();
+    const custParts = [custName, custPhone].filter(Boolean);
+    if (custParts.length > 0) {
+      ticket += centerText(`Cust: ${custParts.join(' - ')}`) + CRLF;
+    }
   }
 
-  // 5. Order Number (CENTERED)
+  // 5. Order Number (Centered, Prominent Double-Height)
   const orderNumberStr = data.orderNumber ? ` - ${data.orderNumber}` : '';
   if (data.orderId || data.orderNumber) {
-    ticket += BOLD_ON + TEXT_DOUBLE + centerText(`Order #${data.orderId || ''}${orderNumberStr}`) + '\n' + TEXT_NORMAL + BOLD_OFF;
+    ticket += CRLF;
+    ticket += BOLD_ON + TEXT_DOUBLE_HEIGHT + centerText(`Order #${data.orderId || ''}${orderNumberStr}`) + TEXT_NORMAL + BOLD_OFF + CRLF;
   }
 
-  // 6. Date & Time (CENTERED)
+  // 6. Date & Time (Centered)
   const orderDate = data.createdAt
     ? new Date(data.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })
     : new Date().toLocaleString('en-US');
-  ticket += centerText(`${orderDate} (KSA)`) + '\n';
+  ticket += centerText(`${orderDate} (KSA)`) + CRLF;
 
-  // 7. Items Table (Formatted QTY: 1 -> 1, >1 -> 2 (10), Amount right aligned)
+  // 7. Items Table Header
   ticket += LEFT;
-  ticket += '-'.repeat(LINE_WIDTH) + '\n';
-  ticket += pad('Item', 18) + pad('QTY', 12) + 'Amount'.padStart(12, ' ') + '\n';
-  ticket += '-'.repeat(LINE_WIDTH) + '\n';
+  ticket += '-'.repeat(LINE_WIDTH) + CRLF;
+  ticket += pad('Item', 24) + 'QTY'.padStart(6, ' ') + 'Amount'.padStart(12, ' ') + CRLF;
+  ticket += '-'.repeat(LINE_WIDTH) + CRLF;
 
+  // 8. Item Rows
   const items = Array.isArray(data.items) ? data.items : [];
   items.forEach((item, index) => {
-    let rawItemName = item.name || item.item_name || '';
-    let itemName = formatItemUrdu(rawItemName);
-    const itemTitle = `${index + 1}. ${itemName}`;
+    const rawName = item.name || item.item_name || '';
+    const cleanName = sanitizeThermalText(rawName);
+    const itemTitle = `${index + 1}. ${cleanName}`;
     const qty = Number(item.qty || item.quantity || 1);
     const unitPrice = Number(item.amount || item.price || item.unit_price || 0);
     const amountNum = item.line_total ? Number(item.line_total) : (unitPrice * qty);
     const amountStr = `${data.currency || 'SAR'} ${amountNum.toFixed(2)}`;
+    const qtyStr = String(qty);
 
-    const uPriceStr = (unitPrice % 1 === 0 ? unitPrice : unitPrice.toFixed(2));
-    const qtyStr = qty > 1 ? `${qty} (${uPriceStr})` : String(qty);
+    if (itemTitle.length <= 24) {
+      ticket += pad(itemTitle, 24) + qtyStr.padStart(6, ' ') + amountStr.padStart(12, ' ') + CRLF;
+    } else {
+      ticket += itemTitle + CRLF;
+      ticket += pad('', 24) + qtyStr.padStart(6, ' ') + amountStr.padStart(12, ' ') + CRLF;
+    }
 
-    ticket += itemTitle + '\n';
-    ticket += pad('', 18) + pad(qtyStr, 12) + amountStr.padStart(12, ' ') + '\n';
+    if (qty > 1) {
+      const uPriceStr = unitPrice % 1 === 0 ? unitPrice.toFixed(0) : unitPrice.toFixed(2);
+      ticket += `   (${qty} @ ${data.currency || 'SAR'} ${uPriceStr})` + CRLF;
+    }
   });
 
-  // 8. Totals Section
-  ticket += '-'.repeat(LINE_WIDTH) + '\n';
-  ticket += rightAlign('Total Items', String(data.totalItems || items.length)) + '\n';
+  // 9. Totals Section
+  ticket += '-'.repeat(LINE_WIDTH) + CRLF;
+  ticket += rightAlign('Total Items', String(data.totalItems || items.length), LINE_WIDTH) + CRLF;
 
   if (data.subtotal !== undefined && data.subtotal !== null) {
-    ticket += rightAlign('Subtotal', `${data.currency || 'SAR'} ${Number(data.subtotal).toFixed(2)}`) + '\n';
+    ticket += rightAlign('Subtotal', `${data.currency || 'SAR'} ${Number(data.subtotal).toFixed(2)}`, LINE_WIDTH) + CRLF;
   }
 
-  // Discount (Prints only if > 0)
   const discountVal = Number(data.discount || data.discountAmount || 0);
   if (discountVal > 0) {
-    ticket += rightAlign('Discount', `-${data.currency || 'SAR'} ${discountVal.toFixed(2)}`) + '\n';
+    ticket += rightAlign('Discount', `-${data.currency || 'SAR'} ${discountVal.toFixed(2)}`, LINE_WIDTH) + CRLF;
   }
 
   const grandTotal = (data.total !== undefined && data.total !== null)
     ? Number(data.total || 0)
     : Math.max(0, items.reduce((s, it) => s + (Number(it.amount || it.price || 0) * (Number(it.qty || it.quantity || 1))), 0) - discountVal);
 
-  // TOTAL (Double Line + Bold, Right-aligned to edge 42)
-  ticket += '='.repeat(LINE_WIDTH) + '\n';
-  ticket += BOLD_ON + rightAlign('TOTAL', `${data.currency || 'SAR'} ${grandTotal.toFixed(2)}`, LINE_WIDTH) + BOLD_OFF + '\n';
-  ticket += '='.repeat(LINE_WIDTH) + '\n';
+  ticket += '='.repeat(LINE_WIDTH) + CRLF;
+  ticket += BOLD_ON + rightAlign('TOTAL', `${data.currency || 'SAR'} ${grandTotal.toFixed(2)}`, LINE_WIDTH) + BOLD_OFF + CRLF;
+  ticket += '='.repeat(LINE_WIDTH) + CRLF;
 
-  // Payment Status (Dynamic)
   if (data.paymentStatus) {
-    ticket += rightAlign('Payment', data.paymentStatus) + '\n';
+    ticket += rightAlign('Payment', sanitizeThermalText(data.paymentStatus), LINE_WIDTH) + CRLF;
   }
 
-  // Paper Cut
-  ticket += '\n\n\n\n' + CUT;
+  // 10. Clean Paper Feed & Cut
+  ticket += CRLF + CRLF + CRLF + CRLF + CUT;
 
   return ticket;
 }
+
 // ================= PRINT DISPATCH LOGIC WITH RETRY =================
 function dispatchPrint(data, retryCount = 0) {
   const targetIp = data.printerIp || config.printerIp || '127.0.0.1';
@@ -487,12 +302,12 @@ function dispatchPrint(data, retryCount = 0) {
     log(`[DISPATCH] Connected! Sending ticket for Order #${data.orderNumber || data.orderId}...`);
 
     const ticket = buildTicket(data);
-    const buffer = Buffer.from(ticket, 'utf8');
+    const buffer = Buffer.from(ticket, 'ascii');
 
     // Auto-update preview HTML
     try {
       const cleanSlip = ticket
-        .replace(/\x1B\x25\x47[\x00-\xFF]/g, '')
+        .replace(/\x1B\x32/g, '')
         .replace(/\x1B\x40/g, '')
         .replace(/\x1B\x45[\x00-\xFF]/g, '')
         .replace(/\x1B\x61[\x00-\xFF]/g, '')
@@ -501,15 +316,14 @@ function dispatchPrint(data, retryCount = 0) {
         .replace(/[\x00-\x09\x0B-\x1F]/g, '');
       const previewFile = path.join(__dirname, 'slip-preview.html');
       const html = `<!DOCTYPE html>
-<html lang="ur">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>POS Receipt Preview</title>
 <style>
-  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background: #e9ecef; margin: 0; padding: 25px; display: flex; flex-direction: column; align-items: center; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Arial, sans-serif; background: #e9ecef; margin: 0; padding: 25px; display: flex; flex-direction: column; align-items: center; }
   .notice { font-size: 14px; color: #495057; margin-bottom: 15px; font-weight: bold; }
-  .receipt { width: 340px; background: #fff; padding: 25px; border-radius: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.12); font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: #111; }
-  .urdu-line { font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 14px; }
+  .receipt { width: 340px; background: #fff; padding: 25px; border-radius: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.12); font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.4; white-space: pre; word-break: break-word; color: #111; font-weight: 600; }
 </style>
 </head>
 <body>
