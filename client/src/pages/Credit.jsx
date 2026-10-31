@@ -996,6 +996,10 @@ export default function Credit() {
   const employeeCount = customers.filter(c => c.category === 'Employee').length;
   const regularCount = customers.filter(c => c.category !== 'Employee').length;
 
+  const totalCustomerBalance = useMemo(() => {
+    return filteredCustomers.reduce((sum, c) => sum + (parseFloat(c.balance) || 0), 0);
+  }, [filteredCustomers]);
+
   // Process ledger: remove cancellations, filter by extra pay if toggle selected
   const processedTransactions = useMemo(() => {
     const cancelledOrderIds = new Set();
@@ -1047,7 +1051,7 @@ export default function Credit() {
   }, [monthlySummary]);
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', boxSizing: 'border-box' }}>
+    <div style={{ padding: '24px', maxWidth: '1440px', margin: '0 auto', boxSizing: 'border-box' }}>
       
       {/* Top Header & Navigation Actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 16 }}>
@@ -1098,57 +1102,82 @@ export default function Credit() {
         </div>
       </div>
 
-      {/* Category Filter Tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid var(--surface-2)', paddingBottom: 12 }}>
-        {[
-          { id: 'All', label: 'All Customers', count: customers.length },
-          { id: 'Employee', label: 'Employees', count: employeeCount },
-          { id: 'Regular Customer', label: 'Regular Customers', count: regularCount },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setCategoryFilter(tab.id)}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 8,
-              border: 'none',
-              background: categoryFilter === tab.id ? 'var(--primary)' : 'var(--surface-2)',
-              color: categoryFilter === tab.id ? '#fff' : 'var(--text)',
-              fontWeight: 600,
-              fontSize: 13,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              transition: 'all 0.2s'
-            }}
-          >
-            <span>{tab.label}</span>
-            <span style={{ 
-              fontSize: 11, 
-              background: categoryFilter === tab.id ? 'rgba(255,255,255,0.25)' : 'var(--surface-3)', 
-              padding: '1px 6px', 
-              borderRadius: 10 
-            }}>
-              {tab.count}
-            </span>
-          </button>
-        ))}
+      {/* Category Filter Tabs & Overall Balance Indicator */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, borderBottom: '1px solid var(--surface-2)', paddingBottom: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {[
+            { id: 'All', label: 'All Customers', count: customers.length },
+            { id: 'Employee', label: 'Employees', count: employeeCount },
+            { id: 'Regular Customer', label: 'Regular Customers', count: regularCount },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setCategoryFilter(tab.id)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 8,
+                border: 'none',
+                background: categoryFilter === tab.id ? 'var(--primary)' : 'var(--surface-2)',
+                color: categoryFilter === tab.id ? '#fff' : 'var(--text)',
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                transition: 'all 0.2s'
+              }}
+            >
+              <span>{tab.label}</span>
+              <span style={{ 
+                fontSize: 11, 
+                background: categoryFilter === tab.id ? 'rgba(255,255,255,0.25)' : 'var(--surface-3)', 
+                padding: '1px 6px', 
+                borderRadius: 10 
+              }}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Overall Balance Summary Pill */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 8, 
+          background: 'var(--surface-2)', 
+          padding: '6px 14px', 
+          borderRadius: 8, 
+          border: '1.5px solid var(--surface-3)', 
+          fontSize: 13, 
+          fontWeight: 600,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+        }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Overall Balance:</span>
+          <span style={{ 
+            fontWeight: 800, 
+            fontSize: 14,
+            color: totalCustomerBalance > 0 ? 'var(--red)' : (totalCustomerBalance < 0 ? 'var(--green)' : 'var(--text)') 
+          }}>
+            {CURRENCY} {Math.abs(totalCustomerBalance).toFixed(2)} {totalCustomerBalance > 0 ? '(DR / Dues)' : (totalCustomerBalance < 0 ? '(CR / Advance)' : '(Settled)')}
+          </span>
+        </div>
       </div>
 
       {/* Customer List Table */}
-      <div style={{ background: 'var(--surface)', borderRadius: 12, border: '1.5px solid var(--surface-2)', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 12, border: '1.5px solid var(--surface-2)', overflowX: 'auto', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <table style={{ width: '100%', minWidth: '1050px', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--surface-2)', background: 'var(--surface-50)' }}>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Customer / Category</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Status</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Phone / Ref</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Discount Package</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Balance</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Limit</th>
-              {isAdmin && <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Branches</th>}
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right' }}>Actions</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 200 }}>Customer / Category</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Status</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 150 }}>Phone / Ref</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 240, whiteSpace: 'nowrap' }}>Discount Package</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 170, whiteSpace: 'nowrap' }}>Balance</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Limit</th>
+              {isAdmin && <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 160 }}>Branches</th>}
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right', minWidth: 110 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1207,9 +1236,9 @@ export default function Credit() {
                       {c.reference && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.reference}</div>}
                     </td>
 
-                    <td style={{ padding: '14px 16px' }}>
+                    <td style={{ padding: '14px 16px', minWidth: 240 }}>
                       {c.discount_package_name ? (
-                        <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                        <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, whiteSpace: 'nowrap', display: 'inline-block' }}>
                           Pkg: {c.discount_package_name} {ruleCount > 0 ? `(${ruleCount} rules)` : ''}
                         </span>
                       ) : (() => {
@@ -1220,7 +1249,7 @@ export default function Credit() {
                         const directCount = Array.isArray(directRules) ? directRules.length : 0;
                         if (directCount > 0) {
                           return (
-                            <span style={{ fontSize: 12, background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                            <span style={{ fontSize: 12, background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, whiteSpace: 'nowrap', display: 'inline-block' }}>
                               Custom ({directCount} rules)
                             </span>
                           );
@@ -1229,7 +1258,7 @@ export default function Credit() {
                       })()}
                     </td>
 
-                    <td style={{ padding: '14px 16px', fontWeight: 700, fontSize: 14, color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) }}>
+                    <td style={{ padding: '14px 16px', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', minWidth: 170, color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) }}>
                       {CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? '(Due)' : (c.balance < 0 ? '(Adv)' : '')}
                     </td>
 
@@ -1284,6 +1313,30 @@ export default function Credit() {
               })
             )}
           </tbody>
+          {filteredCustomers.length > 0 && (
+            <tfoot>
+              <tr style={{ background: 'var(--surface-50)', borderTop: '2px solid var(--surface-3)', fontWeight: 700 }}>
+                <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text)', fontWeight: 700 }}>
+                  Total ({filteredCustomers.length} Accounts)
+                </td>
+                <td style={{ padding: '14px 16px' }}></td>
+                <td style={{ padding: '14px 16px' }}></td>
+                <td style={{ padding: '14px 16px', fontSize: 12.5, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>
+                  Overall Balance:
+                </td>
+                <td style={{ 
+                  padding: '14px 16px', 
+                  fontSize: 14.5, 
+                  fontWeight: 800, 
+                  whiteSpace: 'nowrap',
+                  color: totalCustomerBalance > 0 ? 'var(--red)' : (totalCustomerBalance < 0 ? 'var(--green)' : 'var(--text)') 
+                }}>
+                  {CURRENCY} {Math.abs(totalCustomerBalance).toFixed(2)} {totalCustomerBalance > 0 ? '(DR / Dues)' : (totalCustomerBalance < 0 ? '(CR / Advance)' : '(Settled)')}
+                </td>
+                <td colSpan={isAdmin ? 3 : 2} style={{ padding: '14px 16px' }}></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
@@ -2238,6 +2291,18 @@ export default function Credit() {
                     })
                   )}
                 </tbody>
+                {processedTransactions.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: 'var(--surface-50)', borderTop: '2px solid var(--surface-2)', fontWeight: 700 }}>
+                      <td colSpan={4} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text-secondary)' }}>
+                        {selectedLedgerMonth !== 'All' ? `${formatMonthDisplay(selectedLedgerMonth)} Net Balance:` : 'Account Net Total:'}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', color: visibleSubtotal > 0 ? 'var(--red)' : (visibleSubtotal < 0 ? 'var(--green)' : 'var(--text)') }}>
+                        {visibleSubtotal > 0 ? '+' : (visibleSubtotal < 0 ? '-' : '')} {CURRENCY} {Math.abs(visibleSubtotal).toFixed(2)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
 
