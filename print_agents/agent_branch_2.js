@@ -145,29 +145,22 @@ function buildTicket(data) {
   const ESC = '\x1B';
   const GS = '\x1D';
   const INIT = ESC + '@';
-  const RESET_LINE_SPACING = ESC + '2'; // Standard 1/6-inch line spacing (~34 dots)
+  const SELECT_FONT_A = ESC + 'M' + '\x00'; // Standard clear Font A
+  const SET_LINE_SPACING = ESC + '3' + '\x26'; // 38 dots line spacing (~4.75mm) for clean vertical separation
   const BOLD_ON = ESC + 'E' + '\x01';
   const BOLD_OFF = ESC + 'E' + '\x00';
   const CENTER = ESC + 'a' + '\x01';
   const LEFT = ESC + 'a' + '\x00';
   const TEXT_NORMAL = GS + '!' + '\x00';
-  const TEXT_DOUBLE_HEIGHT = GS + '!' + '\x01';
+  const TEXT_DOUBLE = GS + '!' + '\x11'; // Double-width + Double-height (proportional 2x2, standard aspect ratio)
   const CUT = GS + 'V' + '\x41' + '\x03';
-  const CRLF = '\r\n';
+  const LF = '\n';
   const LINE_WIDTH = 42;
 
   const pad = (str, len) => {
     const s = String(str || '');
     if (s.length >= len) return s.slice(0, len);
     return s + ' '.repeat(len - s.length);
-  };
-
-  const centerText = (str, width = LINE_WIDTH) => {
-    const s = String(str || '').trim();
-    if (!s) return '';
-    if (s.length >= width) return s.slice(0, width);
-    const leftPad = Math.floor((width - s.length) / 2);
-    return ' '.repeat(leftPad) + s;
   };
 
   const rightAlign = (leftStr, rightStr, width = LINE_WIDTH) => {
@@ -177,60 +170,69 @@ function buildTicket(data) {
     return left + ' '.repeat(space) + right;
   };
 
-  let ticket = INIT + RESET_LINE_SPACING;
+  let ticket = INIT + SELECT_FONT_A + SET_LINE_SPACING;
 
-  // 1. Header: Branch & Order Type (Clean, Centered, Double-Height)
+  // 1. Header: Branch & Order Type (Clean, Centered, Proportional Double 2x2)
   const branchPart = data.branchId ? `B${data.branchId}` : `B${BRANCH_ID}`;
   const orderTypePart = sanitizeThermalText(data.orderType || '');
   const headerTitle = branchPart && orderTypePart ? `${branchPart} - ${orderTypePart}` : (branchPart || orderTypePart);
 
   ticket += CENTER;
   if (headerTitle) {
-    ticket += BOLD_ON + TEXT_DOUBLE_HEIGHT + centerText(headerTitle) + TEXT_NORMAL + BOLD_OFF + CRLF;
+    if (headerTitle.length * 2 <= LINE_WIDTH) {
+      ticket += BOLD_ON + TEXT_DOUBLE + headerTitle + TEXT_NORMAL + BOLD_OFF + LF;
+    } else {
+      ticket += BOLD_ON + headerTitle + BOLD_OFF + LF;
+    }
   }
 
-  // 2. Kitchen Notice (Clean English 2 lines, no corrupted Arabic)
-  ticket += CRLF;
-  ticket += centerText('Kitchen slip. Please get original slip') + CRLF;
-  ticket += centerText('from counter.') + CRLF;
-  ticket += CRLF;
+  // 2. Kitchen Notice (Clean, perfectly centered, no awkward breaks or overflow)
+  ticket += LF;
+  ticket += BOLD_ON + 'Kitchen Slip' + BOLD_OFF + LF;
+  ticket += 'Please get original slip from counter.' + LF;
+  ticket += LF;
 
   // 3. Table & Waiter (Centered, Bold)
   const metaParts = [];
   if (data.tableName) metaParts.push(sanitizeThermalText(data.tableName));
   if (data.waiterName) metaParts.push(`By: ${sanitizeThermalText(data.waiterName)}`);
   if (metaParts.length > 0) {
-    ticket += BOLD_ON + centerText(metaParts.join(' | ')) + BOLD_OFF + CRLF;
+    ticket += BOLD_ON + metaParts.join(' | ') + BOLD_OFF + LF;
   }
 
-  // 4. Customer Info (Only if present)
+  // 4. Customer Info (Only if present, Centered)
   if (data.customerName || data.customerPhone || data.phone) {
     const custName = sanitizeThermalText(data.customerName || '');
     const custPhone = String(data.customerPhone || data.phone || '').trim();
     const custParts = [custName, custPhone].filter(Boolean);
     if (custParts.length > 0) {
-      ticket += centerText(`Cust: ${custParts.join(' - ')}`) + CRLF;
+      ticket += `Cust: ${custParts.join(' - ')}` + LF;
     }
   }
 
-  // 5. Order Number (Centered, Prominent Double-Height)
+  // 5. Order Number (Centered, Prominent Double 2x2)
   const orderNumberStr = data.orderNumber ? ` - ${data.orderNumber}` : '';
   if (data.orderId || data.orderNumber) {
-    ticket += CRLF;
-    ticket += BOLD_ON + TEXT_DOUBLE_HEIGHT + centerText(`Order #${data.orderId || ''}${orderNumberStr}`) + TEXT_NORMAL + BOLD_OFF + CRLF;
+    const orderTitle = `Order #${data.orderId || ''}${orderNumberStr}`;
+    ticket += LF;
+    if (orderTitle.length * 2 <= LINE_WIDTH) {
+      ticket += BOLD_ON + TEXT_DOUBLE + orderTitle + TEXT_NORMAL + BOLD_OFF + LF;
+    } else {
+      ticket += BOLD_ON + orderTitle + BOLD_OFF + LF;
+    }
   }
 
   // 6. Date & Time (Centered)
   const orderDate = data.createdAt
     ? new Date(data.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })
     : new Date().toLocaleString('en-US');
-  ticket += centerText(`${orderDate} (KSA)`) + CRLF;
+  ticket += `${orderDate} (KSA)` + LF;
 
-  // 7. Items Table Header
+  // 7. Items Table Header (Switch to LEFT)
   ticket += LEFT;
-  ticket += '-'.repeat(LINE_WIDTH) + CRLF;
-  ticket += pad('Item', 24) + 'QTY'.padStart(6, ' ') + 'Amount'.padStart(12, ' ') + CRLF;
-  ticket += '-'.repeat(LINE_WIDTH) + CRLF;
+  ticket += '-'.repeat(LINE_WIDTH) + LF;
+  ticket += pad('Item', 24) + 'QTY'.padStart(6, ' ') + 'Amount'.padStart(12, ' ') + LF;
+  ticket += '-'.repeat(LINE_WIDTH) + LF;
 
   // 8. Item Rows
   const items = Array.isArray(data.items) ? data.items : [];
@@ -245,45 +247,45 @@ function buildTicket(data) {
     const qtyStr = String(qty);
 
     if (itemTitle.length <= 24) {
-      ticket += pad(itemTitle, 24) + qtyStr.padStart(6, ' ') + amountStr.padStart(12, ' ') + CRLF;
+      ticket += pad(itemTitle, 24) + qtyStr.padStart(6, ' ') + amountStr.padStart(12, ' ') + LF;
     } else {
-      ticket += itemTitle + CRLF;
-      ticket += pad('', 24) + qtyStr.padStart(6, ' ') + amountStr.padStart(12, ' ') + CRLF;
+      ticket += itemTitle + LF;
+      ticket += pad('', 24) + qtyStr.padStart(6, ' ') + amountStr.padStart(12, ' ') + LF;
     }
 
     if (qty > 1) {
       const uPriceStr = unitPrice % 1 === 0 ? unitPrice.toFixed(0) : unitPrice.toFixed(2);
-      ticket += `   (${qty} @ ${data.currency || 'SAR'} ${uPriceStr})` + CRLF;
+      ticket += `   (${qty} @ ${data.currency || 'SAR'} ${uPriceStr})` + LF;
     }
   });
 
   // 9. Totals Section
-  ticket += '-'.repeat(LINE_WIDTH) + CRLF;
-  ticket += rightAlign('Total Items', String(data.totalItems || items.length), LINE_WIDTH) + CRLF;
+  ticket += '-'.repeat(LINE_WIDTH) + LF;
+  ticket += rightAlign('Total Items', String(data.totalItems || items.length), LINE_WIDTH) + LF;
 
   if (data.subtotal !== undefined && data.subtotal !== null) {
-    ticket += rightAlign('Subtotal', `${data.currency || 'SAR'} ${Number(data.subtotal).toFixed(2)}`, LINE_WIDTH) + CRLF;
+    ticket += rightAlign('Subtotal', `${data.currency || 'SAR'} ${Number(data.subtotal).toFixed(2)}`, LINE_WIDTH) + LF;
   }
 
   const discountVal = Number(data.discount || data.discountAmount || 0);
   if (discountVal > 0) {
-    ticket += rightAlign('Discount', `-${data.currency || 'SAR'} ${discountVal.toFixed(2)}`, LINE_WIDTH) + CRLF;
+    ticket += rightAlign('Discount', `-${data.currency || 'SAR'} ${discountVal.toFixed(2)}`, LINE_WIDTH) + LF;
   }
 
   const grandTotal = (data.total !== undefined && data.total !== null)
     ? Number(data.total || 0)
     : Math.max(0, items.reduce((s, it) => s + (Number(it.amount || it.price || 0) * (Number(it.qty || it.quantity || 1))), 0) - discountVal);
 
-  ticket += '='.repeat(LINE_WIDTH) + CRLF;
-  ticket += BOLD_ON + rightAlign('TOTAL', `${data.currency || 'SAR'} ${grandTotal.toFixed(2)}`, LINE_WIDTH) + BOLD_OFF + CRLF;
-  ticket += '='.repeat(LINE_WIDTH) + CRLF;
+  ticket += '='.repeat(LINE_WIDTH) + LF;
+  ticket += BOLD_ON + rightAlign('TOTAL', `${data.currency || 'SAR'} ${grandTotal.toFixed(2)}`, LINE_WIDTH) + BOLD_OFF + LF;
+  ticket += '='.repeat(LINE_WIDTH) + LF;
 
   if (data.paymentStatus) {
-    ticket += rightAlign('Payment', sanitizeThermalText(data.paymentStatus), LINE_WIDTH) + CRLF;
+    ticket += rightAlign('Payment', sanitizeThermalText(data.paymentStatus), LINE_WIDTH) + LF;
   }
 
   // 10. Clean Paper Feed & Cut
-  ticket += CRLF + CRLF + CRLF + CRLF + CUT;
+  ticket += LF + LF + LF + LF + CUT;
 
   return ticket;
 }
@@ -302,11 +304,13 @@ function dispatchPrint(data, retryCount = 0) {
     log(`[DISPATCH] Connected! Sending ticket for Order #${data.orderNumber || data.orderId}...`);
 
     const ticket = buildTicket(data);
-    const buffer = Buffer.from(ticket, 'ascii');
+    const buffer = Buffer.from(ticket, 'latin1');
 
     // Auto-update preview HTML
     try {
       const cleanSlip = ticket
+        .replace(/\x1B\x33[\x00-\xFF]/g, '')
+        .replace(/\x1B\x4D[\x00-\xFF]/g, '')
         .replace(/\x1B\x32/g, '')
         .replace(/\x1B\x40/g, '')
         .replace(/\x1B\x45[\x00-\xFF]/g, '')
