@@ -162,6 +162,58 @@ router.delete('/discount-packages/:id', async (req, res) => {
   }
 });
 
+// Bulk apply or remove a discount package on multiple customers/employees (Admin/Developer only)
+router.post('/discount-packages/:id/apply', async (req, res) => {
+  const userRole = req.user?.role?.trim().toLowerCase();
+  if (userRole !== 'admin' && userRole !== 'developer') {
+    return res.status(403).json({ error: 'Only Admins can apply discount packages.' });
+  }
+
+  const packageId = parseInt(req.params.id, 10);
+  const { customer_ids } = req.body;
+
+  if (!Array.isArray(customer_ids)) {
+    return res.status(400).json({ error: 'customer_ids array is required.' });
+  }
+
+  const validIds = customer_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Remove this package from any customers who were unchecked (not in validIds)
+    if (validIds.length > 0) {
+      await client.query(
+        'UPDATE credit_customers SET discount_package_id = NULL WHERE discount_package_id = $1 AND NOT (id = ANY($2::int[]))',
+        [packageId, validIds]
+      );
+    } else {
+      await client.query(
+        'UPDATE credit_customers SET discount_package_id = NULL WHERE discount_package_id = $1',
+        [packageId]
+      );
+    }
+
+    // 2. Assign this package to all selected customers
+    if (validIds.length > 0) {
+      await client.query(
+        'UPDATE credit_customers SET discount_package_id = $1 WHERE id = ANY($2::int[])',
+        [packageId, validIds]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, count: validIds.length });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error applying discount package:', error);
+    res.status(500).json({ error: 'Failed to update discount package assignments.' });
+  } finally {
+    client.release();
+  }
+});
+
 // ==========================================
 // 2. KHATA CUSTOMERS CRUD & ACCESS CONTROL
 // ==========================================

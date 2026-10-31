@@ -4,7 +4,8 @@ import toast from 'react-hot-toast';
 import { 
   Plus, Edit, Trash2, FileText, X, Percent, Tag, Calendar, 
   MessageSquare, Check, AlertTriangle, Filter, ArrowDownRight, 
-  ArrowUpRight, UserCheck, UserX, ChevronDown, Layers, ShieldCheck 
+  ArrowUpRight, UserCheck, UserX, ChevronDown, Layers, ShieldCheck,
+  Users, Search
 } from 'lucide-react';
 import { CURRENCY } from '../config';
 import { useAuth } from '../contexts/AuthContext';
@@ -391,6 +392,15 @@ export default function Credit() {
   const [customerCustomRules, setCustomerCustomRules] = useState([]);
   const [showLedgerDiscounts, setShowLedgerDiscounts] = useState(false);
   const [savingDiscounts, setSavingDiscounts] = useState(false);
+  const [ledgerDiscountMode, setLedgerDiscountMode] = useState('none'); // 'package' | 'custom' | 'none'
+  const [ledgerSelectedPackageId, setLedgerSelectedPackageId] = useState('');
+
+  // Apply On Package Modal State
+  const [applyOnPackage, setApplyOnPackage] = useState(null);
+  const [applyOnFilter, setApplyOnFilter] = useState('All'); // 'All' | 'Employees' | 'Customers'
+  const [applyOnSearch, setApplyOnSearch] = useState('');
+  const [applyOnSelectedIds, setApplyOnSelectedIds] = useState(new Set());
+  const [savingApplyOn, setSavingApplyOn] = useState(false);
 
   // Items/Cats for dropdowns
   const [categories, setCategories] = useState([]);
@@ -677,7 +687,19 @@ export default function Credit() {
     if (typeof custRules === 'string') {
       try { custRules = JSON.parse(custRules); } catch(e) { custRules = []; }
     }
-    setCustomerCustomRules(Array.isArray(custRules) ? custRules : []);
+    const parsedRules = Array.isArray(custRules) ? custRules : [];
+    setCustomerCustomRules(parsedRules);
+
+    if (customer.discount_package_id) {
+      setLedgerDiscountMode('package');
+      setLedgerSelectedPackageId(customer.discount_package_id.toString());
+    } else if (parsedRules.length > 0) {
+      setLedgerDiscountMode('custom');
+      setLedgerSelectedPackageId('');
+    } else {
+      setLedgerDiscountMode('none');
+      setLedgerSelectedPackageId('');
+    }
 
     try {
       const [ledgerRes, summaryRes] = await Promise.all([
@@ -730,25 +752,125 @@ export default function Credit() {
     }
   };
 
-  // Save Custom Discount Rules for the Active Customer (Priority 1)
+  // Save Discount Configuration for Active Customer (Option A: Package or Option B: Custom Rules)
   const handleSaveLedgerDiscounts = async () => {
     if (!activeCustomer) return;
     setSavingDiscounts(true);
+
+    let finalPkgId = null;
+    let finalRules = [];
+
+    if (ledgerDiscountMode === 'package') {
+      if (!ledgerSelectedPackageId) {
+        setSavingDiscounts(false);
+        return toast.error('Please select an existing discount package.');
+      }
+      finalPkgId = parseInt(ledgerSelectedPackageId, 10);
+      finalRules = [];
+    } else if (ledgerDiscountMode === 'custom') {
+      finalPkgId = null;
+      finalRules = customerCustomRules;
+    } else {
+      finalPkgId = null;
+      finalRules = [];
+    }
+
     try {
       await axios.put(`/api/credit/${activeCustomer.id}`, {
         ...activeCustomer,
-        discount_rules: customerCustomRules
+        discount_package_id: finalPkgId,
+        discount_rules: finalRules
       });
-      toast.success('Custom discount rules saved successfully!');
-      setActiveCustomer({ ...activeCustomer, discount_rules: customerCustomRules });
+      toast.success('Discount configuration updated successfully!');
+
+      const assignedPkg = discountPackages.find(p => p.id === finalPkgId);
+      setActiveCustomer({ 
+        ...activeCustomer, 
+        discount_package_id: finalPkgId,
+        discount_package_name: assignedPkg ? assignedPkg.name : null,
+        discount_rules: finalRules 
+      });
       fetchCustomers();
       setShowLedgerDiscounts(false);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to save discount rules');
+      toast.error(err.response?.data?.error || 'Failed to save discount configuration');
     } finally {
       setSavingDiscounts(false);
     }
   };
+
+  // ── Apply On Handlers ────────────────────────────────────────────────
+  const handleOpenApplyOn = (pkg) => {
+    setApplyOnPackage(pkg);
+    setApplyOnFilter('All');
+    setApplyOnSearch('');
+    const preSelected = new Set(
+      customers
+        .filter(c => c.discount_package_id === pkg.id)
+        .map(c => c.id)
+    );
+    setApplyOnSelectedIds(preSelected);
+  };
+
+  const handleToggleApplyOnId = (id) => {
+    setApplyOnSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllVisibleApplyOn = (visibleIds) => {
+    setApplyOnSelectedIds(prev => {
+      const next = new Set(prev);
+      visibleIds.forEach(id => next.add(id));
+      return next;
+    });
+  };
+
+  const handleUnselectAllVisibleApplyOn = (visibleIds) => {
+    setApplyOnSelectedIds(prev => {
+      const next = new Set(prev);
+      visibleIds.forEach(id => next.delete(id));
+      return next;
+    });
+  };
+
+  const handleSaveApplyOn = async () => {
+    if (!applyOnPackage) return;
+    setSavingApplyOn(true);
+    try {
+      const idsArray = Array.from(applyOnSelectedIds);
+      await axios.post(`/api/credit/discount-packages/${applyOnPackage.id}/apply`, {
+        customer_ids: idsArray
+      });
+      toast.success(`Discount package "${applyOnPackage.name}" updated for ${idsArray.length} records`);
+      setApplyOnPackage(null);
+      fetchCustomers();
+      fetchDiscountPackages();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update package assignments');
+    } finally {
+      setSavingApplyOn(false);
+    }
+  };
+
+  const filteredApplyOnCustomers = useMemo(() => {
+    if (!applyOnPackage) return [];
+    return customers.filter(c => {
+      if (applyOnFilter === 'Employees' && c.category !== 'Employee') return false;
+      if (applyOnFilter === 'Customers' && c.category !== 'Regular Customer') return false;
+      if (applyOnSearch.trim()) {
+        const q = applyOnSearch.toLowerCase();
+        const matchName = (c.name || '').toLowerCase().includes(q);
+        const matchPhone = (c.phone || '').toLowerCase().includes(q);
+        const matchRef = (c.reference || '').toLowerCase().includes(q);
+        if (!matchName && !matchPhone && !matchRef) return false;
+      }
+      return true;
+    });
+  }, [customers, applyOnPackage, applyOnFilter, applyOnSearch]);
 
   // Process Transaction: Exactly 3 options (Receive Major Payment, Add Debit, Extra Pay)
   const handleAddPayment = async (e) => {
@@ -1525,7 +1647,28 @@ export default function Credit() {
                                 )}
                               </td>
                               <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                  <button 
+                                    type="button"
+                                    onClick={() => handleOpenApplyOn(pkg)}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      background: 'rgba(59, 130, 246, 0.1)',
+                                      color: '#2563eb',
+                                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                                      padding: '4px 9px',
+                                      borderRadius: 6,
+                                      cursor: 'pointer',
+                                      fontSize: 11.5,
+                                      fontWeight: 700,
+                                      marginRight: 4
+                                    }}
+                                    title="Apply this package to employees & customers"
+                                  >
+                                    <Users size={14} /> Apply On
+                                  </button>
                                   <button onClick={() => handleEditPackage(pkg)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }} title="Edit Package">
                                     <Edit size={16} />
                                   </button>
@@ -1618,12 +1761,12 @@ export default function Credit() {
               </div>
             </div>
 
-            {/* Collapsible Custom Discount Configuration Interface */}
+            {/* Collapsible Discount Configuration: Option A (Saved Package) vs Option B (Custom Rules) */}
             {showLedgerDiscounts && isAdmin && (
               <div style={{ marginBottom: 10, border: '2px solid var(--primary)', borderRadius: 10, overflow: 'hidden', background: 'var(--surface)', flexShrink: 0 }}>
                 <div style={{ background: 'rgba(255,184,0,0.15)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-3)' }}>
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                    Special Discounts for {activeCustomer.name}
+                    Discount Configuration for {activeCustomer.name}
                   </span>
                   <button 
                     type="button" 
@@ -1634,19 +1777,108 @@ export default function Credit() {
                   </button>
                 </div>
 
-                <div style={{ padding: 12, maxHeight: '220px', overflowY: 'auto' }}>
-                  <DiscountRuleBuilder 
-                    rules={customerCustomRules} 
-                    setRules={setCustomerCustomRules} 
-                    categories={categories} 
-                    items={items} 
-                  />
+                <div style={{ padding: 12, maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {/* Selection Mode: Option A vs Option B vs No Discount */}
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', background: 'var(--surface-2)', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: ledgerDiscountMode === 'package' ? 700 : 500, color: ledgerDiscountMode === 'package' ? 'var(--primary)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="ledgerDiscountMode" 
+                        value="package" 
+                        checked={ledgerDiscountMode === 'package'} 
+                        onChange={() => setLedgerDiscountMode('package')} 
+                      />
+                      Option A: Select Saved Discount Package
+                    </label>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: ledgerDiscountMode === 'custom' ? 700 : 500, color: ledgerDiscountMode === 'custom' ? 'var(--primary)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="ledgerDiscountMode" 
+                        value="custom" 
+                        checked={ledgerDiscountMode === 'custom'} 
+                        onChange={() => setLedgerDiscountMode('custom')} 
+                      />
+                      Option B: Create Custom Discount Rules
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: ledgerDiscountMode === 'none' ? 700 : 500, color: ledgerDiscountMode === 'none' ? 'var(--primary)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="ledgerDiscountMode" 
+                        value="none" 
+                        checked={ledgerDiscountMode === 'none'} 
+                        onChange={() => setLedgerDiscountMode('none')} 
+                      />
+                      No Discount
+                    </label>
+                  </div>
+
+                  {/* Option A: Saved Package Dropdown */}
+                  {ledgerDiscountMode === 'package' && (
+                    <div style={{ background: 'var(--surface)', padding: 10, borderRadius: 8, border: '1px solid var(--surface-3)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                        Select Reusable Discount Package:
+                      </label>
+                      <select 
+                        value={ledgerSelectedPackageId} 
+                        onChange={e => setLedgerSelectedPackageId(e.target.value)}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1.5px solid var(--primary)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
+                      >
+                        <option value="">-- Choose a Saved Discount Package --</option>
+                        {discountPackages.map(pkg => {
+                          let rules = pkg.discount_rules;
+                          if (typeof rules === 'string') {
+                            try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+                          }
+                          const rCount = Array.isArray(rules) ? rules.length : 0;
+                          return (
+                            <option key={pkg.id} value={pkg.id} disabled={!pkg.is_active}>
+                              {pkg.name} {rCount > 0 ? `(${rCount} rules)` : ''} {!pkg.is_active ? '[Deactivated]' : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {ledgerSelectedPackageId && (() => {
+                        const sel = discountPackages.find(p => p.id === parseInt(ledgerSelectedPackageId, 10));
+                        if (!sel) return null;
+                        let rList = sel.discount_rules;
+                        if (typeof rList === 'string') {
+                          try { rList = JSON.parse(rList); } catch(e) { rList = []; }
+                        }
+                        return (
+                          <div style={{ fontSize: 11.5, color: '#15803d', background: '#dcfce7', padding: '6px 10px', borderRadius: 6, marginTop: 4 }}>
+                            <b>Package Active:</b> {sel.name} &bull; {Array.isArray(rList) && rList.length > 0 ? `Includes ${rList.length} configured rules` : 'No rules configured'} (Auto-applied in POS)
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Option B: Custom Discount Builder */}
+                  {ledgerDiscountMode === 'custom' && (
+                    <div style={{ background: 'var(--surface)', padding: 10, borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+                      <DiscountRuleBuilder 
+                        rules={customerCustomRules} 
+                        setRules={setCustomerCustomRules} 
+                        categories={categories} 
+                        items={items} 
+                      />
+                    </div>
+                  )}
+
+                  {/* No Discount Notice */}
+                  {ledgerDiscountMode === 'none' && (
+                    <div style={{ padding: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                      No automatic discount package or custom rules will apply when billing this account.
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
                     <button 
                       type="button" 
                       onClick={() => setShowLedgerDiscounts(false)}
-                      style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', cursor: 'pointer', fontSize: 12 }}
+                      style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', cursor: 'pointer', fontSize: 12 }}
                     >
                       Cancel
                     </button>
@@ -1654,9 +1886,9 @@ export default function Credit() {
                       type="button" 
                       onClick={handleSaveLedgerDiscounts} 
                       disabled={savingDiscounts}
-                      style={{ padding: '5px 16px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, cursor: savingDiscounts ? 'not-allowed' : 'pointer', fontSize: 12 }}
+                      style={{ padding: '6px 18px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, cursor: savingDiscounts ? 'not-allowed' : 'pointer', fontSize: 12 }}
                     >
-                      {savingDiscounts ? 'Saving...' : 'Save Discount Rules'}
+                      {savingDiscounts ? 'Saving...' : 'Save Discount Configuration'}
                     </button>
                   </div>
                 </div>
@@ -2007,6 +2239,197 @@ export default function Credit() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+
+      {/* "Apply On" Modal for Saved Discount Package */}
+      {applyOnPackage && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 2200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 740, maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, boxShadow: '0 15px 40px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+            
+            {/* Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Users size={20} style={{ color: 'var(--primary)' }} />
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Apply Package: "{applyOnPackage.name}"</h3>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Assign or remove this package across registered employees and customers ({applyOnSelectedIds.size} selected)
+                </div>
+              </div>
+              <button 
+                onClick={() => setApplyOnPackage(null)} 
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--surface)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                {/* Classification Filters */}
+                <div style={{ display: 'flex', background: 'var(--surface-2)', padding: 3, borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+                  {[
+                    { id: 'All', label: 'All', count: customers.length },
+                    { id: 'Employees', label: 'Employees', count: customers.filter(c => c.category === 'Employee').length },
+                    { id: 'Customers', label: 'Customers', count: customers.filter(c => c.category === 'Regular Customer').length },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setApplyOnFilter(tab.id)}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: 6,
+                        border: 'none',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        background: applyOnFilter === tab.id ? 'var(--primary)' : 'transparent',
+                        color: applyOnFilter === tab.id ? '#fff' : 'var(--text)',
+                        transition: 'all 0.15s'
+                      }}
+                    >
+                      {tab.label} ({tab.count})
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Box */}
+                <div style={{ position: 'relative', width: 220 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input 
+                    type="text" 
+                    placeholder="Search by name, phone..." 
+                    value={applyOnSearch} 
+                    onChange={e => setApplyOnSearch(e.target.value)} 
+                    style={{ width: '100%', padding: '6px 8px 6px 28px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 12.5, boxSizing: 'border-box' }} 
+                  />
+                </div>
+              </div>
+
+              {/* Quick Selection Actions */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAllVisibleApplyOn(filteredApplyOnCustomers.map(c => c.id))}
+                    style={{ padding: '3px 8px', borderRadius: 5, border: '1px solid var(--surface-3)', background: 'var(--surface-2)', cursor: 'pointer', fontSize: 11.5, fontWeight: 600 }}
+                  >
+                    Select All Visible
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleUnselectAllVisibleApplyOn(filteredApplyOnCustomers.map(c => c.id))}
+                    style={{ padding: '3px 8px', borderRadius: 5, border: '1px solid var(--surface-3)', background: 'var(--surface-2)', cursor: 'pointer', fontSize: 11.5, fontWeight: 600 }}
+                  >
+                    Unselect All Visible
+                  </button>
+                </div>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  Showing {filteredApplyOnCustomers.length} records &bull; <b style={{ color: 'var(--primary)' }}>{applyOnSelectedIds.size} assigned</b>
+                </span>
+              </div>
+            </div>
+
+            {/* Record List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '10px 20px', maxHeight: '45vh' }}>
+              {filteredApplyOnCustomers.length === 0 ? (
+                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                  No matching records found.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {filteredApplyOnCustomers.map(c => {
+                    const isSelected = applyOnSelectedIds.has(c.id);
+                    const isAssignedToThis = c.discount_package_id === applyOnPackage.id;
+                    const isAssignedToOther = c.discount_package_id && c.discount_package_id !== applyOnPackage.id;
+
+                    return (
+                      <div 
+                        key={c.id} 
+                        onClick={() => handleToggleApplyOnId(c.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          border: isSelected ? '1.5px solid var(--primary)' : '1px solid var(--surface-3)',
+                          background: isSelected ? 'rgba(255, 184, 0, 0.08)' : 'var(--surface)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected} 
+                            onChange={() => {}} // handled by row onClick
+                            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary)' }} 
+                          />
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span>{c.name}</span>
+                              {c.category === 'Employee' ? (
+                                <span style={{ fontSize: 10.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                  Employee
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 10.5, background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
+                                  Customer
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                              {c.phone ? c.phone : ''} {c.reference ? `• ${c.reference}` : ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          {isAssignedToThis ? (
+                            <span style={{ fontSize: 11, background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                              Assigned to This Package
+                            </span>
+                          ) : isAssignedToOther ? (
+                            <span style={{ fontSize: 11, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                              Other: {c.discount_package_name}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No Package</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--surface-2)', display: 'flex', justifyContent: 'flex-end', gap: 10, background: 'var(--surface-2)' }}>
+              <button 
+                type="button" 
+                onClick={() => setApplyOnPackage(null)} 
+                style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', cursor: 'pointer', fontSize: 13 }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleSaveApplyOn} 
+                disabled={savingApplyOn}
+                style={{ padding: '7px 20px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, cursor: savingApplyOn ? 'not-allowed' : 'pointer', fontSize: 13 }}
+              >
+                {savingApplyOn ? 'Saving...' : `Save Assignments (${applyOnSelectedIds.size})`}
+              </button>
             </div>
 
           </div>
