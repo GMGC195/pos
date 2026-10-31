@@ -377,9 +377,8 @@ export default function Credit() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [branchFilter, setBranchFilter] = useState('All');
 
-  // Ledger Payment / Charge states
+  // Ledger Payment states (Receive Major Payment strictly)
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentAction, setPaymentAction] = useState('PAYMENT');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [billingMonth, setBillingMonth] = useState(getCurrentMonthStr());
   const [paymentComment, setPaymentComment] = useState('');
@@ -456,6 +455,15 @@ export default function Credit() {
     if (!pkgName.trim()) return toast.error('Package name is required');
     if (!pkgRules || pkgRules.length === 0) {
       return toast.error('Please configure at least one category or item discount rule for this package.');
+    }
+
+    // Enforce Unique Package Name
+    const nameLower = pkgName.trim().toLowerCase();
+    const isDuplicate = discountPackages.some(p => 
+      p.name.trim().toLowerCase() === nameLower && p.id !== editingPackageId
+    );
+    if (isDuplicate) {
+      return toast.error('A discount package with this name already exists. Please choose a unique name.');
     }
 
     setSavingPackage(true);
@@ -538,7 +546,7 @@ export default function Credit() {
   };
 
   const handleDelete = (c) => {
-    // REQUIREMENT 4: Prevent deletion if balance is not 0
+    // Prevent deletion if balance is not 0
     if (Math.abs(Number(c.balance)) > 0.001) {
       return toast.error(
         `Cannot delete account with an outstanding balance of ${CURRENCY} ${Math.abs(c.balance).toFixed(2)}. Balance must be 0.00 before deletion.`,
@@ -610,12 +618,11 @@ export default function Credit() {
   const openLedger = async (customer) => {
     setActiveCustomer(customer);
     setPaymentAmount('');
-    setPaymentAction('PAYMENT');
     setPaymentMethod('Cash');
     setPaymentComment('');
     setPaymentClassification(customer.is_extra_pay ? 'Extra Pay' : 'Regular');
     
-    // Default to current month automatically (Requirement 2)
+    // Default to current month automatically
     const currentMonth = getCurrentMonthStr();
     setSelectedLedgerMonth(currentMonth);
     setBillingMonth(currentMonth);
@@ -661,6 +668,7 @@ export default function Credit() {
 
   const handleSelectLedgerMonth = (m) => {
     setSelectedLedgerMonth(m);
+    setBillingMonth(m !== 'All' ? m : getCurrentMonthStr());
     reloadLedger(m, ledgerClassificationFilter);
   };
 
@@ -698,6 +706,7 @@ export default function Credit() {
     }
   };
 
+  // Strictly Receive Major Payment (Charge/Credit option removed per user request)
   const handleAddPayment = async (e) => {
     e.preventDefault();
     let amountStr = paymentAmount;
@@ -714,21 +723,20 @@ export default function Credit() {
     try {
       await axios.post(`/api/credit/${activeCustomer.id}/payment`, { 
         amount: finalAmount,
-        action: paymentAction,
+        action: 'PAYMENT',
         cashier_name: user?.username || 'Unknown',
-        payment_method: paymentAction === 'PAYMENT' ? paymentMethod : null,
+        payment_method: paymentMethod || 'Cash',
         branch: user?.branch || (branchFilter !== 'All' ? branchFilter : 'Branch 1'),
         billing_month: billingMonth,
         comments: paymentComment.trim() || null,
         classification: activeCustomer.category === 'Employee' ? paymentClassification : 'Regular'
       });
 
-      toast.success(paymentAction === 'PAYMENT' ? `Payment allocated to ${billingMonth}` : `Credit added to ${billingMonth}`);
+      toast.success(`Payment of ${CURRENCY} ${finalAmount.toFixed(2)} received & allocated to ${billingMonth}`);
       setPaymentAmount('');
       setPaymentComment('');
 
-      const balanceChange = paymentAction === 'CHARGE' ? finalAmount : -finalAmount;
-      setActiveCustomer(prev => ({ ...prev, balance: Number(prev.balance) + balanceChange }));
+      setActiveCustomer(prev => ({ ...prev, balance: Number(prev.balance) - finalAmount }));
       
       reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
       fetchCustomers(); 
@@ -785,7 +793,10 @@ export default function Credit() {
       credit: 0,
       total_credit: 0,
       net_balance: 0,
-      remaining_balance: 0
+      remaining_balance: 0,
+      extra_pay_debit: 0,
+      extra_pay_credit: 0,
+      extra_pay_balance: 0
     };
   }, [selectedLedgerMonth, monthlySummary]);
 
@@ -799,6 +810,56 @@ export default function Credit() {
 
   const employeeCount = customers.filter(c => c.category === 'Employee').length;
   const regularCount = customers.filter(c => c.category !== 'Employee').length;
+
+  // Process ledger: remove cancellations, filter by extra pay if toggle selected
+  const processedTransactions = useMemo(() => {
+    const cancelledOrderIds = new Set();
+    ledger.forEach(t => {
+      if (t.type === 'ORDER_CANCELLED') cancelledOrderIds.add(t.order_id);
+    });
+
+    const activeList = [];
+    ledger.forEach(t => {
+      if (t.type === 'ORDER_CANCELLED' || t.type === 'PAYMENT_CANCELLED') return;
+      
+      let isCancelled = false;
+      if (t.type === 'CREDIT_ORDER' && cancelledOrderIds.has(t.order_id)) {
+        isCancelled = true;
+      }
+      activeList.push({ ...t, isCancelled });
+    });
+
+    return activeList;
+  }, [ledger]);
+
+  // Calculations for Extra Pay and Subtotals
+  const monthExtraPayDebit = useMemo(() => {
+    return processedTransactions
+      .filter(t => !t.isCancelled && t.classification === 'Extra Pay' && (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE'))
+      .reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
+  }, [processedTransactions]);
+
+  const monthRegularDebit = useMemo(() => {
+    return processedTransactions
+      .filter(t => !t.isCancelled && t.classification !== 'Extra Pay' && (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE'))
+      .reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
+  }, [processedTransactions]);
+
+  const visibleSubtotal = useMemo(() => {
+    return processedTransactions.reduce((sum, t) => {
+      if (t.isCancelled) return sum;
+      const amt = parseFloat(t.amount || 0);
+      if (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') return sum + amt;
+      if (t.type === 'PAYMENT') return sum - amt;
+      return sum;
+    }, 0);
+  }, [processedTransactions]);
+
+  const overallExtraPayTotal = useMemo(() => {
+    return monthlySummary.reduce((sum, s) => {
+      return sum + parseFloat(s.extra_pay_balance || s.extra_pay_debit || 0);
+    }, 0);
+  }, [monthlySummary]);
 
   return (
     <div style={{ padding: '24px', maxWidth: '1300px', margin: '0 auto', boxSizing: 'border-box' }}>
@@ -1177,7 +1238,7 @@ export default function Credit() {
         </div>
       )}
 
-      {/* Priority 2: Admin Discount Package Management Modal with Complete Custom Discount Functionality */}
+      {/* Reusable Discount Package Modal (Create form at TOP, Saved packages at BOTTOM) */}
       {showPackageModal && isAdmin && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 750, maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
@@ -1196,7 +1257,79 @@ export default function Credit() {
 
             <div style={{ flex: 1, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
               
-              {/* Existing Packages List */}
+              {/* TOP: Package Builder Form (Create New on top) */}
+              <form onSubmit={handleSavePackage} style={{ border: '1.5px solid var(--surface-3)', padding: 18, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--primary)' }}>
+                    {editingPackageId ? 'Edit Discount Package Configuration' : 'Create New Discount Package'}
+                  </h4>
+                  {editingPackageId && (
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setEditingPackageId(null);
+                        setPkgName('');
+                        setPkgRules([]);
+                        setPkgIsActive(true);
+                      }}
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', fontSize: 12, cursor: 'pointer' }}
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                      Discount Package Name (Must be Unique) *
+                    </label>
+                    <input 
+                      required 
+                      value={pkgName} 
+                      onChange={e => setPkgName(e.target.value)} 
+                      placeholder="e.g. Employee Discount, VIP Customer Discount" 
+                      style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--surface-3)', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} 
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', paddingTop: 20 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={pkgIsActive} 
+                        onChange={e => setPkgIsActive(e.target.checked)} 
+                      />
+                      Active Package
+                    </label>
+                  </div>
+                </div>
+
+                {/* Reuse the custom discount rule builder */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                    Category & Item Discount Rules:
+                  </label>
+                  <DiscountRuleBuilder 
+                    rules={pkgRules} 
+                    setRules={setPkgRules} 
+                    categories={categories} 
+                    items={items} 
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
+                  <button 
+                    type="submit" 
+                    disabled={savingPackage}
+                    style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: savingPackage ? 'not-allowed' : 'pointer' }}
+                  >
+                    {savingPackage ? 'Saving Package...' : (editingPackageId ? 'Update Discount Package' : 'Save Discount Package')}
+                  </button>
+                </div>
+              </form>
+
+              {/* BOTTOM: Saved Packages List (Neeche) */}
               <div>
                 <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Layers size={16} /> Saved Packages ({discountPackages.length})
@@ -1214,7 +1347,7 @@ export default function Credit() {
                     </thead>
                     <tbody>
                       {discountPackages.length === 0 ? (
-                        <tr><td colSpan={4} style={{ padding: 18, textAlign: 'center', color: 'var(--text-muted)' }}>No discount packages created yet. Use the builder below to create one.</td></tr>
+                        <tr><td colSpan={4} style={{ padding: 18, textAlign: 'center', color: 'var(--text-muted)' }}>No discount packages created yet. Use the builder above to create one.</td></tr>
                       ) : (
                         discountPackages.map(pkg => {
                           let rules = pkg.discount_rules;
@@ -1268,78 +1401,6 @@ export default function Credit() {
                 </div>
               </div>
 
-              {/* Package Builder Form (Exact Same Selection Interface as Manage Custom Discounts) */}
-              <form onSubmit={handleSavePackage} style={{ border: '1.5px solid var(--surface-3)', padding: 18, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--primary)' }}>
-                    {editingPackageId ? 'Edit Discount Package Configuration' : 'Create New Discount Package'}
-                  </h4>
-                  {editingPackageId && (
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        setEditingPackageId(null);
-                        setPkgName('');
-                        setPkgRules([]);
-                        setPkgIsActive(true);
-                      }}
-                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', fontSize: 12, cursor: 'pointer' }}
-                    >
-                      Cancel Edit
-                    </button>
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                      Discount Package Name *
-                    </label>
-                    <input 
-                      required 
-                      value={pkgName} 
-                      onChange={e => setPkgName(e.target.value)} 
-                      placeholder="e.g. Employee Discount, VIP Customer Discount" 
-                      style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--surface-3)', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} 
-                    />
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', paddingTop: 20 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={pkgIsActive} 
-                        onChange={e => setPkgIsActive(e.target.checked)} 
-                      />
-                      Active Package
-                    </label>
-                  </div>
-                </div>
-
-                {/* Reuse the custom discount rule builder */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                    Category & Item Discount Rules:
-                  </label>
-                  <DiscountRuleBuilder 
-                    rules={pkgRules} 
-                    setRules={setPkgRules} 
-                    categories={categories} 
-                    items={items} 
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
-                  <button 
-                    type="submit" 
-                    disabled={savingPackage}
-                    style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: savingPackage ? 'not-allowed' : 'pointer' }}
-                  >
-                    {savingPackage ? 'Saving Package...' : (editingPackageId ? 'Update Discount Package' : 'Save Discount Package')}
-                  </button>
-                </div>
-              </form>
-
             </div>
           </div>
         </div>
@@ -1348,7 +1409,7 @@ export default function Credit() {
       {/* Customer Detail & Monthly Ledger Modal */}
       {showLedger && activeCustomer && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 920, height: '90vh', borderRadius: 16, padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 940, height: '90vh', borderRadius: 16, padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
             
             {/* Modal Header */}
             <button onClick={() => setShowLedger(false)} style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20}/></button>
@@ -1369,7 +1430,7 @@ export default function Credit() {
                 </h3>
               </div>
 
-              {/* Priority 1: Manage Custom Discount Button (Clickable and Restored!) */}
+              {/* Manage Custom Discount Button (Clickable and Restored!) */}
               {isAdmin && (
                 <button 
                   type="button"
@@ -1396,7 +1457,7 @@ export default function Credit() {
               )}
             </div>
 
-            {/* Priority 1 Panel: Manage Custom Discount Configuration Interface */}
+            {/* Manage Custom Discount Configuration Interface */}
             {showLedgerDiscounts && isAdmin && (
               <div style={{ marginBottom: 16, border: '2px solid var(--primary)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface)', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' }}>
                 <div style={{ background: 'rgba(255,184,0,0.15)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-3)' }}>
@@ -1447,7 +1508,7 @@ export default function Credit() {
             )}
 
             {/* Total Balance & Assigned Package Highlight Banner */}
-            <div style={{ background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 8, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 8, marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <div>
                 <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Overall Account Balance: </span>
                 <span style={{ fontSize: 17, fontWeight: 800, color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
@@ -1461,9 +1522,9 @@ export default function Credit() {
               )}
             </div>
 
-            {/* Priority 3: Month-Wise Selection Dropdown & Monthly Balance Breakdown */}
-            <div style={{ marginBottom: 14, background: 'var(--surface-50)', border: '1px solid var(--surface-2)', borderRadius: 10, padding: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+            {/* Month-Wise Selection Dropdown & Monthly Balance Breakdown */}
+            <div style={{ marginBottom: 12, background: 'var(--surface-50)', border: '1px solid var(--surface-2)', borderRadius: 10, padding: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Calendar size={18} style={{ color: 'var(--primary)' }} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
@@ -1471,13 +1532,13 @@ export default function Credit() {
                   </span>
                 </div>
 
-                {/* Dropdown with all formatted months and "All Months" option (Requirement 2) */}
+                {/* Dropdown with all formatted months and "All Months" option */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <select 
                     value={selectedLedgerMonth} 
                     onChange={e => handleSelectLedgerMonth(e.target.value)}
                     style={{ 
-                      padding: '8px 14px', 
+                      padding: '7px 12px', 
                       borderRadius: 8, 
                       border: '1.5px solid var(--primary)', 
                       background: 'var(--surface)', 
@@ -1501,7 +1562,7 @@ export default function Credit() {
                     type="button"
                     onClick={() => handleSelectLedgerMonth('All')}
                     style={{
-                      padding: '7px 12px',
+                      padding: '6px 12px',
                       borderRadius: 8,
                       border: '1px solid var(--surface-3)',
                       background: selectedLedgerMonth === 'All' ? 'var(--primary)' : 'var(--surface-2)',
@@ -1518,105 +1579,121 @@ export default function Credit() {
 
               {/* Selected Month Balance Summary Card */}
               {selectedLedgerMonth !== 'All' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, background: 'var(--surface)', padding: 12, borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, background: 'var(--surface)', padding: 10, borderRadius: 8, border: '1px solid var(--surface-3)' }}>
                   <div>
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Selected Period</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--primary)' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--primary)' }}>
                       {formatMonthDisplay(selectedLedgerMonth)}
                     </span>
                   </div>
                   <div>
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Monthly Debits / Charges</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--red)' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--red)' }}>
                       +{CURRENCY} {parseFloat(selectedMonthSummaryData?.debit || selectedMonthSummaryData?.total_debit || 0).toFixed(2)}
                     </span>
                   </div>
                   <div>
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Monthly Credits / Payments</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--green)' }}>
                       -{CURRENCY} {parseFloat(selectedMonthSummaryData?.credit || selectedMonthSummaryData?.total_credit || 0).toFixed(2)}
                     </span>
                   </div>
                   <div>
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Month Net Balance</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? 'var(--red)' : '#059669' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 800, color: parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? 'var(--red)' : '#059669' }}>
                       {CURRENCY} {Math.abs(parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0)).toFixed(2)} {parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? '(DR)' : (parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) < 0 ? '(CR)' : '(Settled)')}
                     </span>
                   </div>
                 </div>
               ) : (
-                <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: 8, fontSize: 12.5, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ background: 'var(--surface)', padding: '8px 12px', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Showing complete historical transaction ledger across all billing months.</span>
-                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>Total Transactions: {ledger.length}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>Total Transactions: {processedTransactions.length}</span>
                 </div>
               )}
             </div>
 
-            {/* Employee Extra Pay Filter */}
+            {/* Employee Extra Pay Toggle Button & Totals Breakdown */}
             {activeCustomer.category === 'Employee' && (
-              <div style={{ display: 'flex', gap: 6, marginBottom: 12, alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Employee Filter:</span>
-                {['All', 'Extra Pay', 'Regular'].map(f => (
-                  <button
-                    key={f}
-                    onClick={() => handleSelectClassificationFilter(f)}
-                    style={{
-                      padding: '3px 10px',
-                      borderRadius: 6,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      border: 'none',
-                      background: ledgerClassificationFilter === f ? '#1d4ed8' : 'var(--surface-2)',
-                      color: ledgerClassificationFilter === f ? '#fff' : 'var(--text)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {f === 'All' ? 'All Employee Credits' : (f === 'Extra Pay' ? 'Extra Pay Only' : 'Regular Credits')}
-                  </button>
-                ))}
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>Employee Extra Pay Filter:</span>
+                    <div style={{ display: 'flex', background: 'white', borderRadius: 6, padding: 2, border: '1px solid #bbf7d0' }}>
+                      {[
+                        { id: 'All', label: 'All Transactions' },
+                        { id: 'Extra Pay', label: 'Extra Pay Only' },
+                        { id: 'Regular', label: 'Regular Credits' },
+                      ].map(f => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => handleSelectClassificationFilter(f.id)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            border: 'none',
+                            background: ledgerClassificationFilter === f.id ? '#16a34a' : 'transparent',
+                            color: ledgerClassificationFilter === f.id ? '#fff' : '#166534',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s'
+                          }}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>
+                    All Extra Pay Total: <span style={{ color: '#15803d', fontWeight: 800 }}>{CURRENCY} {Math.abs(overallExtraPayTotal).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {/* Subtotals breakdown: Month Extra Pay, Month Regular Dues, Visible Filter Subtotal */}
+                <div style={{ display: 'flex', gap: 16, fontSize: 11.5, color: '#166534', flexWrap: 'wrap', borderTop: '1px dashed #bbf7d0', paddingTop: 6 }}>
+                  <span>Month Extra Pay: <b>+{CURRENCY} {monthExtraPayDebit.toFixed(2)}</b></span>
+                  <span>Month Regular Dues: <b>+{CURRENCY} {monthRegularDebit.toFixed(2)}</b></span>
+                  <span style={{ marginLeft: 'auto', fontWeight: 800, color: '#15803d' }}>
+                    {ledgerClassificationFilter === 'All' ? 'Month Total Dues' : `${ledgerClassificationFilter} Subtotal`}: {CURRENCY} {Math.abs(visibleSubtotal).toFixed(2)}
+                  </span>
+                </div>
               </div>
             )}
 
-            {/* Add Payment / Charge Form (Billing Month Required + Remarks) */}
+            {/* Receive Major Payment Form (Dedicated strictly to Receive Major Payment, Credit/Charge removed) */}
             {!isManagement && (
-              <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14, padding: 14, background: 'var(--surface-2)', borderRadius: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                  <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                      <input type="radio" name="actionType" value="PAYMENT" checked={paymentAction === 'PAYMENT'} onChange={() => setPaymentAction('PAYMENT')} />
-                      Receive Major Payment
+              <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12, padding: 12, background: 'var(--surface-2)', borderRadius: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>
+                    Receive Major Payment
+                  </span>
+
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'var(--bg)', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--surface-3)' }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>Method:</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12.5 }}>
+                      <input type="radio" name="paymentMethod" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
+                      Cash
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                      <input type="radio" name="actionType" value="CHARGE" checked={paymentAction === 'CHARGE'} onChange={() => setPaymentAction('CHARGE')} />
-                      Add Manual Dues / Charge
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12.5 }}>
+                      <input type="radio" name="paymentMethod" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
+                      Card
                     </label>
                   </div>
-
-                  {paymentAction === 'PAYMENT' && (
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'var(--bg)', padding: '4px 10px', borderRadius: 6, border: '1px solid var(--surface-3)' }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Method:</span>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13 }}>
-                        <input type="radio" name="paymentMethod" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
-                        Cash
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13 }}>
-                        <input type="radio" name="paymentMethod" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
-                        Card
-                      </label>
-                    </div>
-                  )}
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 2fr auto', gap: 8, alignItems: 'center' }}>
                   {/* Amount */}
                   <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--red)' }}>
-                      {paymentAction === 'PAYMENT' ? '-' : '+'}
+                    <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: 'var(--green)' }}>
+                      -
                     </span>
                     <input 
                       type="number" step="0.01" required placeholder="Amount"
                       value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} 
-                      style={{ width: '100%', padding: '8px 10px 8px 24px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
+                      style={{ width: '100%', padding: '7px 8px 7px 22px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
                     />
                   </div>
 
@@ -1628,7 +1705,7 @@ export default function Credit() {
                       value={billingMonth} 
                       onChange={e => setBillingMonth(e.target.value)} 
                       title="Billing Month to allocate payment against"
-                      style={{ width: '100%', padding: '7px 8px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
                     />
                   </div>
 
@@ -1636,16 +1713,16 @@ export default function Credit() {
                   <div>
                     <input 
                       type="text" 
-                      placeholder="Comment / Remarks (Optional)..." 
+                      placeholder="Remarks / Note (Optional)..." 
                       value={paymentComment} 
                       onChange={e => setPaymentComment(e.target.value)} 
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
                     />
                   </div>
 
                   {/* Submit button */}
-                  <button type="submit" style={{ background: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--red)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}>
-                    {paymentAction === 'PAYMENT' ? 'Receive Payment' : 'Post Charge'}
+                  <button type="submit" style={{ background: 'var(--green)', color: '#fff', border: 'none', padding: '7px 16px', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}>
+                    Receive Payment
                   </button>
                 </div>
               </form>
@@ -1656,72 +1733,96 @@ export default function Credit() {
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
                   <tr style={{ borderBottom: '2px solid var(--surface-2)' }}>
-                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Date & Month</th>
+                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Bill # & Date</th>
+                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Billing Month</th>
                     <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Description & Remarks</th>
                     <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Classification</th>
                     <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700, textAlign: 'right' }}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(() => {
-                    const processedLedger = [];
-                    const cancelledOrderIds = new Set();
-                    
-                    ledger.forEach(t => {
-                      if (t.type === 'ORDER_CANCELLED') cancelledOrderIds.add(t.order_id);
-                    });
-
-                    ledger.forEach(t => {
-                      if (t.type === 'ORDER_CANCELLED' || t.type === 'PAYMENT_CANCELLED') {
-                        return;
-                      }
-                      
-                      let isCancelled = false;
-                      if (t.type === 'CREDIT_ORDER' && cancelledOrderIds.has(t.order_id)) {
-                        isCancelled = true;
-                      }
-                      processedLedger.push({ ...t, isCancelled });
-                    });
-
-                    if (processedLedger.length === 0) {
-                      return (
-                        <tr>
-                          <td colSpan={4} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
-                            No transactions found for {selectedLedgerMonth !== 'All' ? formatMonthDisplay(selectedLedgerMonth) : 'this account'}.
-                          </td>
-                        </tr>
-                      );
-                    }
-
-                    return processedLedger.map(t => (
+                  {processedTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                        No transactions found for {selectedLedgerMonth !== 'All' ? formatMonthDisplay(selectedLedgerMonth) : 'this account'}.
+                      </td>
+                    </tr>
+                  ) : (
+                    processedTransactions.map(t => (
                       <tr key={t.id} style={{ borderBottom: '1px solid var(--surface-2)', opacity: t.isCancelled ? 0.6 : 1 }}>
-                        <td style={{ padding: '10px 14px', fontSize: 12, textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
-                          <div style={{ fontWeight: 600 }}>{new Date(t.created_at).toLocaleDateString()}</div>
-                          <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                          {t.billing_month && (
-                            <span style={{ fontSize: 10, background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 4, fontWeight: 700, color: 'var(--primary)' }}>
-                              {formatMonthDisplay(t.billing_month)}
-                            </span>
+                        
+                        {/* Column 1: Bill # and underneath is the Date, clicking Bill # opens detailed slip */}
+                        <td style={{ padding: '10px 14px', fontSize: 13 }}>
+                          {t.type === 'CREDIT_ORDER' ? (
+                            <div>
+                              <div 
+                                onClick={() => handleViewOrder(t.order_id)} 
+                                style={{ 
+                                  color: 'var(--red)', 
+                                  fontWeight: 700, 
+                                  fontSize: 14, 
+                                  cursor: 'pointer', 
+                                  textDecoration: t.isCancelled ? 'line-through' : 'underline',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6
+                                }}
+                                title="Click to view detailed order slip"
+                              >
+                                <span>Bill # {t.order_id}</span>
+                                {t.slip_number && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({t.slip_number})</span>}
+                                {t.isCancelled && <span style={{ marginLeft: 6, color: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold' }}>(Cancelled)</span>}
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                {new Date(t.created_at).toLocaleString()}
+                              </div>
+                            </div>
+                          ) : t.type === 'CHARGE' ? (
+                            <div>
+                              <div style={{ color: 'var(--red)', fontWeight: 700, fontSize: 13.5 }}>
+                                Manual Charge
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                {new Date(t.created_at).toLocaleString()}
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span>Major Payment</span>
+                                <span style={{ fontSize: 11, fontWeight: 600, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 4 }}>
+                                  via {t.payment_method || 'Cash'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                {new Date(t.created_at).toLocaleString()}
+                              </div>
+                            </div>
                           )}
                         </td>
 
-                        <td style={{ padding: '10px 14px', fontSize: 12.5 }}>
-                          {t.type === 'CREDIT_ORDER' ? (
-                            <div>
-                              <span onClick={() => handleViewOrder(t.order_id)} style={{ color: 'var(--red)', fontWeight: 600, cursor: 'pointer', textDecoration: t.isCancelled ? 'line-through' : 'underline' }}>
-                                Order #{t.order_id}
-                              </span>
-                              {t.isCancelled && <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold' }}>(Cancelled)</span>}
-                            </div>
-                          ) : t.type === 'CHARGE' ? (
-                            <span style={{ color: 'var(--red)', fontWeight: 600 }}>Manual Charge {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
+                        {/* Column 2: Billing Month */}
+                        <td style={{ padding: '10px 14px', fontSize: 12 }}>
+                          {t.billing_month ? (
+                            <span style={{ fontSize: 11, background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, color: 'var(--primary)' }}>
+                              {formatMonthDisplay(t.billing_month)}
+                            </span>
                           ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                              <span style={{ color: 'var(--green)', fontWeight: 600 }}>Payment Received {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
-                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>via {t.payment_method || 'Cash'}</span>
-                            </div>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>-</span>
                           )}
+                        </td>
 
+                        {/* Column 3: Description & Remarks */}
+                        <td style={{ padding: '10px 14px', fontSize: 12.5 }}>
+                          <div>
+                            {t.type === 'CREDIT_ORDER' ? (
+                              <span>Order Charge</span>
+                            ) : t.type === 'CHARGE' ? (
+                              <span>Manual Charge {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
+                            ) : (
+                              <span>Payment Received {t.cashier_name ? `(to ${t.cashier_name})` : ''}</span>
+                            )}
+                          </div>
                           {t.comments && (
                             <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 4 }}>
                               <MessageSquare size={11} /> {t.comments}
@@ -1729,6 +1830,7 @@ export default function Credit() {
                           )}
                         </td>
 
+                        {/* Column 4: Classification */}
                         <td style={{ padding: '10px 14px', fontSize: 12 }}>
                           {t.classification === 'Extra Pay' ? (
                             <span style={{ fontSize: 10.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
@@ -1741,12 +1843,13 @@ export default function Credit() {
                           )}
                         </td>
 
+                        {/* Column 5: Amount */}
                         <td style={{ padding: '10px 14px', fontSize: 13, textAlign: 'right', fontWeight: 700, color: (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? 'var(--red)' : 'var(--green)', textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
                           {(t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}
                         </td>
                       </tr>
-                    ));
-                  })()}
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
