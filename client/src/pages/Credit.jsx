@@ -377,6 +377,12 @@ export default function Credit() {
   const [discountMode, setDiscountMode] = useState('none'); // 'none' | 'package' | 'custom'
   const [customerModalRules, setCustomerModalRules] = useState([]);
 
+  // Registered Employees for Option A (Select Registered) vs Option B (Manual Entry)
+  const [registeredEmployees, setRegisteredEmployees] = useState([]);
+  const [employeeSelectMode, setEmployeeSelectMode] = useState('registered'); // 'registered' | 'manual'
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [employeeSearchTerm, setEmployeeSearchTerm] = useState('');
+
   // Category Filter & Branch Filter state
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [branchFilter, setBranchFilter] = useState('All');
@@ -417,6 +423,19 @@ export default function Credit() {
   useEffect(() => {
     fetchCustomers();
   }, [branchFilter]);
+
+  const fetchEmployeesList = async () => {
+    try {
+      const res = await axios.get('/api/employees');
+      setRegisteredEmployees(res.data || []);
+    } catch (err) {
+      console.error('Failed to load registered employees for Khata selection:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchEmployeesList();
+  }, []);
 
   const fetchDiscountPackages = async () => {
     try {
@@ -554,6 +573,7 @@ export default function Credit() {
       available_branches: isAdmin ? selectedBranches : [user?.branch?.split(',')[0]?.trim() || ''],
       category,
       is_extra_pay: category === 'Employee' ? isExtraPay : false,
+      employee_id: category === 'Employee' && employeeSelectMode === 'registered' && selectedEmployeeId ? parseInt(selectedEmployeeId, 10) : null,
       status,
       discount_package_id: finalPkgId,
       discount_rules: finalRules
@@ -616,6 +636,23 @@ export default function Credit() {
     ), { duration: Infinity });
   };
 
+  const handleSelectRegisteredEmployee = (empId) => {
+    setSelectedEmployeeId(empId);
+    if (!empId) return;
+    const emp = registeredEmployees.find(e => e.id.toString() === empId.toString());
+    if (emp) {
+      setName(emp.name || '');
+      if (emp.phones || emp.phone) {
+        setPhone(emp.phones || emp.phone || '');
+      }
+      const refParts = [];
+      if (emp.employee_id) refParts.push(`Emp #${emp.employee_id}`);
+      if (emp.role) refParts.push(emp.role);
+      if (emp.branch) refParts.push(emp.branch);
+      setReference(refParts.join(' • '));
+    }
+  };
+
   const openAddModal = () => {
     setEditingCustomer(null);
     setName('');
@@ -630,6 +667,9 @@ export default function Credit() {
     setDiscountMode('none');
     setDiscountPackageId('');
     setCustomerModalRules([]);
+    setEmployeeSelectMode('registered');
+    setSelectedEmployeeId('');
+    setEmployeeSearchTerm('');
     setShowModal(true);
   };
 
@@ -644,6 +684,20 @@ export default function Credit() {
     setCategory(customer.category || 'Regular Customer');
     setIsExtraPay(Boolean(customer.is_extra_pay));
     setStatus(customer.status || 'Active');
+    setEmployeeSearchTerm('');
+
+    if (customer.category === 'Employee') {
+      if (customer.employee_id) {
+        setEmployeeSelectMode('registered');
+        setSelectedEmployeeId(customer.employee_id.toString());
+      } else {
+        setEmployeeSelectMode('manual');
+        setSelectedEmployeeId('');
+      }
+    } else {
+      setEmployeeSelectMode('registered');
+      setSelectedEmployeeId('');
+    }
 
     let custRules = customer.discount_rules;
     if (typeof custRules === 'string') {
@@ -671,6 +725,8 @@ export default function Credit() {
   // ── Month-Wise Balance Breakdown & Ledger ────────────────────────────
   const openLedger = async (customer) => {
     setActiveCustomer(customer);
+    setLedger([]);
+    setMonthlySummary([]);
     setPaymentAmount('');
     setEntryType('PAYMENT');
     setPaymentMethod('Cash');
@@ -1209,7 +1265,7 @@ export default function Credit() {
                         <span>{c.name}</span>
                         {c.category === 'Employee' ? (
                           <span style={{ fontSize: 11, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
-                            Employee {c.is_extra_pay ? '• Extra Pay' : ''}
+                            Employee {c.is_extra_pay ? '• Extra Pay' : ''} {c.employee_id ? '🔗' : ''}
                           </span>
                         ) : (
                           <span style={{ fontSize: 11, background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
@@ -1379,17 +1435,95 @@ export default function Credit() {
                   </div>
 
                   {category === 'Employee' && (
-                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--surface-3)' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#1d4ed8' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={isExtraPay} 
-                          onChange={e => setIsExtraPay(e.target.checked)} 
-                        />
-                        Classify as "Extra Pay" Account
-                      </label>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                        If checked, credit transactions for this employee will be classified under Extra Pay.
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--surface-3)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {/* Option A: Select Registered Employee vs Option B: Manual Entry */}
+                      <div style={{ display: 'flex', gap: 16 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12.5, fontWeight: employeeSelectMode === 'registered' ? 700 : 500, color: employeeSelectMode === 'registered' ? 'var(--primary)' : 'var(--text)' }}>
+                          <input 
+                            type="radio" 
+                            name="empSelectMode" 
+                            value="registered" 
+                            checked={employeeSelectMode === 'registered'} 
+                            onChange={() => setEmployeeSelectMode('registered')} 
+                          />
+                          Select Registered Employee
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12.5, fontWeight: employeeSelectMode === 'manual' ? 700 : 500, color: employeeSelectMode === 'manual' ? 'var(--primary)' : 'var(--text)' }}>
+                          <input 
+                            type="radio" 
+                            name="empSelectMode" 
+                            value="manual" 
+                            checked={employeeSelectMode === 'manual'} 
+                            onChange={() => {
+                              setEmployeeSelectMode('manual');
+                              setSelectedEmployeeId('');
+                            }} 
+                          />
+                          Manual Entry
+                        </label>
+                      </div>
+
+                      {/* Option A Dropdown: Registered Employees from Manage Employees */}
+                      {employeeSelectMode === 'registered' && (
+                        <div style={{ background: 'var(--surface)', padding: 10, borderRadius: 6, border: '1px solid var(--surface-3)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text)' }}>
+                              Select Employee from Manage Employees *
+                            </label>
+                            {selectedEmployeeId && (
+                              <span style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 700 }}>✓ Linked</span>
+                            )}
+                          </div>
+                          
+                          <input 
+                            type="text" 
+                            placeholder="Type to filter employees by name, role or code..."
+                            value={employeeSearchTerm}
+                            onChange={e => setEmployeeSearchTerm(e.target.value)}
+                            style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}
+                          />
+
+                          <select 
+                            value={selectedEmployeeId} 
+                            onChange={e => handleSelectRegisteredEmployee(e.target.value)}
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--primary)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12.5, fontWeight: 600 }}
+                          >
+                            <option value="">-- Choose an Employee ({registeredEmployees.length} registered) --</option>
+                            {registeredEmployees
+                              .filter(emp => {
+                                if (!employeeSearchTerm.trim()) return true;
+                                const s = employeeSearchTerm.toLowerCase();
+                                return (
+                                  (emp.name || '').toLowerCase().includes(s) ||
+                                  (emp.role || '').toLowerCase().includes(s) ||
+                                  (emp.employee_id || '').toLowerCase().includes(s) ||
+                                  (emp.branch || '').toLowerCase().includes(s)
+                                );
+                              })
+                              .map(emp => (
+                                <option key={emp.id} value={emp.id}>
+                                  {emp.name} {emp.role ? `(${emp.role})` : ''} {emp.employee_id ? `• Code: ${emp.employee_id}` : ''} {emp.branch ? `• ${emp.branch}` : ''}
+                                </option>
+                              ))}
+                          </select>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            Selecting an existing employee links this Khata account to their record and auto-fills their details.
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ paddingTop: 4 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, color: '#1d4ed8' }}>
+                          <input 
+                            type="checkbox" 
+                            checked={isExtraPay} 
+                            onChange={e => setIsExtraPay(e.target.checked)} 
+                          />
+                          Classify as "Extra Pay" Account
+                        </label>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                          If checked, credit transactions for this employee will be classified under Extra Pay.
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2096,8 +2230,8 @@ export default function Credit() {
                     </span>
                   </div>
 
-                  {/* All Extra Pay: Visible ONLY when "All" filter is selected */}
-                  {ledgerClassificationFilter === 'All' && (
+                  {/* All Extra Pay: Visible ONLY when Month filter is set to "All Months" */}
+                  {selectedLedgerMonth === 'All' && (
                     <div style={{ 
                       background: 'rgba(22, 163, 74, 0.12)', 
                       border: '1px solid #86efac', 

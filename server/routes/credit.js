@@ -231,9 +231,13 @@ router.get('/', async (req, res) => {
         dp.name AS discount_package_name,
         dp.discount_percentage AS discount_package_percentage,
         dp.discount_rules AS discount_package_rules,
-        dp.is_active AS discount_package_active
+        dp.is_active AS discount_package_active,
+        emp.name AS registered_employee_name,
+        emp.role AS registered_employee_role,
+        emp.employee_id AS registered_employee_code
       FROM credit_customers cc
       LEFT JOIN discount_packages dp ON cc.discount_package_id = dp.id
+      LEFT JOIN employees emp ON cc.employee_id = emp.id
     `;
     let params = [];
     let whereClauses = [];
@@ -289,7 +293,8 @@ router.post('/', async (req, res) => {
     status,
     category,
     is_extra_pay,
-    discount_package_id
+    discount_package_id,
+    employee_id
   } = req.body;
 
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
@@ -305,6 +310,7 @@ router.post('/', async (req, res) => {
   const finalCategory = category === 'Employee' ? 'Employee' : 'Regular Customer';
   const finalExtraPay = finalCategory === 'Employee' && Boolean(is_extra_pay);
   const finalPkgId = discount_package_id ? parseInt(discount_package_id, 10) : null;
+  const finalEmployeeId = finalCategory === 'Employee' && employee_id ? parseInt(employee_id, 10) : null;
 
   try {
     const checkQuery = `SELECT id, name, phone FROM credit_customers WHERE LOWER(name) = LOWER($1) ${phone ? 'OR phone = $2' : ''}`;
@@ -323,8 +329,8 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO credit_customers (
         name, phone, credit_limit, balance, available_branches, reference, notes, discount_rules,
-        status, category, is_extra_pay, discount_package_id
-      ) VALUES ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        status, category, is_extra_pay, discount_package_id, employee_id
+      ) VALUES ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       [
         name.trim(), 
         phone ? phone.trim() : null, 
@@ -336,7 +342,8 @@ router.post('/', async (req, res) => {
         finalStatus,
         finalCategory,
         finalExtraPay,
-        finalPkgId
+        finalPkgId,
+        finalEmployeeId
       ]
     );
 
@@ -376,7 +383,8 @@ router.put('/:id', async (req, res) => {
     status,
     category,
     is_extra_pay,
-    discount_package_id
+    discount_package_id,
+    employee_id
   } = req.body;
 
   try {
@@ -420,9 +428,25 @@ router.put('/:id', async (req, res) => {
       } else if (cat !== 'Employee') {
         query += `, is_extra_pay = FALSE`;
       }
-    } else if (is_extra_pay !== undefined) {
-      params.push(Boolean(is_extra_pay));
-      query += `, is_extra_pay = $${params.length}`;
+      if (cat === 'Employee') {
+        if (employee_id !== undefined) {
+          const empId = employee_id ? parseInt(employee_id, 10) : null;
+          params.push(empId);
+          query += `, employee_id = $${params.length}`;
+        }
+      } else {
+        query += `, employee_id = NULL`;
+      }
+    } else {
+      if (is_extra_pay !== undefined) {
+        params.push(Boolean(is_extra_pay));
+        query += `, is_extra_pay = $${params.length}`;
+      }
+      if (employee_id !== undefined) {
+        const empId = employee_id ? parseInt(employee_id, 10) : null;
+        params.push(empId);
+        query += `, employee_id = $${params.length}`;
+      }
     }
 
     if (discount_package_id !== undefined) {
