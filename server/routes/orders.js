@@ -310,24 +310,25 @@ router.post('/', authenticateToken, async (req, res) => {
         else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
         else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
 
+        const cleanText = (str) => String(str || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
         const payload = {
           orderId: order.id,
           orderNumber: slipNumber,
           branchId: parseInt(branchNumber),
-          waiterName: (order.order_taker || "Staff").replace(/[^\x00-\x7F]/g, "").trim(),
-          tableName: (order.table_number || "").replace(/[^\x00-\x7F]/g, "").trim(),
+          waiterName: cleanText(order.order_taker || "Staff"),
+          tableName: cleanText(order.table_number || ""),
           orderType: order.order_type || "Takeaway",
           printerIp: printerIp,
           subtotal: subtotal,
           discount: order.discount || 0,
           total: grand_total,
           currency: "SAR",
-          customerName: (order.customer_name || req.body.customer_name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+          customerName: cleanText(order.customer_name || req.body.customer_name || ""),
           customerPhone: order.customer_phone || req.body.customer_phone || "",
           paymentStatus: order.status || "Completed",
           createdAt: new Date().toISOString(),
           items: items.map(item => ({
-            name: (item.name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+            name: cleanText(item.name || ""),
             qty: item.qty || 1,
             amount: item.price
           }))
@@ -952,24 +953,25 @@ router.patch('/:id/pay', authenticateToken, async (req, res) => {
           const branchNumber = String(req.body.branchId || effectiveBranch).replace(/\D/g, '') || '1';
           const channelName = `branch-${branchNumber}-orders`;
 
+          const cleanText = (str) => String(str || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
           const payload = {
             orderId: updatedOrder.id,
             orderNumber: updatedOrder.slip_number,
             branchId: parseInt(branchNumber),
-            waiterName: (updatedOrder.order_taker || "Staff").replace(/[^\x00-\x7F]/g, "").trim(),
-            tableName: (updatedOrder.table_number || "").replace(/[^\x00-\x7F]/g, "").trim(),
+            waiterName: cleanText(updatedOrder.order_taker || "Staff"),
+            tableName: cleanText(updatedOrder.table_number || ""),
             orderType: updatedOrder.order_type || "Takeaway",
             printerIp: printerIp,
             subtotal: updatedOrder.subtotal,
             discount: updatedOrder.discount || 0,
             total: updatedOrder.grand_total,
             currency: "SAR",
-            customerName: (updatedOrder.customer_name || req.body.customer_name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+            customerName: cleanText(updatedOrder.customer_name || req.body.customer_name || ""),
             customerPhone: updatedOrder.customer_phone || req.body.customer_phone || "",
             paymentStatus: updatedOrder.status || "Completed",
             createdAt: new Date().toISOString(),
             items: items.map(item => ({
-              name: (item.name || item.item_name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+              name: cleanText(item.name || item.item_name || ""),
               qty: item.qty || 1,
               amount: item.price || item.unit_price
             }))
@@ -2535,24 +2537,25 @@ router.post('/:id/reprint', authenticateToken, async (req, res) => {
     const printerIp = req.body.printerIp || (settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip ? settingsRes.rows[0].printer_ip : '127.0.0.1');
 
     if (pusher) {
+      const cleanText = (str) => String(str || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
       const payload = {
         orderId: order.id,
         orderNumber: order.slip_number,
         branchId: parseInt(branchNumber),
-        waiterName: (order.order_taker || "Staff").replace(/[^\x00-\x7F]/g, "").trim(),
-        tableName: (order.table_number || "").replace(/[^\x00-\x7F]/g, "").trim(),
+        waiterName: cleanText(order.order_taker || "Staff"),
+        tableName: cleanText(order.table_number || ""),
         orderType: order.order_type || "Takeaway",
         printerIp: printerIp,
         subtotal: order.subtotal,
         discount: order.discount || 0,
         total: order.grand_total,
         currency: "SAR",
-        customerName: (order.customer_name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+        customerName: cleanText(order.customer_name || ""),
         customerPhone: order.customer_phone || "",
         paymentStatus: order.status || "Completed",
         createdAt: new Date().toISOString(),
         items: items.map(item => ({
-          name: (item.item_name || item.name || "").replace(/[^\x00-\x7F]/g, "").trim(),
+          name: cleanText(item.item_name || item.name || ""),
           qty: item.qty || 1,
           amount: item.unit_price || item.price
         }))

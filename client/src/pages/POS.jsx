@@ -36,6 +36,7 @@ import {
   removePendingOrder
 } from '../utils/db'
 import { printViaRawBT } from '../utils/rawbtPrinter'
+import { formatItemUrdu } from '../utils/urduHelper'
 
 import {
   BRAND_NAME,
@@ -945,26 +946,59 @@ export default function POS() {
 
     let itemRows = '';
     if (!isFullReceipt && diffData) {
-      itemRows = diffData.added.map((item, index) => `
-      <div class="row">
-        <span class="item-name">${index + 1}. ${item.name}</span>
-        <span class="item-qty">${item.qty}</span>
-        <span class="item-price">${CURRENCY}${parseFloat((item.price || item.unit_price || 0) * item.qty).toFixed(2)}</span>
-      </div>`).join('');
+      itemRows = diffData.added.map((item, index) => {
+        const uPrice = parseFloat(item.price || item.unit_price || 0);
+        const qty = item.qty || 1;
+        const lineTotal = uPrice * qty;
+        const uPriceStr = uPrice % 1 === 0 ? uPrice : uPrice.toFixed(2);
+        const qtyDisplay = qty > 1 ? `${qty} (${uPriceStr})` : `${qty}`;
+        const formattedName = formatItemUrdu(item.name || item.item_name);
+        return `
+        <div style="padding: 2px 0;">
+          <div style="font-size: 12px; font-weight: normal; word-break: break-word;">${index + 1}. ${formattedName}</div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+            <span style="flex: 1.5;"></span>
+            <span style="flex: 1; text-align: center; font-weight: bold;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+          </div>
+        </div>`;
+      }).join('');
       
-      itemRows += diffData.cancelled.map((item, index) => `
-      <div class="row" style="text-decoration: line-through; color: #555;">
-        <span class="item-name">${diffData.added.length + index + 1}. ${item.name} [CANCELLED]</span>
-        <span class="item-qty">${item.qty}</span>
-        <span class="item-price">${CURRENCY}${parseFloat((item.price || item.unit_price || 0) * item.qty).toFixed(2)}</span>
-      </div>`).join('');
+      itemRows += diffData.cancelled.map((item, index) => {
+        const uPrice = parseFloat(item.price || item.unit_price || 0);
+        const qty = item.qty || 1;
+        const lineTotal = uPrice * qty;
+        const uPriceStr = uPrice % 1 === 0 ? uPrice : uPrice.toFixed(2);
+        const qtyDisplay = qty > 1 ? `${qty} (${uPriceStr})` : `${qty}`;
+        const formattedName = formatItemUrdu(item.name || item.item_name);
+        return `
+        <div style="padding: 2px 0; text-decoration: line-through; color: #555;">
+          <div style="font-size: 12px; word-break: break-word;">${diffData.added.length + index + 1}. ${formattedName} [CANCELLED]</div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+            <span style="flex: 1.5;"></span>
+            <span style="flex: 1; text-align: center;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+          </div>
+        </div>`;
+      }).join('');
     } else {
-      itemRows = currentCart.map((item, index) => `
-      <div class="row">
-        <span class="item-name">${index + 1}. ${item.name || item.item_name}</span>
-        <span class="item-qty">${item.qty}</span>
-        <span class="item-price">${CURRENCY}${parseFloat((item.price || item.unit_price) * item.qty).toFixed(2)}</span>
-      </div>`).join('');
+      itemRows = currentCart.map((item, index) => {
+        const uPrice = parseFloat(item.price || item.unit_price || 0);
+        const qty = item.qty || 1;
+        const lineTotal = uPrice * qty;
+        const uPriceStr = uPrice % 1 === 0 ? uPrice : uPrice.toFixed(2);
+        const qtyDisplay = qty > 1 ? `${qty} (${uPriceStr})` : `${qty}`;
+        const formattedName = formatItemUrdu(item.name || item.item_name);
+        return `
+        <div style="padding: 2px 0;">
+          <div style="font-size: 12px; font-weight: normal; word-break: break-word;">${index + 1}. ${formattedName}</div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+            <span style="flex: 1.5;"></span>
+            <span style="flex: 1; text-align: center; font-weight: bold;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+          </div>
+        </div>`;
+      }).join('');
     }
 
     const taker = currentInfo.order_taker || currentInfo.orderTaker || user?.username || 'Guest';
@@ -984,33 +1018,33 @@ export default function POS() {
     const editReasonHtml = diffData?.reason ? `<div style="font-size: 11px; margin: 2px 0; text-align: center; font-weight: bold; background: #eee; padding: 2px 4px; border-radius: 2px;">Edit Reason: ${diffData.reason}</div>` : '';
 
     const headerHtml = isFullReceipt ? `
-    <div style="font-size: 16px; font-weight: normal; margin: 6px 0; text-align: center;">
+    <div style="font-size: 16px; font-weight: bold; margin: 4px 0; text-align: center;">
       ${shortBranch} - ${currentInfo.orderType}
     </div>
-    <div style="font-size: 10px; text-align: center; margin: 4px 0;">
+    <div style="font-size: 11px; text-align: center; margin: 4px 0; line-height: 1.4;">
       Kitchen slip. Please get original slip from counter.<br/>
-      إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+      اصل پرچی کاؤنٹر سے حاصل کریں۔
     </div>
     ${metaRow}
-    <div style="margin: 10px 0; font-size: 16px; font-weight: bold;">
+    <div style="margin: 6px 0; font-size: 15px; font-weight: bold; text-align: center;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
     </div>
     ${editReasonHtml}
-    <p class="sub">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
+    <p class="sub" style="text-align: center;">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
     ` : `
-    <div style="font-size: 14px; font-weight: normal; margin: 2px 0; text-align: center;">
+    <div style="font-size: 14px; font-weight: bold; margin: 2px 0; text-align: center;">
       ${shortBranch} - ${currentInfo.orderType}
     </div>
-    <div style="font-size: 10px; text-align: center; margin: 4px 0;">
+    <div style="font-size: 11px; text-align: center; margin: 4px 0; line-height: 1.4;">
       Kitchen slip. Please get original slip from counter.<br/>
-      إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+      اصل پرچی کاؤنٹر سے حاصل کریں۔
     </div>
     ${metaRow}
-    <div style="margin: 2px 0; font-size: 14px; font-weight: bold;">
+    <div style="margin: 4px 0; font-size: 14px; font-weight: bold; text-align: center;">
       Order #${orderId} - ${editCount > 0 ? `Edit ${slipNumber}${String.fromCharCode(64 + editCount)}` : slipNumber}
     </div>
     ${editReasonHtml}
-    <p class="sub" style="margin-bottom: 2px; font-size: 10px;">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
+    <p class="sub" style="margin-bottom: 2px; font-size: 10px; text-align: center;">${now2.toLocaleDateString()} ${now2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
     `;
 
     const footerHtml = isFullReceipt ? `
@@ -1096,18 +1130,18 @@ export default function POS() {
   </div>
   ${isFullReceipt && (currentInfo.name || currentInfo.phone || currentInfo.comments || (currentInfo.address && currentInfo.orderType !== 'Dine-In' && currentInfo.orderType !== 'Takeaway')) ? `
   <div class="divider"></div>
-  <div style="text-align: left; font-size: 11px; display: flex; flex-wrap: wrap; justify-content: space-between;">
-    ${currentInfo.name ? `<div style="width: 48%; margin: 2px 0;"><strong>Cust:</strong> ${currentInfo.name}</div>` : ''}
-    ${currentInfo.phone ? `<div style="width: 48%; margin: 2px 0;"><strong>Phone:</strong> ${currentInfo.phone}</div>` : ''}
-    ${currentInfo.address && currentInfo.orderType !== 'Dine-In' && currentInfo.orderType !== 'Takeaway' ? `<div style="width: 100%; margin: 2px 0;"><strong>Address:</strong> ${currentInfo.address}</div>` : ''}
-    ${currentInfo.comments ? `<div style="width: 100%; margin: 2px 0;"><strong>Note:</strong> ${currentInfo.comments}</div>` : ''}
+  <div style="text-align: center; font-size: 11px; margin: 2px 0;">
+    ${currentInfo.name ? `<span><strong>Cust:</strong> ${currentInfo.name}</span>` : ''}
+    ${currentInfo.phone ? `<span style="margin-left: 8px;"><strong>Phone:</strong> ${currentInfo.phone}</span>` : ''}
+    ${currentInfo.address && currentInfo.orderType !== 'Dine-In' && currentInfo.orderType !== 'Takeaway' ? `<div style="margin-top: 2px;"><strong>Address:</strong> ${currentInfo.address}</div>` : ''}
+    ${currentInfo.comments ? `<div style="margin-top: 2px;"><strong>Note:</strong> ${currentInfo.comments}</div>` : ''}
   </div>
   ` : ''}
   <div class="divider"></div>
-  <div class="row" style="font-weight:normal;">
-    <span class="item-name">Item</span>
-    <span class="item-qty">QTY</span>
-    <span class="item-price">Amount</span>
+  <div class="row" style="font-weight: bold; font-size: 12px;">
+    <span style="flex: 1.5;">Item</span>
+    <span style="flex: 1; text-align: center;">QTY</span>
+    <span style="flex: 1; text-align: right;">Amount</span>
   </div>
   <div class="divider"></div>
   ${itemRows}

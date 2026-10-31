@@ -1,0 +1,14 @@
+{
+  "name": "pos-print-agent-branch-1",
+  "version": "2.0.0",
+  "description": "POS Thermal Print Agent with Urdu Support and Auto-Healing",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "test": "node test-print.js"
+  },
+  "dependencies": {
+    "pusher-js": "^8.4.0"
+  }
+}
+

@@ -3,6 +3,7 @@ import { Printer, X, Edit } from 'lucide-react'
 import axios from '../api'
 import toast from 'react-hot-toast'
 import { CURRENCY } from '../config'
+import { formatItemUrdu } from '../utils/urduHelper'
 import {
   BRAND_SLIP_LOGO as logo,
   BRAND_NAME,
@@ -97,28 +98,44 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   let itemRows = '';
   let idx = 1;
   fullItemsList.forEach(item => {
+    const uPrice = parseFloat(item.price || item.unit_price || 0);
+    const qty = item.qty || 1;
+    const lineTotal = uPrice * qty;
+    const uPriceStr = uPrice % 1 === 0 ? uPrice : uPrice.toFixed(2);
+    const qtyDisplay = qty > 1 ? `${qty} (${uPriceStr})` : `${qty}`;
+    const formattedName = formatItemUrdu(item.name || item.item_name);
+
     if (item.isCancelled) {
       itemRows += `
-        <div class="row" style="text-decoration: line-through; color: #dc2626; opacity: 0.85;">
-          <span class="item-name">${idx++}. ${item.name} <span style="font-size: 9px; font-weight: bold; background: #fee2e2; color: #991b1b; padding: 1px 4px; border-radius: 3px; text-decoration: none; display: inline-block;">[CANCELLED]</span></span>
-          <span class="item-qty">${item.qty}</span>
-          <span class="item-price">${CURRENCY}${(item.price * item.qty).toFixed(2)}</span>
+        <div style="padding: 2px 0; text-decoration: line-through; color: #dc2626; opacity: 0.85;">
+          <div style="font-size: 12px; word-break: break-word;">${idx++}. ${formattedName} <span style="font-size: 9px; font-weight: bold; background: #fee2e2; color: #991b1b; padding: 1px 4px; border-radius: 3px; text-decoration: none; display: inline-block;">[CANCELLED]</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+            <span style="flex: 1.5;"></span>
+            <span style="flex: 1; text-align: center;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+          </div>
         </div>
       `;
     } else if (item.isNew) {
       itemRows += `
-        <div class="row">
-          <span class="item-name">${idx++}. ${item.name} <span style="font-size: 9px; font-weight: bold; color: #15803d; background: #dcfce7; padding: 1px 4px; border-radius: 3px; display: inline-block;">+NEW</span></span>
-          <span class="item-qty">${item.qty}</span>
-          <span class="item-price">${CURRENCY}${(item.price * item.qty).toFixed(2)}</span>
+        <div style="padding: 2px 0;">
+          <div style="font-size: 12px; font-weight: bold; word-break: break-word;">${idx++}. ${formattedName} <span style="font-size: 9px; font-weight: bold; color: #15803d; background: #dcfce7; padding: 1px 4px; border-radius: 3px; display: inline-block;">+NEW</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+            <span style="flex: 1.5;"></span>
+            <span style="flex: 1; text-align: center; font-weight: bold;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+          </div>
         </div>
       `;
     } else {
       itemRows += `
-        <div class="row">
-          <span class="item-name">${idx++}. ${item.name}</span>
-          <span class="item-qty">${item.qty}</span>
-          <span class="item-price">${CURRENCY}${(item.price * item.qty).toFixed(2)}</span>
+        <div style="padding: 2px 0;">
+          <div style="font-size: 12px; font-weight: normal; word-break: break-word;">${idx++}. ${formattedName}</div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; padding-top: 1px;">
+            <span style="flex: 1.5;"></span>
+            <span style="flex: 1; text-align: center; font-weight: bold;">${qtyDisplay}</span>
+            <span style="flex: 1; text-align: right;">${CURRENCY}${lineTotal.toFixed(2)}</span>
+          </div>
         </div>
       `;
     }
@@ -138,7 +155,7 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   </div>
     <div style="font-size: 10px; text-align: center; margin: 4px 0;">
       Kitchen slip. Please get original slip from counter.<br/>
-      إيصال المطبخ. يرجى الحصول على الإيصال الأصلي من الكاونتر.
+      اصل پرچی کاؤنٹر سے حاصل کریں۔
     </div>
   ${metaRow}
   <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">
@@ -148,10 +165,10 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   <p class="sub" style="margin-bottom: 2px; font-size: 10px;">${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</p>
 </div>
 <div class="divider"></div>
-<div class="row" style="font-weight:bold;">
-  <span class="item-name">Item</span>
-  <span class="item-qty">QTY</span>
-  <span class="item-price">Amount</span>
+<div class="row" style="font-weight: bold; font-size: 12px;">
+  <span style="flex: 1.5;">Item</span>
+  <span style="flex: 1; text-align: center;">QTY</span>
+  <span style="flex: 1; text-align: right;">Amount</span>
 </div>
 <div class="divider"></div>
 ${itemRows}
