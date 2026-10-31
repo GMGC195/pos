@@ -1773,11 +1773,21 @@ export default function Credit() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {/* Compact, Prominent Overall Balance Badge */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface-2)', padding: '4px 10px', borderRadius: 8, border: '1px solid var(--surface-3)' }}>
-                  <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', fontWeight: 600 }}>Overall Balance:</span>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
-                    {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(0.00)')}
+                {/* Prominently Highlighted Overall Balance Badge */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 8, 
+                  background: activeCustomer.balance > 0 ? '#dc2626' : (activeCustomer.balance < 0 ? '#16a34a' : '#475569'), 
+                  color: '#ffffff',
+                  padding: '5px 14px', 
+                  borderRadius: 8, 
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.18)',
+                  border: '1px solid rgba(255,255,255,0.2)' 
+                }}>
+                  <span style={{ fontSize: 12, color: '#ffffff', fontWeight: 600, opacity: 0.95 }}>Overall Balance:</span>
+                  <span style={{ fontSize: 14.5, fontWeight: 900, color: '#ffffff', letterSpacing: 0.2 }}>
+                    {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(Settled)')}
                   </span>
                 </div>
 
@@ -1994,12 +2004,41 @@ export default function Credit() {
               </div>
 
               {selectedLedgerMonth !== 'All' ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5 }}>
-                  <span>Debits: <b style={{ color: 'var(--red)' }}>+{CURRENCY} {parseFloat(selectedMonthSummaryData?.debit || selectedMonthSummaryData?.total_debit || 0).toFixed(2)}</b></span>
-                  <span>Credits: <b style={{ color: 'var(--green)' }}>-{CURRENCY} {parseFloat(selectedMonthSummaryData?.credit || selectedMonthSummaryData?.total_credit || 0).toFixed(2)}</b></span>
-                  <span>Net: <b style={{ color: parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? 'var(--red)' : '#059669', fontWeight: 800 }}>
-                    {CURRENCY} {Math.abs(parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0)).toFixed(2)} {parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? '(DR)' : (parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) < 0 ? '(CR)' : '(0)')}
-                  </b></span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, flexWrap: 'wrap' }}>
+                  {/* Debits Badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#fef2f2', border: '1px solid #fecaca', padding: '3px 9px', borderRadius: 6 }}>
+                    <span style={{ color: '#991b1b', fontWeight: 600, fontSize: 11.5 }}>Debits:</span>
+                    <span style={{ color: '#dc2626', fontWeight: 800, fontSize: 12.5 }}>+{CURRENCY} {parseFloat(selectedMonthSummaryData?.debit || selectedMonthSummaryData?.total_debit || 0).toFixed(2)}</span>
+                  </div>
+
+                  {/* Credits Badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 9px', borderRadius: 6 }}>
+                    <span style={{ color: '#166534', fontWeight: 600, fontSize: 11.5 }}>Credits:</span>
+                    <span style={{ color: '#16a34a', fontWeight: 800, fontSize: 12.5 }}>-{CURRENCY} {parseFloat(selectedMonthSummaryData?.credit || selectedMonthSummaryData?.total_credit || 0).toFixed(2)}</span>
+                  </div>
+
+                  {/* Net Badge */}
+                  {(() => {
+                    const netVal = parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0);
+                    const isDue = netVal > 0;
+                    const isAdv = netVal < 0;
+                    return (
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 5, 
+                        background: isDue ? '#fff1f2' : (isAdv ? '#ecfdf5' : 'var(--surface-2)'), 
+                        border: `1px solid ${isDue ? '#fecdd3' : (isAdv ? '#a7f3d0' : 'var(--surface-3)')}`, 
+                        padding: '3px 9px', 
+                        borderRadius: 6 
+                      }}>
+                        <span style={{ color: isDue ? '#9f1239' : (isAdv ? '#065f46' : 'var(--text-secondary)'), fontWeight: 600, fontSize: 11.5 }}>Net:</span>
+                        <span style={{ color: isDue ? '#e11d48' : (isAdv ? '#059669' : 'var(--text)'), fontWeight: 900, fontSize: 12.5 }}>
+                          {CURRENCY} {Math.abs(netVal).toFixed(2)} {isDue ? '(DR)' : (isAdv ? '(CR)' : '(0.00)')}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Showing all {processedTransactions.length} transactions across all months</span>
@@ -2014,8 +2053,7 @@ export default function Credit() {
                   <div style={{ display: 'flex', background: 'white', borderRadius: 5, padding: 1, border: '1px solid #bbf7d0' }}>
                     {[
                       { id: 'All', label: 'All' },
-                      { id: 'Extra Pay', label: 'Extra Pay Only' },
-                      { id: 'Regular', label: 'Regular' },
+                      { id: 'Extra Pay', label: 'Extra Pay Only' }
                     ].map(f => (
                       <button
                         key={f.id}
@@ -2038,11 +2076,46 @@ export default function Credit() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5, color: '#166534' }}>
-                  <span>Month Extra: <b>+{CURRENCY} {monthExtraPayDebit.toFixed(0)}</b></span>
-                  <span>Month Regular: <b>+{CURRENCY} {monthRegularDebit.toFixed(0)}</b></span>
-                  <span>{ledgerClassificationFilter === 'All' ? 'Month Dues' : `${ledgerClassificationFilter}`}: <b>{CURRENCY} {Math.abs(visibleSubtotal).toFixed(2)}</b></span>
-                  <span style={{ borderLeft: '1px solid #bbf7d0', paddingLeft: 8 }}>All Extra Pay: <b style={{ color: '#15803d', fontWeight: 800 }}>{CURRENCY} {Math.abs(overallExtraPayTotal).toFixed(2)}</b></span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11.5 }}>
+                  {/* Highlighted Extra Pay Summary Badge with White Text */}
+                  <div style={{ 
+                    background: '#16a34a', 
+                    color: '#ffffff', 
+                    padding: '3px 10px', 
+                    borderRadius: 6, 
+                    fontSize: 12, 
+                    fontWeight: 700, 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 6,
+                    boxShadow: '0 1px 4px rgba(22, 163, 74, 0.3)'
+                  }}>
+                    <span>Extra Pay:</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: '#ffffff' }}>
+                      +{CURRENCY} {monthExtraPayDebit.toFixed(2)}
+                    </span>
+                  </div>
+
+                  {/* All Extra Pay: Visible ONLY when "All" filter is selected */}
+                  {ledgerClassificationFilter === 'All' && (
+                    <div style={{ 
+                      background: 'rgba(22, 163, 74, 0.12)', 
+                      border: '1px solid #86efac', 
+                      color: '#15803d', 
+                      padding: '3px 9px', 
+                      borderRadius: 6, 
+                      fontSize: 12, 
+                      fontWeight: 700, 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 6 
+                    }}>
+                      <span>All Extra Pay:</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: '#166534' }}>
+                        {CURRENCY} {Math.abs(overallExtraPayTotal).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2276,8 +2349,8 @@ export default function Credit() {
                                 Extra Pay
                               </span>
                             ) : (
-                              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-                                Regular
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                -
                               </span>
                             )}
                           </td>
