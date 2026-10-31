@@ -203,7 +203,7 @@ router.post('/', authenticateToken, async (req, res) => {
         finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
       } else {
         const custRes = await client.query(`
-          SELECT cc.*, dp.name as discount_package_name, dp.discount_percentage as pkg_discount, dp.is_active as pkg_active
+          SELECT cc.*, dp.name as discount_package_name, dp.discount_percentage as pkg_discount, dp.discount_rules as pkg_rules, dp.is_active as pkg_active
           FROM credit_customers cc
           LEFT JOIN discount_packages dp ON cc.discount_package_id = dp.id
           WHERE cc.id = $1
@@ -224,20 +224,19 @@ router.post('/', authenticateToken, async (req, res) => {
             });
           }
 
-          // Automatic discount package application
-          if (creditCustInfo.pkg_active && parseFloat(creditCustInfo.pkg_discount) > 0) {
+          let rules = (creditCustInfo.pkg_active && creditCustInfo.pkg_rules && creditCustInfo.pkg_rules.length > 0) ? creditCustInfo.pkg_rules : creditCustInfo.discount_rules;
+          if (typeof rules === 'string') {
+            try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+          }
+          if (creditCustInfo.pkg_active && parseFloat(creditCustInfo.pkg_discount) > 0 && (!rules || rules.length === 0)) {
             const pkgPct = parseFloat(creditCustInfo.pkg_discount);
             finalDiscount = Math.round((parseFloat(subtotal) || 0) * (pkgPct / 100) * 100) / 100;
             finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) - finalDiscount + (parseFloat(tax) || 0));
+          } else if (Array.isArray(rules) && rules.length > 0) {
+            finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) - finalDiscount + (parseFloat(tax) || 0));
           } else {
-            let rules = creditCustInfo.discount_rules;
-            if (typeof rules === 'string') {
-              try { rules = JSON.parse(rules); } catch(e) { rules = []; }
-            }
-            if (!Array.isArray(rules) || rules.length === 0) {
-              finalDiscount = 0;
-              finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
-            }
+            finalDiscount = 0;
+            finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
           }
         }
       }

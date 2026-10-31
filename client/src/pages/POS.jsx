@@ -74,6 +74,18 @@ const getTimeElapsed = (dateString) => {
 };
 const getCustomerDiscountRules = (customer) => {
   if (!customer) return [];
+  // 1. If assigned discount package has rules, use package rules
+  let pkgRules = customer.discount_package_rules;
+  if (pkgRules) {
+    if (typeof pkgRules === 'string') {
+      try { pkgRules = JSON.parse(pkgRules); } catch(e) { pkgRules = []; }
+    }
+    if (Array.isArray(pkgRules) && pkgRules.length > 0) {
+      return pkgRules;
+    }
+  }
+
+  // 2. Otherwise use direct custom discount rules
   let rules = customer.discount_rules;
   if (typeof rules === 'string') {
     try { rules = JSON.parse(rules); } catch(e) { rules = []; }
@@ -86,60 +98,60 @@ const calculateCreditCustomerDiscount = (customer, currentCart) => {
     return 0;
   }
 
-  // 1. Check assigned discount package percentage first
+  // 1. Check rules (either from assigned package OR direct customer rules)
+  const rules = getCustomerDiscountRules(customer);
+  if (rules && rules.length > 0) {
+    let totalDiscount = 0;
+    currentCart.forEach(item => {
+      let applicableRule = null;
+      const itemIdStr = (item.id || '').toString();
+
+      // 1. Check item level first
+      const itemRule = rules.find(r => r.targetType === 'item' && r.targetId && r.targetId.toString() === itemIdStr);
+      if (itemRule) {
+        applicableRule = itemRule;
+      } else {
+        // 2. Check category level
+        const catRule = rules.find(r => r.targetType === 'category' && 
+          ((item.category_names && item.category_names.includes(r.targetName)) || 
+           item.category_name === r.targetName || item.category === r.targetName ||
+           (item.category_id && r.targetId && item.category_id.toString() === r.targetId.toString())
+          )
+        );
+        if (catRule) {
+          applicableRule = catRule;
+        } else {
+          // 3. Check all level
+          const allRule = rules.find(r => r.targetType === 'all');
+          if (allRule) applicableRule = allRule;
+        }
+      }
+
+      if (applicableRule) {
+        const itemPrice = parseFloat(item.price) || 0;
+        const itemQty = parseInt(item.qty) || 1;
+        const itemTotal = itemPrice * itemQty;
+        const discVal = parseFloat(applicableRule.discountValue) || 0;
+
+        if (applicableRule.discountType === 'percentage') {
+          totalDiscount += itemTotal * (discVal / 100);
+        } else if (applicableRule.discountType === 'fixed') {
+          totalDiscount += discVal * itemQty;
+        }
+      }
+    });
+
+    return Math.round(totalDiscount * 100) / 100;
+  }
+
+  // 2. Fall back to flat package percentage if any
   const pkgPercent = parseFloat(customer.discount_percentage || customer.discount_package_percentage || 0);
   if (pkgPercent > 0) {
     const cartSubtotal = currentCart.reduce((sum, item) => sum + ((parseFloat(item.price || item.unit_price || 0)) * (parseInt(item.qty || item.quantity || 1) || 1)), 0);
     return Math.round(cartSubtotal * (pkgPercent / 100) * 100) / 100;
   }
 
-  // 2. Fall back to custom item/category discount rules if any
-  const rules = getCustomerDiscountRules(customer);
-  if (!rules || rules.length === 0) {
-    return 0;
-  }
-
-  let totalDiscount = 0;
-  currentCart.forEach(item => {
-    let applicableRule = null;
-    const itemIdStr = (item.id || '').toString();
-
-    // 1. Check item level first
-    const itemRule = rules.find(r => r.targetType === 'item' && r.targetId && r.targetId.toString() === itemIdStr);
-    if (itemRule) {
-      applicableRule = itemRule;
-    } else {
-      // 2. Check category level
-      const catRule = rules.find(r => r.targetType === 'category' && 
-        ((item.category_names && item.category_names.includes(r.targetName)) || 
-         item.category_name === r.targetName || item.category === r.targetName ||
-         (item.category_id && r.targetId && item.category_id.toString() === r.targetId.toString())
-        )
-      );
-      if (catRule) {
-        applicableRule = catRule;
-      } else {
-        // 3. Check all level
-        const allRule = rules.find(r => r.targetType === 'all');
-        if (allRule) applicableRule = allRule;
-      }
-    }
-
-    if (applicableRule) {
-      const itemPrice = parseFloat(item.price) || 0;
-      const itemQty = parseInt(item.qty) || 1;
-      const itemTotal = itemPrice * itemQty;
-      const discVal = parseFloat(applicableRule.discountValue) || 0;
-
-      if (applicableRule.discountType === 'percentage') {
-        totalDiscount += itemTotal * (discVal / 100);
-      } else if (applicableRule.discountType === 'fixed') {
-        totalDiscount += discVal * itemQty;
-      }
-    }
-  });
-
-  return Math.round(totalDiscount * 100) / 100;
+  return 0;
 };
 
 const CreditCustomerDropdown = ({ 

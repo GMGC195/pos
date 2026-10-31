@@ -43,20 +43,22 @@ router.post('/discount-packages', async (req, res) => {
     return res.status(403).json({ error: 'Only Admins can manage discount packages.' });
   }
 
-  const { name, discount_percentage, is_active } = req.body;
+  const { name, discount_percentage, discount_rules, is_active } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Package name is required.' });
   }
-  const pct = parseFloat(discount_percentage);
-  if (isNaN(pct) || pct < 0 || pct > 100) {
+  const pct = discount_percentage !== undefined ? parseFloat(discount_percentage) || 0 : 0;
+  if (pct < 0 || pct > 100) {
     return res.status(400).json({ error: 'Discount percentage must be between 0 and 100.' });
   }
 
+  const rules = Array.isArray(discount_rules) ? JSON.stringify(discount_rules) : (typeof discount_rules === 'string' ? discount_rules : '[]');
+
   try {
     const result = await pool.query(
-      `INSERT INTO discount_packages (name, discount_percentage, is_active, updated_at)
-       VALUES ($1, $2, $3, NOW()) RETURNING *`,
-      [name.trim(), pct, is_active !== false]
+      `INSERT INTO discount_packages (name, discount_percentage, discount_rules, is_active, updated_at)
+       VALUES ($1, $2, $3::jsonb, $4, NOW()) RETURNING *`,
+      [name.trim(), pct, rules, is_active !== false]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -73,7 +75,7 @@ router.put('/discount-packages/:id', async (req, res) => {
   }
 
   const { id } = req.params;
-  const { name, discount_percentage, is_active } = req.body;
+  const { name, discount_percentage, discount_rules, is_active } = req.body;
 
   try {
     const fields = [];
@@ -84,12 +86,17 @@ router.put('/discount-packages/:id', async (req, res) => {
       fields.push(`name = $${params.length}`);
     }
     if (discount_percentage !== undefined) {
-      const pct = parseFloat(discount_percentage);
-      if (isNaN(pct) || pct < 0 || pct > 100) {
+      const pct = parseFloat(discount_percentage) || 0;
+      if (pct < 0 || pct > 100) {
         return res.status(400).json({ error: 'Discount percentage must be between 0 and 100.' });
       }
       params.push(pct);
       fields.push(`discount_percentage = $${params.length}`);
+    }
+    if (discount_rules !== undefined) {
+      const rules = Array.isArray(discount_rules) ? JSON.stringify(discount_rules) : (typeof discount_rules === 'string' ? discount_rules : '[]');
+      params.push(rules);
+      fields.push(`discount_rules = $${params.length}::jsonb`);
     }
     if (is_active !== undefined) {
       params.push(Boolean(is_active));
@@ -150,6 +157,7 @@ router.get('/', async (req, res) => {
         cc.*,
         dp.name AS discount_package_name,
         dp.discount_percentage AS discount_package_percentage,
+        dp.discount_rules AS discount_package_rules,
         dp.is_active AS discount_package_active
       FROM credit_customers cc
       LEFT JOIN discount_packages dp ON cc.discount_package_id = dp.id
@@ -413,8 +421,11 @@ router.get('/:id/monthly-summary', async (req, res) => {
     const summaryRes = await pool.query(`
       SELECT 
         COALESCE(billing_month, TO_CHAR(created_at, 'YYYY-MM')) AS month,
+        COALESCE(billing_month, TO_CHAR(created_at, 'YYYY-MM')) AS billing_month,
         SUM(CASE WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount ELSE 0 END) AS total_debit,
+        SUM(CASE WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount ELSE 0 END) AS debit,
         SUM(CASE WHEN type = 'PAYMENT' THEN amount ELSE 0 END) AS total_credit,
+        SUM(CASE WHEN type = 'PAYMENT' THEN amount ELSE 0 END) AS credit,
         SUM(CASE 
           WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount 
           WHEN type = 'PAYMENT' THEN -amount 
@@ -422,6 +433,13 @@ router.get('/:id/monthly-summary', async (req, res) => {
           WHEN type = 'PAYMENT_CANCELLED' THEN amount
           ELSE 0 
         END) AS remaining_balance,
+        SUM(CASE 
+          WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount 
+          WHEN type = 'PAYMENT' THEN -amount 
+          WHEN type = 'ORDER_CANCELLED' THEN -amount
+          WHEN type = 'PAYMENT_CANCELLED' THEN amount
+          ELSE 0 
+        END) AS net_balance,
         COUNT(*) AS transaction_count
       FROM credit_transactions
       WHERE credit_customer_id = $1

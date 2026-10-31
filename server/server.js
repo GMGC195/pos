@@ -79,10 +79,12 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         id SERIAL PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         discount_percentage NUMERIC(5,2) NOT NULL DEFAULT 0,
+        discount_rules JSONB DEFAULT '[]'::jsonb,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`,
+      "ALTER TABLE discount_packages ADD COLUMN IF NOT EXISTS discount_rules JSONB DEFAULT '[]'::jsonb",
       "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'Active'",
       "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS category VARCHAR(30) DEFAULT 'Regular Customer'",
       "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS is_extra_pay BOOLEAN DEFAULT FALSE",

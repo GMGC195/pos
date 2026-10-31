@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from '../api';
 import toast from 'react-hot-toast';
 import { 
@@ -19,39 +19,108 @@ const getCurrentMonthStr = () => {
   return `${year}-${month}`;
 };
 
-const MultiSelectDropdown = ({ options, selectedIds, onChange, placeholder, style }) => {
+const formatMonthDisplay = (monthStr) => {
+  if (!monthStr || monthStr === 'All') return 'All Months';
+  const parts = monthStr.split('-');
+  if (parts.length < 2) return monthStr;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = new Date(y, m - 1, 1);
+  return !isNaN(d.getTime()) ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : monthStr;
+};
+
+// ── MultiSelect Dropdown with Search ──────────────────────────────────────────
+const MultiSelectDropdown = ({ options = [], selectedIds = [], onChange, placeholder = 'Select...', style }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [filterText, setFilterText] = useState('');
+
   const toggleId = (id) => {
-    if (selectedIds.includes(id)) {
-      onChange(selectedIds.filter(i => i !== id));
+    const idStr = id.toString();
+    if (selectedIds.includes(idStr)) {
+      onChange(selectedIds.filter(i => i !== idStr));
     } else {
-      onChange([...selectedIds, id]);
+      onChange([...selectedIds, idStr]);
     }
   };
 
+  const filtered = options.filter(opt => 
+    (opt.name || '').toLowerCase().includes(filterText.toLowerCase())
+  );
+
   return (
-    <div style={{ position: 'relative', flex: 1, ...style }}>
+    <div style={{ position: 'relative', flex: 1, minWidth: 180, ...style }}>
       <div 
         onClick={() => setIsOpen(!isOpen)}
-        style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        style={{ 
+          padding: '8px 12px', 
+          borderRadius: 6, 
+          border: '1px solid var(--surface-3)', 
+          background: 'var(--bg)', 
+          color: 'var(--text)', 
+          cursor: 'pointer', 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          fontSize: 13,
+          userSelect: 'none'
+        }}
       >
-        <span>{selectedIds.length > 0 ? `${selectedIds.length} Selected` : placeholder}</span>
-        <span>▼</span>
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '85%' }}>
+          {selectedIds.length > 0 ? `${selectedIds.length} Selected` : placeholder}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>▼</span>
       </div>
+
       {isOpen && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9 }} onClick={() => setIsOpen(false)} />
-          <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--surface-2)', borderRadius: 6, marginBottom: 4, maxHeight: 220, overflowY: 'auto', zIndex: 10, boxShadow: '0 -4px 6px rgba(0,0,0,0.1)' }}>
-            {options.map(opt => (
-              <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', position: 'relative', zIndex: 11 }}>
-                <input 
-                  type="checkbox" 
-                  checked={selectedIds.includes(opt.id.toString())}
-                  onChange={() => toggleId(opt.id.toString())}
-                />
-                <span style={{ fontSize: 13 }}>{opt.name}</span>
-              </label>
-            ))}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1100 }} onClick={() => setIsOpen(false)} />
+          <div style={{ 
+            position: 'absolute', 
+            top: '100%', 
+            left: 0, 
+            right: 0, 
+            background: 'var(--surface)', 
+            border: '1px solid var(--surface-3)', 
+            borderRadius: 8, 
+            marginTop: 4, 
+            maxHeight: 250, 
+            display: 'flex',
+            flexDirection: 'column',
+            zIndex: 1200, 
+            boxShadow: '0 8px 20px rgba(0,0,0,0.15)' 
+          }}>
+            <div style={{ padding: 6, borderBottom: '1px solid var(--surface-2)' }}>
+              <input 
+                autoFocus
+                type="text" 
+                placeholder="Search..." 
+                value={filterText}
+                onChange={e => setFilterText(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--surface-2)', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, maxHeight: 180 }}>
+              {filtered.length === 0 ? (
+                <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No options found</div>
+              ) : (
+                filtered.map(opt => (
+                  <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', fontSize: 12.5 }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedIds.includes(opt.id.toString())}
+                      onChange={() => toggleId(opt.id.toString())}
+                    />
+                    <span>{opt.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+            {selectedIds.length > 0 && (
+              <div style={{ padding: '4px 8px', background: 'var(--surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                <span>{selectedIds.length} selected</span>
+                <button type="button" onClick={() => onChange([])} style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', fontWeight: 600 }}>Clear</button>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -59,8 +128,214 @@ const MultiSelectDropdown = ({ options, selectedIds, onChange, placeholder, styl
   );
 };
 
+// ── Reusable Custom Discount Rule Builder ─────────────────────────────────────
+const DiscountRuleBuilder = ({ rules = [], setRules, categories = [], items = [] }) => {
+  const [ruleTargetType, setRuleTargetType] = useState('all');
+  const [ruleTargetIds, setRuleTargetIds] = useState([]);
+  const [ruleDiscountType, setRuleDiscountType] = useState('percentage');
+  const [ruleDiscountValue, setRuleDiscountValue] = useState('');
+
+  const handleAddRule = () => {
+    if (ruleTargetType !== 'all' && (!ruleTargetIds || ruleTargetIds.length === 0)) {
+      return toast.error('Please select at least one category or item.');
+    }
+    const val = parseFloat(ruleDiscountValue);
+    if (isNaN(val) || val <= 0) {
+      return toast.error('Please enter a valid positive discount value.');
+    }
+    if (ruleDiscountType === 'percentage' && val > 100) {
+      return toast.error('Percentage discount cannot exceed 100%.');
+    }
+
+    let newRules = [];
+    if (ruleTargetType === 'all') {
+      newRules.push({
+        targetType: 'all',
+        targetId: 'all',
+        targetName: 'All Items',
+        discountType: ruleDiscountType,
+        discountValue: val
+      });
+    } else {
+      ruleTargetIds.forEach(id => {
+        let targetName = 'Unknown';
+        if (ruleTargetType === 'category') {
+          const cat = categories.find(c => c.id.toString() === id.toString());
+          if (cat) targetName = cat.name;
+        } else if (ruleTargetType === 'item') {
+          const it = items.find(i => i.id.toString() === id.toString());
+          if (it) targetName = it.name;
+        }
+        newRules.push({
+          targetType: ruleTargetType,
+          targetId: id.toString(),
+          targetName,
+          discountType: ruleDiscountType,
+          discountValue: val
+        });
+      });
+    }
+
+    // Replace any existing rule for the exact same target
+    const filteredOld = rules.filter(oldR => {
+      return !newRules.some(nR => nR.targetType === oldR.targetType && nR.targetId === oldR.targetId);
+    });
+
+    setRules([...filteredOld, ...newRules]);
+    setRuleTargetIds([]);
+    setRuleDiscountValue('');
+    toast.success(`Added ${newRules.length} discount rule(s)`);
+  };
+
+  const handleRemoveRule = (index) => {
+    setRules(rules.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div style={{ background: 'var(--surface-2)', padding: 14, borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Existing Rules List */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+            Configured Discount Rules ({rules.length})
+          </span>
+          {rules.length > 0 && (
+            <button 
+              type="button" 
+              onClick={() => setRules([])}
+              style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Clear All Rules
+            </button>
+          )}
+        </div>
+
+        {rules.length === 0 ? (
+          <div style={{ padding: '12px', background: 'var(--bg)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', border: '1px dashed var(--surface-3)' }}>
+            No rules added yet. Select categories or items below to configure custom discounts.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto', paddingRight: 4 }}>
+            {rules.map((rule, idx) => (
+              <div 
+                key={idx} 
+                style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center', 
+                  fontSize: 13, 
+                  background: 'var(--bg)', 
+                  padding: '7px 12px', 
+                  borderRadius: 6, 
+                  border: '1px solid var(--surface-3)' 
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ 
+                    fontSize: 10, 
+                    fontWeight: 700, 
+                    padding: '2px 6px', 
+                    borderRadius: 4, 
+                    background: rule.targetType === 'category' ? '#eff6ff' : (rule.targetType === 'item' ? '#fef3c7' : '#f3e8ff'),
+                    color: rule.targetType === 'category' ? '#1d4ed8' : (rule.targetType === 'item' ? '#b45309' : '#7e22ce')
+                  }}>
+                    {rule.targetType === 'category' ? 'Category' : (rule.targetType === 'item' ? 'Item' : 'All Items')}
+                  </span>
+                  <span style={{ fontWeight: 600 }}>{rule.targetName}</span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontWeight: 700, color: '#059669', fontSize: 13 }}>
+                    {rule.discountValue}{rule.discountType === 'percentage' ? '%' : ` ${CURRENCY}`} OFF
+                  </span>
+                  <button 
+                    type="button" 
+                    onClick={() => handleRemoveRule(idx)} 
+                    style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: 4 }}
+                    title="Remove Rule"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Rule Creator Controls */}
+      <div style={{ borderTop: '1px solid var(--surface-3)', paddingTop: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 8 }}>
+          Add New Category / Item Rule:
+        </span>
+        
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select 
+            value={ruleTargetType} 
+            onChange={e => { setRuleTargetType(e.target.value); setRuleTargetIds([]); }} 
+            style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
+          >
+            <option value="all">Apply For All Items</option>
+            <option value="category">Specific Category</option>
+            <option value="item">Specific Item</option>
+          </select>
+          
+          {ruleTargetType === 'category' && (
+            <MultiSelectDropdown 
+              options={categories} 
+              selectedIds={ruleTargetIds} 
+              onChange={setRuleTargetIds} 
+              placeholder="Select Categories..." 
+            />
+          )}
+
+          {ruleTargetType === 'item' && (
+            <MultiSelectDropdown 
+              options={items} 
+              selectedIds={ruleTargetIds} 
+              onChange={setRuleTargetIds} 
+              placeholder="Select Items..." 
+            />
+          )}
+
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <select 
+              value={ruleDiscountType} 
+              onChange={e => setRuleDiscountType(e.target.value)} 
+              style={{ padding: '8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
+            >
+              <option value="percentage">%</option>
+              <option value="fixed">{CURRENCY}</option>
+            </select>
+
+            <input 
+              type="number" 
+              step="0.5" 
+              min="0"
+              max={ruleDiscountType === 'percentage' ? 100 : undefined}
+              value={ruleDiscountValue} 
+              onChange={e => setRuleDiscountValue(e.target.value)} 
+              placeholder="Discount" 
+              style={{ width: 85, padding: '8px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} 
+            />
+
+            <button 
+              type="button" 
+              onClick={handleAddRule} 
+              style={{ background: 'var(--primary)', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12.5 }}
+            >
+              Add Rule
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function Credit() {
   const { user } = useAuth();
+  // Ensure Developer role has full permissions identical to Admin
   const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || user?.role?.trim().toLowerCase() === 'developer';
   const isManagement = user?.role?.trim().toLowerCase() === 'management';
   
@@ -73,7 +348,7 @@ export default function Credit() {
   const [activeCustomer, setActiveCustomer] = useState(null);
   const [ledger, setLedger] = useState([]);
   const [monthlySummary, setMonthlySummary] = useState([]);
-  const [selectedLedgerMonth, setSelectedLedgerMonth] = useState('All');
+  const [selectedLedgerMonth, setSelectedLedgerMonth] = useState(getCurrentMonthStr());
   const [ledgerClassificationFilter, setLedgerClassificationFilter] = useState('All');
   const [selectedOrder, setSelectedOrder] = useState(null);
 
@@ -81,7 +356,7 @@ export default function Credit() {
   const [discountPackages, setDiscountPackages] = useState([]);
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [pkgName, setPkgName] = useState('');
-  const [pkgDiscountPercent, setPkgDiscountPercent] = useState('');
+  const [pkgRules, setPkgRules] = useState([]);
   const [pkgIsActive, setPkgIsActive] = useState(true);
   const [editingPackageId, setEditingPackageId] = useState(null);
   const [savingPackage, setSavingPackage] = useState(false);
@@ -110,12 +385,10 @@ export default function Credit() {
   const [paymentComment, setPaymentComment] = useState('');
   const [paymentClassification, setPaymentClassification] = useState('Regular');
 
-  const [discountRules, setDiscountRules] = useState([]);
-  const [ruleTargetType, setRuleTargetType] = useState('all');
-  const [ruleTargetIds, setRuleTargetIds] = useState([]);
-  const [ruleDiscountType, setRuleDiscountType] = useState('percentage');
-  const [ruleDiscountValue, setRuleDiscountValue] = useState('');
+  // Custom Discounts State inside Ledger (Priority 1)
+  const [customerCustomRules, setCustomerCustomRules] = useState([]);
   const [showLedgerDiscounts, setShowLedgerDiscounts] = useState(false);
+  const [savingDiscounts, setSavingDiscounts] = useState(false);
 
   // Items/Cats for dropdowns
   const [categories, setCategories] = useState([]);
@@ -123,8 +396,8 @@ export default function Credit() {
 
   useEffect(() => {
     if (isAdmin) {
-      axios.get('/api/categories').then(r => setCategories(r.data)).catch(console.error);
-      axios.get('/api/items').then(r => setItems(r.data)).catch(console.error);
+      axios.get('/api/categories').then(r => setCategories(r.data || [])).catch(console.error);
+      axios.get('/api/items').then(r => setItems(r.data || [])).catch(console.error);
       fetchDiscountPackages();
     }
   }, [isAdmin]);
@@ -161,7 +434,7 @@ export default function Credit() {
   const handleOpenPackageModal = () => {
     setEditingPackageId(null);
     setPkgName('');
-    setPkgDiscountPercent('');
+    setPkgRules([]);
     setPkgIsActive(true);
     setShowPackageModal(true);
     fetchDiscountPackages();
@@ -170,36 +443,41 @@ export default function Credit() {
   const handleEditPackage = (pkg) => {
     setEditingPackageId(pkg.id);
     setPkgName(pkg.name);
-    setPkgDiscountPercent(pkg.discount_percentage);
+    let rules = pkg.discount_rules;
+    if (typeof rules === 'string') {
+      try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+    }
+    setPkgRules(Array.isArray(rules) ? rules : []);
     setPkgIsActive(pkg.is_active);
   };
 
   const handleSavePackage = async (e) => {
     e.preventDefault();
     if (!pkgName.trim()) return toast.error('Package name is required');
-    const pct = parseFloat(pkgDiscountPercent);
-    if (isNaN(pct) || pct < 0 || pct > 100) return toast.error('Enter valid percentage between 0 and 100');
+    if (!pkgRules || pkgRules.length === 0) {
+      return toast.error('Please configure at least one category or item discount rule for this package.');
+    }
 
     setSavingPackage(true);
     try {
+      const payload = {
+        name: pkgName.trim(),
+        discount_rules: pkgRules,
+        discount_percentage: 0,
+        is_active: pkgIsActive
+      };
+
       if (editingPackageId) {
-        await axios.put(`/api/credit/discount-packages/${editingPackageId}`, {
-          name: pkgName.trim(),
-          discount_percentage: pct,
-          is_active: pkgIsActive
-        });
-        toast.success('Discount package updated');
+        await axios.put(`/api/credit/discount-packages/${editingPackageId}`, payload);
+        toast.success('Discount package updated successfully');
       } else {
-        await axios.post('/api/credit/discount-packages', {
-          name: pkgName.trim(),
-          discount_percentage: pct,
-          is_active: pkgIsActive
-        });
-        toast.success('Discount package created');
+        await axios.post('/api/credit/discount-packages', payload);
+        toast.success('Discount package created successfully');
       }
+
       setEditingPackageId(null);
       setPkgName('');
-      setPkgDiscountPercent('');
+      setPkgRules([]);
       setPkgIsActive(true);
       fetchDiscountPackages();
       fetchCustomers();
@@ -235,7 +513,6 @@ export default function Credit() {
       reference,
       notes,
       available_branches: isAdmin ? selectedBranches : [user?.branch?.split(',')[0]?.trim() || ''],
-      discount_rules: discountRules,
       category,
       is_extra_pay: category === 'Employee' ? isExtraPay : false,
       status,
@@ -307,7 +584,6 @@ export default function Credit() {
     setNotes('');
     setCreditLimit(0);
     setSelectedBranches(AVAILABLE_BRANCHES);
-    setDiscountRules([]);
     setCategory('Regular Customer');
     setIsExtraPay(false);
     setStatus('Active');
@@ -323,7 +599,6 @@ export default function Credit() {
     setNotes(customer.notes || '');
     setCreditLimit(customer.credit_limit || 0);
     setSelectedBranches(customer.available_branches || []);
-    setDiscountRules(customer.discount_rules || []);
     setCategory(customer.category || 'Regular Customer');
     setIsExtraPay(Boolean(customer.is_extra_pay));
     setStatus(customer.status || 'Active');
@@ -337,17 +612,25 @@ export default function Credit() {
     setPaymentAmount('');
     setPaymentAction('PAYMENT');
     setPaymentMethod('Cash');
-    setBillingMonth(getCurrentMonthStr());
     setPaymentComment('');
     setPaymentClassification(customer.is_extra_pay ? 'Extra Pay' : 'Regular');
-    setDiscountRules(customer.discount_rules || []);
-    setShowLedgerDiscounts(false);
-    setSelectedLedgerMonth('All');
+    
+    // Default to current month automatically (Requirement 2)
+    const currentMonth = getCurrentMonthStr();
+    setSelectedLedgerMonth(currentMonth);
+    setBillingMonth(currentMonth);
     setLedgerClassificationFilter('All');
+    setShowLedgerDiscounts(false);
+
+    let custRules = customer.discount_rules;
+    if (typeof custRules === 'string') {
+      try { custRules = JSON.parse(custRules); } catch(e) { custRules = []; }
+    }
+    setCustomerCustomRules(Array.isArray(custRules) ? custRules : []);
 
     try {
       const [ledgerRes, summaryRes] = await Promise.all([
-        axios.get(`/api/credit/${customer.id}/ledger`),
+        axios.get(`/api/credit/${customer.id}/ledger`, { params: { month: currentMonth } }),
         axios.get(`/api/credit/${customer.id}/monthly-summary`)
       ]);
       setLedger(ledgerRes.data || []);
@@ -392,6 +675,26 @@ export default function Credit() {
       setSelectedOrder(res.data);
     } catch (err) {
       toast.error('Failed to load order details');
+    }
+  };
+
+  // Save Custom Discount Rules for the Active Customer (Priority 1)
+  const handleSaveLedgerDiscounts = async () => {
+    if (!activeCustomer) return;
+    setSavingDiscounts(true);
+    try {
+      await axios.put(`/api/credit/${activeCustomer.id}`, {
+        ...activeCustomer,
+        discount_rules: customerCustomRules
+      });
+      toast.success('Custom discount rules saved successfully!');
+      setActiveCustomer({ ...activeCustomer, discount_rules: customerCustomRules });
+      fetchCustomers();
+      setShowLedgerDiscounts(false);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save discount rules');
+    } finally {
+      setSavingDiscounts(false);
     }
   };
 
@@ -442,60 +745,49 @@ export default function Credit() {
     }
   };
 
-  const handleAddDiscountRule = () => {
-    if (ruleTargetType !== 'all' && (!ruleTargetIds || ruleTargetIds.length === 0)) return toast.error('Please specify target');
-    if (!ruleDiscountValue || Number(ruleDiscountValue) <= 0) return toast.error('Enter valid discount value');
-
-    let newRules = [];
-    if (ruleTargetType === 'all') {
-      newRules.push({
-        targetType: 'all',
-        targetId: 'all',
-        targetName: 'All',
-        discountType: ruleDiscountType,
-        discountValue: Number(ruleDiscountValue)
-      });
-    } else {
-      ruleTargetIds.forEach(id => {
-        let targetName = 'Unknown';
-        if (ruleTargetType === 'category') {
-          const cat = categories.find(c => c.id.toString() === id);
-          if (cat) targetName = cat.name;
-        } else if (ruleTargetType === 'item') {
-          const it = items.find(i => i.id.toString() === id);
-          if (it) targetName = it.name;
-        }
-        newRules.push({
-          targetType: ruleTargetType,
-          targetId: id,
-          targetName,
-          discountType: ruleDiscountType,
-          discountValue: Number(ruleDiscountValue)
-        });
-      });
-    }
+  // Generate Available Months List (Sorted chronologically descending)
+  const availableMonths = useMemo(() => {
+    const monthMap = new Map();
+    const now = new Date();
     
-    setDiscountRules([...discountRules, ...newRules]);
-    setRuleTargetIds([]);
-    setRuleDiscountValue('');
-  };
-
-  const handleSaveLedgerDiscounts = async () => {
-    setSaving(true);
-    try {
-      await axios.put(`/api/credit/${activeCustomer.id}`, {
-        ...activeCustomer,
-        discount_rules: discountRules
-      });
-      toast.success('Discount Rules updated');
-      setActiveCustomer({ ...activeCustomer, discount_rules: discountRules });
-      fetchCustomers();
-    } catch (err) {
-      toast.error('Failed to save discount rules');
-    } finally {
-      setSaving(false);
+    // Always include current month and past 12 months
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      monthMap.set(key, label);
     }
-  };
+
+    // Include any additional months from transactions
+    if (Array.isArray(monthlySummary)) {
+      monthlySummary.forEach(s => {
+        const mKey = s.billing_month || s.month;
+        if (mKey && typeof mKey === 'string' && mKey.includes('-') && !monthMap.has(mKey)) {
+          const parts = mKey.split('-');
+          const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+          const label = !isNaN(d.getTime()) ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : mKey;
+          monthMap.set(mKey, label);
+        }
+      });
+    }
+
+    return Array.from(monthMap.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, label]) => ({ key, label }));
+  }, [monthlySummary]);
+
+  // Selected Month Summary Calculation
+  const selectedMonthSummaryData = useMemo(() => {
+    if (selectedLedgerMonth === 'All') return null;
+    return monthlySummary.find(s => (s.billing_month || s.month) === selectedLedgerMonth) || {
+      debit: 0,
+      total_debit: 0,
+      credit: 0,
+      total_credit: 0,
+      net_balance: 0,
+      remaining_balance: 0
+    };
+  }, [selectedLedgerMonth, monthlySummary]);
 
   // Filtered customer listing based on category tab
   const filteredCustomers = customers.filter(c => {
@@ -516,7 +808,7 @@ export default function Credit() {
         <div>
           <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: 'var(--text)' }}>Credit Customers (Khata)</h2>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-            Manage customer credit accounts, monthly ledgers, and discount packages
+            Manage customer credit accounts, monthly ledgers, and category-wise discount packages
           </p>
         </div>
         
@@ -623,7 +915,8 @@ export default function Credit() {
                 const effLim = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 100;
                 const limitExceeded = Number(c.balance) > effLim;
                 const isDeactivated = c.status === 'Deactivated' || c.is_active === false;
-                const pkgPercent = parseFloat(c.discount_package_percentage || c.discount_percentage || 0);
+                const pkgRules = c.discount_package_rules || [];
+                const ruleCount = Array.isArray(pkgRules) ? pkgRules.length : (typeof pkgRules === 'string' ? JSON.parse(pkgRules || '[]').length : 0);
 
                 return (
                   <tr 
@@ -669,9 +962,9 @@ export default function Credit() {
                     </td>
 
                     <td style={{ padding: '14px 16px' }}>
-                      {pkgPercent > 0 ? (
+                      {c.discount_package_name ? (
                         <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
-                          {pkgPercent}% ({c.discount_package_name || 'Assigned'})
+                          {c.discount_package_name} {ruleCount > 0 ? `(${ruleCount} rules)` : ''}
                         </span>
                       ) : (
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>None</span>
@@ -817,11 +1110,18 @@ export default function Credit() {
                     style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid var(--surface-2)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
                   >
                     <option value="">-- No Discount Package --</option>
-                    {discountPackages.map(pkg => (
-                      <option key={pkg.id} value={pkg.id} disabled={!pkg.is_active}>
-                        {pkg.name} ({pkg.discount_percentage}%) {!pkg.is_active ? '[Deactivated]' : ''}
-                      </option>
-                    ))}
+                    {discountPackages.map(pkg => {
+                      let rules = pkg.discount_rules;
+                      if (typeof rules === 'string') {
+                        try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+                      }
+                      const rCount = Array.isArray(rules) ? rules.length : 0;
+                      return (
+                        <option key={pkg.id} value={pkg.id} disabled={!pkg.is_active}>
+                          {pkg.name} {rCount > 0 ? `(${rCount} rules)` : ''} {!pkg.is_active ? '[Deactivated]' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
@@ -877,141 +1177,182 @@ export default function Credit() {
         </div>
       )}
 
-      {/* Admin Discount Package Management Modal */}
+      {/* Priority 2: Admin Discount Package Management Modal with Complete Custom Discount Functionality */}
       {showPackageModal && isAdmin && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 650, maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, position: 'relative', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 750, maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+            
             <div style={{ padding: '20px 24px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-2)', flexShrink: 0 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Tag size={20} /> Manage Reusable Discount Packages
-              </h3>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Tag size={20} /> Reusable Discount Packages
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Configure category-wise and item-wise custom discounts reusable across multiple Khata customers
+                </p>
+              </div>
               <button type="button" onClick={() => setShowPackageModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}><X size={20}/></button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {/* Form to create/edit package */}
-              <form onSubmit={handleSavePackage} style={{ background: 'var(--surface-2)', padding: 16, borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
-                  {editingPackageId ? 'Edit Discount Package' : 'Create New Discount Package'}
+              
+              {/* Existing Packages List */}
+              <div>
+                <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Layers size={16} /> Saved Packages ({discountPackages.length})
                 </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Package Name *</label>
-                    <input 
-                      required 
-                      value={pkgName} 
-                      onChange={e => setPkgName(e.target.value)} 
-                      placeholder="e.g. Employee Discount, VIP" 
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', fontSize: 13, boxSizing: 'border-box' }} 
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Discount % *</label>
-                    <input 
-                      required 
-                      type="number" 
-                      step="0.5" 
-                      min="0" 
-                      max="100" 
-                      value={pkgDiscountPercent} 
-                      onChange={e => setPkgDiscountPercent(e.target.value)} 
-                      placeholder="e.g. 20" 
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', fontSize: 13, boxSizing: 'border-box' }} 
-                    />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', paddingTop: 18 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={pkgIsActive} 
-                        onChange={e => setPkgIsActive(e.target.checked)} 
-                      />
-                      Active
-                    </label>
-                  </div>
-                </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <div style={{ border: '1px solid var(--surface-2)', borderRadius: 8, overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--surface-3)' }}>
+                        <th style={{ padding: '10px 14px' }}>Package Name</th>
+                        <th style={{ padding: '10px 14px' }}>Configured Rules</th>
+                        <th style={{ padding: '10px 14px' }}>Status</th>
+                        <th style={{ padding: '10px 14px', textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {discountPackages.length === 0 ? (
+                        <tr><td colSpan={4} style={{ padding: 18, textAlign: 'center', color: 'var(--text-muted)' }}>No discount packages created yet. Use the builder below to create one.</td></tr>
+                      ) : (
+                        discountPackages.map(pkg => {
+                          let rules = pkg.discount_rules;
+                          if (typeof rules === 'string') {
+                            try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+                          }
+                          const ruleList = Array.isArray(rules) ? rules : [];
+                          const isCurrentlyEditing = editingPackageId === pkg.id;
+
+                          return (
+                            <tr key={pkg.id} style={{ borderBottom: '1px solid var(--surface-2)', background: isCurrentlyEditing ? 'rgba(255,184,0,0.1)' : 'transparent' }}>
+                              <td style={{ padding: '10px 14px', fontWeight: 700 }}>
+                                {pkg.name} {isCurrentlyEditing && <span style={{ fontSize: 11, color: 'var(--primary)' }}>(Editing)</span>}
+                              </td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                  {ruleList.length === 0 ? (
+                                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No rules</span>
+                                  ) : (
+                                    ruleList.map((r, i) => (
+                                      <span key={i} style={{ fontSize: 11, background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 4 }}>
+                                        {r.targetName}: <b>{r.discountValue}{r.discountType === 'percentage' ? '%' : ` ${CURRENCY}`}</b>
+                                      </span>
+                                    ))
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ padding: '10px 14px' }}>
+                                {pkg.is_active ? (
+                                  <span style={{ fontSize: 11, background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>Active</span>
+                                ) : (
+                                  <span style={{ fontSize: 11, background: '#fee2e2', color: '#b91c1c', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>Deactivated</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                  <button onClick={() => handleEditPackage(pkg)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }} title="Edit Package">
+                                    <Edit size={16} />
+                                  </button>
+                                  <button onClick={() => handleDeletePackage(pkg.id)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: 4 }} title="Delete Package">
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Package Builder Form (Exact Same Selection Interface as Manage Custom Discounts) */}
+              <form onSubmit={handleSavePackage} style={{ border: '1.5px solid var(--surface-3)', padding: 18, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--primary)' }}>
+                    {editingPackageId ? 'Edit Discount Package Configuration' : 'Create New Discount Package'}
+                  </h4>
                   {editingPackageId && (
                     <button 
                       type="button" 
                       onClick={() => {
                         setEditingPackageId(null);
                         setPkgName('');
-                        setPkgDiscountPercent('');
+                        setPkgRules([]);
                         setPkgIsActive(true);
                       }}
-                      style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', fontSize: 12, cursor: 'pointer' }}
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', fontSize: 12, cursor: 'pointer' }}
                     >
                       Cancel Edit
                     </button>
                   )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                      Discount Package Name *
+                    </label>
+                    <input 
+                      required 
+                      value={pkgName} 
+                      onChange={e => setPkgName(e.target.value)} 
+                      placeholder="e.g. Employee Discount, VIP Customer Discount" 
+                      style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--surface-3)', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} 
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', paddingTop: 20 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={pkgIsActive} 
+                        onChange={e => setPkgIsActive(e.target.checked)} 
+                      />
+                      Active Package
+                    </label>
+                  </div>
+                </div>
+
+                {/* Reuse the custom discount rule builder */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                    Category & Item Discount Rules:
+                  </label>
+                  <DiscountRuleBuilder 
+                    rules={pkgRules} 
+                    setRules={setPkgRules} 
+                    categories={categories} 
+                    items={items} 
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
                   <button 
                     type="submit" 
                     disabled={savingPackage}
-                    style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}
+                    style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: savingPackage ? 'not-allowed' : 'pointer' }}
                   >
-                    {savingPackage ? 'Saving...' : (editingPackageId ? 'Update Package' : 'Add Package')}
+                    {savingPackage ? 'Saving Package...' : (editingPackageId ? 'Update Discount Package' : 'Save Discount Package')}
                   </button>
                 </div>
               </form>
 
-              {/* Existing packages table */}
-              <div>
-                <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700 }}>Existing Packages</h4>
-                <div style={{ border: '1px solid var(--surface-2)', borderRadius: 8, overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--surface-3)' }}>
-                        <th style={{ padding: '8px 12px' }}>Name</th>
-                        <th style={{ padding: '8px 12px' }}>Discount</th>
-                        <th style={{ padding: '8px 12px' }}>Status</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {discountPackages.length === 0 ? (
-                        <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)' }}>No packages defined.</td></tr>
-                      ) : (
-                        discountPackages.map(pkg => (
-                          <tr key={pkg.id} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                            <td style={{ padding: '8px 12px', fontWeight: 600 }}>{pkg.name}</td>
-                            <td style={{ padding: '8px 12px', color: '#059669', fontWeight: 700 }}>{pkg.discount_percentage}%</td>
-                            <td style={{ padding: '8px 12px' }}>
-                              {pkg.is_active ? (
-                                <span style={{ fontSize: 11, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>Active</span>
-                              ) : (
-                                <span style={{ fontSize: 11, background: '#fee2e2', color: '#b91c1c', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>Deactivated</span>
-                              )}
-                            </td>
-                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                              <button onClick={() => handleEditPackage(pkg)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }} title="Edit">
-                                <Edit size={15} />
-                              </button>
-                              <button onClick={() => handleDeletePackage(pkg.id)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: 4, marginLeft: 4 }} title="Delete">
-                                <Trash2 size={15} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Monthly Breakdown & Detailed Ledger Modal */}
+      {/* Customer Detail & Monthly Ledger Modal */}
       {showLedger && activeCustomer && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 880, height: '90vh', borderRadius: 16, padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 920, height: '90vh', borderRadius: 16, padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
             
             {/* Modal Header */}
             <button onClick={() => setShowLedger(false)} style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20}/></button>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingRight: 32 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingRight: 32, flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span>{activeCustomer.name}'s Khata Ledger</span>
@@ -1028,96 +1369,190 @@ export default function Credit() {
                 </h3>
               </div>
 
+              {/* Priority 1: Manage Custom Discount Button (Clickable and Restored!) */}
               {isAdmin && (
                 <button 
+                  type="button"
                   onClick={() => setShowLedgerDiscounts(!showLedgerDiscounts)} 
-                  style={{ background: showLedgerDiscounts ? 'var(--primary)' : 'var(--surface-2)', color: showLedgerDiscounts ? '#fff' : 'var(--text)', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                  style={{ 
+                    background: showLedgerDiscounts ? 'var(--primary)' : 'var(--surface-2)', 
+                    color: showLedgerDiscounts ? '#fff' : 'var(--text)', 
+                    border: '1px solid var(--surface-3)', 
+                    padding: '8px 14px', 
+                    borderRadius: 8, 
+                    cursor: 'pointer', 
+                    fontSize: 13, 
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    boxShadow: showLedgerDiscounts ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
+                    transition: 'all 0.2s'
+                  }}
                 >
-                  Manage Custom Discounts
+                  <Percent size={15} />
+                  {showLedgerDiscounts ? 'Close Custom Discounts' : 'Manage Custom Discounts'}
                 </button>
               )}
             </div>
 
-            {/* Total Outstanding Balance Highlight */}
-            <div style={{ background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 8, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            {/* Priority 1 Panel: Manage Custom Discount Configuration Interface */}
+            {showLedgerDiscounts && isAdmin && (
+              <div style={{ marginBottom: 16, border: '2px solid var(--primary)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface)', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' }}>
+                <div style={{ background: 'rgba(255,184,0,0.15)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-3)' }}>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                      Manage Special Discounts for {activeCustomer.name}
+                    </h4>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                      Configure category-wise and item-wise discounts applied automatically during POS order taking
+                    </span>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowLedgerDiscounts(false)} 
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div style={{ padding: 16 }}>
+                  <DiscountRuleBuilder 
+                    rules={customerCustomRules} 
+                    setRules={setCustomerCustomRules} 
+                    categories={categories} 
+                    items={items} 
+                  />
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+                    <button 
+                      type="button" 
+                      onClick={() => setShowLedgerDiscounts(false)}
+                      style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', cursor: 'pointer', fontSize: 13 }}
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={handleSaveLedgerDiscounts} 
+                      disabled={savingDiscounts}
+                      style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, cursor: savingDiscounts ? 'not-allowed' : 'pointer', fontSize: 13 }}
+                    >
+                      {savingDiscounts ? 'Saving...' : 'Save Discount Rules'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Total Balance & Assigned Package Highlight Banner */}
+            <div style={{ background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 8, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <div>
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Overall Current Balance: </span>
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Overall Account Balance: </span>
                 <span style={{ fontSize: 17, fontWeight: 800, color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
                   {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(Due / Debit)' : (activeCustomer.balance < 0 ? '(Advance / Credit)' : '(Settled)')}
                 </span>
               </div>
-              {activeCustomer.discount_package_percentage > 0 && (
-                <div style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.15)', color: '#059669', padding: '4px 8px', borderRadius: 6, fontWeight: 700 }}>
-                  Assigned Package: {activeCustomer.discount_package_name} ({activeCustomer.discount_package_percentage}%)
+              {activeCustomer.discount_package_name && (
+                <div style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.15)', color: '#059669', padding: '4px 10px', borderRadius: 6, fontWeight: 700 }}>
+                  Assigned Package: {activeCustomer.discount_package_name}
                 </div>
               )}
             </div>
 
-            {/* REQUIREMENT 1: Month-Wise Balance Breakdown Card */}
-            <div style={{ marginBottom: 16, background: 'var(--surface-50)', border: '1px solid var(--surface-2)', borderRadius: 10, padding: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
-                  <Calendar size={15} /> Month-Wise Balance Breakdown
-                </span>
-                <button 
-                  onClick={() => handleSelectLedgerMonth('All')}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    border: 'none',
-                    background: selectedLedgerMonth === 'All' ? 'var(--primary)' : 'transparent',
-                    color: selectedLedgerMonth === 'All' ? '#fff' : 'var(--primary)',
-                    padding: '2px 8px',
-                    borderRadius: 4,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Show All Months
-                </button>
+            {/* Priority 3: Month-Wise Selection Dropdown & Monthly Balance Breakdown */}
+            <div style={{ marginBottom: 14, background: 'var(--surface-50)', border: '1px solid var(--surface-2)', borderRadius: 10, padding: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Calendar size={18} style={{ color: 'var(--primary)' }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                    Filter Ledger By Month:
+                  </span>
+                </div>
+
+                {/* Dropdown with all formatted months and "All Months" option (Requirement 2) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <select 
+                    value={selectedLedgerMonth} 
+                    onChange={e => handleSelectLedgerMonth(e.target.value)}
+                    style={{ 
+                      padding: '8px 14px', 
+                      borderRadius: 8, 
+                      border: '1.5px solid var(--primary)', 
+                      background: 'var(--surface)', 
+                      color: 'var(--text)', 
+                      fontSize: 13, 
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      outline: 'none',
+                      minWidth: 200
+                    }}
+                  >
+                    <option value="All">All Months (Complete History)</option>
+                    {availableMonths.map(m => (
+                      <option key={m.key} value={m.key}>
+                        {m.label} {m.key === getCurrentMonthStr() ? '• Current Month' : ''}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button 
+                    type="button"
+                    onClick={() => handleSelectLedgerMonth('All')}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--surface-3)',
+                      background: selectedLedgerMonth === 'All' ? 'var(--primary)' : 'var(--surface-2)',
+                      color: selectedLedgerMonth === 'All' ? '#fff' : 'var(--text)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    All Months
+                  </button>
+                </div>
               </div>
 
-              {monthlySummary.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>No monthly transactions recorded yet.</div>
+              {/* Selected Month Balance Summary Card */}
+              {selectedLedgerMonth !== 'All' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, background: 'var(--surface)', padding: 12, borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+                  <div>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Selected Period</span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--primary)' }}>
+                      {formatMonthDisplay(selectedLedgerMonth)}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Monthly Debits / Charges</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--red)' }}>
+                      +{CURRENCY} {parseFloat(selectedMonthSummaryData?.debit || selectedMonthSummaryData?.total_debit || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Monthly Credits / Payments</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>
+                      -{CURRENCY} {parseFloat(selectedMonthSummaryData?.credit || selectedMonthSummaryData?.total_credit || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Month Net Balance</span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? 'var(--red)' : '#059669' }}>
+                      {CURRENCY} {Math.abs(parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0)).toFixed(2)} {parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? '(DR)' : (parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) < 0 ? '(CR)' : '(Settled)')}
+                    </span>
+                  </div>
+                </div>
               ) : (
-                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-                  {monthlySummary.map((ms) => {
-                    const isSelected = selectedLedgerMonth === ms.billing_month;
-                    const net = parseFloat(ms.net_balance || 0);
-                    return (
-                      <div 
-                        key={ms.billing_month}
-                        onClick={() => handleSelectLedgerMonth(ms.billing_month)}
-                        style={{
-                          flex: '0 0 auto',
-                          padding: '8px 12px',
-                          borderRadius: 8,
-                          border: isSelected ? '2px solid var(--primary)' : '1px solid var(--surface-3)',
-                          background: isSelected ? 'rgba(255,184,0,0.1)' : 'var(--surface)',
-                          cursor: 'pointer',
-                          minWidth: 125,
-                          transition: 'all 0.15s'
-                        }}
-                      >
-                        <div style={{ fontSize: 12, fontWeight: 800, color: isSelected ? 'var(--primary)' : 'var(--text)' }}>
-                          {ms.billing_month}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', marginTop: 2 }}>
-                          Debits: <span style={{ color: 'var(--red)' }}>+{CURRENCY}{parseFloat(ms.debit).toFixed(0)}</span>
-                        </div>
-                        <div style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>
-                          Credits: <span style={{ color: 'var(--green)' }}>-{CURRENCY}{parseFloat(ms.credit).toFixed(0)}</span>
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 700, marginTop: 4, color: net > 0 ? 'var(--red)' : (net < 0 ? 'var(--green)' : 'var(--text-muted)') }}>
-                          Net: {CURRENCY} {Math.abs(net).toFixed(2)} {net > 0 ? 'DR' : (net < 0 ? 'CR' : '0')}
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: 8, fontSize: 12.5, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Showing complete historical transaction ledger across all billing months.</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>Total Transactions: {ledger.length}</span>
                 </div>
               )}
             </div>
 
-            {/* REQUIREMENT 8: Employee Extra Pay Filter */}
+            {/* Employee Extra Pay Filter */}
             {activeCustomer.category === 'Employee' && (
               <div style={{ display: 'flex', gap: 6, marginBottom: 12, alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Employee Filter:</span>
@@ -1142,9 +1577,9 @@ export default function Credit() {
               </div>
             )}
 
-            {/* Add Payment / Charge Form (REQUIREMENTS 2 & 6: Billing Month + Comments) */}
+            {/* Add Payment / Charge Form (Billing Month Required + Remarks) */}
             {!isManagement && (
-              <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16, padding: 14, background: 'var(--surface-2)', borderRadius: 8 }}>
+              <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14, padding: 14, background: 'var(--surface-2)', borderRadius: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                   <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
@@ -1252,7 +1687,7 @@ export default function Credit() {
                       return (
                         <tr>
                           <td colSpan={4} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
-                            No transactions found for this period.
+                            No transactions found for {selectedLedgerMonth !== 'All' ? formatMonthDisplay(selectedLedgerMonth) : 'this account'}.
                           </td>
                         </tr>
                       );
@@ -1265,7 +1700,7 @@ export default function Credit() {
                           <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                           {t.billing_month && (
                             <span style={{ fontSize: 10, background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 4, fontWeight: 700, color: 'var(--primary)' }}>
-                              {t.billing_month}
+                              {formatMonthDisplay(t.billing_month)}
                             </span>
                           )}
                         </td>
