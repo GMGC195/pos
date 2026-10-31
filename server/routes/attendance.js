@@ -1034,10 +1034,6 @@ router.post('/check-out', authenticateToken, async (req, res) => {
     if (overtimeMins > 0) {
       // Override final checkout time so attendance sheet initially doesn't show unapproved overtime
       finalCheckoutTime = new Date(expectedCheckoutTime);
-    }
-    if (finalCheckoutTime.getTime() < checkInTime) {
-      finalCheckoutTime = new Date(checkInTime);
-    }
       
       if (!ignore_overtime) {
         // Overtime > 0 mins, require reason to generate a pending request
@@ -1048,6 +1044,10 @@ router.post('/check-out', authenticateToken, async (req, res) => {
           });
         }
       }
+    }
+
+    if (finalCheckoutTime.getTime() < checkInTime) {
+      finalCheckoutTime = new Date(checkInTime);
     }
 
     // Auto-clamp break logs to finalCheckoutTime:
