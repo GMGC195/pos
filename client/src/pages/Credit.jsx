@@ -380,13 +380,12 @@ export default function Credit() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [branchFilter, setBranchFilter] = useState('All');
 
-  // Ledger Payment & Charge states
+  // Ledger Transaction Entry states: Exactly 3 options (Receive Major Payment, Add Debit, Extra Pay)
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentAction, setPaymentAction] = useState('PAYMENT'); // 'PAYMENT' or 'CHARGE'
+  const [entryType, setEntryType] = useState('PAYMENT'); // 'PAYMENT' | 'CHARGE' | 'EXTRA_PAY'
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [billingMonth, setBillingMonth] = useState(getCurrentMonthStr());
   const [paymentComment, setPaymentComment] = useState('');
-  const [paymentClassification, setPaymentClassification] = useState('Regular');
 
   // Custom Discounts State inside Ledger (Priority 1)
   const [customerCustomRules, setCustomerCustomRules] = useState([]);
@@ -663,10 +662,9 @@ export default function Credit() {
   const openLedger = async (customer) => {
     setActiveCustomer(customer);
     setPaymentAmount('');
-    setPaymentAction('PAYMENT');
+    setEntryType('PAYMENT');
     setPaymentMethod('Cash');
     setPaymentComment('');
-    setPaymentClassification(customer.is_extra_pay ? 'Extra Pay' : 'Regular');
     
     // Default to current month automatically
     const currentMonth = getCurrentMonthStr();
@@ -752,7 +750,7 @@ export default function Credit() {
     }
   };
 
-  // Receive Major Payment or Add Debit / Manual Charge
+  // Process Transaction: Exactly 3 options (Receive Major Payment, Add Debit, Extra Pay)
   const handleAddPayment = async (e) => {
     e.preventDefault();
     let amountStr = paymentAmount;
@@ -765,25 +763,42 @@ export default function Credit() {
     if (!billingMonth) {
       return toast.error('Please select the Billing Month');
     }
+
+    let action = 'PAYMENT';
+    let classification = 'Regular';
+
+    if (entryType === 'PAYMENT') {
+      action = 'PAYMENT';
+      classification = 'Regular';
+    } else if (entryType === 'CHARGE') {
+      action = 'CHARGE';
+      classification = 'Regular';
+    } else if (entryType === 'EXTRA_PAY') {
+      action = 'CHARGE';
+      classification = 'Extra Pay';
+    }
     
     try {
       await axios.post(`/api/credit/${activeCustomer.id}/payment`, { 
         amount: finalAmount,
-        action: paymentAction,
+        action,
         cashier_name: user?.username || 'Unknown',
-        payment_method: paymentAction === 'PAYMENT' ? (paymentMethod || 'Cash') : null,
+        payment_method: action === 'PAYMENT' ? (paymentMethod || 'Cash') : null,
         branch: user?.branch || (branchFilter !== 'All' ? branchFilter : 'Branch 1'),
         billing_month: billingMonth,
         comments: paymentComment.trim() || null,
-        classification: activeCustomer.category === 'Employee' ? paymentClassification : 'Regular'
+        classification
       });
 
-      const actionText = paymentAction === 'PAYMENT' ? 'Payment received' : 'Debit / Charge added';
+      const actionText = entryType === 'PAYMENT' 
+        ? 'Payment received' 
+        : (entryType === 'EXTRA_PAY' ? 'Extra Pay added' : 'Debit / Charge added');
+
       toast.success(`${actionText} of ${CURRENCY} ${finalAmount.toFixed(2)} allocated to ${billingMonth}`);
       setPaymentAmount('');
       setPaymentComment('');
 
-      const balanceChange = paymentAction === 'CHARGE' ? finalAmount : -finalAmount;
+      const balanceChange = action === 'CHARGE' ? finalAmount : -finalAmount;
       setActiveCustomer(prev => ({ ...prev, balance: Number(prev.balance) + balanceChange }));
       
       reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
@@ -1747,85 +1762,72 @@ export default function Credit() {
               </div>
             )}
 
-            {/* Transaction Entry Form with Radio Buttons: Major Payment, Add Debit, Extra Pay / Regular */}
+            {/* Transaction Entry Form: Exactly 3 Radio Options (Receive Major Payment, Add Debit, Extra Pay) */}
             {!isManagement && (
               <form onSubmit={handleAddPayment} style={{ background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 8, padding: '7px 10px', marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-                {/* Radio Buttons Row */}
+                {/* 3 Radio Options Row (in ma sa aik selected ho gi) */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    {/* Action Radio Buttons */}
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--text)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                    {/* Option 1: Receive Major Payment */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: entryType === 'PAYMENT' ? 'var(--green)' : 'var(--text)' }}>
                       <input 
                         type="radio" 
-                        name="paymentAction" 
+                        name="ledgerEntryOption" 
                         value="PAYMENT" 
-                        checked={paymentAction === 'PAYMENT'} 
-                        onChange={() => setPaymentAction('PAYMENT')} 
+                        checked={entryType === 'PAYMENT'} 
+                        onChange={() => setEntryType('PAYMENT')} 
                       />
                       Receive Major Payment
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: paymentAction === 'CHARGE' ? 'var(--red)' : 'var(--text)' }}>
+
+                    {/* Option 2: Add Debit / Manual Charge */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: entryType === 'CHARGE' ? 'var(--red)' : 'var(--text)' }}>
                       <input 
                         type="radio" 
-                        name="paymentAction" 
+                        name="ledgerEntryOption" 
                         value="CHARGE" 
-                        checked={paymentAction === 'CHARGE'} 
-                        onChange={() => setPaymentAction('CHARGE')} 
+                        checked={entryType === 'CHARGE'} 
+                        onChange={() => setEntryType('CHARGE')} 
                       />
                       Add Debit / Manual Charge
                     </label>
-                  </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {/* If Employee: Classification Radio Buttons */}
+                    {/* Option 3: Extra Pay (for Employee) */}
                     {activeCustomer.category === 'Employee' && (
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg)', padding: '2px 6px', borderRadius: 5, border: '1px solid var(--surface-3)', fontSize: 11.5 }}>
-                        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Type:</span>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', fontWeight: paymentClassification === 'Extra Pay' ? 700 : 500 }}>
-                          <input 
-                            type="radio" 
-                            name="paymentClassification" 
-                            value="Extra Pay" 
-                            checked={paymentClassification === 'Extra Pay'} 
-                            onChange={() => setPaymentClassification('Extra Pay')} 
-                          />
-                          Extra Pay
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', fontWeight: paymentClassification === 'Regular' ? 700 : 500 }}>
-                          <input 
-                            type="radio" 
-                            name="paymentClassification" 
-                            value="Regular" 
-                            checked={paymentClassification === 'Regular'} 
-                            onChange={() => setPaymentClassification('Regular')} 
-                          />
-                          Regular
-                        </label>
-                      </div>
-                    )}
-
-                    {/* If PAYMENT: Method Radio Buttons */}
-                    {paymentAction === 'PAYMENT' && (
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg)', padding: '2px 6px', borderRadius: 5, border: '1px solid var(--surface-3)', fontSize: 11.5 }}>
-                        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Method:</span>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
-                          <input type="radio" name="paymentMethod" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
-                          Cash
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
-                          <input type="radio" name="paymentMethod" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
-                          Card
-                        </label>
-                      </div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: entryType === 'EXTRA_PAY' ? '#16a34a' : 'var(--text)' }}>
+                        <input 
+                          type="radio" 
+                          name="ledgerEntryOption" 
+                          value="EXTRA_PAY" 
+                          checked={entryType === 'EXTRA_PAY'} 
+                          onChange={() => setEntryType('EXTRA_PAY')} 
+                        />
+                        Extra Pay
+                      </label>
                     )}
                   </div>
+
+                  {/* Payment Method Radio Buttons (Only when Receive Major Payment is selected) */}
+                  {entryType === 'PAYMENT' && (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg)', padding: '2px 8px', borderRadius: 5, border: '1px solid var(--surface-3)', fontSize: 11.5 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Method:</span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                        <input type="radio" name="paymentMethod" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
+                        Cash
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                        <input type="radio" name="paymentMethod" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
+                        Card
+                      </label>
+                    </div>
+                  )}
                 </div>
 
                 {/* Inputs Row */}
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 145px 1fr auto', gap: 8, alignItems: 'center' }}>
                   <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: paymentAction === 'CHARGE' ? 'var(--red)' : 'var(--green)', fontSize: 13 }}>
-                      {paymentAction === 'CHARGE' ? '+' : '-'}
+                    <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: entryType === 'PAYMENT' ? 'var(--green)' : (entryType === 'EXTRA_PAY' ? '#16a34a' : 'var(--red)'), fontSize: 13 }}>
+                      {entryType === 'PAYMENT' ? '-' : '+'}
                     </span>
                     <input 
                       type="number" step="0.01" required placeholder="Amount"
@@ -1848,7 +1850,7 @@ export default function Credit() {
                   <div>
                     <input 
                       type="text" 
-                      placeholder={paymentAction === 'CHARGE' ? "Debit Reason / Note..." : "Payment Remarks / Note..."} 
+                      placeholder={entryType === 'PAYMENT' ? "Payment Remarks / Note..." : (entryType === 'EXTRA_PAY' ? "Extra Pay Reason / Note..." : "Debit Reason / Note...")} 
                       value={paymentComment} 
                       onChange={e => setPaymentComment(e.target.value)} 
                       style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 12.5, boxSizing: 'border-box' }} 
@@ -1858,7 +1860,7 @@ export default function Credit() {
                   <button 
                     type="submit" 
                     style={{ 
-                      background: paymentAction === 'CHARGE' ? 'var(--red)' : 'var(--green)', 
+                      background: entryType === 'PAYMENT' ? 'var(--green)' : (entryType === 'EXTRA_PAY' ? '#16a34a' : 'var(--red)'), 
                       color: '#fff', 
                       border: 'none', 
                       padding: '6px 14px', 
@@ -1869,7 +1871,7 @@ export default function Credit() {
                       whiteSpace: 'nowrap' 
                     }}
                   >
-                    {paymentAction === 'CHARGE' ? '+ Add Debit' : 'Receive Payment'}
+                    {entryType === 'PAYMENT' ? 'Receive Payment' : (entryType === 'EXTRA_PAY' ? '+ Add Extra Pay' : '+ Add Debit')}
                   </button>
                 </div>
               </form>
