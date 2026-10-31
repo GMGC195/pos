@@ -646,11 +646,8 @@ export default function Credit() {
       if (emp.phones || emp.phone) {
         setPhone(emp.phones || emp.phone || '');
       }
-      const refParts = [];
-      if (emp.employee_id) refParts.push(`Emp #${emp.employee_id}`);
-      if (emp.role) refParts.push(emp.role);
-      if (emp.branch) refParts.push(emp.branch);
-      setReference(refParts.join(' • '));
+      const empCode = emp.employee_id ? (String(emp.employee_id).startsWith('EMP') ? emp.employee_id : `EMP-${emp.employee_id}`) : '';
+      setReference(empCode || '');
     }
   };
 
@@ -1510,7 +1507,7 @@ export default function Credit() {
                           
                           <input 
                             type="text" 
-                            placeholder="Type to filter employees by name, role or code..."
+                            placeholder="Type to filter employees by name or code..."
                             value={employeeSearchTerm}
                             onChange={e => setEmployeeSearchTerm(e.target.value)}
                             style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}
@@ -1528,16 +1525,17 @@ export default function Credit() {
                                 const s = employeeSearchTerm.toLowerCase();
                                 return (
                                   (emp.name || '').toLowerCase().includes(s) ||
-                                  (emp.role || '').toLowerCase().includes(s) ||
-                                  (emp.employee_id || '').toLowerCase().includes(s) ||
-                                  (emp.branch || '').toLowerCase().includes(s)
+                                  (emp.employee_id || '').toLowerCase().includes(s)
                                 );
                               })
-                              .map(emp => (
-                                <option key={emp.id} value={emp.id}>
-                                  {emp.name} {emp.role ? `(${emp.role})` : ''} {emp.employee_id ? `• Code: ${emp.employee_id}` : ''} {emp.branch ? `• ${emp.branch}` : ''}
-                                </option>
-                              ))}
+                              .map(emp => {
+                                const empCode = emp.employee_id ? (String(emp.employee_id).startsWith('EMP') ? emp.employee_id : `EMP-${emp.employee_id}`) : '';
+                                return (
+                                  <option key={emp.id} value={emp.id}>
+                                    {emp.name} {empCode ? `(${empCode})` : ''}
+                                  </option>
+                                );
+                              })}
                           </select>
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             Selecting an existing employee links this Khata account to their record and auto-fills their details.
