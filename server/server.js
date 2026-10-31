@@ -74,7 +74,22 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       'ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS expiry_date DATE',
       'ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS closing_card NUMERIC(10, 2) DEFAULT 0',
       'ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS card_difference NUMERIC(10, 2) DEFAULT 0',
-      'ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS cash_difference NUMERIC(10, 2) DEFAULT 0'
+      'ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS cash_difference NUMERIC(10, 2) DEFAULT 0',
+      `CREATE TABLE IF NOT EXISTS discount_packages (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        discount_percentage NUMERIC(5,2) NOT NULL DEFAULT 0,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
+      "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'Active'",
+      "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS category VARCHAR(30) DEFAULT 'Regular Customer'",
+      "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS is_extra_pay BOOLEAN DEFAULT FALSE",
+      "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS discount_package_id INTEGER REFERENCES discount_packages(id) ON DELETE SET NULL",
+      "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS billing_month VARCHAR(7)",
+      "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS comments TEXT",
+      "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS classification VARCHAR(50) DEFAULT 'Regular'"
     ];
 
     for (const sq of safeStartupQueries) {

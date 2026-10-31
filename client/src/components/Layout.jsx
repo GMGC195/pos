@@ -39,7 +39,8 @@ import {
   Fingerprint,
   CalendarRange,
   BookOpen,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Bike
 } from 'lucide-react'
 
 const navGroups = [
@@ -49,8 +50,9 @@ const navGroups = [
       { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management', 'Operator'] },
       { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Live Orders', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
+      { to: '/held-deliveries', icon: <Bike size={18} strokeWidth={2.2} />, label: 'Held Deliveries', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
-      { to: '/credit', icon: <BookOpen size={18} strokeWidth={2.2} />, label: 'Credit (Khata)', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
+      { to: '/credit', icon: <BookOpen size={18} strokeWidth={2.2} />, label: 'Credit (Khata)', roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
     ]
   },

@@ -82,8 +82,20 @@ const getCustomerDiscountRules = (customer) => {
 };
 
 const calculateCreditCustomerDiscount = (customer, currentCart) => {
+  if (!customer || !Array.isArray(currentCart) || currentCart.length === 0) {
+    return 0;
+  }
+
+  // 1. Check assigned discount package percentage first
+  const pkgPercent = parseFloat(customer.discount_percentage || customer.discount_package_percentage || 0);
+  if (pkgPercent > 0) {
+    const cartSubtotal = currentCart.reduce((sum, item) => sum + ((parseFloat(item.price || item.unit_price || 0)) * (parseInt(item.qty || item.quantity || 1) || 1)), 0);
+    return Math.round(cartSubtotal * (pkgPercent / 100) * 100) / 100;
+  }
+
+  // 2. Fall back to custom item/category discount rules if any
   const rules = getCustomerDiscountRules(customer);
-  if (!rules || rules.length === 0 || !Array.isArray(currentCart) || currentCart.length === 0) {
+  if (!rules || rules.length === 0) {
     return 0;
   }
 
@@ -158,6 +170,19 @@ const CreditCustomerDropdown = ({
   const isExceeded = limitExceeded || newBalanceExceeded;
 
   const handleSelectCustomer = (c) => {
+    if (c && (c.status === 'Deactivated' || c.is_active === false)) {
+      toast.error(
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ fontWeight: 700, fontSize: 13.5 }}>This account is deactivated. Please contact the Admin.</div>
+          <div style={{ fontSize: 13, direction: 'rtl', marginTop: 4, fontFamily: 'Noto Nastaliq Urdu, Tahoma, sans-serif' }}>
+            یہ اکاؤنٹ غیر فعال (Deactivated) ہے۔ براہ کرم ایڈمن سے رابطہ کریں۔
+          </div>
+        </div>,
+        { duration: 6000, id: 'khata-deactivated-warning' }
+      );
+      return;
+    }
+
     setSelectedCreditCustomer(c ? c.id.toString() : '');
     if (setCustomerInfo) {
       if (c) {
@@ -222,24 +247,51 @@ const CreditCustomerDropdown = ({
                 filteredCustomers.map(c => {
                   const effLim = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 100;
                   const isLimitExceeded = Number(c.balance) > effLim;
+                  const isDeactivated = c.status === 'Deactivated' || c.is_active === false;
+                  const pkgPercent = parseFloat(c.discount_percentage || c.discount_package_percentage || 0);
+                  const pkgName = c.discount_package_name;
                   const cRules = getCustomerDiscountRules(c);
-                  const hasDiscount = cRules.length > 0;
+                  const hasDiscount = pkgPercent > 0 || cRules.length > 0;
                   return (
                     <div 
                       key={c.id} 
                       onClick={() => handleSelectCustomer(c)}
-                      style={{ padding: '8px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid var(--surface-2)', background: isLimitExceeded ? 'rgba(255,0,0,0.05)' : 'transparent', color: isLimitExceeded ? 'var(--red)' : 'inherit' }}
+                      style={{ 
+                        padding: '8px 10px', 
+                        fontSize: 13, 
+                        cursor: isDeactivated ? 'not-allowed' : 'pointer', 
+                        borderBottom: '1px solid var(--surface-2)', 
+                        background: isDeactivated ? 'rgba(0,0,0,0.03)' : (isLimitExceeded ? 'rgba(255,0,0,0.05)' : 'transparent'), 
+                        opacity: isDeactivated ? 0.65 : 1,
+                        color: isLimitExceeded ? 'var(--red)' : 'inherit' 
+                      }}
                     >
                       <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                         <span>{c.name}</span>
-                        {hasDiscount ? (
-                          <span style={{ fontSize: 9.5, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>Discount Allowed</span>
-                        ) : (
-                          <span style={{ fontSize: 9.5, background: '#f1f5f9', color: '#64748b', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>No Discount</span>
+                        {c.category === 'Employee' && (
+                          <span style={{ fontSize: 9.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                            Employee {c.is_extra_pay ? '(Extra Pay)' : ''}
+                          </span>
                         )}
+                        {isDeactivated && (
+                          <span style={{ fontSize: 9.5, background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                            Deactivated
+                          </span>
+                        )}
+                        {pkgPercent > 0 ? (
+                          <span style={{ fontSize: 9.5, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                            {pkgPercent}% {pkgName ? `(${pkgName})` : 'Disc'}
+                          </span>
+                        ) : hasDiscount ? (
+                          <span style={{ fontSize: 9.5, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                            Discount Allowed
+                          </span>
+                        ) : null}
                         {isLimitExceeded && <span style={{fontSize: 10, background: 'var(--red)', color: 'white', padding: '2px 4px', borderRadius: 4, marginLeft: 4}}>Limit Exceeded</span>}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.phone || 'N/A'} • Bal: {CURRENCY} {Math.abs(c.balance).toFixed(2)} • Limit: {Number(c.credit_limit) > 0 ? `${CURRENCY} ${Number(c.credit_limit).toFixed(2)}` : 'None'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {c.phone || 'N/A'} • Bal: {CURRENCY} {Math.abs(c.balance).toFixed(2)} • Limit: {Number(c.credit_limit) > 0 ? `${CURRENCY} ${Number(c.credit_limit).toFixed(2)}` : 'None'}
+                      </div>
                     </div>
                   )
                 })
@@ -796,16 +848,30 @@ export default function POS() {
     setProcessing(actionType || (shouldPrint ? 'print' : 'punch'))
     let finalDiscount = parseFloat(customerInfo.discount) || 0;
     if (method === 'Credit') {
+      if (user?.role?.trim().toLowerCase() === 'order taker') {
+        setProcessing(null);
+        return toast.error('Waiters are not authorized to charge to Khata/Credit.');
+      }
       if (!selectedCreditCustomer) {
-        finalDiscount = 0;
+        setProcessing(null);
+        return toast.error('Please select a Khata customer.');
+      }
+      const cust = creditCustomers.find(c => c.id.toString() === selectedCreditCustomer);
+      if (cust && (cust.status === 'Deactivated' || cust.is_active === false)) {
+        setProcessing(null);
+        return toast.error(
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontWeight: 700 }}>This account is deactivated. Please contact the Admin.</div>
+            <div style={{ fontSize: 13, direction: 'rtl', marginTop: 4 }}>یہ اکاؤنٹ غیر فعال (Deactivated) ہے۔ براہ کرم ایڈمن سے رابطہ کریں۔</div>
+          </div>
+        );
+      }
+      const allowedDiscount = calculateCreditCustomerDiscount(cust, cart);
+      if (allowedDiscount > 0) {
+        // Automatically apply the discount package or customer rule
+        finalDiscount = allowedDiscount;
       } else {
-        const cust = creditCustomers.find(c => c.id.toString() === selectedCreditCustomer);
-        const allowedDiscount = calculateCreditCustomerDiscount(cust, cart);
-        if (allowedDiscount <= 0) {
-          finalDiscount = 0;
-        } else if (finalDiscount > allowedDiscount) {
-          finalDiscount = allowedDiscount;
-        }
+        finalDiscount = 0;
       }
     }
     const finalTotal = total - finalDiscount;
@@ -2195,7 +2261,7 @@ export default function POS() {
                     <div className="form-group" style={{ marginBottom: 1, marginTop: 'auto' }}>
                       <label style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2, display: 'block' }}>Payment Method</label>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {['Cash', 'Online', 'Payment Pending', 'Credit'].map(pm => (
+                        {['Cash', 'Online', 'Payment Pending', ...(user?.role?.trim().toLowerCase() !== 'order taker' ? ['Credit'] : [])].map(pm => (
                           <button 
                             key={pm}
                             type="button"
@@ -2307,7 +2373,7 @@ export default function POS() {
             ) : (
               <>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 16, justifyContent: 'center' }}>
-                  {['Cash', 'Card', 'Payment Pending', 'Credit'].map(pm => {
+                  {['Cash', 'Card', 'Payment Pending', ...(user?.role?.trim().toLowerCase() !== 'order taker' ? ['Credit'] : [])].map(pm => {
                     const isSelected = paymentMethod === pm || (pm === 'Payment Pending' && paymentMethod === 'Hold');
                     return (
                       <button 

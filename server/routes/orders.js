@@ -192,27 +192,52 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    // Enforce credit customer discount rules strictly
+    // Enforce credit customer discount rules & package auto-application strictly
     let finalDiscount = parseFloat(discount) || 0;
     let finalGrandTotal = parseFloat(grand_total) || 0;
+    let creditCustInfo = null;
 
     if (payment_method === 'Credit') {
       if (!credit_customer_id) {
         finalDiscount = 0;
         finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
       } else {
-        const custRes = await client.query('SELECT discount_rules FROM credit_customers WHERE id = $1', [credit_customer_id]);
+        const custRes = await client.query(`
+          SELECT cc.*, dp.name as discount_package_name, dp.discount_percentage as pkg_discount, dp.is_active as pkg_active
+          FROM credit_customers cc
+          LEFT JOIN discount_packages dp ON cc.discount_package_id = dp.id
+          WHERE cc.id = $1
+        `, [credit_customer_id]);
+
         if (custRes.rows.length === 0) {
           finalDiscount = 0;
           finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
         } else {
-          let rules = custRes.rows[0].discount_rules;
-          if (typeof rules === 'string') {
-            try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+          creditCustInfo = custRes.rows[0];
+
+          // Safeguard: Check if Khata account is Deactivated (Orders blocked)
+          if (creditCustInfo.status === 'Deactivated') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+              error: 'This account is deactivated. Please contact the Admin.',
+              error_ur: 'یہ اکاؤنٹ غیر فعال (Deactivated) ہے۔ براہ کرم ایڈمن سے رابطہ کریں۔'
+            });
           }
-          if (!Array.isArray(rules) || rules.length === 0) {
-            finalDiscount = 0;
-            finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+
+          // Automatic discount package application
+          if (creditCustInfo.pkg_active && parseFloat(creditCustInfo.pkg_discount) > 0) {
+            const pkgPct = parseFloat(creditCustInfo.pkg_discount);
+            finalDiscount = Math.round((parseFloat(subtotal) || 0) * (pkgPct / 100) * 100) / 100;
+            finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) - finalDiscount + (parseFloat(tax) || 0));
+          } else {
+            let rules = creditCustInfo.discount_rules;
+            if (typeof rules === 'string') {
+              try { rules = JSON.parse(rules); } catch(e) { rules = []; }
+            }
+            if (!Array.isArray(rules) || rules.length === 0) {
+              finalDiscount = 0;
+              finalGrandTotal = Math.max(0, (parseFloat(subtotal) || 0) + (parseFloat(tax) || 0));
+            }
           }
         }
       }
@@ -242,12 +267,17 @@ router.post('/', authenticateToken, async (req, res) => {
       [order.id, payment_method || 'Cash', finalGrandTotal]
     );
 
-    // Handle Credit order logic
+    // Handle Credit order logic with month-allocation and employee classification
     if (payment_method === 'Credit' && credit_customer_id) {
+      const currentMonthStr = new Date().toISOString().slice(0, 7);
+      const custClassification = creditCustInfo?.is_extra_pay ? 'Extra Pay' : 'Regular';
+      const txComments = comments ? String(comments).trim() : `Order #${order.id} - ${order.slip_number || ''}`;
+
       // Add the order to their ledger (increases debt)
       await client.query(
-        `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
-        [credit_customer_id, order.id, 'CREDIT_ORDER', finalGrandTotal]
+        `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount, billing_month, comments, classification, branch) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [credit_customer_id, order.id, 'CREDIT_ORDER', finalGrandTotal, currentMonthStr, txComments, custClassification, finalBranch]
       );
       
       let balanceChange = parseFloat(finalGrandTotal);
@@ -256,8 +286,9 @@ router.post('/', authenticateToken, async (req, res) => {
       if (credit_payment_amount && parseFloat(credit_payment_amount) > 0) {
         const paymentAmt = parseFloat(credit_payment_amount);
         await client.query(
-          `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount) VALUES ($1, $2, $3, $4)`,
-          [credit_customer_id, order.id, 'PAYMENT', paymentAmt]
+          `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount, billing_month, comments, classification, branch) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [credit_customer_id, order.id, 'PAYMENT', paymentAmt, currentMonthStr, 'Payment with order', custClassification, finalBranch]
         );
         balanceChange -= paymentAmt;
       }
@@ -387,6 +418,17 @@ router.get('/', authenticateToken, async (req, res) => {
 
     if (cancel_requested === 'true') {
       query += ` AND o.cancel_requested = TRUE`;
+    }
+
+    if (req.query.order_type) {
+      const ot = req.query.order_type;
+      if (ot.includes(',')) {
+        params.push(ot.split(',').map(s => s.trim().toLowerCase()));
+        query += ` AND LOWER(COALESCE(o.order_type, '')) = ANY(${params.length})`;
+      } else {
+        params.push(ot.trim().toLowerCase());
+        query += ` AND LOWER(COALESCE(o.order_type, '')) = ${params.length}`;
+      }
     }
 
     // Branch isolation
