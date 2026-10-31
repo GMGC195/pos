@@ -48,6 +48,7 @@ const MultiSelectDropdown = ({ options = [], selectedIds = [], onChange, placeho
   );
 
   return (
+
     <div style={{ position: 'relative', flex: 1, minWidth: 180, ...style }}>
       <div 
         onClick={() => setIsOpen(!isOpen)}
@@ -377,8 +378,9 @@ export default function Credit() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [branchFilter, setBranchFilter] = useState('All');
 
-  // Ledger Payment states (Receive Major Payment strictly)
+  // Ledger Payment & Charge states
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentAction, setPaymentAction] = useState('PAYMENT'); // 'PAYMENT' or 'CHARGE'
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [billingMonth, setBillingMonth] = useState(getCurrentMonthStr());
   const [paymentComment, setPaymentComment] = useState('');
@@ -618,6 +620,7 @@ export default function Credit() {
   const openLedger = async (customer) => {
     setActiveCustomer(customer);
     setPaymentAmount('');
+    setPaymentAction('PAYMENT');
     setPaymentMethod('Cash');
     setPaymentComment('');
     setPaymentClassification(customer.is_extra_pay ? 'Extra Pay' : 'Regular');
@@ -706,7 +709,7 @@ export default function Credit() {
     }
   };
 
-  // Strictly Receive Major Payment (Charge/Credit option removed per user request)
+  // Receive Major Payment or Add Debit / Manual Charge
   const handleAddPayment = async (e) => {
     e.preventDefault();
     let amountStr = paymentAmount;
@@ -717,31 +720,33 @@ export default function Credit() {
     }
 
     if (!billingMonth) {
-      return toast.error('Please select the Billing Month for this payment');
+      return toast.error('Please select the Billing Month');
     }
     
     try {
       await axios.post(`/api/credit/${activeCustomer.id}/payment`, { 
         amount: finalAmount,
-        action: 'PAYMENT',
+        action: paymentAction,
         cashier_name: user?.username || 'Unknown',
-        payment_method: paymentMethod || 'Cash',
+        payment_method: paymentAction === 'PAYMENT' ? (paymentMethod || 'Cash') : null,
         branch: user?.branch || (branchFilter !== 'All' ? branchFilter : 'Branch 1'),
         billing_month: billingMonth,
         comments: paymentComment.trim() || null,
         classification: activeCustomer.category === 'Employee' ? paymentClassification : 'Regular'
       });
 
-      toast.success(`Payment of ${CURRENCY} ${finalAmount.toFixed(2)} received & allocated to ${billingMonth}`);
+      const actionText = paymentAction === 'PAYMENT' ? 'Payment received' : 'Debit / Charge added';
+      toast.success(`${actionText} of ${CURRENCY} ${finalAmount.toFixed(2)} allocated to ${billingMonth}`);
       setPaymentAmount('');
       setPaymentComment('');
 
-      setActiveCustomer(prev => ({ ...prev, balance: Number(prev.balance) - finalAmount }));
+      const balanceChange = paymentAction === 'CHARGE' ? finalAmount : -finalAmount;
+      setActiveCustomer(prev => ({ ...prev, balance: Number(prev.balance) + balanceChange }));
       
       reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
       fetchCustomers(); 
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to add payment');
+      toast.error(err.response?.data?.error || 'Failed to process transaction');
     }
   };
 
@@ -1408,77 +1413,91 @@ export default function Credit() {
 
       {/* Customer Detail & Monthly Ledger Modal */}
       {showLedger && activeCustomer && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 940, height: '90vh', borderRadius: 16, padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }}>
+          <div style={{ background: 'var(--surface)', width: '100%', maxWidth: 980, height: '92vh', maxHeight: '92vh', borderRadius: 16, padding: '16px 20px', position: 'relative', display: 'flex', flexDirection: 'column', boxShadow: '0 12px 35px rgba(0,0,0,0.28)', overflow: 'hidden' }}>
             
-            {/* Modal Header */}
-            <button onClick={() => setShowLedger(false)} style={{ position: 'absolute', right: 16, top: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={20}/></button>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingRight: 32, flexWrap: 'wrap', gap: 10 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>{activeCustomer.name}'s Khata Ledger</span>
-                  {activeCustomer.category === 'Employee' && (
-                    <span style={{ fontSize: 11, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: 12, fontWeight: 700 }}>
-                      Employee {activeCustomer.is_extra_pay ? '(Extra Pay)' : ''}
-                    </span>
-                  )}
-                  {(activeCustomer.status === 'Deactivated' || activeCustomer.is_active === false) && (
-                    <span style={{ fontSize: 11, background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: 12, fontWeight: 700 }}>
-                      Deactivated
-                    </span>
-                  )}
+            {/* Modal Header: Title, Badges, Integrated Overall Balance, and Action Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingRight: 32, flexWrap: 'wrap', gap: 8, flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>{activeCustomer.name}'s Khata</span>
                 </h3>
+                {activeCustomer.category === 'Employee' && (
+                  <span style={{ fontSize: 11, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 7px', borderRadius: 12, fontWeight: 700 }}>
+                    Employee {activeCustomer.is_extra_pay ? '(Extra Pay)' : ''}
+                  </span>
+                )}
+                {activeCustomer.discount_package_name && (
+                  <span style={{ fontSize: 11, background: 'rgba(16, 185, 129, 0.15)', color: '#059669', padding: '1px 7px', borderRadius: 6, fontWeight: 700 }}>
+                    Pkg: {activeCustomer.discount_package_name}
+                  </span>
+                )}
+                {(activeCustomer.status === 'Deactivated' || activeCustomer.is_active === false) && (
+                  <span style={{ fontSize: 11, background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', padding: '1px 7px', borderRadius: 12, fontWeight: 700 }}>
+                    Deactivated
+                  </span>
+                )}
               </div>
 
-              {/* Manage Custom Discount Button (Clickable and Restored!) */}
-              {isAdmin && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* Compact, Prominent Overall Balance Badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface-2)', padding: '4px 10px', borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', fontWeight: 600 }}>Overall Balance:</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
+                    {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(0.00)')}
+                  </span>
+                </div>
+
+                {isAdmin && (
+                  <button 
+                    type="button"
+                    onClick={() => setShowLedgerDiscounts(!showLedgerDiscounts)} 
+                    style={{ 
+                      background: showLedgerDiscounts ? 'var(--primary)' : 'var(--surface-2)', 
+                      color: showLedgerDiscounts ? '#fff' : 'var(--text)', 
+                      border: '1px solid var(--surface-3)', 
+                      padding: '5px 10px', 
+                      borderRadius: 6, 
+                      cursor: 'pointer', 
+                      fontSize: 12, 
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5
+                    }}
+                  >
+                    <Percent size={13} />
+                    {showLedgerDiscounts ? 'Close Discounts' : 'Custom Discounts'}
+                  </button>
+                )}
+
                 <button 
-                  type="button"
-                  onClick={() => setShowLedgerDiscounts(!showLedgerDiscounts)} 
-                  style={{ 
-                    background: showLedgerDiscounts ? 'var(--primary)' : 'var(--surface-2)', 
-                    color: showLedgerDiscounts ? '#fff' : 'var(--text)', 
-                    border: '1px solid var(--surface-3)', 
-                    padding: '8px 14px', 
-                    borderRadius: 8, 
-                    cursor: 'pointer', 
-                    fontSize: 13, 
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    boxShadow: showLedgerDiscounts ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
-                    transition: 'all 0.2s'
-                  }}
+                  onClick={() => setShowLedger(false)} 
+                  style={{ position: 'absolute', right: 14, top: 14, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  title="Close Modal"
                 >
-                  <Percent size={15} />
-                  {showLedgerDiscounts ? 'Close Custom Discounts' : 'Manage Custom Discounts'}
+                  <X size={20}/>
                 </button>
-              )}
+              </div>
             </div>
 
-            {/* Manage Custom Discount Configuration Interface */}
+            {/* Collapsible Custom Discount Configuration Interface */}
             {showLedgerDiscounts && isAdmin && (
-              <div style={{ marginBottom: 16, border: '2px solid var(--primary)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface)', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' }}>
-                <div style={{ background: 'rgba(255,184,0,0.15)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-3)' }}>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
-                      Manage Special Discounts for {activeCustomer.name}
-                    </h4>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                      Configure category-wise and item-wise discounts applied automatically during POS order taking
-                    </span>
-                  </div>
+              <div style={{ marginBottom: 10, border: '2px solid var(--primary)', borderRadius: 10, overflow: 'hidden', background: 'var(--surface)', flexShrink: 0 }}>
+                <div style={{ background: 'rgba(255,184,0,0.15)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--surface-3)' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                    Special Discounts for {activeCustomer.name}
+                  </span>
                   <button 
                     type="button" 
                     onClick={() => setShowLedgerDiscounts(false)} 
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}
                   >
-                    <X size={18} />
+                    <X size={16} />
                   </button>
                 </div>
 
-                <div style={{ padding: 16 }}>
+                <div style={{ padding: 12, maxHeight: '220px', overflowY: 'auto' }}>
                   <DiscountRuleBuilder 
                     rules={customerCustomRules} 
                     setRules={setCustomerCustomRules} 
@@ -1486,11 +1505,11 @@ export default function Credit() {
                     items={items} 
                   />
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
                     <button 
                       type="button" 
                       onClick={() => setShowLedgerDiscounts(false)}
-                      style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', cursor: 'pointer', fontSize: 13 }}
+                      style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', cursor: 'pointer', fontSize: 12 }}
                     >
                       Cancel
                     </button>
@@ -1498,7 +1517,7 @@ export default function Credit() {
                       type="button" 
                       onClick={handleSaveLedgerDiscounts} 
                       disabled={savingDiscounts}
-                      style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, cursor: savingDiscounts ? 'not-allowed' : 'pointer', fontSize: 13 }}
+                      style={{ padding: '5px 16px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, cursor: savingDiscounts ? 'not-allowed' : 'pointer', fontSize: 12 }}
                     >
                       {savingDiscounts ? 'Saving...' : 'Save Discount Rules'}
                     </button>
@@ -1507,348 +1526,360 @@ export default function Credit() {
               </div>
             )}
 
-            {/* Total Balance & Assigned Package Highlight Banner */}
-            <div style={{ background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 8, marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Overall Account Balance: </span>
-                <span style={{ fontSize: 17, fontWeight: 800, color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
-                  {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(Due / Debit)' : (activeCustomer.balance < 0 ? '(Advance / Credit)' : '(Settled)')}
-                </span>
-              </div>
-              {activeCustomer.discount_package_name && (
-                <div style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.15)', color: '#059669', padding: '4px 10px', borderRadius: 6, fontWeight: 700 }}>
-                  Assigned Package: {activeCustomer.discount_package_name}
-                </div>
-              )}
-            </div>
-
-            {/* Month-Wise Selection Dropdown & Monthly Balance Breakdown */}
-            <div style={{ marginBottom: 12, background: 'var(--surface-50)', border: '1px solid var(--surface-2)', borderRadius: 10, padding: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Calendar size={18} style={{ color: 'var(--primary)' }} />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                    Filter Ledger By Month:
-                  </span>
-                </div>
-
-                {/* Dropdown with all formatted months and "All Months" option */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <select 
-                    value={selectedLedgerMonth} 
-                    onChange={e => handleSelectLedgerMonth(e.target.value)}
-                    style={{ 
-                      padding: '7px 12px', 
-                      borderRadius: 8, 
-                      border: '1.5px solid var(--primary)', 
-                      background: 'var(--surface)', 
-                      color: 'var(--text)', 
-                      fontSize: 13, 
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      outline: 'none',
-                      minWidth: 200
-                    }}
-                  >
-                    <option value="All">All Months (Complete History)</option>
-                    {availableMonths.map(m => (
-                      <option key={m.key} value={m.key}>
-                        {m.label} {m.key === getCurrentMonthStr() ? '• Current Month' : ''}
-                      </option>
-                    ))}
-                  </select>
-
-                  <button 
-                    type="button"
-                    onClick={() => handleSelectLedgerMonth('All')}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: 8,
-                      border: '1px solid var(--surface-3)',
-                      background: selectedLedgerMonth === 'All' ? 'var(--primary)' : 'var(--surface-2)',
-                      color: selectedLedgerMonth === 'All' ? '#fff' : 'var(--text)',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    All Months
-                  </button>
-                </div>
+            {/* Compact 1-Line Month-Wise Filter & Period Breakdown Strip */}
+            <div style={{ background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 8, padding: '5px 10px', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Calendar size={14} style={{ color: 'var(--primary)' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Month:</span>
+                <select 
+                  value={selectedLedgerMonth} 
+                  onChange={e => handleSelectLedgerMonth(e.target.value)}
+                  style={{ 
+                    padding: '3px 8px', 
+                    borderRadius: 6, 
+                    border: '1px solid var(--surface-3)', 
+                    background: 'var(--surface)', 
+                    color: 'var(--text)', 
+                    fontSize: 12, 
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    outline: 'none'
+                  }}
+                >
+                  <option value="All">All Months (Complete History)</option>
+                  {availableMonths.map(m => (
+                    <option key={m.key} value={m.key}>
+                      {m.label} {m.key === getCurrentMonthStr() ? '• Current Month' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button 
+                  type="button"
+                  onClick={() => handleSelectLedgerMonth('All')}
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    border: '1px solid var(--surface-3)',
+                    background: selectedLedgerMonth === 'All' ? 'var(--primary)' : 'var(--surface)',
+                    color: selectedLedgerMonth === 'All' ? '#fff' : 'var(--text)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  All
+                </button>
               </div>
 
-              {/* Selected Month Balance Summary Card */}
               {selectedLedgerMonth !== 'All' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, background: 'var(--surface)', padding: 10, borderRadius: 8, border: '1px solid var(--surface-3)' }}>
-                  <div>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Selected Period</span>
-                    <span style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--primary)' }}>
-                      {formatMonthDisplay(selectedLedgerMonth)}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Monthly Debits / Charges</span>
-                    <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--red)' }}>
-                      +{CURRENCY} {parseFloat(selectedMonthSummaryData?.debit || selectedMonthSummaryData?.total_debit || 0).toFixed(2)}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Monthly Credits / Payments</span>
-                    <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--green)' }}>
-                      -{CURRENCY} {parseFloat(selectedMonthSummaryData?.credit || selectedMonthSummaryData?.total_credit || 0).toFixed(2)}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block' }}>Month Net Balance</span>
-                    <span style={{ fontSize: 13.5, fontWeight: 800, color: parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? 'var(--red)' : '#059669' }}>
-                      {CURRENCY} {Math.abs(parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0)).toFixed(2)} {parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? '(DR)' : (parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) < 0 ? '(CR)' : '(Settled)')}
-                    </span>
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5 }}>
+                  <span>Debits: <b style={{ color: 'var(--red)' }}>+{CURRENCY} {parseFloat(selectedMonthSummaryData?.debit || selectedMonthSummaryData?.total_debit || 0).toFixed(2)}</b></span>
+                  <span>Credits: <b style={{ color: 'var(--green)' }}>-{CURRENCY} {parseFloat(selectedMonthSummaryData?.credit || selectedMonthSummaryData?.total_credit || 0).toFixed(2)}</b></span>
+                  <span>Net: <b style={{ color: parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? 'var(--red)' : '#059669', fontWeight: 800 }}>
+                    {CURRENCY} {Math.abs(parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0)).toFixed(2)} {parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) > 0 ? '(DR)' : (parseFloat(selectedMonthSummaryData?.net_balance || selectedMonthSummaryData?.remaining_balance || 0) < 0 ? '(CR)' : '(0)')}
+                  </b></span>
                 </div>
               ) : (
-                <div style={{ background: 'var(--surface)', padding: '8px 12px', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Showing complete historical transaction ledger across all billing months.</span>
-                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>Total Transactions: {processedTransactions.length}</span>
-                </div>
+                <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Showing all {processedTransactions.length} transactions across all months</span>
               )}
             </div>
 
-            {/* Employee Extra Pay Toggle Button & Totals Breakdown */}
+            {/* Compact Employee Extra Pay Strip */}
             {activeCustomer.category === 'Employee' && (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>Employee Extra Pay Filter:</span>
-                    <div style={{ display: 'flex', background: 'white', borderRadius: 6, padding: 2, border: '1px solid #bbf7d0' }}>
-                      {[
-                        { id: 'All', label: 'All Transactions' },
-                        { id: 'Extra Pay', label: 'Extra Pay Only' },
-                        { id: 'Regular', label: 'Regular Credits' },
-                      ].map(f => (
-                        <button
-                          key={f.id}
-                          type="button"
-                          onClick={() => handleSelectClassificationFilter(f.id)}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: 4,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            border: 'none',
-                            background: ledgerClassificationFilter === f.id ? '#16a34a' : 'transparent',
-                            color: ledgerClassificationFilter === f.id ? '#fff' : '#166534',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s'
-                          }}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>
-                    All Extra Pay Total: <span style={{ color: '#15803d', fontWeight: 800 }}>{CURRENCY} {Math.abs(overallExtraPayTotal).toFixed(2)}</span>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '4px 10px', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#166534' }}>Extra Pay Filter:</span>
+                  <div style={{ display: 'flex', background: 'white', borderRadius: 5, padding: 1, border: '1px solid #bbf7d0' }}>
+                    {[
+                      { id: 'All', label: 'All' },
+                      { id: 'Extra Pay', label: 'Extra Pay Only' },
+                      { id: 'Regular', label: 'Regular' },
+                    ].map(f => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => handleSelectClassificationFilter(f.id)}
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          border: 'none',
+                          background: ledgerClassificationFilter === f.id ? '#16a34a' : 'transparent',
+                          color: ledgerClassificationFilter === f.id ? '#fff' : '#166534',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* Subtotals breakdown: Month Extra Pay, Month Regular Dues, Visible Filter Subtotal */}
-                <div style={{ display: 'flex', gap: 16, fontSize: 11.5, color: '#166534', flexWrap: 'wrap', borderTop: '1px dashed #bbf7d0', paddingTop: 6 }}>
-                  <span>Month Extra Pay: <b>+{CURRENCY} {monthExtraPayDebit.toFixed(2)}</b></span>
-                  <span>Month Regular Dues: <b>+{CURRENCY} {monthRegularDebit.toFixed(2)}</b></span>
-                  <span style={{ marginLeft: 'auto', fontWeight: 800, color: '#15803d' }}>
-                    {ledgerClassificationFilter === 'All' ? 'Month Total Dues' : `${ledgerClassificationFilter} Subtotal`}: {CURRENCY} {Math.abs(visibleSubtotal).toFixed(2)}
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5, color: '#166534' }}>
+                  <span>Month Extra: <b>+{CURRENCY} {monthExtraPayDebit.toFixed(0)}</b></span>
+                  <span>Month Regular: <b>+{CURRENCY} {monthRegularDebit.toFixed(0)}</b></span>
+                  <span>{ledgerClassificationFilter === 'All' ? 'Month Dues' : `${ledgerClassificationFilter}`}: <b>{CURRENCY} {Math.abs(visibleSubtotal).toFixed(2)}</b></span>
+                  <span style={{ borderLeft: '1px solid #bbf7d0', paddingLeft: 8 }}>All Extra Pay: <b style={{ color: '#15803d', fontWeight: 800 }}>{CURRENCY} {Math.abs(overallExtraPayTotal).toFixed(2)}</b></span>
                 </div>
               </div>
             )}
 
-            {/* Receive Major Payment Form (Dedicated strictly to Receive Major Payment, Credit/Charge removed) */}
+            {/* Transaction Entry Form with Radio Buttons: Major Payment, Add Debit, Extra Pay / Regular */}
             {!isManagement && (
-              <form onSubmit={handleAddPayment} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12, padding: 12, background: 'var(--surface-2)', borderRadius: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>
-                    Receive Major Payment
-                  </span>
+              <form onSubmit={handleAddPayment} style={{ background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 8, padding: '7px 10px', marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                {/* Radio Buttons Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    {/* Action Radio Buttons */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: paymentAction === 'PAYMENT' ? 'var(--green)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="paymentAction" 
+                        value="PAYMENT" 
+                        checked={paymentAction === 'PAYMENT'} 
+                        onChange={() => setPaymentAction('PAYMENT')} 
+                      />
+                      Receive Major Payment
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: paymentAction === 'CHARGE' ? 'var(--red)' : 'var(--text)' }}>
+                      <input 
+                        type="radio" 
+                        name="paymentAction" 
+                        value="CHARGE" 
+                        checked={paymentAction === 'CHARGE'} 
+                        onChange={() => setPaymentAction('CHARGE')} 
+                      />
+                      Add Debit / Manual Charge
+                    </label>
+                  </div>
 
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'var(--bg)', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--surface-3)' }}>
-                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>Method:</span>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12.5 }}>
-                      <input type="radio" name="paymentMethod" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
-                      Cash
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12.5 }}>
-                      <input type="radio" name="paymentMethod" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
-                      Card
-                    </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {/* If Employee: Classification Radio Buttons */}
+                    {activeCustomer.category === 'Employee' && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg)', padding: '2px 6px', borderRadius: 5, border: '1px solid var(--surface-3)', fontSize: 11.5 }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Type:</span>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', fontWeight: paymentClassification === 'Extra Pay' ? 700 : 500 }}>
+                          <input 
+                            type="radio" 
+                            name="paymentClassification" 
+                            value="Extra Pay" 
+                            checked={paymentClassification === 'Extra Pay'} 
+                            onChange={() => setPaymentClassification('Extra Pay')} 
+                          />
+                          Extra Pay
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', fontWeight: paymentClassification === 'Regular' ? 700 : 500 }}>
+                          <input 
+                            type="radio" 
+                            name="paymentClassification" 
+                            value="Regular" 
+                            checked={paymentClassification === 'Regular'} 
+                            onChange={() => setPaymentClassification('Regular')} 
+                          />
+                          Regular
+                        </label>
+                      </div>
+                    )}
+
+                    {/* If PAYMENT: Method Radio Buttons */}
+                    {paymentAction === 'PAYMENT' && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg)', padding: '2px 6px', borderRadius: 5, border: '1px solid var(--surface-3)', fontSize: 11.5 }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Method:</span>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                          <input type="radio" name="paymentMethod" value="Cash" checked={paymentMethod === 'Cash'} onChange={() => setPaymentMethod('Cash')} />
+                          Cash
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                          <input type="radio" name="paymentMethod" value="Card" checked={paymentMethod === 'Card'} onChange={() => setPaymentMethod('Card')} />
+                          Card
+                        </label>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 2fr auto', gap: 8, alignItems: 'center' }}>
-                  {/* Amount */}
+                {/* Inputs Row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 145px 1fr auto', gap: 8, alignItems: 'center' }}>
                   <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: 'var(--green)' }}>
-                      -
+                    <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: paymentAction === 'CHARGE' ? 'var(--red)' : 'var(--green)', fontSize: 13 }}>
+                      {paymentAction === 'CHARGE' ? '+' : '-'}
                     </span>
                     <input 
                       type="number" step="0.01" required placeholder="Amount"
                       value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} 
-                      style={{ width: '100%', padding: '7px 8px 7px 22px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
+                      style={{ width: '100%', padding: '5px 6px 5px 20px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 12.5, boxSizing: 'border-box' }} 
                     />
                   </div>
 
-                  {/* Billing Month (Required) */}
                   <div>
                     <input 
                       type="month" 
                       required 
                       value={billingMonth} 
                       onChange={e => setBillingMonth(e.target.value)} 
-                      title="Billing Month to allocate payment against"
-                      style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
+                      title="Billing Month to allocate against"
+                      style={{ width: '100%', padding: '5px 6px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 12, boxSizing: 'border-box' }} 
                     />
                   </div>
 
-                  {/* Optional Comment / Remarks */}
                   <div>
                     <input 
                       type="text" 
-                      placeholder="Remarks / Note (Optional)..." 
+                      placeholder={paymentAction === 'CHARGE' ? "Debit Reason / Note..." : "Payment Remarks / Note..."} 
                       value={paymentComment} 
                       onChange={e => setPaymentComment(e.target.value)} 
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} 
+                      style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 12.5, boxSizing: 'border-box' }} 
                     />
                   </div>
 
-                  {/* Submit button */}
-                  <button type="submit" style={{ background: 'var(--green)', color: '#fff', border: 'none', padding: '7px 16px', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}>
-                    Receive Payment
+                  <button 
+                    type="submit" 
+                    style={{ 
+                      background: paymentAction === 'CHARGE' ? 'var(--red)' : 'var(--green)', 
+                      color: '#fff', 
+                      border: 'none', 
+                      padding: '6px 14px', 
+                      borderRadius: 6, 
+                      fontWeight: 700, 
+                      cursor: 'pointer', 
+                      fontSize: 12, 
+                      whiteSpace: 'nowrap' 
+                    }}
+                  >
+                    {paymentAction === 'CHARGE' ? '+ Add Debit' : 'Receive Payment'}
                   </button>
                 </div>
               </form>
             )}
 
-            {/* Transactions List */}
-            <div style={{ flex: 1, overflowY: 'auto', border: '1.5px solid var(--surface-2)', borderRadius: 8 }}>
+            {/* Fully Scrollable Transactions List with Sticky Headers */}
+            <div style={{ flex: 1, minHeight: 300, overflowY: 'auto', border: '1.5px solid var(--surface-2)', borderRadius: 8, background: 'var(--surface)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-                  <tr style={{ borderBottom: '2px solid var(--surface-2)' }}>
-                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Bill # & Date</th>
-                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Billing Month</th>
-                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Description & Remarks</th>
-                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700 }}>Classification</th>
-                    <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700, textAlign: 'right' }}>Amount</th>
+                <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-2)', zIndex: 2 }}>
+                  <tr style={{ borderBottom: '2px solid var(--surface-3)' }}>
+                    <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700 }}>Bill # & Date</th>
+                    <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700 }}>Billing Month</th>
+                    <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700 }}>Description & Remarks</th>
+                    <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700 }}>Classification</th>
+                    <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textAlign: 'right' }}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
                   {processedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={5} style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>
                         No transactions found for {selectedLedgerMonth !== 'All' ? formatMonthDisplay(selectedLedgerMonth) : 'this account'}.
                       </td>
                     </tr>
                   ) : (
-                    processedTransactions.map(t => (
-                      <tr key={t.id} style={{ borderBottom: '1px solid var(--surface-2)', opacity: t.isCancelled ? 0.6 : 1 }}>
-                        
-                        {/* Column 1: Bill # and underneath is the Date, clicking Bill # opens detailed slip */}
-                        <td style={{ padding: '10px 14px', fontSize: 13 }}>
-                          {t.type === 'CREDIT_ORDER' ? (
-                            <div>
-                              <div 
-                                onClick={() => handleViewOrder(t.order_id)} 
-                                style={{ 
-                                  color: 'var(--red)', 
-                                  fontWeight: 700, 
-                                  fontSize: 14, 
-                                  cursor: 'pointer', 
-                                  textDecoration: t.isCancelled ? 'line-through' : 'underline',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 6
-                                }}
-                                title="Click to view detailed order slip"
-                              >
-                                <span>Bill # {t.order_id}</span>
-                                {t.slip_number && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({t.slip_number})</span>}
-                                {t.isCancelled && <span style={{ marginLeft: 6, color: 'var(--text-muted)', fontSize: 11, fontWeight: 'bold' }}>(Cancelled)</span>}
+                    processedTransactions.map(t => {
+                      const hasOrder = Boolean(t.order_id);
+                      return (
+                        <tr 
+                          key={t.id} 
+                          onClick={() => hasOrder && handleViewOrder(t.order_id)}
+                          style={{ 
+                            borderBottom: '1px solid var(--surface-2)', 
+                            opacity: t.isCancelled ? 0.6 : 1,
+                            cursor: hasOrder ? 'pointer' : 'default',
+                            transition: 'background-color 0.15s'
+                          }}
+                          className={hasOrder ? 'clickable-ledger-row' : ''}
+                          title={hasOrder ? `Click row to view full order slip for Bill #${t.slip_number || t.order_id}` : ''}
+                        >
+                          {/* Column 1: Bill # and underneath is the Date */}
+                          <td style={{ padding: '8px 12px', fontSize: 13 }}>
+                            {(t.type === 'CREDIT_ORDER' || hasOrder) ? (
+                              <div>
+                                <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ textDecoration: t.isCancelled ? 'line-through' : 'underline' }}>
+                                    Bill #{t.slip_number || t.order_id}
+                                  </span>
+                                  {t.slip_number && t.order_id && (
+                                    <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>(ID: #{t.order_id})</span>
+                                  )}
+                                  {t.isCancelled && (
+                                    <span style={{ color: 'var(--red)', fontSize: 10.5, fontWeight: 'bold' }}>(Cancelled)</span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                  {new Date(t.created_at).toLocaleString()}
+                                </div>
                               </div>
-                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                                {new Date(t.created_at).toLocaleString()}
-                              </div>
-                            </div>
-                          ) : t.type === 'CHARGE' ? (
-                            <div>
-                              <div style={{ color: 'var(--red)', fontWeight: 700, fontSize: 13.5 }}>
-                                Manual Charge
-                              </div>
-                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                                {new Date(t.created_at).toLocaleString()}
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span>Major Payment</span>
-                                <span style={{ fontSize: 11, fontWeight: 600, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 4 }}>
-                                  via {t.payment_method || 'Cash'}
-                                </span>
-                              </div>
-                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                                {new Date(t.created_at).toLocaleString()}
-                              </div>
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Column 2: Billing Month */}
-                        <td style={{ padding: '10px 14px', fontSize: 12 }}>
-                          {t.billing_month ? (
-                            <span style={{ fontSize: 11, background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, color: 'var(--primary)' }}>
-                              {formatMonthDisplay(t.billing_month)}
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>-</span>
-                          )}
-                        </td>
-
-                        {/* Column 3: Description & Remarks */}
-                        <td style={{ padding: '10px 14px', fontSize: 12.5 }}>
-                          <div>
-                            {t.type === 'CREDIT_ORDER' ? (
-                              <span>Order Charge</span>
                             ) : t.type === 'CHARGE' ? (
-                              <span>Manual Charge {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
+                              <div>
+                                <div style={{ color: 'var(--red)', fontWeight: 700, fontSize: 13 }}>
+                                  Debit / Manual Charge
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                  {new Date(t.created_at).toLocaleString()}
+                                </div>
+                              </div>
                             ) : (
-                              <span>Payment Received {t.cashier_name ? `(to ${t.cashier_name})` : ''}</span>
+                              <div>
+                                <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span>Major Payment</span>
+                                  <span style={{ fontSize: 10.5, fontWeight: 600, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 4 }}>
+                                    via {t.payment_method || 'Cash'}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                  {new Date(t.created_at).toLocaleString()}
+                                </div>
+                              </div>
                             )}
-                          </div>
-                          {t.comments && (
-                            <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <MessageSquare size={11} /> {t.comments}
+                          </td>
+
+                          {/* Column 2: Billing Month */}
+                          <td style={{ padding: '8px 12px', fontSize: 12 }}>
+                            {t.billing_month ? (
+                              <span style={{ fontSize: 11, background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4, fontWeight: 700, color: 'var(--primary)' }}>
+                                {formatMonthDisplay(t.billing_month)}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>-</span>
+                            )}
+                          </td>
+
+                          {/* Column 3: Description & Remarks */}
+                          <td style={{ padding: '8px 12px', fontSize: 12 }}>
+                            <div>
+                              {t.type === 'CREDIT_ORDER' ? (
+                                <span style={{ fontWeight: 600 }}>Order Charge {hasOrder ? '🔍 (Click row to view slip)' : ''}</span>
+                              ) : t.type === 'CHARGE' ? (
+                                <span>Manual Charge {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
+                              ) : (
+                                <span>Payment Received {t.cashier_name ? `(to ${t.cashier_name})` : ''}</span>
+                              )}
                             </div>
-                          )}
-                        </td>
+                            {t.comments && (
+                              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <MessageSquare size={11} /> {t.comments}
+                              </div>
+                            )}
+                          </td>
 
-                        {/* Column 4: Classification */}
-                        <td style={{ padding: '10px 14px', fontSize: 12 }}>
-                          {t.classification === 'Extra Pay' ? (
-                            <span style={{ fontSize: 10.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
-                              Extra Pay
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-                              Regular
-                            </span>
-                          )}
-                        </td>
+                          {/* Column 4: Classification */}
+                          <td style={{ padding: '8px 12px', fontSize: 12 }}>
+                            {t.classification === 'Extra Pay' ? (
+                              <span style={{ fontSize: 10.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                Extra Pay
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                                Regular
+                              </span>
+                            )}
+                          </td>
 
-                        {/* Column 5: Amount */}
-                        <td style={{ padding: '10px 14px', fontSize: 13, textAlign: 'right', fontWeight: 700, color: (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? 'var(--red)' : 'var(--green)', textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
-                          {(t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}
-                        </td>
-                      </tr>
-                    ))
+                          {/* Column 5: Amount */}
+                          <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 700, color: (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? 'var(--red)' : 'var(--green)', textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
+                            {(t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -1858,8 +1889,9 @@ export default function Credit() {
         </div>
       )}
 
+      {/* Full Order Detail Modal on top of everything */}
       {selectedOrder && (
-        <div style={{ zIndex: 1200, position: 'relative' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 3000 }}>
           <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
         </div>
       )}

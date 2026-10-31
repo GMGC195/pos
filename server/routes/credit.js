@@ -497,8 +497,12 @@ router.get('/:id/ledger', async (req, res) => {
     let query = `
       SELECT 
         ct.*,
-        COALESCE(ct.billing_month, TO_CHAR(ct.created_at, 'YYYY-MM')) AS effective_billing_month
+        COALESCE(ct.billing_month, TO_CHAR(ct.created_at, 'YYYY-MM')) AS effective_billing_month,
+        o.slip_number,
+        o.order_type,
+        o.status AS order_status
       FROM credit_transactions ct
+      LEFT JOIN orders o ON ct.order_id = o.id
       WHERE ct.credit_customer_id = $1
     `;
     const params = [id];
