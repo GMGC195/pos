@@ -174,6 +174,73 @@ async function runMigration() {
 
     console.log(`   ✓ Synced ${syncCashRes.rowCount} cash payments & ${syncBankRes.rowCount} bank payments.`);
 
+    // 6. Khata (Credit Module), Discount Packages, and Shift Closings updates
+    console.log('📌 6/6 Migrating Khata (Credit module), Discount Packages & Shift Closing columns...');
+    await client.query(`
+      -- A. Create discount_packages table
+      CREATE TABLE IF NOT EXISTS discount_packages (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        discount_percentage NUMERIC(5,2) NOT NULL DEFAULT 0,
+        discount_rules JSONB DEFAULT '[]'::jsonb,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      ALTER TABLE discount_packages ADD COLUMN IF NOT EXISTS discount_rules JSONB DEFAULT '[]'::jsonb;
+
+      -- B. Update credit_customers table
+      ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'Active';
+      ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS category VARCHAR(30) DEFAULT 'Regular Customer';
+      ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS is_extra_pay BOOLEAN DEFAULT FALSE;
+      ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS discount_package_id INTEGER REFERENCES discount_packages(id) ON DELETE SET NULL;
+      ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_credit_customers_employee_id ON credit_customers(employee_id);
+      CREATE INDEX IF NOT EXISTS idx_credit_customers_discount_package_id ON credit_customers(discount_package_id);
+      CREATE INDEX IF NOT EXISTS idx_credit_customers_category ON credit_customers(category);
+      CREATE INDEX IF NOT EXISTS idx_credit_customers_status ON credit_customers(status);
+
+      -- C. Update credit_transactions table
+      ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS billing_month VARCHAR(7);
+      ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS comments TEXT;
+      ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS classification VARCHAR(50) DEFAULT 'Regular';
+
+      CREATE INDEX IF NOT EXISTS idx_credit_transactions_customer_id ON credit_transactions(credit_customer_id);
+      CREATE INDEX IF NOT EXISTS idx_credit_transactions_billing_month ON credit_transactions(billing_month);
+      CREATE INDEX IF NOT EXISTS idx_credit_transactions_classification ON credit_transactions(classification);
+
+      -- D. Update orders table credit customer link
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS credit_customer_id INTEGER REFERENCES credit_customers(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_orders_credit_customer_id ON orders(credit_customer_id);
+
+      -- E. Update shift_closings columns
+      ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS closing_card NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS card_difference NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS cash_difference NUMERIC(10, 2) DEFAULT 0;
+
+      -- F. Employee Documents table
+      CREATE TABLE IF NOT EXISTS employee_documents (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        document_name VARCHAR(255) NOT NULL,
+        document_type VARCHAR(50),
+        document_number VARCHAR(100),
+        note TEXT,
+        file_url TEXT,
+        file_path TEXT,
+        expiry_date DATE,
+        uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_type VARCHAR(50);
+      ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS document_number VARCHAR(100);
+      ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS note TEXT;
+      ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS file_path TEXT;
+      ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS expiry_date DATE;
+      CREATE INDEX IF NOT EXISTS idx_employee_documents_employee_id ON employee_documents(employee_id);
+    `);
+    console.log('   ✓ Khata & system schema migration verified and applied successfully.');
+
     await client.query('COMMIT');
     console.log('\x1b[32m%s\x1b[0m', '==================================================');
     console.log('\x1b[32m%s\x1b[0m', '✅ SUCCESS: ALL DATABASE MIGRATIONS COMPLETED!');

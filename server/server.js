@@ -89,9 +89,14 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS category VARCHAR(30) DEFAULT 'Regular Customer'",
       "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS is_extra_pay BOOLEAN DEFAULT FALSE",
       "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS discount_package_id INTEGER REFERENCES discount_packages(id) ON DELETE SET NULL",
+      "ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL",
+      "CREATE INDEX IF NOT EXISTS idx_credit_customers_employee_id ON credit_customers(employee_id)",
+      "CREATE INDEX IF NOT EXISTS idx_credit_customers_discount_package_id ON credit_customers(discount_package_id)",
       "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS billing_month VARCHAR(7)",
       "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS comments TEXT",
-      "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS classification VARCHAR(50) DEFAULT 'Regular'"
+      "ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS classification VARCHAR(50) DEFAULT 'Regular'",
+      "CREATE INDEX IF NOT EXISTS idx_credit_transactions_customer_id ON credit_transactions(credit_customer_id)",
+      "CREATE INDEX IF NOT EXISTS idx_credit_transactions_billing_month ON credit_transactions(billing_month)"
     ];
 
     for (const sq of safeStartupQueries) {
