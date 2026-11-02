@@ -948,29 +948,35 @@ export default function Credit() {
       const amt = parseFloat(t.amount || 0);
       const isOrder = t.type === 'CREDIT_ORDER' || t.order_id;
       
-      let desc = '';
+      let descLine1 = '';
+      let descLine2 = '';
       if (isOrder) {
+        const orderNum = t.slip_number || t.order_id || '';
+        descLine1 = orderNum ? `Order #${orderNum}` : 'Order Charge';
         let itemNames = '';
         if (Array.isArray(t.order_items) && t.order_items.length > 0) {
           itemNames = t.order_items.map(i => `${i.qty > 1 ? `${i.qty}x ` : ''}${i.item_name}`).join(', ');
         }
-        const orderNum = t.slip_number || t.order_id || '';
-        desc = orderNum 
-          ? `Order #${orderNum}${itemNames ? ` – ${itemNames}` : (t.comments ? ` – ${t.comments}` : '')}` 
-          : (t.comments || 'Order Charge');
+        descLine2 = itemNames || t.comments || '';
       } else if (t.type === 'PAYMENT') {
-        desc = `Payment Received${t.payment_method ? ` (${t.payment_method})` : ''}${t.comments ? ` – ${t.comments}` : ''}`;
+        descLine1 = `Payment Received${t.payment_method ? ` (${t.payment_method})` : ''}`;
+        descLine2 = t.comments || '';
       } else if (t.type === 'CHARGE') {
-        desc = `Manual Debit${t.comments ? ` – ${t.comments}` : ''}`;
+        descLine1 = 'Manual Debit';
+        descLine2 = t.comments || '';
       } else {
-        desc = `${t.type === 'DEBIT_ADJUSTMENT' ? 'Debit Adjustment' : (t.type === 'CREDIT_ADJUSTMENT' ? 'Credit Adjustment' : t.type)}${t.comments ? ` – ${t.comments}` : ''}`;
+        descLine1 = t.type === 'DEBIT_ADJUSTMENT' ? 'Debit Adjustment' : (t.type === 'CREDIT_ADJUSTMENT' ? 'Credit Adjustment' : (t.type || 'Adjustment'));
+        descLine2 = t.comments || '';
       }
 
       return `
-        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px;">
-          <td style="padding: 9px 10px; word-break: break-word;">${desc}</td>
-          <td style="padding: 9px 10px; white-space: nowrap; color: #475569;">${new Date(t.created_at).toLocaleDateString()}</td>
-          <td style="padding: 9px 10px; text-align: right; white-space: nowrap; font-weight: 700; color: ${isDebit ? '#dc2626' : '#16a34a'};">
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11.5px;">
+          <td style="padding: 7px 8px; word-break: break-word; vertical-align: top;">
+            <div style="font-weight: 700; color: #0f172a; font-size: 12px;">${descLine1}</div>
+            ${descLine2 ? `<div style="font-size: 11px; color: #475569; margin-top: 2px; line-height: 1.35;">${descLine2}</div>` : ''}
+          </td>
+          <td style="padding: 7px 8px; white-space: nowrap; color: #475569; vertical-align: top;">${new Date(t.created_at).toLocaleDateString()}</td>
+          <td style="padding: 7px 8px; text-align: right; white-space: nowrap; font-weight: 700; vertical-align: top; color: ${isDebit ? '#dc2626' : '#16a34a'};">
             ${isDebit ? '+' : '-'}SAR ${amt.toFixed(2)}
           </td>
         </tr>
@@ -983,25 +989,27 @@ export default function Credit() {
       <meta charset="UTF-8"/>
       <title></title>
       <style>
-        @page { size: A4 portrait; margin: 12mm 15mm; }
+        @page { size: A4 portrait; margin: 6mm 10mm 10mm 10mm; }
         @media print {
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          thead { display: table-header-group; }
+          tr { page-break-inside: avoid; }
         }
         * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 0; margin: 0; color: #0f172a; line-height: 1.4; }
-        .heading { margin: 0 0 4px; font-size: 19px; font-weight: 800; text-transform: uppercase; word-break: break-word; color: #0f172a; }
-        .period { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 16px; }
-        .summary-block { margin-bottom: 20px; font-size: 13px; line-height: 1.8; max-width: 480px; }
-        .summary-row { display: flex; justify-content: space-between; padding: 2px 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 0; margin: 0; color: #0f172a; line-height: 1.35; }
+        .heading { margin: 0 0 3px; font-size: 18px; font-weight: 800; text-transform: uppercase; word-break: break-word; color: #0f172a; }
+        .period { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 12px; }
+        .summary-block { margin-bottom: 14px; font-size: 12px; line-height: 1.6; max-width: 440px; }
+        .summary-row { display: flex; justify-content: space-between; padding: 1px 0; }
         .summary-label { font-weight: 600; color: #334155; }
         .summary-val { font-weight: 700; color: #0f172a; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th { background: #f1f5f9; padding: 9px 10px; font-size: 12px; text-align: left; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; font-weight: 700; color: #334155; }
-        .bottom-totals { margin-top: 22px; padding: 14px 18px; background: #f8fafc; border-top: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; max-width: 520px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; }
+        th { background: #f1f5f9; padding: 7px 8px; font-size: 11.5px; text-align: left; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; font-weight: 700; color: #334155; }
+        .bottom-totals { margin-top: 16px; padding: 10px 16px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; max-width: 480px; page-break-inside: avoid; }
         .total-item { }
-        .total-label { font-size: 11.5px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-        .total-amt { font-size: 16.5px; font-weight: 800; margin-top: 3px; }
-        .print-date { margin-top: 28px; font-size: 11px; color: #64748b; font-style: italic; }
+        .total-label { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .total-amt { font-size: 15px; font-weight: 800; margin-top: 2px; }
+        .print-date { margin-top: 18px; font-size: 10.5px; color: #64748b; font-style: italic; page-break-inside: avoid; }
       </style>
     </head>
     <body>
@@ -1019,7 +1027,7 @@ export default function Credit() {
         </div>
         <div class="summary-row">
           <span class="summary-label">Closing Balance:</span>
-          <span class="summary-val" style="color: ${closingBal > 0 ? '#dc2626' : (closingBal < 0 ? '#16a34a' : '#0f172a')};">
+          <span class="summary-val" style="color: ${closingBal > 0 ? '#dc2626' : (closingBal < 0 ? '#16a34a' : '#0f172a')}; font-weight: 800;">
             SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Adv)' : '(0.00)')}
           </span>
         </div>
@@ -1028,13 +1036,13 @@ export default function Credit() {
       <table>
         <thead>
           <tr>
-            <th style="width: 55%;">Description / Activity</th>
-            <th style="width: 20%;">Date</th>
-            <th style="width: 25%; text-align: right;">Total Amount</th>
+            <th style="width: 58%;">Description / Activity</th>
+            <th style="width: 18%;">Date</th>
+            <th style="width: 24%; text-align: right;">Total Amount</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || '<tr><td colspan="3" style="padding: 20px; text-align: center; color: #64748b;">No transactions recorded in this period.</td></tr>'}
+          ${rowsHtml || '<tr><td colspan="3" style="padding: 16px; text-align: center; color: #64748b;">No transactions recorded in this period.</td></tr>'}
         </tbody>
       </table>
 
@@ -1043,8 +1051,8 @@ export default function Credit() {
           <div class="total-label">Total Bills</div>
           <div class="total-amt" style="color: #dc2626;">SAR ${totalBills.toFixed(2)}</div>
         </div>
-        <div style="height: 38px; width: 1px; background: #cbd5e1;"></div>
-        <div class="total-item">
+        <div style="height: 34px; width: 1px; background: #cbd5e1;"></div>
+        <div class="total-item" style="text-align: right;">
           <div class="total-label">Total Payments Received</div>
           <div class="total-amt" style="color: #16a34a;">SAR ${totalPayments.toFixed(2)}</div>
         </div>
@@ -1277,43 +1285,141 @@ export default function Credit() {
     }
   };
 
-  // 3. Redesigned Detailed Excel Export (Complete 13-Column Breakdown, Full Item/Payment Details, Summary)
+  // 3. Redesigned Detailed Excel Export (Professional Styling, Merged Headers, Colors, Borders, xlsx-js-style)
   const handleExportExcel = async () => {
     const data = getStatementData();
     if (!data) return;
     const { periodLabel, statementMonth, totalBills, totalPayments, openBal, closingBal, sortedTxs } = data;
 
     try {
-      const XLSX = await import('xlsx');
+      const xlsxModule = await import('xlsx-js-style');
+      const XLSX = xlsxModule.default || xlsxModule;
 
-      const excelRows = [
-        [`${activeCustomer.name.toUpperCase()} – KHATA STATEMENT`],
-        ['Statement Period', periodLabel],
-        ['Statement Month', statementMonth],
-        ['Opening Balance', Number(openBal.toFixed(2))],
-        ['Closing Balance', Number(closingBal.toFixed(2))],
-        ['Customer Category', activeCustomer.category || 'Regular Customer'],
-        ['Company Name', activeCustomer.company_name || '-'],
-        ['Phone', activeCustomer.phone || '-'],
-        ['Generated At', new Date().toLocaleString()],
-        [], // Empty separator
-        [
-          'Transaction Date',
-          'Bill / Invoice Number',
-          'Transaction Type',
-          'Activity / Description',
-          'Product Name',
-          'Product Description',
-          'Quantity',
-          'Unit Price',
-          'Debit Amount',
-          'Credit / Payment Received',
-          'Total Amount',
-          'Payment Method',
-          'Related Bill Number'
-        ]
+      const borderThin = {
+        top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+        bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+        left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+        right: { style: 'thin', color: { rgb: 'CBD5E1' } }
+      };
+
+      const rows = [];
+      const rowHeights = [];
+      const merges = [];
+
+      // Row 0: Merged Main Header Banner (A1:M1)
+      const headerTitle = `${(activeCustomer.name || 'CUSTOMER').toUpperCase()} – KHATA STATEMENT`;
+      const titleRow = [];
+      for (let c = 0; c < 13; c++) {
+        titleRow.push({
+          v: c === 0 ? headerTitle : '',
+          t: 's',
+          s: {
+            font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: '1E293B' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: borderThin
+          }
+        });
+      }
+      rows.push(titleRow);
+      rowHeights.push({ hpt: 32 });
+      merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } });
+
+      // Row 1: Merged Subtitle Banner (A2:M2)
+      const subtitleText = `Statement Period: ${periodLabel}    |    Statement Month: ${statementMonth}    |    Generated: ${new Date().toLocaleString()}`;
+      const subtitleRow = [];
+      for (let c = 0; c < 13; c++) {
+        subtitleRow.push({
+          v: c === 0 ? subtitleText : '',
+          t: 's',
+          s: {
+            font: { bold: true, sz: 9.5, color: { rgb: '334155' } },
+            fill: { fgColor: { rgb: 'F1F5F9' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: borderThin
+          }
+        });
+      }
+      rows.push(subtitleRow);
+      rowHeights.push({ hpt: 20 });
+      merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 12 } });
+
+      // Row 2: Customer Meta & Balances Info
+      // A3:D3 (cols 0-3): Customer & Category
+      // E3:H3 (cols 4-7): Opening Balance
+      // I3:M3 (cols 8-12): Closing Balance
+      const custText = `Customer: ${activeCustomer.name || 'Customer'}${activeCustomer.category ? ` (${activeCustomer.category})` : ''}${activeCustomer.company_name ? ` • ${activeCustomer.company_name}` : ''}`;
+      const openBalText = `Opening Balance: SAR ${openBal.toFixed(2)}`;
+      const closeBalText = `Closing Balance: SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Advance)' : '(0.00)')}`;
+
+      const metaRow = [];
+      for (let c = 0; c < 13; c++) {
+        let v = '';
+        let fontColor = '0F172A';
+        let bgColor = 'F8FAFC';
+
+        if (c === 0) {
+          v = custText;
+        } else if (c === 4) {
+          v = openBalText;
+        } else if (c === 8) {
+          v = closeBalText;
+          fontColor = closingBal > 0 ? 'DC2626' : (closingBal < 0 ? '16A34A' : '0F172A');
+          bgColor = closingBal > 0 ? 'FEF2F2' : (closingBal < 0 ? 'F0FDF4' : 'F8FAFC');
+        }
+
+        metaRow.push({
+          v,
+          t: 's',
+          s: {
+            font: { bold: true, sz: 9.5, color: { rgb: fontColor } },
+            fill: { fgColor: { rgb: bgColor } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: borderThin
+          }
+        });
+      }
+      rows.push(metaRow);
+      rowHeights.push({ hpt: 22 });
+      merges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: 3 } });
+      merges.push({ s: { r: 2, c: 4 }, e: { r: 2, c: 7 } });
+      merges.push({ s: { r: 2, c: 8 }, e: { r: 2, c: 12 } });
+
+      // Row 3: Blank spacing row
+      rows.push(Array(13).fill({ v: '', t: 's' }));
+      rowHeights.push({ hpt: 8 });
+
+      // Row 4: Column Headers
+      const colHeaders = [
+        'Transaction Date',
+        'Bill / Invoice Number',
+        'Transaction Type',
+        'Activity / Description',
+        'Product Name',
+        'Product Description',
+        'Quantity',
+        'Unit Price (SAR)',
+        'Debit Amount (SAR)',
+        'Credit / Received (SAR)',
+        'Total Amount (SAR)',
+        'Payment Method',
+        'Related Bill Number'
       ];
+      rows.push(
+        colHeaders.map(h => ({
+          v: h,
+          t: 's',
+          s: {
+            font: { bold: true, sz: 9.5, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: '334155' } },
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            border: borderThin
+          }
+        }))
+      );
+      rowHeights.push({ hpt: 28 });
 
+      // Data Rows
       sortedTxs.forEach((t) => {
         const isOrder = t.type === 'CREDIT_ORDER' || t.order_id;
         const isPayment = t.type === 'PAYMENT';
@@ -1327,97 +1433,294 @@ export default function Credit() {
             const q = parseFloat(item.qty || 1);
             const uPrice = parseFloat(item.unit_price || 0);
             const lineAmt = q * uPrice;
-            excelRows.push([
-              txDate,
-              billNum,
-              'Order / Sale',
-              idx === 0 ? `Order ${billNum} – Products Sale` : `Item in ${billNum}`,
-              item.item_name || '',
-              item.description || '',
-              q,
-              uPrice,
-              lineAmt, // Debit
-              '', // Credit
-              lineAmt, // Total
-              t.payment_method || '',
-              billNum
+            const desc = idx === 0 ? `Order ${billNum} – Products Sale` : `Item in ${billNum}`;
+            const prodName = item.item_name || '';
+            const prodDesc = item.description || '';
+
+            const textLen = Math.max(desc.length, prodName.length, prodDesc.length);
+            const hpt = textLen > 50 ? 34 : (textLen > 25 ? 26 : 20);
+
+            rows.push([
+              { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+              { v: billNum, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+              { v: 'Order / Sale', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+              { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+              { v: prodName, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+              { v: prodDesc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+              { v: q, t: 'n', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+              { v: uPrice, t: 'n', z: '#,##0.00', s: { alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+              { v: lineAmt, t: 'n', z: '#,##0.00', s: { font: { bold: true, color: { rgb: 'DC2626' } }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+              { v: '', t: 's', s: { alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+              { v: lineAmt, t: 'n', z: '#,##0.00', s: { font: { bold: true }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+              { v: t.payment_method || '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+              { v: billNum, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } }
             ]);
+            rowHeights.push({ hpt });
           });
         } else if (isOrder) {
-          excelRows.push([
-            txDate,
-            billNum,
-            'Order / Sale',
-            t.comments || `Order ${billNum}`,
-            'General Order',
-            t.comments || '',
-            1,
-            amt,
-            amt, // Debit
-            '', // Credit
-            amt, // Total
-            t.payment_method || '',
-            billNum
+          const desc = t.comments || `Order ${billNum}`;
+          const prodDesc = t.comments || '';
+          const textLen = Math.max(desc.length, prodDesc.length);
+          const hpt = textLen > 50 ? 34 : (textLen > 25 ? 26 : 20);
+
+          rows.push([
+            { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: billNum, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: 'Order / Sale', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: 'General Order', t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: prodDesc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: 1, t: 'n', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: amt, t: 'n', z: '#,##0.00', s: { alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: amt, t: 'n', z: '#,##0.00', s: { font: { bold: true, color: { rgb: 'DC2626' } }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: '', t: 's', s: { alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: amt, t: 'n', z: '#,##0.00', s: { font: { bold: true }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: t.payment_method || '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: billNum, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } }
           ]);
+          rowHeights.push({ hpt });
         } else if (isPayment) {
-          excelRows.push([
-            txDate,
-            '',
-            'Payment Received',
-            `Payment Received (${t.payment_method || 'Cash'})${t.comments ? ` – ${t.comments}` : ''}`,
-            '',
-            t.comments || '',
-            '',
-            '',
-            '', // Debit
-            amt, // Credit
-            amt, // Total
-            t.payment_method || 'Cash',
-            t.slip_number ? `Bill #${t.slip_number}` : ''
+          const desc = `Payment Received (${t.payment_method || 'Cash'})${t.comments ? ` – ${t.comments}` : ''}`;
+          const prodDesc = t.comments || '';
+          const textLen = Math.max(desc.length, prodDesc.length);
+          const hpt = textLen > 50 ? 34 : (textLen > 25 ? 26 : 20);
+
+          rows.push([
+            { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: 'Payment Received', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: '', t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: prodDesc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: '', t: 's', s: { alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: '', t: 's', s: { alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: amt, t: 'n', z: '#,##0.00', s: { font: { bold: true, color: { rgb: '16A34A' } }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: amt, t: 'n', z: '#,##0.00', s: { font: { bold: true }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: t.payment_method || 'Cash', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: t.slip_number ? `Bill #${t.slip_number}` : '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } }
           ]);
+          rowHeights.push({ hpt });
         } else {
           // Manual charge or adjustment
-          excelRows.push([
-            txDate,
-            billNum || '',
-            isCharge ? 'Manual Debit' : (t.type || 'Adjustment'),
-            t.comments || 'Manual Charge / Adjustment',
-            '',
-            t.comments || '',
-            1,
-            amt,
-            amt, // Debit
-            '', // Credit
-            amt, // Total
-            t.payment_method || '',
-            billNum || ''
+          const desc = t.comments || 'Manual Charge / Adjustment';
+          const typeLabel = isCharge ? 'Manual Debit' : (t.type === 'DEBIT_ADJUSTMENT' ? 'Debit Adjustment' : (t.type === 'CREDIT_ADJUSTMENT' ? 'Credit Adjustment' : (t.type || 'Adjustment')));
+          const isDebitAdj = isCharge || t.type === 'DEBIT_ADJUSTMENT';
+
+          rows.push([
+            { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: billNum || '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: typeLabel, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: '', t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: t.comments || '', t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
+            { v: 1, t: 'n', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: amt, t: 'n', z: '#,##0.00', s: { alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: isDebitAdj ? amt : '', t: isDebitAdj ? 'n' : 's', z: '#,##0.00', s: { font: { bold: true, color: { rgb: isDebitAdj ? 'DC2626' : '000000' } }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: !isDebitAdj ? amt : '', t: !isDebitAdj ? 'n' : 's', z: '#,##0.00', s: { font: { bold: true, color: { rgb: '16A34A' } }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: amt, t: 'n', z: '#,##0.00', s: { font: { bold: true }, alignment: { horizontal: 'right', vertical: 'center' }, border: borderThin } },
+            { v: t.payment_method || '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: billNum || '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } }
           ]);
+          rowHeights.push({ hpt: 22 });
         }
       });
 
-      excelRows.push([]);
-      excelRows.push(['SUMMARY & TOTALS']);
-      excelRows.push(['Total Bills (Orders)', '', '', '', '', '', '', '', Number(totalBills.toFixed(2))]);
-      excelRows.push(['Total Payments Received', '', '', '', '', '', '', '', '', Number(totalPayments.toFixed(2))]);
-      excelRows.push(['Opening Balance', '', '', '', '', '', '', '', '', '', Number(openBal.toFixed(2))]);
-      excelRows.push(['Closing Balance', '', '', '', '', '', '', '', '', '', Number(closingBal.toFixed(2))]);
-      excelRows.push(['Printed On', new Date().toLocaleString()]);
+      // Bottom Summary Block
+      rows.push(Array(13).fill({ v: '', t: 's' }));
+      rowHeights.push({ hpt: 10 });
 
-      const ws = XLSX.utils.aoa_to_sheet(excelRows);
+      const buildSummaryRow = (label, amtVal, colorRgb, isDebit) => {
+        const sRow = [];
+        for (let c = 0; c < 13; c++) {
+          if (c === 0) {
+            sRow.push({
+              v: label,
+              t: 's',
+              s: {
+                font: { bold: true, sz: 10, color: { rgb: '1E293B' } },
+                fill: { fgColor: { rgb: 'F8FAFC' } },
+                alignment: { horizontal: 'right', vertical: 'center' },
+                border: borderThin
+              }
+            });
+          } else if (c < 8) {
+            sRow.push({
+              v: '',
+              t: 's',
+              s: { fill: { fgColor: { rgb: 'F8FAFC' } }, border: borderThin }
+            });
+          } else if (c === 8 && isDebit) {
+            sRow.push({
+              v: amtVal,
+              t: 'n',
+              z: '#,##0.00',
+              s: {
+                font: { bold: true, sz: 10, color: { rgb: colorRgb } },
+                fill: { fgColor: { rgb: 'F8FAFC' } },
+                alignment: { horizontal: 'right', vertical: 'center' },
+                border: borderThin
+              }
+            });
+          } else if (c === 9 && !isDebit) {
+            sRow.push({
+              v: amtVal,
+              t: 'n',
+              z: '#,##0.00',
+              s: {
+                font: { bold: true, sz: 10, color: { rgb: colorRgb } },
+                fill: { fgColor: { rgb: 'F8FAFC' } },
+                alignment: { horizontal: 'right', vertical: 'center' },
+                border: borderThin
+              }
+            });
+          } else if (c === 10) {
+            sRow.push({
+              v: amtVal,
+              t: 'n',
+              z: '#,##0.00',
+              s: {
+                font: { bold: true, sz: 10, color: { rgb: colorRgb } },
+                fill: { fgColor: { rgb: 'F8FAFC' } },
+                alignment: { horizontal: 'right', vertical: 'center' },
+                border: borderThin
+              }
+            });
+          } else {
+            sRow.push({
+              v: '',
+              t: 's',
+              s: { fill: { fgColor: { rgb: 'F8FAFC' } }, border: borderThin }
+            });
+          }
+        }
+        return sRow;
+      };
+
+      // Row: Total Bills
+      const rIdxBills = rows.length;
+      rows.push(buildSummaryRow('Total Bills (Orders):', totalBills, 'DC2626', true));
+      rowHeights.push({ hpt: 22 });
+      merges.push({ s: { r: rIdxBills, c: 0 }, e: { r: rIdxBills, c: 7 } });
+
+      // Row: Total Payments
+      const rIdxPmts = rows.length;
+      rows.push(buildSummaryRow('Total Payments Received:', totalPayments, '16A34A', false));
+      rowHeights.push({ hpt: 22 });
+      merges.push({ s: { r: rIdxPmts, c: 0 }, e: { r: rIdxPmts, c: 7 } });
+
+      // Row: Opening Balance
+      const rIdxOpen = rows.length;
+      const openRow = [];
+      for (let c = 0; c < 13; c++) {
+        if (c === 0) {
+          openRow.push({
+            v: 'Opening Balance:',
+            t: 's',
+            s: {
+              font: { bold: true, sz: 10, color: { rgb: '334155' } },
+              fill: { fgColor: { rgb: 'F1F5F9' } },
+              alignment: { horizontal: 'right', vertical: 'center' },
+              border: borderThin
+            }
+          });
+        } else if (c < 8) {
+          openRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: 'F1F5F9' } }, border: borderThin } });
+        } else if (c === 10) {
+          openRow.push({
+            v: openBal,
+            t: 'n',
+            z: '#,##0.00',
+            s: {
+              font: { bold: true, sz: 10, color: { rgb: '0F172A' } },
+              fill: { fgColor: { rgb: 'F1F5F9' } },
+              alignment: { horizontal: 'right', vertical: 'center' },
+              border: borderThin
+            }
+          });
+        } else {
+          openRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: 'F1F5F9' } }, border: borderThin } });
+        }
+      }
+      rows.push(openRow);
+      rowHeights.push({ hpt: 22 });
+      merges.push({ s: { r: rIdxOpen, c: 0 }, e: { r: rIdxOpen, c: 7 } });
+
+      // Row: Closing Balance
+      const rIdxClose = rows.length;
+      const closeColor = closingBal > 0 ? 'DC2626' : (closingBal < 0 ? '16A34A' : '0F172A');
+      const closeBg = closingBal > 0 ? 'FEF2F2' : (closingBal < 0 ? 'F0FDF4' : 'F1F5F9');
+      const closeLabel = `Closing Balance ${closingBal > 0 ? '(Due / Outstanding):' : (closingBal < 0 ? '(Advance):' : ':')}`;
+      const closeRow = [];
+      for (let c = 0; c < 13; c++) {
+        if (c === 0) {
+          closeRow.push({
+            v: closeLabel,
+            t: 's',
+            s: {
+              font: { bold: true, sz: 10.5, color: { rgb: closeColor } },
+              fill: { fgColor: { rgb: closeBg } },
+              alignment: { horizontal: 'right', vertical: 'center' },
+              border: borderThin
+            }
+          });
+        } else if (c < 8) {
+          closeRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: closeBg } }, border: borderThin } });
+        } else if (c === 10) {
+          closeRow.push({
+            v: closingBal,
+            t: 'n',
+            z: '#,##0.00',
+            s: {
+              font: { bold: true, sz: 10.5, color: { rgb: closeColor } },
+              fill: { fgColor: { rgb: closeBg } },
+              alignment: { horizontal: 'right', vertical: 'center' },
+              border: borderThin
+            }
+          });
+        } else {
+          closeRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: closeBg } }, border: borderThin } });
+        }
+      }
+      rows.push(closeRow);
+      rowHeights.push({ hpt: 24 });
+      merges.push({ s: { r: rIdxClose, c: 0 }, e: { r: rIdxClose, c: 7 } });
+
+      // Row: Generated At footer
+      const rIdxGen = rows.length;
+      const genRow = [];
+      for (let c = 0; c < 13; c++) {
+        genRow.push({
+          v: c === 0 ? `Printed / Exported On: ${new Date().toLocaleString()}` : '',
+          t: 's',
+          s: {
+            font: { italic: true, sz: 9, color: { rgb: '64748B' } },
+            alignment: { horizontal: 'center', vertical: 'center' }
+          }
+        });
+      }
+      rows.push(genRow);
+      rowHeights.push({ hpt: 18 });
+      merges.push({ s: { r: rIdxGen, c: 0 }, e: { r: rIdxGen, c: 12 } });
+
+      // Create sheet & attach properties
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!merges'] = merges;
+      ws['!rows'] = rowHeights;
       ws['!cols'] = [
-        { wch: 20 }, // Transaction Date
-        { wch: 20 }, // Bill / Invoice Number
-        { wch: 18 }, // Transaction Type
+        { wch: 19 }, // Transaction Date
+        { wch: 16 }, // Bill / Invoice Number
+        { wch: 16 }, // Transaction Type
         { wch: 32 }, // Activity / Description
-        { wch: 24 }, // Product Name
-        { wch: 28 }, // Product Description
-        { wch: 10 }, // Quantity
-        { wch: 12 }, // Unit Price
-        { wch: 14 }, // Debit Amount
-        { wch: 15 }, // Credit / Payment Received
-        { wch: 14 }, // Total Amount
-        { wch: 16 }, // Payment Method
-        { wch: 20 }  // Related Bill Number
+        { wch: 22 }, // Product Name
+        { wch: 22 }, // Product Description
+        { wch: 9 },  // Quantity
+        { wch: 14 }, // Unit Price
+        { wch: 16 }, // Debit Amount
+        { wch: 16 }, // Credit / Received
+        { wch: 16 }, // Total Amount
+        { wch: 15 }, // Payment Method
+        { wch: 16 }  // Related Bill Number
       ];
 
       const wb = XLSX.utils.book_new();
