@@ -317,12 +317,28 @@ router.get('/', async (req, res) => {
     `;
     let whereClauses = [];
 
+    // Helper to generate branch matching clause (overlap matching across branch name variations)
+    const getBranchMatchClause = (branchStr) => {
+      const numMatch = (branchStr || '').match(/\d+/);
+      const branchNum = numMatch ? numMatch[0] : null;
+      if (branchNum) {
+        return `(
+          cc.available_branches @> '["${branchStr.replace(/'/g, "''")}"]'::jsonb 
+          OR cc.available_branches @> '["Branch ${branchNum}"]'::jsonb 
+          OR cc.available_branches @> '["Restaurant ${branchNum}"]'::jsonb 
+          OR cc.available_branches @> '["B${branchNum}"]'::jsonb
+        )`;
+      } else {
+        params.push(JSON.stringify([branchStr]));
+        return `cc.available_branches @> $${params.length}::jsonb`;
+      }
+    };
+
     // Branch isolation for non-admin/management
     if (userRole !== 'admin' && userRole !== 'developer' && userRole !== 'management') {
       if (userBranch) {
         const branches = userBranch.split(',').map(s => s.trim());
-        params.push(JSON.stringify([branches[0]]));
-        whereClauses.push(`cc.available_branches @> $${params.length}::jsonb`);
+        whereClauses.push(getBranchMatchClause(branches[0]));
       } else {
         whereClauses.push('1=0');
       }
@@ -332,8 +348,7 @@ router.get('/', async (req, res) => {
         : (userRole === 'management' && userBranch && userBranch !== 'All' ? userBranch.split(',')[0].trim() : null);
         
       if (effectiveBranch && effectiveBranch !== 'All') {
-        params.push(JSON.stringify([effectiveBranch]));
-        whereClauses.push(`cc.available_branches @> $${params.length}::jsonb`);
+        whereClauses.push(getBranchMatchClause(effectiveBranch));
       }
     }
 

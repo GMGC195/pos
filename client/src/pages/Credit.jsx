@@ -5,7 +5,7 @@ import {
   Plus, Edit, Trash2, FileText, X, Percent, Tag, Calendar, 
   MessageSquare, Check, AlertTriangle, Filter, ArrowDownRight, 
   ArrowUpRight, UserCheck, UserX, ChevronDown, Layers, ShieldCheck,
-  Users, Search, Printer, Download
+  Users, Search, Printer, Download, MoreVertical
 } from 'lucide-react';
 import { CURRENCY } from '../config';
 import { useAuth } from '../contexts/AuthContext';
@@ -382,6 +382,7 @@ export default function Credit() {
   const [selectedMainMonth, setSelectedMainMonth] = useState(getCurrentMonthStr());
   const [balanceSort, setBalanceSort] = useState('default'); // 'default' | 'highest_balance' | 'lowest_balance'
   const [dbBranches, setDbBranches] = useState(['Branch 1', 'Branch 2', 'Branch 3']);
+  const [actionMenuOpenId, setActionMenuOpenId] = useState(null);
 
   // Date Range Filter & Running Balance State inside Ledger
   const [showDateRangeFilter, setShowDateRangeFilter] = useState(false);
@@ -460,6 +461,16 @@ export default function Credit() {
   useEffect(() => {
     fetchEmployeesList();
   }, []);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (actionMenuOpenId && !e.target.closest('.khata-action-menu-container')) {
+        setActionMenuOpenId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [actionMenuOpenId]);
 
   const fetchDiscountPackages = async () => {
     try {
@@ -1284,8 +1295,23 @@ export default function Credit() {
     };
   }, [selectedLedgerMonth, monthlySummary]);
 
-  // Filtered customer listing based on category tab
+  const customerMatchesBranch = (c, bFilter) => {
+    if (!bFilter || bFilter === 'All') return true;
+    const branches = Array.isArray(c.available_branches) ? c.available_branches : [];
+    if (branches.length === 0) return true;
+    const numMatch = bFilter.match(/\d+/);
+    const branchNum = numMatch ? numMatch[0] : null;
+    return branches.some(b => {
+      if (!b) return false;
+      if (b === bFilter) return true;
+      if (branchNum && b.includes(branchNum)) return true;
+      return false;
+    });
+  };
+
+  // Filtered customer listing based on category tab & branch overlap
   const filteredCustomers = customers.filter(c => {
+    if (!customerMatchesBranch(c, branchFilter)) return false;
     if (categoryFilter === 'All') return true;
     if (categoryFilter === 'Employee') return c.category === 'Employee';
     if (categoryFilter === 'Company') return c.category === 'Company';
@@ -1293,9 +1319,10 @@ export default function Credit() {
     return true;
   });
 
-  const employeeCount = customers.filter(c => c.category === 'Employee').length;
-  const companyCount = customers.filter(c => c.category === 'Company').length;
-  const regularCount = customers.filter(c => c.category === 'Regular Customer' || (!c.category && c.category !== 'Employee' && c.category !== 'Company')).length;
+  const branchFilteredCustomers = customers.filter(c => customerMatchesBranch(c, branchFilter));
+  const employeeCount = branchFilteredCustomers.filter(c => c.category === 'Employee').length;
+  const companyCount = branchFilteredCustomers.filter(c => c.category === 'Company').length;
+  const regularCount = branchFilteredCustomers.filter(c => c.category === 'Regular Customer' || (!c.category && c.category !== 'Employee' && c.category !== 'Company')).length;
 
   const sortedAndFilteredCustomers = useMemo(() => {
     let list = [...filteredCustomers];
@@ -1398,35 +1425,17 @@ export default function Credit() {
             </select>
           </div>
 
-          {/* 1.B Branch Segmented Switch Control */}
+          {/* 1.B Branch Segmented Switch Control: Strictly All, B1, B2, B3 */}
           {(isAdmin || isManagement) && (
             <div style={{ display: 'inline-flex', background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 8, padding: 3, gap: 3 }}>
-              <button
-                type="button"
-                onClick={() => setBranchFilter('All')}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  border: 'none',
-                  background: branchFilter === 'All' ? 'var(--primary)' : 'transparent',
-                  color: branchFilter === 'All' ? '#fff' : 'var(--text)',
-                  fontWeight: 700,
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s'
-                }}
-              >
-                All
-              </button>
-              {dbBranches.map(b => {
-                const shortCode = getBranchShortName(b);
-                const isActive = branchFilter === b;
+              {['All', 'B1', 'B2', 'B3'].map((code) => {
+                const isActive = (code === 'All' && (!branchFilter || branchFilter === 'All')) ||
+                                 (code !== 'All' && (branchFilter === code || branchFilter === `Branch ${code.replace('B', '')}` || branchFilter.includes(code.replace('B', ''))));
                 return (
                   <button
-                    key={b}
+                    key={code}
                     type="button"
-                    onClick={() => setBranchFilter(b)}
-                    title={b}
+                    onClick={() => setBranchFilter(code === 'All' ? 'All' : `Branch ${code.replace('B', '')}`)}
                     style={{
                       padding: '5px 12px',
                       borderRadius: 6,
@@ -1439,7 +1448,7 @@ export default function Credit() {
                       transition: 'all 0.15s'
                     }}
                   >
-                    {shortCode}
+                    {code}
                   </button>
                 );
               })}
@@ -1550,27 +1559,35 @@ export default function Credit() {
       </div>
 
       {/* Customer List Table */}
-      <div style={{ background: 'var(--surface)', borderRadius: 12, border: '1.5px solid var(--surface-2)', overflowX: 'auto', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 12, border: '1.5px solid var(--surface-2)', overflowX: 'auto', minHeight: 220, paddingBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
         <table style={{ width: '100%', minWidth: '1050px', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--surface-2)', background: 'var(--surface-50)' }}>
+              {/* 1. Customer / Category */}
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 200 }}>Customer / Category</th>
+              {/* 2. Balance (All & Current) */}
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 180, whiteSpace: 'nowrap' }}>Balance (All & Current)</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Status</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 150 }}>Phone / Ref</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 240, whiteSpace: 'nowrap' }}>Discount Package</th>
+              {/* 3. Discount Package */}
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 220, whiteSpace: 'nowrap' }}>Discount Package</th>
+              {/* 4. Branches */}
+              {(isAdmin || isManagement) && <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 160 }}>Branches</th>}
+              {/* 5. Limit */}
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Limit</th>
-              {isAdmin && <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 160 }}>Branches</th>}
+              {/* 6. Phone / Ref */}
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 150 }}>Phone / Ref</th>
+              {/* 7. Status */}
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Status</th>
+              {/* 8. Actions */}
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right', minWidth: 110 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={isAdmin ? 8 : 7} style={{ padding: 32, textAlign: 'center' }}>Loading...</td></tr>
+              <tr><td colSpan={(isAdmin || isManagement) ? 8 : 7} style={{ padding: 32, textAlign: 'center' }}>Loading...</td></tr>
             ) : filteredCustomers.length === 0 ? (
-              <tr><td colSpan={isAdmin ? 8 : 7} style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>No credit customers found.</td></tr>
+              <tr><td colSpan={(isAdmin || isManagement) ? 8 : 7} style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>No credit customers found.</td></tr>
             ) : (
-              sortedAndFilteredCustomers.map((c) => {
+              sortedAndFilteredCustomers.map((c, index) => {
                 const effLim = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 100;
                 const limitExceeded = Number(c.balance) > effLim;
                 const isDeactivated = c.status === 'Deactivated' || c.is_active === false;
@@ -1588,6 +1605,7 @@ export default function Credit() {
                       opacity: isDeactivated ? 0.75 : 1
                     }}
                   >
+                    {/* 1. Customer / Category */}
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span>{c.name}</span>
@@ -1607,7 +1625,7 @@ export default function Credit() {
                       </div>
                     </td>
 
-                    {/* Column 2: Balance (All & Current) moved immediately after Customer / Category */}
+                    {/* 2. Balance (All & Current) */}
                     <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', minWidth: 180 }}>
                       {/* All Balance (Overall Account Total) */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1641,27 +1659,8 @@ export default function Credit() {
                       </div>
                     </td>
 
-                    {/* Column 3: Status */}
-                    <td style={{ padding: '14px 16px' }}>
-                      {isDeactivated ? (
-                        <span style={{ fontSize: 11, background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <UserX size={12} /> Deactivated
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 11, background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <UserCheck size={12} /> Active
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Column 4: Phone / Ref */}
-                    <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 13 }}>
-                      <div>{c.phone || '-'}</div>
-                      {c.reference && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.reference}</div>}
-                    </td>
-
-                    {/* Column 5: Discount Package */}
-                    <td style={{ padding: '14px 16px', minWidth: 240 }}>
+                    {/* 3. Discount Package */}
+                    <td style={{ padding: '14px 16px', minWidth: 220 }}>
                       {c.discount_package_name ? (
                         <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, whiteSpace: 'nowrap', display: 'inline-block' }}>
                           Pkg: {c.discount_package_name} {ruleCount > 0 ? `(${ruleCount} rules)` : ''}
@@ -1683,50 +1682,201 @@ export default function Credit() {
                       })()}
                     </td>
 
+                    {/* 4. Branches */}
+                    {(isAdmin || isManagement) && (
+                      <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 12 }}>
+                        {Array.isArray(c.available_branches) && c.available_branches.length > 0 
+                          ? c.available_branches.join(', ') 
+                          : (c.available_branches ? String(c.available_branches) : '-')}
+                      </td>
+                    )}
+
+                    {/* 5. Limit */}
                     <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 13 }}>
                       {Number(c.credit_limit) > 0 ? `${CURRENCY} ${Number(c.credit_limit).toFixed(2)}` : 'No Limit'}
                     </td>
 
-                    {isAdmin && (
-                      <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 12 }}>
-                        {c.available_branches ? c.available_branches.join(', ') : '-'}
-                      </td>
-                    )}
+                    {/* 6. Phone / Ref */}
+                    <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 13 }}>
+                      <div>{c.phone || '-'}</div>
+                      {c.reference && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.reference}</div>}
+                    </td>
 
+                    {/* 7. Status */}
+                    <td style={{ padding: '14px 16px' }}>
+                      {isDeactivated ? (
+                        <span style={{ fontSize: 11, background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <UserX size={12} /> Deactivated
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <UserCheck size={12} /> Active
+                        </span>
+                      )}
+                    </td>
+
+                    {/* 8. Actions */}
                     <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
-                        <button onClick={(e) => { e.stopPropagation(); openLedger(c); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 6 }} title="Ledger & Monthly Breakdown">
+                      <div 
+                        className="khata-action-menu-container"
+                        style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center', position: 'relative' }}
+                      >
+                        {/* Visible View Slip / Details icon */}
+                        <button 
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openLedger(c); }} 
+                          style={{ 
+                            background: 'none', 
+                            border: 'none', 
+                            color: 'var(--primary)', 
+                            cursor: 'pointer', 
+                            padding: '6px 8px', 
+                            borderRadius: 6,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }} 
+                          title="Ledger & Monthly Breakdown"
+                        >
                           <FileText size={18} />
                         </button>
-                        {isManagement ? (
-                          <>
-                            <button disabled style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'not-allowed', opacity: 0.4, padding: 6 }}>
-                              <Edit size={18} />
-                            </button>
-                            <button disabled style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'not-allowed', opacity: 0.4, padding: 6 }}>
-                              <Trash2 size={18} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button onClick={(e) => { e.stopPropagation(); openEditModal(c); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6 }} title="Edit Customer">
-                              <Edit size={18} />
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); handleDelete(c); }} 
+
+                        {/* Three-Dot (⋮) Menu Button */}
+                        <div style={{ position: 'relative', display: 'inline-block' }}>
+                          <button 
+                            type="button"
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setActionMenuOpenId(actionMenuOpenId === c.id ? null : c.id); 
+                            }} 
+                            style={{ 
+                              background: actionMenuOpenId === c.id ? 'var(--surface-2)' : 'none', 
+                              border: 'none', 
+                              color: 'var(--text-secondary)', 
+                              cursor: 'pointer', 
+                              padding: '6px 6px', 
+                              borderRadius: 6,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }} 
+                            title="Actions"
+                          >
+                            <MoreVertical size={18} />
+                          </button>
+
+                          {/* Three-Dot Dropdown */}
+                          {actionMenuOpenId === c.id && (
+                            <div 
+                              onClick={(e) => e.stopPropagation()}
                               style={{ 
-                                background: 'none', 
-                                border: 'none', 
-                                color: Math.abs(Number(c.balance)) > 0.001 ? '#9ca3af' : 'var(--red)', 
-                                cursor: 'pointer', 
-                                padding: 6 
-                              }} 
-                              title={Math.abs(Number(c.balance)) > 0.001 ? "Balance must be 0 to delete" : "Delete Customer"}
+                                position: 'absolute', 
+                                right: 0, 
+                                ...(index >= Math.max(1, sortedAndFilteredCustomers.length - 2) && sortedAndFilteredCustomers.length > 2 
+                                    ? { bottom: 'calc(100% + 4px)' } 
+                                    : { top: 'calc(100% + 4px)' }),
+                                background: 'var(--surface)', 
+                                border: '1px solid var(--surface-3)', 
+                                borderRadius: 8, 
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.18)', 
+                                minWidth: 130, 
+                                zIndex: 100, 
+                                overflow: 'hidden',
+                                padding: '4px 0',
+                                textAlign: 'left'
+                              }}
                             >
-                              <Trash2 size={18} />
-                            </button>
-                          </>
-                        )}
+                              {isManagement ? (
+                                <>
+                                  <div 
+                                    style={{ 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: 8, 
+                                      padding: '8px 14px', 
+                                      fontSize: 13, 
+                                      color: 'var(--text-muted)', 
+                                      opacity: 0.5, 
+                                      cursor: 'not-allowed' 
+                                    }}
+                                  >
+                                    <Edit size={15} /> Edit
+                                  </div>
+                                  <div 
+                                    style={{ 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: 8, 
+                                      padding: '8px 14px', 
+                                      fontSize: 13, 
+                                      color: 'var(--text-muted)', 
+                                      opacity: 0.5, 
+                                      cursor: 'not-allowed' 
+                                    }}
+                                  >
+                                    <Trash2 size={15} /> Delete
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      setActionMenuOpenId(null); 
+                                      openEditModal(c); 
+                                    }} 
+                                    style={{ 
+                                      width: '100%', 
+                                      background: 'transparent', 
+                                      border: 'none', 
+                                      padding: '8px 14px', 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: 8, 
+                                      fontSize: 13, 
+                                      fontWeight: 500,
+                                      color: 'var(--text)', 
+                                      cursor: 'pointer',
+                                      textAlign: 'left'
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-2)'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                  >
+                                    <Edit size={15} color="var(--primary)" /> Edit
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      setActionMenuOpenId(null); 
+                                      handleDelete(c); 
+                                    }} 
+                                    style={{ 
+                                      width: '100%', 
+                                      background: 'transparent', 
+                                      border: 'none', 
+                                      padding: '8px 14px', 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: 8, 
+                                      fontSize: 13, 
+                                      fontWeight: 500,
+                                      color: Math.abs(Number(c.balance)) > 0.001 ? 'var(--text-muted)' : 'var(--red)', 
+                                      cursor: 'pointer',
+                                      textAlign: 'left'
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                    title={Math.abs(Number(c.balance)) > 0.001 ? "Balance must be 0 to delete" : "Delete Customer"}
+                                  >
+                                    <Trash2 size={15} /> Delete
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -1737,24 +1887,27 @@ export default function Credit() {
           {filteredCustomers.length > 0 && (
             <tfoot>
               <tr style={{ background: 'var(--surface-50)', borderTop: '2px solid var(--surface-3)', fontWeight: 700 }}>
+                {/* 1. Customer / Category */}
                 <td style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text)', fontWeight: 700 }}>
                   Total ({filteredCustomers.length} Accounts)
                 </td>
-                <td style={{ padding: '14px 16px' }}></td>
-                <td style={{ padding: '14px 16px' }}></td>
-                <td style={{ padding: '14px 16px', fontSize: 12.5, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>
-                  Overall Balance:
-                </td>
+
+                {/* 2. Balance (All & Current) */}
                 <td style={{ 
                   padding: '14px 16px', 
-                  fontSize: 14.5, 
+                  fontSize: 14, 
                   fontWeight: 800, 
                   whiteSpace: 'nowrap',
                   color: totalCustomerBalance > 0 ? 'var(--red)' : (totalCustomerBalance < 0 ? 'var(--green)' : 'var(--text)') 
                 }}>
-                  {CURRENCY} {Math.abs(totalCustomerBalance).toFixed(2)} {totalCustomerBalance > 0 ? '(DR / Dues)' : (totalCustomerBalance < 0 ? '(CR / Advance)' : '(Settled)')}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>Overall Balance:</div>
+                  <div>
+                    {CURRENCY} {Math.abs(totalCustomerBalance).toFixed(2)} {totalCustomerBalance > 0 ? '(DR / Dues)' : (totalCustomerBalance < 0 ? '(CR / Advance)' : '(Settled)')}
+                  </div>
                 </td>
-                <td colSpan={isAdmin ? 3 : 2} style={{ padding: '14px 16px' }}></td>
+
+                {/* 3 to 8 (Remaining Columns) */}
+                <td colSpan={(isAdmin || isManagement) ? 6 : 5} style={{ padding: '14px 16px' }}></td>
               </tr>
             </tfoot>
           )}

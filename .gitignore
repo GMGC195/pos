@@ -37,7 +37,8 @@ Thumbs.db
 ehthumbs.db
 desktop.ini
 
-# IDE and editors
+# Temporary test files
+test_temp.js
 .vscode/
 !.vscode/extensions.json
 .idea/
