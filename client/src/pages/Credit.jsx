@@ -874,35 +874,104 @@ export default function Credit() {
     reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
   };
 
-  // Statement Print Slip Handler
-  const handlePrintSlip = () => {
-    if (!activeCustomer) return;
-    const periodLabel = isDateRangeActive 
-      ? `Period: ${filterFromDate} to ${filterToDate || filterFromDate}`
-      : (selectedLedgerMonth !== 'All' ? `Month: ${formatMonthDisplay(selectedLedgerMonth)}` : 'All Months');
+  // Helper to compile statement period, balances and transaction data consistently across Print, PDF & Excel
+  const getStatementData = () => {
+    if (!activeCustomer) return null;
 
-    const pDebits = processedTransactions
+    let periodLabel = '';
+    let statementMonth = '';
+
+    if (isDateRangeActive && filterFromDate) {
+      periodLabel = `From ${filterFromDate} To ${filterToDate || filterFromDate}`;
+      statementMonth = 'Custom Range';
+    } else if (selectedLedgerMonth !== 'All') {
+      const parts = selectedLedgerMonth.split('-');
+      if (parts.length === 2) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const lastDay = new Date(y, m, 0).getDate();
+        const fromStr = `${selectedLedgerMonth}-01`;
+        const toStr = `${selectedLedgerMonth}-${String(lastDay).padStart(2, '0')}`;
+        periodLabel = `From ${fromStr} To ${toStr}`;
+        statementMonth = formatMonthDisplay(selectedLedgerMonth);
+      } else {
+        periodLabel = `From ${selectedLedgerMonth} To ${selectedLedgerMonth}`;
+        statementMonth = selectedLedgerMonth;
+      }
+    } else {
+      if (processedTransactions.length > 0) {
+        const dates = processedTransactions.map(t => new Date(t.created_at).getTime()).filter(t => !isNaN(t));
+        if (dates.length > 0) {
+          const minD = new Date(Math.min(...dates)).toISOString().slice(0, 10);
+          const maxD = new Date(Math.max(...dates)).toISOString().slice(0, 10);
+          periodLabel = `From ${minD} To ${maxD}`;
+        } else {
+          periodLabel = 'From Beginning To Present';
+        }
+      } else {
+        periodLabel = 'From Beginning To Present';
+      }
+      statementMonth = 'All Months';
+    }
+
+    const totalBills = processedTransactions
       .filter(t => !t.isCancelled && (t.type === 'CHARGE' || t.type === 'CREDIT_ORDER'))
       .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
-    const pCredits = processedTransactions
+
+    const totalPayments = processedTransactions
       .filter(t => !t.isCancelled && t.type === 'PAYMENT')
       .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
-    const pClosing = openingBalance + pDebits - pCredits;
 
-    const rowsHtml = processedTransactions.map((t) => {
+    const openBal = parseFloat(openingBalance || 0);
+    const closingBal = openBal + totalBills - totalPayments;
+    const sortedTxs = [...processedTransactions].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    return {
+      periodLabel,
+      statementMonth,
+      totalBills,
+      totalPayments,
+      openBal,
+      closingBal,
+      sortedTxs
+    };
+  };
+
+  // 1. Redesigned Compact Customer Print Slip (Header, 3-Row Summary, 3-Column Table, Bottom Totals, Print Time)
+  const handlePrintSlip = () => {
+    const data = getStatementData();
+    if (!data) return;
+    const { periodLabel, statementMonth, totalBills, totalPayments, openBal, closingBal, sortedTxs } = data;
+
+    const rowsHtml = sortedTxs.map((t) => {
       const isDebit = t.type === 'CHARGE' || t.type === 'CREDIT_ORDER';
       const amt = parseFloat(t.amount || 0);
-      const runBal = t.running_balance !== undefined ? parseFloat(t.running_balance) : 0;
+      const isOrder = t.type === 'CREDIT_ORDER' || t.order_id;
+      
+      let desc = '';
+      if (isOrder) {
+        let itemNames = '';
+        if (Array.isArray(t.order_items) && t.order_items.length > 0) {
+          itemNames = t.order_items.map(i => `${i.qty > 1 ? `${i.qty}x ` : ''}${i.item_name}`).join(', ');
+        }
+        const orderNum = t.slip_number || t.order_id || '';
+        desc = orderNum 
+          ? `Order #${orderNum}${itemNames ? ` – ${itemNames}` : (t.comments ? ` – ${t.comments}` : '')}` 
+          : (t.comments || 'Order Charge');
+      } else if (t.type === 'PAYMENT') {
+        desc = `Payment Received${t.payment_method ? ` (${t.payment_method})` : ''}${t.comments ? ` – ${t.comments}` : ''}`;
+      } else if (t.type === 'CHARGE') {
+        desc = `Manual Debit${t.comments ? ` – ${t.comments}` : ''}`;
+      } else {
+        desc = `${t.type === 'DEBIT_ADJUSTMENT' ? 'Debit Adjustment' : (t.type === 'CREDIT_ADJUSTMENT' ? 'Credit Adjustment' : t.type)}${t.comments ? ` – ${t.comments}` : ''}`;
+      }
+
       return `
-        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11.5px;">
-          <td style="padding: 6px 8px;">${new Date(t.created_at).toLocaleDateString()}</td>
-          <td style="padding: 6px 8px;">${t.slip_number ? `Bill #${t.slip_number}` : (t.type === 'CHARGE' ? 'Manual Charge' : 'Major Payment')}</td>
-          <td style="padding: 6px 8px;">${t.comments || (isDebit ? 'Order Charge' : 'Payment Received')}</td>
-          <td style="padding: 6px 8px; text-align: right; color: ${isDebit ? '#dc2626' : '#16a34a'}; font-weight: 700;">
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px;">
+          <td style="padding: 9px 10px; word-break: break-word;">${desc}</td>
+          <td style="padding: 9px 10px; white-space: nowrap; color: #475569;">${new Date(t.created_at).toLocaleDateString()}</td>
+          <td style="padding: 9px 10px; text-align: right; white-space: nowrap; font-weight: 700; color: ${isDebit ? '#dc2626' : '#16a34a'};">
             ${isDebit ? '+' : '-'}SAR ${amt.toFixed(2)}
-          </td>
-          <td style="padding: 6px 8px; text-align: right; font-weight: 800; color: #1e293b;">
-            SAR ${runBal.toFixed(2)}
           </td>
         </tr>
       `;
@@ -912,125 +981,445 @@ export default function Credit() {
     <html>
     <head>
       <meta charset="UTF-8"/>
-      <title>Khata Statement - ${activeCustomer.name}</title>
+      <title></title>
       <style>
-        @page { size: auto; margin: 12mm; }
+        @page { size: A4 portrait; margin: 12mm 15mm; }
+        @media print {
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
         * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 10px; color: #111; line-height: 1.4; }
-        h2 { margin: 0 0 2px; font-size: 19px; text-align: center; font-weight: 800; }
-        .meta-box { background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 12.5px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 0; margin: 0; color: #0f172a; line-height: 1.4; }
+        .heading { margin: 0 0 4px; font-size: 19px; font-weight: 800; text-transform: uppercase; word-break: break-word; color: #0f172a; }
+        .period { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 16px; }
+        .summary-block { margin-bottom: 20px; font-size: 13px; line-height: 1.8; max-width: 480px; }
+        .summary-row { display: flex; justify-content: space-between; padding: 2px 0; }
+        .summary-label { font-weight: 600; color: #334155; }
+        .summary-val { font-weight: 700; color: #0f172a; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th { background: #f1f5f9; padding: 7px 8px; font-size: 11.5px; text-align: left; border-bottom: 2px solid #94a3b8; font-weight: 700; }
-        .footer-box { margin-top: 14px; padding: 10px 14px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 12.5px; }
+        th { background: #f1f5f9; padding: 9px 10px; font-size: 12px; text-align: left; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; font-weight: 700; color: #334155; }
+        .bottom-totals { margin-top: 22px; padding: 14px 18px; background: #f8fafc; border-top: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; max-width: 520px; }
+        .total-item { }
+        .total-label { font-size: 11.5px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .total-amt { font-size: 16.5px; font-weight: 800; margin-top: 3px; }
+        .print-date { margin-top: 28px; font-size: 11px; color: #64748b; font-style: italic; }
       </style>
     </head>
     <body>
-      <h2>CUSTOMER KHATA STATEMENT</h2>
-      <div style="text-align: center; font-size: 11.5px; color: #64748b; margin-bottom: 6px;">Generated on ${new Date().toLocaleString()}</div>
-      
-      <div class="meta-box">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-          <span><strong>Customer:</strong> ${activeCustomer.name} (${activeCustomer.category}${activeCustomer.company_name ? ` - ${activeCustomer.company_name}` : ''})</span>
-          <span><strong>Phone:</strong> ${activeCustomer.phone || '-'}</span>
+      <div class="heading">${activeCustomer.name} – KHATA STATEMENT</div>
+      <div class="period">Statement Period: ${periodLabel}</div>
+
+      <div class="summary-block">
+        <div class="summary-row">
+          <span class="summary-label">Statement Month:</span>
+          <span class="summary-val">${statementMonth}</span>
         </div>
-        <div style="display: flex; justify-content: space-between;">
-          <span><strong>Statement Period:</strong> ${periodLabel}</span>
-          <span><strong>Opening Balance:</strong> SAR ${openingBalance.toFixed(2)}</span>
+        <div class="summary-row">
+          <span class="summary-label">Opening Balance:</span>
+          <span class="summary-val">SAR ${openBal.toFixed(2)}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Closing Balance:</span>
+          <span class="summary-val" style="color: ${closingBal > 0 ? '#dc2626' : (closingBal < 0 ? '#16a34a' : '#0f172a')};">
+            SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Adv)' : '(0.00)')}
+          </span>
         </div>
       </div>
 
       <table>
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Bill # / Type</th>
-            <th>Description & Remarks</th>
-            <th style="text-align: right;">Amount</th>
-            <th style="text-align: right;">Running Balance</th>
+            <th style="width: 55%;">Description / Activity</th>
+            <th style="width: 20%;">Date</th>
+            <th style="width: 25%; text-align: right;">Total Amount</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml}
+          ${rowsHtml || '<tr><td colspan="3" style="padding: 20px; text-align: center; color: #64748b;">No transactions recorded in this period.</td></tr>'}
         </tbody>
       </table>
 
-      <div class="footer-box">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-          <span><strong>Period Debits:</strong> +SAR ${pDebits.toFixed(2)}</span>
-          <span><strong>Period Credits:</strong> -SAR ${pCredits.toFixed(2)}</span>
-          <span><strong>Period Closing Balance:</strong> SAR ${pClosing.toFixed(2)}</span>
+      <div class="bottom-totals">
+        <div class="total-item">
+          <div class="total-label">Total Bills</div>
+          <div class="total-amt" style="color: #dc2626;">SAR ${totalBills.toFixed(2)}</div>
         </div>
-        <div style="border-top: 1px solid #cbd5e1; padding-top: 6px; margin-top: 4px; display: flex; justify-content: space-between;">
-          <span><strong>Lifetime Outstanding Balance:</strong></span>
-          <span style="font-weight: 800; font-size: 13.5px; color: ${activeCustomer.balance > 0 ? '#dc2626' : '#16a34a'};">
-            SAR ${Math.abs(activeCustomer.balance).toFixed(2)} ${activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(Settled)')}
-          </span>
+        <div style="height: 38px; width: 1px; background: #cbd5e1;"></div>
+        <div class="total-item">
+          <div class="total-label">Total Payments Received</div>
+          <div class="total-amt" style="color: #16a34a;">SAR ${totalPayments.toFixed(2)}</div>
         </div>
+      </div>
+
+      <div class="print-date">
+        Printed On: ${new Date().toLocaleString()}
       </div>
     </body>
     </html>`;
 
     const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
     document.body.appendChild(iframe);
     iframe.contentDocument.write(html);
     iframe.contentDocument.close();
     setTimeout(() => {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
-      setTimeout(() => document.body.removeChild(iframe), 1000);
-    }, 500);
+      setTimeout(() => document.body.removeChild(iframe), 1500);
+    }, 400);
   };
 
-  // Statement Excel Export Handler
-  const handleExportExcel = async () => {
-    if (!activeCustomer) return;
+  // 2. Redesigned Detailed PDF Statement Download (Multi-page, Product Breakdown, jsPDF + AutoTable)
+  const handleExportPDF = async () => {
+    const data = getStatementData();
+    if (!data) return;
+    const { periodLabel, statementMonth, totalBills, totalPayments, openBal, closingBal, sortedTxs } = data;
+
     try {
-      const XLSX = await import('xlsx');
-      const periodLabel = isDateRangeActive 
-        ? `${filterFromDate} to ${filterToDate || filterFromDate}`
-        : (selectedLedgerMonth !== 'All' ? formatMonthDisplay(selectedLedgerMonth) : 'All Months');
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
 
-      const pDebits = processedTransactions
-        .filter(t => !t.isCancelled && (t.type === 'CHARGE' || t.type === 'CREDIT_ORDER'))
-        .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
-      const pCredits = processedTransactions
-        .filter(t => !t.isCancelled && t.type === 'PAYMENT')
-        .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
-      const pClosing = openingBalance + pDebits - pCredits;
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 14;
 
-      const data = [
-        ['CUSTOMER KHATA STATEMENT / LEDGER'],
-        ['Customer Name', activeCustomer.name, 'Category', activeCustomer.category || 'Regular Customer'],
-        ['Company Name', activeCustomer.company_name || '-', 'Phone', activeCustomer.phone || '-'],
-        ['Statement Period', periodLabel, 'Generated At', new Date().toLocaleString()],
-        ['Opening Balance', `SAR ${openingBalance.toFixed(2)}`, 'Lifetime Balance', `SAR ${parseFloat(activeCustomer.balance || 0).toFixed(2)}`],
-        [],
-        ['Date & Time', 'Bill # / Type', 'Description & Remarks', 'Classification', 'Debit (+)', 'Credit (-)', 'Running Balance']
-      ];
+      // 1. Heading
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(15);
+      doc.setTextColor(15, 23, 42); // #0f172a
+      const titleText = `${activeCustomer.name.toUpperCase()} – KHATA STATEMENT`;
+      const titleLines = doc.splitTextToSize(titleText, pageWidth - (margin * 2));
+      doc.text(titleLines, margin, 18);
 
-      processedTransactions.forEach(t => {
-        const isDebit = t.type === 'CHARGE' || t.type === 'CREDIT_ORDER';
-        const isCredit = t.type === 'PAYMENT';
+      let currentY = 18 + (titleLines.length * 6);
+
+      // 2. Statement Period
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105); // #475569
+      doc.text(`Statement Period: ${periodLabel}`, margin, currentY);
+      currentY += 8;
+
+      // 3. Three-Row Summary
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(51, 65, 85);
+      doc.text('Statement Month:', margin, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(statementMonth, margin + 40, currentY);
+      currentY += 5.5;
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Opening Balance:', margin, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`SAR ${openBal.toFixed(2)}`, margin + 40, currentY);
+      currentY += 5.5;
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Closing Balance:', margin, currentY);
+      if (closingBal > 0) doc.setTextColor(220, 38, 38);
+      else if (closingBal < 0) doc.setTextColor(22, 163, 74);
+      else doc.setTextColor(15, 23, 42);
+      doc.text(`SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Adv)' : '(0.00)')}`, margin + 40, currentY);
+      currentY += 8;
+
+      // 4. Detailed Table
+      const tableHeaders = [['Date', 'Bill #', 'Description / Product Details', 'Qty', 'Unit Price', 'Debit (+)', 'Credit (-)']];
+      const tableBody = [];
+
+      sortedTxs.forEach((t) => {
+        const isOrder = t.type === 'CREDIT_ORDER' || t.order_id;
+        const isPayment = t.type === 'PAYMENT';
+        const isCharge = t.type === 'CHARGE';
+        const txDate = new Date(t.created_at).toLocaleDateString();
+        const billNum = t.slip_number ? `#${t.slip_number}` : (t.order_id ? `#${t.order_id}` : '-');
         const amt = parseFloat(t.amount || 0);
-        const runBal = t.running_balance !== undefined ? parseFloat(t.running_balance) : 0;
-        data.push([
-          new Date(t.created_at).toLocaleString(),
-          t.slip_number ? `Bill #${t.slip_number}` : (t.type === 'CHARGE' ? 'Manual Charge' : 'Major Payment'),
-          t.comments || (isDebit ? 'Order Charge' : 'Payment Received'),
-          t.classification || '-',
-          isDebit ? amt : '',
-          isCredit ? amt : '',
-          runBal
-        ]);
+
+        if (isOrder && Array.isArray(t.order_items) && t.order_items.length > 0) {
+          t.order_items.forEach((item, idx) => {
+            const q = item.qty || 1;
+            const uPrice = parseFloat(item.unit_price || 0);
+            const lineTotal = q * uPrice;
+            tableBody.push([
+              idx === 0 ? txDate : '',
+              idx === 0 ? billNum : '',
+              `${item.item_name}${item.description ? ` (${item.description})` : ''}`,
+              String(q),
+              `SAR ${uPrice.toFixed(2)}`,
+              `SAR ${lineTotal.toFixed(2)}`,
+              '-'
+            ]);
+          });
+        } else if (isOrder) {
+          tableBody.push([
+            txDate,
+            billNum,
+            t.comments || 'Order Charge',
+            '1',
+            `SAR ${amt.toFixed(2)}`,
+            `SAR ${amt.toFixed(2)}`,
+            '-'
+          ]);
+        } else if (isPayment) {
+          tableBody.push([
+            txDate,
+            billNum !== '-' ? billNum : '',
+            `Payment Received${t.payment_method ? ` (${t.payment_method})` : ''}${t.comments ? ` – ${t.comments}` : ''}`,
+            '-',
+            '-',
+            '-',
+            `SAR ${amt.toFixed(2)}`
+          ]);
+        } else {
+          // Manual Charge or Adjustment
+          tableBody.push([
+            txDate,
+            billNum,
+            isCharge ? `Manual Debit${t.comments ? ` – ${t.comments}` : ''}` : `${t.type}${t.comments ? ` – ${t.comments}` : ''}`,
+            '1',
+            `SAR ${amt.toFixed(2)}`,
+            `SAR ${amt.toFixed(2)}`,
+            '-'
+          ]);
+        }
       });
 
-      data.push([]);
-      data.push(['Period Summary', '', '', '', `+SAR ${pDebits.toFixed(2)}`, `-SAR ${pCredits.toFixed(2)}`, `Closing: SAR ${pClosing.toFixed(2)}`]);
-      data.push(['Total Outstanding Balance', `SAR ${parseFloat(activeCustomer.balance || 0).toFixed(2)}`]);
+      if (tableBody.length === 0) {
+        tableBody.push(['-', '-', 'No transactions recorded in this period.', '-', '-', '-', '-']);
+      }
 
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      ws['!cols'] = [{ wch: 22 }, { wch: 18 }, { wch: 32 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 16 }];
+      autoTable(doc, {
+        startY: currentY,
+        head: tableHeaders,
+        body: tableBody,
+        theme: 'striped',
+        margin: { left: margin, right: margin, top: 20, bottom: 20 },
+        styles: {
+          fontSize: 8.5,
+          cellPadding: 2.5,
+          overflow: 'linebreak',
+          textColor: [30, 41, 59]
+        },
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          halign: 'left'
+        },
+        columnStyles: {
+          0: { cellWidth: 22 }, // Date
+          1: { cellWidth: 18 }, // Bill #
+          2: { cellWidth: 'auto' }, // Description
+          3: { cellWidth: 12, halign: 'center' }, // Qty
+          4: { cellWidth: 22, halign: 'right' }, // Unit Price
+          5: { cellWidth: 24, halign: 'right', textColor: [220, 38, 38], fontStyle: 'bold' }, // Debit
+          6: { cellWidth: 24, halign: 'right', textColor: [22, 163, 74], fontStyle: 'bold' } // Credit
+        },
+        didDrawPage: (data) => {
+          // Print Date & Page Number on each page footer
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'italic');
+          doc.setTextColor(148, 163, 184);
+          doc.text(`Printed On: ${new Date().toLocaleString()}`, margin, pageHeight - 8);
+          doc.text(`Page ${data.pageNumber}`, pageWidth - margin - 12, pageHeight - 8);
+        }
+      });
+
+      // 5. Final Summary Block
+      const finalY = doc.lastAutoTable.finalY + 8;
+      const isNewPage = finalY + 30 > pageHeight - 15;
+      if (isNewPage) {
+        doc.addPage();
+      }
+      const summaryY = isNewPage ? 20 : finalY;
+
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.roundedRect(margin, summaryY, pageWidth - (margin * 2), 24, 2, 2, 'FD');
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(100, 116, 139);
+      doc.text('TOTAL BILLS (DEBIT):', margin + 6, summaryY + 8);
+      doc.setTextColor(220, 38, 38);
+      doc.setFontSize(11.5);
+      doc.text(`SAR ${totalBills.toFixed(2)}`, margin + 6, summaryY + 18);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(100, 116, 139);
+      doc.text('TOTAL PAYMENTS RECEIVED (CREDIT):', margin + 65, summaryY + 8);
+      doc.setTextColor(22, 163, 74);
+      doc.setFontSize(11.5);
+      doc.text(`SAR ${totalPayments.toFixed(2)}`, margin + 65, summaryY + 18);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(100, 116, 139);
+      doc.text('CLOSING BALANCE:', margin + 140, summaryY + 8);
+      if (closingBal > 0) doc.setTextColor(220, 38, 38);
+      else if (closingBal < 0) doc.setTextColor(22, 163, 74);
+      else doc.setTextColor(15, 23, 42);
+      doc.setFontSize(11.5);
+      doc.text(`SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Adv)' : '(0.00)')}`, margin + 140, summaryY + 18);
+
+      const safeName = (activeCustomer.name || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');
+      doc.save(`Khata_Statement_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
+      toast.success('PDF statement downloaded successfully!');
+    } catch (err) {
+      console.error('Error exporting PDF statement:', err);
+      toast.error('Failed to generate PDF statement');
+    }
+  };
+
+  // 3. Redesigned Detailed Excel Export (Complete 13-Column Breakdown, Full Item/Payment Details, Summary)
+  const handleExportExcel = async () => {
+    const data = getStatementData();
+    if (!data) return;
+    const { periodLabel, statementMonth, totalBills, totalPayments, openBal, closingBal, sortedTxs } = data;
+
+    try {
+      const XLSX = await import('xlsx');
+
+      const excelRows = [
+        [`${activeCustomer.name.toUpperCase()} – KHATA STATEMENT`],
+        ['Statement Period', periodLabel],
+        ['Statement Month', statementMonth],
+        ['Opening Balance', Number(openBal.toFixed(2))],
+        ['Closing Balance', Number(closingBal.toFixed(2))],
+        ['Customer Category', activeCustomer.category || 'Regular Customer'],
+        ['Company Name', activeCustomer.company_name || '-'],
+        ['Phone', activeCustomer.phone || '-'],
+        ['Generated At', new Date().toLocaleString()],
+        [], // Empty separator
+        [
+          'Transaction Date',
+          'Bill / Invoice Number',
+          'Transaction Type',
+          'Activity / Description',
+          'Product Name',
+          'Product Description',
+          'Quantity',
+          'Unit Price',
+          'Debit Amount',
+          'Credit / Payment Received',
+          'Total Amount',
+          'Payment Method',
+          'Related Bill Number'
+        ]
+      ];
+
+      sortedTxs.forEach((t) => {
+        const isOrder = t.type === 'CREDIT_ORDER' || t.order_id;
+        const isPayment = t.type === 'PAYMENT';
+        const isCharge = t.type === 'CHARGE';
+        const txDate = new Date(t.created_at).toLocaleString();
+        const billNum = t.slip_number ? `Bill #${t.slip_number}` : (t.order_id ? `#${t.order_id}` : '');
+        const amt = parseFloat(t.amount || 0);
+
+        if (isOrder && Array.isArray(t.order_items) && t.order_items.length > 0) {
+          t.order_items.forEach((item, idx) => {
+            const q = parseFloat(item.qty || 1);
+            const uPrice = parseFloat(item.unit_price || 0);
+            const lineAmt = q * uPrice;
+            excelRows.push([
+              txDate,
+              billNum,
+              'Order / Sale',
+              idx === 0 ? `Order ${billNum} – Products Sale` : `Item in ${billNum}`,
+              item.item_name || '',
+              item.description || '',
+              q,
+              uPrice,
+              lineAmt, // Debit
+              '', // Credit
+              lineAmt, // Total
+              t.payment_method || '',
+              billNum
+            ]);
+          });
+        } else if (isOrder) {
+          excelRows.push([
+            txDate,
+            billNum,
+            'Order / Sale',
+            t.comments || `Order ${billNum}`,
+            'General Order',
+            t.comments || '',
+            1,
+            amt,
+            amt, // Debit
+            '', // Credit
+            amt, // Total
+            t.payment_method || '',
+            billNum
+          ]);
+        } else if (isPayment) {
+          excelRows.push([
+            txDate,
+            '',
+            'Payment Received',
+            `Payment Received (${t.payment_method || 'Cash'})${t.comments ? ` – ${t.comments}` : ''}`,
+            '',
+            t.comments || '',
+            '',
+            '',
+            '', // Debit
+            amt, // Credit
+            amt, // Total
+            t.payment_method || 'Cash',
+            t.slip_number ? `Bill #${t.slip_number}` : ''
+          ]);
+        } else {
+          // Manual charge or adjustment
+          excelRows.push([
+            txDate,
+            billNum || '',
+            isCharge ? 'Manual Debit' : (t.type || 'Adjustment'),
+            t.comments || 'Manual Charge / Adjustment',
+            '',
+            t.comments || '',
+            1,
+            amt,
+            amt, // Debit
+            '', // Credit
+            amt, // Total
+            t.payment_method || '',
+            billNum || ''
+          ]);
+        }
+      });
+
+      excelRows.push([]);
+      excelRows.push(['SUMMARY & TOTALS']);
+      excelRows.push(['Total Bills (Orders)', '', '', '', '', '', '', '', Number(totalBills.toFixed(2))]);
+      excelRows.push(['Total Payments Received', '', '', '', '', '', '', '', '', Number(totalPayments.toFixed(2))]);
+      excelRows.push(['Opening Balance', '', '', '', '', '', '', '', '', '', Number(openBal.toFixed(2))]);
+      excelRows.push(['Closing Balance', '', '', '', '', '', '', '', '', '', Number(closingBal.toFixed(2))]);
+      excelRows.push(['Printed On', new Date().toLocaleString()]);
+
+      const ws = XLSX.utils.aoa_to_sheet(excelRows);
+      ws['!cols'] = [
+        { wch: 20 }, // Transaction Date
+        { wch: 20 }, // Bill / Invoice Number
+        { wch: 18 }, // Transaction Type
+        { wch: 32 }, // Activity / Description
+        { wch: 24 }, // Product Name
+        { wch: 28 }, // Product Description
+        { wch: 10 }, // Quantity
+        { wch: 12 }, // Unit Price
+        { wch: 14 }, // Debit Amount
+        { wch: 15 }, // Credit / Payment Received
+        { wch: 14 }, // Total Amount
+        { wch: 16 }, // Payment Method
+        { wch: 20 }  // Related Bill Number
+      ];
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Khata Statement');
       const safeName = (activeCustomer.name || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');
@@ -1686,8 +2075,8 @@ export default function Credit() {
                     {(isAdmin || isManagement) && (
                       <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 12 }}>
                         {Array.isArray(c.available_branches) && c.available_branches.length > 0 
-                          ? c.available_branches.join(', ') 
-                          : (c.available_branches ? String(c.available_branches) : '-')}
+                          ? c.available_branches.map(b => getBranchShortName(b)).join(', ') 
+                          : (c.available_branches ? getBranchShortName(String(c.available_branches)) : '-')}
                       </td>
                     )}
 
@@ -3115,7 +3504,7 @@ export default function Credit() {
 
                 <button
                   type="button"
-                  onClick={handlePrintSlip}
+                  onClick={handleExportPDF}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -3129,7 +3518,7 @@ export default function Credit() {
                     fontWeight: 700,
                     cursor: 'pointer'
                   }}
-                  title="Download / Print statement PDF"
+                  title="Download structured PDF statement (.pdf)"
                 >
                   <FileText size={13} /> Download PDF
                 </button>

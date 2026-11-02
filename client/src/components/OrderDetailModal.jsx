@@ -156,10 +156,12 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
 
   const creditPaymentHtml = isCreditOrder ? `
 <div class="divider"></div>
+${pmtReceived > 0 ? `
 <div class="total-row" style="font-weight: 700; color: #15803d; font-size: 13px;">
   <span>Payment Received:</span>
   <span>${CURRENCY}${pmtReceived.toFixed(2)}</span>
 </div>
+` : ''}
 <div class="total-row" style="font-weight: 800; color: ${remDue > 0 ? '#dc2626' : '#15803d'}; font-size: 13px;">
   <span>Remaining Due Amount:</span>
   <span>${CURRENCY}${remDue.toFixed(2)}</span>

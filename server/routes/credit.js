@@ -697,7 +697,20 @@ router.get('/:id/ledger', async (req, res) => {
         COALESCE(ct.billing_month, TO_CHAR(ct.created_at, 'YYYY-MM')) AS effective_billing_month,
         o.slip_number,
         o.order_type,
-        o.status AS order_status
+        o.status AS order_status,
+        (
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'item_name', oi.item_name,
+              'qty', oi.qty,
+              'unit_price', oi.unit_price,
+              'description', COALESCE(i.description, '')
+            )
+          )
+          FROM order_items oi
+          LEFT JOIN items i ON oi.item_id = i.id
+          WHERE oi.order_id = ct.order_id
+        ) AS order_items
       FROM credit_transactions ct
       LEFT JOIN orders o ON ct.order_id = o.id
       WHERE ct.credit_customer_id = $1

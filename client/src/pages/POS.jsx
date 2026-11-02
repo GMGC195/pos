@@ -1012,15 +1012,7 @@ export default function POS() {
   }
 
   const printThermalSlip = (method, orderId, slipNumber, editCount = 0, isFullReceipt = true, diffData = null, customCart = null, customCustomerInfo = null) => {
-    const now2 = new Date()
-    const pmtReceived = method === 'Credit' ? parseFloat(currentInfo?.credit_payment_amount || creditPaymentAmount || 0) : 0;
-    const grandTotalAfterDisc = parseFloat(currentTotal - (parseFloat(currentInfo?.discount) || 0));
-    const remDue = Math.max(0, grandTotalAfterDisc - pmtReceived);
-    const creditPaymentReceiptHtml = (method === 'Credit' && pmtReceived > 0) ? `
-  <div class="divider"></div>
-  <div class="total-row" style="font-weight: 700; color: #15803d; font-size: 13px;"><span>Payment Received:</span><span>${CURRENCY}${pmtReceived.toFixed(2)}</span></div>
-  <div class="total-row" style="font-weight: 800; color: ${remDue > 0 ? '#dc2626' : '#15803d'}; font-size: 13px;"><span>Remaining Due Amount:</span><span>${CURRENCY}${remDue.toFixed(2)}</span></div>
-  ` : '';
+    const now2 = new Date();
     const paymentLabel = method === 'Hold' ? 'Hold (Pending)' : method;
     
     const currentCart = customCart || cart;
@@ -1029,6 +1021,18 @@ export default function POS() {
     const currentSubtotal = currentCart.reduce((sum, i) => sum + (parseFloat(i.price || i.unit_price) * i.qty), 0);
     const currentTax = currentSubtotal * TAX_RATE;
     const currentTotal = currentSubtotal + currentTax;
+    const currentDiscount = parseFloat(currentInfo?.discount) || 0;
+    const grandTotalAfterDisc = Math.max(0, currentTotal - currentDiscount);
+
+    const isCreditOrder = method === 'Credit';
+    const pmtReceived = isCreditOrder ? parseFloat(currentInfo?.credit_payment_amount || creditPaymentAmount || 0) : 0;
+    const remDue = Math.max(0, grandTotalAfterDisc - pmtReceived);
+
+    const creditPaymentReceiptHtml = isCreditOrder ? `
+  <div class="divider"></div>
+  ${pmtReceived > 0 ? `<div class="total-row" style="font-weight: 700; color: #15803d; font-size: 13px;"><span>Payment Received:</span><span>${CURRENCY}${pmtReceived.toFixed(2)}</span></div>` : ''}
+  <div class="total-row" style="font-weight: 800; color: ${remDue > 0 ? '#dc2626' : '#15803d'}; font-size: 13px;"><span>Remaining Due Amount:</span><span>${CURRENCY}${remDue.toFixed(2)}</span></div>
+  ` : '';
 
     let itemRows = '';
     if (!isFullReceipt && diffData) {
