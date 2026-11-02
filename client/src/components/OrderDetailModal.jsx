@@ -148,6 +148,33 @@ export default function OrderDetailModal({ order, onClose, onEdit }) {
   else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
 
   // Define the raw HTML body (without HTML wrapper for inline rendering)
+  const isCreditOrder = order.payment_method === 'Credit' || parseFloat(order.payment_received || 0) > 0 || (order.credit_payments && order.credit_payments.length > 0);
+  const pmtReceived = parseFloat(order.payment_received || 0);
+  const remDue = order.remaining_due !== undefined
+    ? parseFloat(order.remaining_due)
+    : Math.max(0, parseFloat(order.grand_total || 0) - pmtReceived);
+
+  const creditPaymentHtml = isCreditOrder ? `
+<div class="divider"></div>
+<div class="total-row" style="font-weight: 700; color: #15803d; font-size: 13px;">
+  <span>Payment Received:</span>
+  <span>${CURRENCY}${pmtReceived.toFixed(2)}</span>
+</div>
+<div class="total-row" style="font-weight: 800; color: ${remDue > 0 ? '#dc2626' : '#15803d'}; font-size: 13px;">
+  <span>Remaining Due Amount:</span>
+  <span>${CURRENCY}${remDue.toFixed(2)}</span>
+</div>
+${(Array.isArray(order.credit_payments) && order.credit_payments.length > 1) ? `
+  <div style="font-size: 10.5px; color: #475569; margin-top: 3px; padding-left: 4px;">
+    ${order.credit_payments.map((p, idx) => `
+      <div style="display: flex; justify-content: space-between; padding: 1px 0;">
+        <span>• Pmt #${idx + 1} (${p.payment_method || 'Cash'} - ${new Date(p.created_at).toLocaleDateString()}):</span>
+        <span>${CURRENCY}${parseFloat(p.amount).toFixed(2)}</span>
+      </div>
+    `).join('')}
+  </div>
+` : ''}
+` : '';
   const slipBody = `
 <div class="center">
   <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
@@ -178,6 +205,7 @@ ${itemRows}
 ${parseFloat(order.discount || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${CURRENCY}${parseFloat(order.discount).toFixed(2)}</span></div>` : ''}
 <div class="total-row grand"><span>TOTAL</span><span>${CURRENCY}${parseFloat(order.grand_total).toFixed(2)}</span></div>
 <div class="total-row"><span>Payment</span><span>${order.status === 'Hold' ? 'Hold (Pending)' : (order.payment_method ? order.payment_method + ' - ' + order.status : order.status)}</span></div>
+${creditPaymentHtml}
   `;
 
   const htmlWrapper = `<!DOCTYPE html>

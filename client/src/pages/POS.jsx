@@ -1013,6 +1013,14 @@ export default function POS() {
 
   const printThermalSlip = (method, orderId, slipNumber, editCount = 0, isFullReceipt = true, diffData = null, customCart = null, customCustomerInfo = null) => {
     const now2 = new Date()
+    const pmtReceived = method === 'Credit' ? parseFloat(currentInfo?.credit_payment_amount || creditPaymentAmount || 0) : 0;
+    const grandTotalAfterDisc = parseFloat(currentTotal - (parseFloat(currentInfo?.discount) || 0));
+    const remDue = Math.max(0, grandTotalAfterDisc - pmtReceived);
+    const creditPaymentReceiptHtml = (method === 'Credit' && pmtReceived > 0) ? `
+  <div class="divider"></div>
+  <div class="total-row" style="font-weight: 700; color: #15803d; font-size: 13px;"><span>Payment Received:</span><span>${CURRENCY}${pmtReceived.toFixed(2)}</span></div>
+  <div class="total-row" style="font-weight: 800; color: ${remDue > 0 ? '#dc2626' : '#15803d'}; font-size: 13px;"><span>Remaining Due Amount:</span><span>${CURRENCY}${remDue.toFixed(2)}</span></div>
+  ` : '';
     const paymentLabel = method === 'Hold' ? 'Hold (Pending)' : method;
     
     const currentCart = customCart || cart;
@@ -1249,6 +1257,7 @@ export default function POS() {
   ${parseFloat(currentInfo.discount || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${CURRENCY}${parseFloat(currentInfo.discount).toFixed(2)}</span></div>` : ''}
   <div class="total-row grand"><span>TOTAL</span><span>${CURRENCY}${parseFloat(currentTotal - (parseFloat(currentInfo.discount) || 0)).toFixed(2)}</span></div>
   <div class="total-row"><span>Payment</span><span>${paymentLabel}</span></div>
+  ${creditPaymentReceiptHtml}
   ${footerHtml}
 </body>
 </html>`

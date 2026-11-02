@@ -227,23 +227,62 @@ router.post('/discount-packages/:id/apply', async (req, res) => {
 // 2. KHATA CUSTOMERS CRUD & ACCESS CONTROL
 // ==========================================
 
+// Get available branches from credit_customers, orders, and users
+router.get('/branches', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT b FROM (
+        SELECT jsonb_array_elements_text(available_branches) AS b FROM credit_customers WHERE available_branches IS NOT NULL AND jsonb_typeof(available_branches) = 'array'
+        UNION
+        SELECT branch AS b FROM orders WHERE branch IS NOT NULL AND branch != ''
+        UNION
+        SELECT branch AS b FROM users WHERE branch IS NOT NULL AND branch != ''
+      ) sub
+      WHERE b IS NOT NULL AND b != ''
+      ORDER BY b ASC
+    `);
+    let branches = result.rows.map(r => r.b);
+    if (branches.length === 0) branches = ['Branch 1', 'Branch 2', 'Branch 3'];
+    res.json(branches);
+  } catch (error) {
+    console.error('Error fetching branches:', error);
+    res.json(['Branch 1', 'Branch 2', 'Branch 3']);
+  }
+});
+
 // Get all credit customers (with category, status, and discount package info)
 router.get('/', async (req, res) => {
   const branchFilter = req.query.branch;
   const userRole = req.user?.role?.trim().toLowerCase();
   const userBranch = req.user?.branch;
+  const categoryFilter = req.query.category;
+  const sortBy = req.query.sortBy;
+  const targetMonth = (req.query.month && req.query.month.trim()) ? req.query.month.trim() : getKsaCurrentMonthStr();
 
   try {
-    let query = `
-      SELECT 
-        cc.*,
-        dp.name AS discount_package_name,
-        dp.discount_percentage AS discount_package_percentage,
-        dp.discount_rules AS discount_package_rules,
-        dp.is_active AS discount_package_active,
-        emp.name AS registered_employee_name,
-        emp.role AS registered_employee_role,
-        emp.employee_id AS registered_employee_code,
+    const isAllMonths = targetMonth === 'All';
+    let monthBalanceClause = '';
+    let params = [];
+
+    if (isAllMonths) {
+      monthBalanceClause = `
+        COALESCE((
+          SELECT SUM(
+            CASE 
+              WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount 
+              WHEN type = 'PAYMENT' THEN -amount 
+              WHEN type = 'ORDER_CANCELLED' THEN -amount
+              WHEN type = 'PAYMENT_CANCELLED' THEN amount
+              ELSE 0 
+            END
+          )
+          FROM credit_transactions 
+          WHERE credit_customer_id = cc.id
+        ), 0) AS current_month_balance
+      `;
+    } else {
+      params.push(targetMonth);
+      monthBalanceClause = `
         COALESCE((
           SELECT SUM(
             CASE 
@@ -258,12 +297,24 @@ router.get('/', async (req, res) => {
           WHERE credit_customer_id = cc.id 
             AND COALESCE(billing_month, TO_CHAR(created_at, 'YYYY-MM')) = $1
         ), 0) AS current_month_balance
+      `;
+    }
+
+    let query = `
+      SELECT 
+        cc.*,
+        dp.name AS discount_package_name,
+        dp.discount_percentage AS discount_package_percentage,
+        dp.discount_rules AS discount_package_rules,
+        dp.is_active AS discount_package_active,
+        emp.name AS registered_employee_name,
+        emp.role AS registered_employee_role,
+        emp.employee_id AS registered_employee_code,
+        ${monthBalanceClause}
       FROM credit_customers cc
       LEFT JOIN discount_packages dp ON cc.discount_package_id = dp.id
       LEFT JOIN employees emp ON cc.employee_id = emp.id
     `;
-    const targetMonth = (req.query.month && req.query.month.trim()) ? req.query.month.trim() : getKsaCurrentMonthStr();
-    let params = [targetMonth];
     let whereClauses = [];
 
     // Branch isolation for non-admin/management
@@ -286,11 +337,25 @@ router.get('/', async (req, res) => {
       }
     }
 
+    // Category filter
+    if (categoryFilter && categoryFilter !== 'All') {
+      params.push(categoryFilter);
+      whereClauses.push(`cc.category = $${params.length}`);
+    }
+
     if (whereClauses.length > 0) {
       query += ` WHERE ${whereClauses.join(' AND ')}`;
     }
 
-    query += ' ORDER BY COALESCE((SELECT MAX(created_at) FROM credit_transactions WHERE credit_customer_id = cc.id), cc.created_at) DESC, cc.name ASC';
+    // Balance Sorting Filter
+    if (sortBy === 'highest_balance') {
+      query += ' ORDER BY cc.balance DESC, cc.name ASC';
+    } else if (sortBy === 'lowest_balance') {
+      query += ' ORDER BY cc.balance ASC, cc.name ASC';
+    } else {
+      query += ' ORDER BY COALESCE((SELECT MAX(created_at) FROM credit_transactions WHERE credit_customer_id = cc.id), cc.created_at) DESC, cc.name ASC';
+    }
+
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
@@ -316,6 +381,7 @@ router.post('/', async (req, res) => {
     discount_rules,
     status,
     category,
+    company_name,
     is_extra_pay,
     discount_package_id,
     employee_id
@@ -331,7 +397,13 @@ router.post('/', async (req, res) => {
   }
 
   const finalStatus = status === 'Deactivated' ? 'Deactivated' : 'Active';
-  const finalCategory = category === 'Employee' ? 'Employee' : 'Regular Customer';
+  const finalCategory = (category === 'Employee' || category === 'Company') ? category : 'Regular Customer';
+  
+  if (finalCategory === 'Company' && (!company_name || !company_name.trim())) {
+    return res.status(400).json({ error: 'Company Name is required for Company customers' });
+  }
+
+  const finalCompanyName = finalCategory === 'Company' ? company_name.trim() : null;
   const finalExtraPay = finalCategory === 'Employee' && Boolean(is_extra_pay);
   const finalPkgId = discount_package_id ? parseInt(discount_package_id, 10) : null;
   const finalEmployeeId = finalCategory === 'Employee' && employee_id ? parseInt(employee_id, 10) : null;
@@ -353,8 +425,8 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO credit_customers (
         name, phone, credit_limit, balance, available_branches, reference, notes, discount_rules,
-        status, category, is_extra_pay, discount_package_id, employee_id
-      ) VALUES ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+        status, category, is_extra_pay, discount_package_id, employee_id, company_name
+      ) VALUES ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [
         name.trim(), 
         phone ? phone.trim() : null, 
@@ -367,7 +439,8 @@ router.post('/', async (req, res) => {
         finalCategory,
         finalExtraPay,
         finalPkgId,
-        finalEmployeeId
+        finalEmployeeId,
+        finalCompanyName
       ]
     );
 
@@ -375,7 +448,7 @@ router.post('/', async (req, res) => {
     try {
       await pool.query(
         "INSERT INTO notifications (message, type, target_roles) VALUES ($1, 'CREDIT_CUSTOMER', '[\"admin\", \"developer\"]'::jsonb)",
-        [`New Credit Customer added: ${name.trim()} (${finalCategory})`]
+        [`New Credit Customer added: ${name.trim()} (${finalCategory}${finalCompanyName ? ` - ${finalCompanyName}` : ''})`]
       );
     } catch (notifErr) {
       console.error('Failed to create notification:', notifErr);
@@ -406,6 +479,7 @@ router.put('/:id', async (req, res) => {
     discount_rules,
     status,
     category,
+    company_name,
     is_extra_pay,
     discount_package_id,
     employee_id
@@ -443,25 +517,33 @@ router.put('/:id', async (req, res) => {
     }
 
     if (category !== undefined) {
-      const cat = category === 'Employee' ? 'Employee' : 'Regular Customer';
+      const cat = (category === 'Employee' || category === 'Company') ? category : 'Regular Customer';
       params.push(cat);
       query += `, category = $${params.length}`;
-      if (cat === 'Employee' && is_extra_pay !== undefined) {
-        params.push(Boolean(is_extra_pay));
-        query += `, is_extra_pay = $${params.length}`;
-      } else if (cat !== 'Employee') {
-        query += `, is_extra_pay = FALSE`;
-      }
-      if (cat === 'Employee') {
+
+      if (cat === 'Company') {
+        const cName = company_name !== undefined ? (company_name ? company_name.trim() : '') : '';
+        params.push(cName || null);
+        query += `, company_name = $${params.length}, is_extra_pay = FALSE, employee_id = NULL`;
+      } else if (cat === 'Employee') {
+        query += `, company_name = NULL`;
+        if (is_extra_pay !== undefined) {
+          params.push(Boolean(is_extra_pay));
+          query += `, is_extra_pay = $${params.length}`;
+        }
         if (employee_id !== undefined) {
           const empId = employee_id ? parseInt(employee_id, 10) : null;
           params.push(empId);
           query += `, employee_id = $${params.length}`;
         }
       } else {
-        query += `, employee_id = NULL`;
+        query += `, company_name = NULL, is_extra_pay = FALSE, employee_id = NULL`;
       }
     } else {
+      if (company_name !== undefined) {
+        params.push(company_name ? company_name.trim() : null);
+        query += `, company_name = $${params.length}`;
+      }
       if (is_extra_pay !== undefined) {
         params.push(Boolean(is_extra_pay));
         query += `, is_extra_pay = $${params.length}`;
@@ -588,10 +670,10 @@ router.get('/:id/monthly-summary', async (req, res) => {
   }
 });
 
-// Get ledger (transactions) for a customer with optional month & classification filtering
+// Get ledger (transactions) for a customer with optional month, date range & classification filtering
 router.get('/:id/ledger', async (req, res) => {
   const { id } = req.params;
-  const { month, classification } = req.query;
+  const { month, classification, from_date, to_date, with_meta } = req.query;
 
   try {
     let query = `
@@ -606,10 +688,57 @@ router.get('/:id/ledger', async (req, res) => {
       WHERE ct.credit_customer_id = $1
     `;
     const params = [id];
+    let openingBalance = 0;
 
-    if (month && month !== 'All') {
+    // Custom Date Range Filtering
+    if (from_date) {
+      const fromTimestamp = `${from_date} 00:00:00`;
+      
+      // Calculate Opening Balance strictly before from_date
+      const openBalRes = await pool.query(`
+        SELECT COALESCE(SUM(
+          CASE 
+            WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount 
+            WHEN type = 'PAYMENT' THEN -amount 
+            WHEN type = 'ORDER_CANCELLED' THEN -amount
+            WHEN type = 'PAYMENT_CANCELLED' THEN amount
+            ELSE 0 
+          END
+        ), 0) AS opening_balance
+        FROM credit_transactions
+        WHERE credit_customer_id = $1 AND created_at < $2
+      `, [id, fromTimestamp]);
+
+      openingBalance = parseFloat(openBalRes.rows[0]?.opening_balance || 0);
+
+      params.push(fromTimestamp);
+      query += ` AND ct.created_at >= $${params.length}`;
+
+      if (to_date) {
+        const toTimestamp = `${to_date} 23:59:59.999`;
+        params.push(toTimestamp);
+        query += ` AND ct.created_at <= $${params.length}`;
+      }
+    } else if (month && month !== 'All') {
       params.push(month);
       query += ` AND COALESCE(ct.billing_month, TO_CHAR(ct.created_at, 'YYYY-MM')) = $${params.length}`;
+
+      // Calculate opening balance before this month begins
+      const monthStart = `${month}-01 00:00:00`;
+      const openBalRes = await pool.query(`
+        SELECT COALESCE(SUM(
+          CASE 
+            WHEN type IN ('CHARGE', 'CREDIT_ORDER') THEN amount 
+            WHEN type = 'PAYMENT' THEN -amount 
+            WHEN type = 'ORDER_CANCELLED' THEN -amount
+            WHEN type = 'PAYMENT_CANCELLED' THEN amount
+            ELSE 0 
+          END
+        ), 0) AS opening_balance
+        FROM credit_transactions
+        WHERE credit_customer_id = $1 AND created_at < $2
+      `, [id, monthStart]);
+      openingBalance = parseFloat(openBalRes.rows[0]?.opening_balance || 0);
     }
 
     if (classification && classification !== 'All') {
@@ -617,9 +746,51 @@ router.get('/:id/ledger', async (req, res) => {
       query += ` AND ct.classification = $${params.length}`;
     }
 
-    query += ' ORDER BY ct.created_at DESC, ct.id DESC';
+    // Sort chronologically ascending to accurately compute running balance
+    query += ' ORDER BY ct.created_at ASC, ct.id ASC';
     const result = await pool.query(query, params);
-    res.json(result.rows);
+
+    let periodDebit = 0;
+    let periodCredit = 0;
+    let currentRunning = openingBalance;
+
+    const rowsWithRunningBalance = result.rows.map(row => {
+      const amt = parseFloat(row.amount || 0);
+      if (row.type === 'CHARGE' || row.type === 'CREDIT_ORDER') {
+        periodDebit += amt;
+        currentRunning += amt;
+      } else if (row.type === 'PAYMENT') {
+        periodCredit += amt;
+        currentRunning -= amt;
+      } else if (row.type === 'ORDER_CANCELLED') {
+        periodDebit -= amt;
+        currentRunning -= amt;
+      } else if (row.type === 'PAYMENT_CANCELLED') {
+        periodCredit -= amt;
+        currentRunning += amt;
+      }
+      return {
+        ...row,
+        running_balance: currentRunning
+      };
+    });
+
+    const closingBalance = currentRunning;
+
+    // Reverse for descending display in table
+    rowsWithRunningBalance.reverse();
+
+    if (from_date || with_meta === 'true') {
+      res.json({
+        transactions: rowsWithRunningBalance,
+        opening_balance: openingBalance,
+        period_debit: periodDebit,
+        period_credit: periodCredit,
+        closing_balance: closingBalance
+      });
+    } else {
+      res.json(rowsWithRunningBalance);
+    }
   } catch (error) {
     console.error('Error fetching ledger:', error);
     res.status(500).json({ error: 'Internal server error' });

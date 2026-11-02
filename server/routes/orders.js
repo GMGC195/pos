@@ -386,6 +386,19 @@ router.post('/', authenticateToken, async (req, res) => {
       console.error('[ORDER ERROR] Auto print logic error:', printErr);
     }
     
+    const pmtRecv = credit_payment_amount ? parseFloat(credit_payment_amount) : 0;
+    order.payment_received = pmtRecv;
+    order.remaining_due = Math.max(0, parseFloat(order.grand_total) - pmtRecv);
+    if (pmtRecv > 0) {
+      order.credit_payments = [{
+        amount: pmtRecv,
+        type: 'PAYMENT',
+        created_at: new Date().toISOString(),
+        payment_method: 'Cash',
+        comments: 'Payment with order'
+      }];
+    }
+    
     res.status(201).json({ success: true, order });
   } catch (err) {
     console.error('❌ Order insertion failed:', err);
@@ -824,9 +837,26 @@ router.get('/:id', authenticateToken, async (req, res) => {
     
     const itemsResult = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [req.params.id]);
     
+    // Fetch credit payments linked to this order
+    const creditPaymentsResult = await pool.query(`
+      SELECT id, amount, type, created_at, cashier_name, payment_method, comments 
+      FROM credit_transactions 
+      WHERE order_id = $1 AND type = 'PAYMENT'
+      ORDER BY created_at ASC, id ASC
+    `, [req.params.id]);
+
+    const creditPayments = creditPaymentsResult.rows;
+    const totalPaymentReceived = creditPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const orderRow = orderResult.rows[0];
+    const grandTotal = parseFloat(orderRow.grand_total || 0);
+    const remainingDue = Math.max(0, grandTotal - totalPaymentReceived);
+
     res.json({
-      ...orderResult.rows[0],
-      items: itemsResult.rows
+      ...orderRow,
+      items: itemsResult.rows,
+      credit_payments: creditPayments,
+      payment_received: totalPaymentReceived,
+      remaining_due: remainingDue
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

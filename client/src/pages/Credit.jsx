@@ -5,7 +5,7 @@ import {
   Plus, Edit, Trash2, FileText, X, Percent, Tag, Calendar, 
   MessageSquare, Check, AlertTriangle, Filter, ArrowDownRight, 
   ArrowUpRight, UserCheck, UserX, ChevronDown, Layers, ShieldCheck,
-  Users, Search
+  Users, Search, Printer, Download
 } from 'lucide-react';
 import { CURRENCY } from '../config';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,6 +18,13 @@ const getCurrentMonthStr = () => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
+};
+
+const getBranchShortName = (b) => {
+  if (!b || b === 'All') return 'All';
+  const match = b.match(/\d+/);
+  if (match) return `B${match[0]}`;
+  return b.length > 5 ? b.substring(0, 4) : b;
 };
 
 const formatMonthDisplay = (monthStr) => {
@@ -371,6 +378,17 @@ export default function Credit() {
   const [notes, setNotes] = useState('');
   const [selectedBranches, setSelectedBranches] = useState([]);
   const [category, setCategory] = useState('Regular Customer');
+  const [companyName, setCompanyName] = useState('');
+  const [selectedMainMonth, setSelectedMainMonth] = useState(getCurrentMonthStr());
+  const [balanceSort, setBalanceSort] = useState('default'); // 'default' | 'highest_balance' | 'lowest_balance'
+  const [dbBranches, setDbBranches] = useState(['Branch 1', 'Branch 2', 'Branch 3']);
+
+  // Date Range Filter & Running Balance State inside Ledger
+  const [showDateRangeFilter, setShowDateRangeFilter] = useState(false);
+  const [filterFromDate, setFilterFromDate] = useState('');
+  const [filterToDate, setFilterToDate] = useState('');
+  const [isDateRangeActive, setIsDateRangeActive] = useState(false);
+  const [openingBalance, setOpeningBalance] = useState(0);
   const [isExtraPay, setIsExtraPay] = useState(false);
   const [status, setStatus] = useState('Active');
   const [discountPackageId, setDiscountPackageId] = useState('');
@@ -421,8 +439,14 @@ export default function Credit() {
   }, [isAdmin]);
 
   useEffect(() => {
+    axios.get('/api/credit/branches').then(r => {
+      if (Array.isArray(r.data) && r.data.length > 0) setDbBranches(r.data);
+    }).catch(console.error);
+  }, []);
+
+  useEffect(() => {
     fetchCustomers();
-  }, [branchFilter]);
+  }, [branchFilter, selectedMainMonth, balanceSort]);
 
   const fetchEmployeesList = async () => {
     try {
@@ -449,11 +473,14 @@ export default function Credit() {
   const fetchCustomers = async () => {
     setLoading(true);
     try {
-      const curMonth = getCurrentMonthStr();
-      const url = (isAdmin || isManagement) && branchFilter !== 'All' 
-        ? `/api/credit?branch=${encodeURIComponent(branchFilter)}&month=${curMonth}` 
-        : `/api/credit?month=${curMonth}`;
-      const res = await axios.get(url);
+      const params = {
+        month: selectedMainMonth,
+        sortBy: balanceSort
+      };
+      if ((isAdmin || isManagement) && branchFilter !== 'All') {
+        params.branch = branchFilter;
+      }
+      const res = await axios.get('/api/credit', { params });
       setCustomers(res.data || []);
     } catch (err) {
       toast.error('Failed to fetch credit customers');
@@ -565,6 +592,11 @@ export default function Credit() {
       finalRules = [];
     }
 
+    if (category === 'Company' && (!companyName || !companyName.trim())) {
+      toast.error('Company Name is required for Company customers');
+      return;
+    }
+
     const payload = {
       name,
       phone,
@@ -573,6 +605,7 @@ export default function Credit() {
       notes,
       available_branches: isAdmin ? selectedBranches : [user?.branch?.split(',')[0]?.trim() || ''],
       category,
+      company_name: category === 'Company' ? companyName.trim() : null,
       is_extra_pay: category === 'Employee' ? isExtraPay : false,
       employee_id: category === 'Employee' && employeeSelectMode === 'registered' && selectedEmployeeId ? parseInt(selectedEmployeeId, 10) : null,
       status,
@@ -660,6 +693,7 @@ export default function Credit() {
     setCreditLimit(0);
     setSelectedBranches(AVAILABLE_BRANCHES);
     setCategory('Regular Customer');
+    setCompanyName('');
     setIsExtraPay(false);
     setStatus('Active');
     setDiscountMode('none');
@@ -680,6 +714,7 @@ export default function Credit() {
     setCreditLimit(customer.credit_limit || 0);
     setSelectedBranches(customer.available_branches || []);
     setCategory(customer.category || 'Regular Customer');
+    setCompanyName(customer.company_name || '');
     setIsExtraPay(Boolean(customer.is_extra_pay));
     setStatus(customer.status || 'Active');
     setEmployeeSearchTerm('');
@@ -755,12 +790,21 @@ export default function Credit() {
       setLedgerSelectedPackageId('');
     }
 
+    setIsDateRangeActive(false);
+    setFilterFromDate('');
+    setFilterToDate('');
+    setShowDateRangeFilter(false);
+    setOpeningBalance(0);
+
     try {
       const [ledgerRes, summaryRes] = await Promise.all([
-        axios.get(`/api/credit/${customer.id}/ledger`, { params: { month: currentMonth } }),
+        axios.get(`/api/credit/${customer.id}/ledger`, { params: { month: currentMonth, with_meta: 'true' } }),
         axios.get(`/api/credit/${customer.id}/monthly-summary`)
       ]);
-      setLedger(ledgerRes.data || []);
+      const txs = Array.isArray(ledgerRes.data) ? ledgerRes.data : (ledgerRes.data?.transactions || []);
+      const openBal = Array.isArray(ledgerRes.data) ? 0 : (parseFloat(ledgerRes.data?.opening_balance) || 0);
+      setLedger(txs);
+      setOpeningBalance(openBal);
       setMonthlySummary(summaryRes.data || []);
       setShowLedger(true);
     } catch (err) {
@@ -768,18 +812,26 @@ export default function Credit() {
     }
   };
 
-  const reloadLedger = async (month = selectedLedgerMonth, classification = ledgerClassificationFilter) => {
+  const reloadLedger = async (month = selectedLedgerMonth, classification = ledgerClassificationFilter, customFrom = null, customTo = null) => {
     if (!activeCustomer) return;
     try {
-      const params = {};
-      if (month && month !== 'All') params.month = month;
+      const params = { with_meta: 'true' };
+      if (customFrom) {
+        params.from_date = customFrom;
+        if (customTo) params.to_date = customTo;
+      } else {
+        if (month && month !== 'All') params.month = month;
+      }
       if (classification && classification !== 'All') params.classification = classification;
 
       const [ledgerRes, summaryRes] = await Promise.all([
         axios.get(`/api/credit/${activeCustomer.id}/ledger`, { params }),
         axios.get(`/api/credit/${activeCustomer.id}/monthly-summary`)
       ]);
-      setLedger(ledgerRes.data || []);
+      const txs = Array.isArray(ledgerRes.data) ? ledgerRes.data : (ledgerRes.data?.transactions || []);
+      const openBal = Array.isArray(ledgerRes.data) ? 0 : (parseFloat(ledgerRes.data?.opening_balance) || 0);
+      setLedger(txs);
+      setOpeningBalance(openBal);
       setMonthlySummary(summaryRes.data || []);
     } catch (err) {
       console.error('Error reloading ledger:', err);
@@ -788,8 +840,195 @@ export default function Credit() {
 
   const handleSelectLedgerMonth = (m) => {
     setSelectedLedgerMonth(m);
+    setIsDateRangeActive(false);
+    setFilterFromDate('');
+    setFilterToDate('');
     setBillingMonth(m !== 'All' ? m : getCurrentMonthStr());
     reloadLedger(m, ledgerClassificationFilter);
+  };
+
+  const handleApplyDateRange = () => {
+    if (!filterFromDate) {
+      toast.error('Please select From Date');
+      return;
+    }
+    setIsDateRangeActive(true);
+    reloadLedger(null, ledgerClassificationFilter, filterFromDate, filterToDate || filterFromDate);
+  };
+
+  const handleClearDateRange = () => {
+    setIsDateRangeActive(false);
+    setFilterFromDate('');
+    setFilterToDate('');
+    reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
+  };
+
+  // Statement Print Slip Handler
+  const handlePrintSlip = () => {
+    if (!activeCustomer) return;
+    const periodLabel = isDateRangeActive 
+      ? `Period: ${filterFromDate} to ${filterToDate || filterFromDate}`
+      : (selectedLedgerMonth !== 'All' ? `Month: ${formatMonthDisplay(selectedLedgerMonth)}` : 'All Months');
+
+    const pDebits = processedTransactions
+      .filter(t => !t.isCancelled && (t.type === 'CHARGE' || t.type === 'CREDIT_ORDER'))
+      .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+    const pCredits = processedTransactions
+      .filter(t => !t.isCancelled && t.type === 'PAYMENT')
+      .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+    const pClosing = openingBalance + pDebits - pCredits;
+
+    const rowsHtml = processedTransactions.map((t) => {
+      const isDebit = t.type === 'CHARGE' || t.type === 'CREDIT_ORDER';
+      const amt = parseFloat(t.amount || 0);
+      const runBal = t.running_balance !== undefined ? parseFloat(t.running_balance) : 0;
+      return `
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11.5px;">
+          <td style="padding: 6px 8px;">${new Date(t.created_at).toLocaleDateString()}</td>
+          <td style="padding: 6px 8px;">${t.slip_number ? `Bill #${t.slip_number}` : (t.type === 'CHARGE' ? 'Manual Charge' : 'Major Payment')}</td>
+          <td style="padding: 6px 8px;">${t.comments || (isDebit ? 'Order Charge' : 'Payment Received')}</td>
+          <td style="padding: 6px 8px; text-align: right; color: ${isDebit ? '#dc2626' : '#16a34a'}; font-weight: 700;">
+            ${isDebit ? '+' : '-'}SAR ${amt.toFixed(2)}
+          </td>
+          <td style="padding: 6px 8px; text-align: right; font-weight: 800; color: #1e293b;">
+            SAR ${runBal.toFixed(2)}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8"/>
+      <title>Khata Statement - ${activeCustomer.name}</title>
+      <style>
+        @page { size: auto; margin: 12mm; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 10px; color: #111; line-height: 1.4; }
+        h2 { margin: 0 0 2px; font-size: 19px; text-align: center; font-weight: 800; }
+        .meta-box { background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 12.5px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { background: #f1f5f9; padding: 7px 8px; font-size: 11.5px; text-align: left; border-bottom: 2px solid #94a3b8; font-weight: 700; }
+        .footer-box { margin-top: 14px; padding: 10px 14px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 12.5px; }
+      </style>
+    </head>
+    <body>
+      <h2>CUSTOMER KHATA STATEMENT</h2>
+      <div style="text-align: center; font-size: 11.5px; color: #64748b; margin-bottom: 6px;">Generated on ${new Date().toLocaleString()}</div>
+      
+      <div class="meta-box">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span><strong>Customer:</strong> ${activeCustomer.name} (${activeCustomer.category}${activeCustomer.company_name ? ` - ${activeCustomer.company_name}` : ''})</span>
+          <span><strong>Phone:</strong> ${activeCustomer.phone || '-'}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span><strong>Statement Period:</strong> ${periodLabel}</span>
+          <span><strong>Opening Balance:</strong> SAR ${openingBalance.toFixed(2)}</span>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Bill # / Type</th>
+            <th>Description & Remarks</th>
+            <th style="text-align: right;">Amount</th>
+            <th style="text-align: right;">Running Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+
+      <div class="footer-box">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span><strong>Period Debits:</strong> +SAR ${pDebits.toFixed(2)}</span>
+          <span><strong>Period Credits:</strong> -SAR ${pCredits.toFixed(2)}</span>
+          <span><strong>Period Closing Balance:</strong> SAR ${pClosing.toFixed(2)}</span>
+        </div>
+        <div style="border-top: 1px solid #cbd5e1; padding-top: 6px; margin-top: 4px; display: flex; justify-content: space-between;">
+          <span><strong>Lifetime Outstanding Balance:</strong></span>
+          <span style="font-weight: 800; font-size: 13.5px; color: ${activeCustomer.balance > 0 ? '#dc2626' : '#16a34a'};">
+            SAR ${Math.abs(activeCustomer.balance).toFixed(2)} ${activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(Settled)')}
+          </span>
+        </div>
+      </div>
+    </body>
+    </html>`;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    iframe.contentDocument.write(html);
+    iframe.contentDocument.close();
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => document.body.removeChild(iframe), 1000);
+    }, 500);
+  };
+
+  // Statement Excel Export Handler
+  const handleExportExcel = async () => {
+    if (!activeCustomer) return;
+    try {
+      const XLSX = await import('xlsx');
+      const periodLabel = isDateRangeActive 
+        ? `${filterFromDate} to ${filterToDate || filterFromDate}`
+        : (selectedLedgerMonth !== 'All' ? formatMonthDisplay(selectedLedgerMonth) : 'All Months');
+
+      const pDebits = processedTransactions
+        .filter(t => !t.isCancelled && (t.type === 'CHARGE' || t.type === 'CREDIT_ORDER'))
+        .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+      const pCredits = processedTransactions
+        .filter(t => !t.isCancelled && t.type === 'PAYMENT')
+        .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+      const pClosing = openingBalance + pDebits - pCredits;
+
+      const data = [
+        ['CUSTOMER KHATA STATEMENT / LEDGER'],
+        ['Customer Name', activeCustomer.name, 'Category', activeCustomer.category || 'Regular Customer'],
+        ['Company Name', activeCustomer.company_name || '-', 'Phone', activeCustomer.phone || '-'],
+        ['Statement Period', periodLabel, 'Generated At', new Date().toLocaleString()],
+        ['Opening Balance', `SAR ${openingBalance.toFixed(2)}`, 'Lifetime Balance', `SAR ${parseFloat(activeCustomer.balance || 0).toFixed(2)}`],
+        [],
+        ['Date & Time', 'Bill # / Type', 'Description & Remarks', 'Classification', 'Debit (+)', 'Credit (-)', 'Running Balance']
+      ];
+
+      processedTransactions.forEach(t => {
+        const isDebit = t.type === 'CHARGE' || t.type === 'CREDIT_ORDER';
+        const isCredit = t.type === 'PAYMENT';
+        const amt = parseFloat(t.amount || 0);
+        const runBal = t.running_balance !== undefined ? parseFloat(t.running_balance) : 0;
+        data.push([
+          new Date(t.created_at).toLocaleString(),
+          t.slip_number ? `Bill #${t.slip_number}` : (t.type === 'CHARGE' ? 'Manual Charge' : 'Major Payment'),
+          t.comments || (isDebit ? 'Order Charge' : 'Payment Received'),
+          t.classification || '-',
+          isDebit ? amt : '',
+          isCredit ? amt : '',
+          runBal
+        ]);
+      });
+
+      data.push([]);
+      data.push(['Period Summary', '', '', '', `+SAR ${pDebits.toFixed(2)}`, `-SAR ${pCredits.toFixed(2)}`, `Closing: SAR ${pClosing.toFixed(2)}`]);
+      data.push(['Total Outstanding Balance', `SAR ${parseFloat(activeCustomer.balance || 0).toFixed(2)}`]);
+
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      ws['!cols'] = [{ wch: 22 }, { wch: 18 }, { wch: 32 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 16 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Khata Statement');
+      const safeName = (activeCustomer.name || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');
+      XLSX.writeFile(wb, `Khata_Statement_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success('Excel statement downloaded successfully!');
+    } catch (err) {
+      console.error('Error exporting Excel statement:', err);
+      toast.error('Failed to export Excel statement');
+    }
   };
 
   const handleSelectClassificationFilter = (c) => {
@@ -914,6 +1153,7 @@ export default function Credit() {
     if (!applyOnPackage) return [];
     return customers.filter(c => {
       if (applyOnFilter === 'Employees' && c.category !== 'Employee') return false;
+      if (applyOnFilter === 'Companies' && c.category !== 'Company') return false;
       if (applyOnFilter === 'Customers' && c.category !== 'Regular Customer') return false;
       if (applyOnSearch.trim()) {
         const q = applyOnSearch.toLowerCase();
@@ -1048,12 +1288,24 @@ export default function Credit() {
   const filteredCustomers = customers.filter(c => {
     if (categoryFilter === 'All') return true;
     if (categoryFilter === 'Employee') return c.category === 'Employee';
-    if (categoryFilter === 'Regular Customer') return c.category !== 'Employee';
+    if (categoryFilter === 'Company') return c.category === 'Company';
+    if (categoryFilter === 'Regular Customer') return c.category === 'Regular Customer' || (!c.category && c.category !== 'Employee' && c.category !== 'Company');
     return true;
   });
 
   const employeeCount = customers.filter(c => c.category === 'Employee').length;
-  const regularCount = customers.filter(c => c.category !== 'Employee').length;
+  const companyCount = customers.filter(c => c.category === 'Company').length;
+  const regularCount = customers.filter(c => c.category === 'Regular Customer' || (!c.category && c.category !== 'Employee' && c.category !== 'Company')).length;
+
+  const sortedAndFilteredCustomers = useMemo(() => {
+    let list = [...filteredCustomers];
+    if (balanceSort === 'highest_balance') {
+      list.sort((a, b) => Number(b.balance || 0) - Number(a.balance || 0));
+    } else if (balanceSort === 'lowest_balance') {
+      list.sort((a, b) => Number(a.balance || 0) - Number(b.balance || 0));
+    }
+    return list;
+  }, [filteredCustomers, balanceSort]);
 
   const totalCustomerBalance = useMemo(() => {
     return filteredCustomers.reduce((sum, c) => sum + (parseFloat(c.balance) || 0), 0);
@@ -1122,18 +1374,90 @@ export default function Credit() {
         </div>
         
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          {(isAdmin || isManagement) && (
-            <select 
-              value={branchFilter}
-              onChange={e => setBranchFilter(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
+          {/* 1.A Month-wise Filter at Top */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 8, padding: '5px 10px' }}>
+            <Calendar size={15} style={{ color: 'var(--primary)' }} />
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>Month:</span>
+            <select
+              value={selectedMainMonth}
+              onChange={e => setSelectedMainMonth(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--surface)', fontSize: 12.5, fontWeight: 600, outline: 'none', cursor: 'pointer' }}
             >
-              <option value="All">All Branches</option>
-              {AVAILABLE_BRANCHES.map(b => (
-                <option key={b} value={b}>{b}</option>
-              ))}
+              <option value={getCurrentMonthStr()}>{formatMonthDisplay(getCurrentMonthStr())} • Current</option>
+              {/* Previous 12 months */}
+              {Array.from({ length: 12 }, (_, i) => {
+                const d = new Date();
+                d.setDate(1);
+                d.setMonth(d.getMonth() - (i + 1));
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const key = `${y}-${m}`;
+                return <option key={key} value={key}>{formatMonthDisplay(key)}</option>;
+              })}
+              <option value="All">All Months (Full History)</option>
             </select>
+          </div>
+
+          {/* 1.B Branch Segmented Switch Control */}
+          {(isAdmin || isManagement) && (
+            <div style={{ display: 'inline-flex', background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 8, padding: 3, gap: 3 }}>
+              <button
+                type="button"
+                onClick={() => setBranchFilter('All')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: branchFilter === 'All' ? 'var(--primary)' : 'transparent',
+                  color: branchFilter === 'All' ? '#fff' : 'var(--text)',
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s'
+                }}
+              >
+                All
+              </button>
+              {dbBranches.map(b => {
+                const shortCode = getBranchShortName(b);
+                const isActive = branchFilter === b;
+                return (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => setBranchFilter(b)}
+                    title={b}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: isActive ? 'var(--primary)' : 'transparent',
+                      color: isActive ? '#fff' : 'var(--text)',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {shortCode}
+                  </button>
+                );
+              })}
+            </div>
           )}
+
+          {/* 1.C Balance Sorting Filter Dropdown */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <select
+              value={balanceSort}
+              onChange={e => setBalanceSort(e.target.value)}
+              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--surface-3)', background: 'var(--surface)', fontSize: 12.5, fontWeight: 600, outline: 'none', cursor: 'pointer' }}
+            >
+              <option value="default">Sort: Default</option>
+              <option value="highest_balance">Sort: Highest Balance</option>
+              <option value="lowest_balance">Sort: Lowest Balance</option>
+            </select>
+          </div>
 
           {isAdmin && (
             <button
@@ -1168,6 +1492,7 @@ export default function Credit() {
             { id: 'All', label: 'All Customers', count: customers.length },
             { id: 'Employee', label: 'Employees', count: employeeCount },
             { id: 'Regular Customer', label: 'Regular Customers', count: regularCount },
+            { id: 'Company', label: 'Companies', count: companyCount },
           ].map(tab => (
             <button
               key={tab.id}
@@ -1230,10 +1555,10 @@ export default function Credit() {
           <thead>
             <tr style={{ borderBottom: '2px solid var(--surface-2)', background: 'var(--surface-50)' }}>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 200 }}>Customer / Category</th>
+              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 180, whiteSpace: 'nowrap' }}>Balance (All & Current)</th>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Status</th>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 150 }}>Phone / Ref</th>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 240, whiteSpace: 'nowrap' }}>Discount Package</th>
-              <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 175, whiteSpace: 'nowrap' }}>Balance (All & Current)</th>
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 120 }}>Limit</th>
               {isAdmin && <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 160 }}>Branches</th>}
               <th style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right', minWidth: 110 }}>Actions</th>
@@ -1245,7 +1570,7 @@ export default function Credit() {
             ) : filteredCustomers.length === 0 ? (
               <tr><td colSpan={isAdmin ? 8 : 7} style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>No credit customers found.</td></tr>
             ) : (
-              filteredCustomers.map((c) => {
+              sortedAndFilteredCustomers.map((c) => {
                 const effLim = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 100;
                 const limitExceeded = Number(c.balance) > effLim;
                 const isDeactivated = c.status === 'Deactivated' || c.is_active === false;
@@ -1270,6 +1595,10 @@ export default function Credit() {
                           <span style={{ fontSize: 11, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
                             Employee {c.is_extra_pay ? '• Extra Pay' : ''} {c.employee_id ? '🔗' : ''}
                           </span>
+                        ) : c.category === 'Company' ? (
+                          <span style={{ fontSize: 11, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                            Company {c.company_name ? `(${c.company_name})` : ''}
+                          </span>
                         ) : (
                           <span style={{ fontSize: 11, background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
                             Regular
@@ -1278,6 +1607,41 @@ export default function Credit() {
                       </div>
                     </td>
 
+                    {/* Column 2: Balance (All & Current) moved immediately after Customer / Category */}
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', minWidth: 180 }}>
+                      {/* All Balance (Overall Account Total) */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>All Bal:</span>
+                        <span style={{ 
+                          fontWeight: 800, 
+                          fontSize: 14, 
+                          color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) 
+                        }}>
+                          {CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? '(Due)' : (c.balance < 0 ? '(Adv)' : '(0.00)')}
+                        </span>
+                      </div>
+
+                      {/* Current / Selected Month Balance */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)' }}>
+                          {selectedMainMonth !== 'All' ? `${formatMonthDisplay(selectedMainMonth).slice(0, 7)}:` : 'Mo Bal:'}
+                        </span>
+                        {(() => {
+                          const curBal = parseFloat(c.current_month_balance || 0);
+                          return (
+                            <span style={{ 
+                              fontSize: 12, 
+                              fontWeight: 700, 
+                              color: curBal > 0 ? '#dc2626' : (curBal < 0 ? '#16a34a' : 'var(--text-muted)') 
+                            }}>
+                              {CURRENCY} {Math.abs(curBal).toFixed(2)} {curBal > 0 ? '(Due)' : (curBal < 0 ? '(Adv)' : '(0.00)')}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </td>
+
+                    {/* Column 3: Status */}
                     <td style={{ padding: '14px 16px' }}>
                       {isDeactivated ? (
                         <span style={{ fontSize: 11, background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -1290,11 +1654,13 @@ export default function Credit() {
                       )}
                     </td>
 
+                    {/* Column 4: Phone / Ref */}
                     <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 13 }}>
                       <div>{c.phone || '-'}</div>
                       {c.reference && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.reference}</div>}
                     </td>
 
+                    {/* Column 5: Discount Package */}
                     <td style={{ padding: '14px 16px', minWidth: 240 }}>
                       {c.discount_package_name ? (
                         <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, whiteSpace: 'nowrap', display: 'inline-block' }}>
@@ -1315,37 +1681,6 @@ export default function Credit() {
                         }
                         return <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>None</span>;
                       })()}
-                    </td>
-
-                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', minWidth: 175 }}>
-                      {/* All Balance (Overall Account Total) */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>All Bal:</span>
-                        <span style={{ 
-                          fontWeight: 800, 
-                          fontSize: 14, 
-                          color: limitExceeded ? 'var(--red)' : (c.balance > 0 ? 'var(--red)' : (c.balance < 0 ? 'var(--green)' : 'var(--text)')) 
-                        }}>
-                          {CURRENCY} {Math.abs(c.balance).toFixed(2)} {c.balance > 0 ? '(Due)' : (c.balance < 0 ? '(Adv)' : '(0.00)')}
-                        </span>
-                      </div>
-
-                      {/* Current Month Balance */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                        <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)' }}>Current Mo:</span>
-                        {(() => {
-                          const curBal = parseFloat(c.current_month_balance || 0);
-                          return (
-                            <span style={{ 
-                              fontSize: 12, 
-                              fontWeight: 700, 
-                              color: curBal > 0 ? '#dc2626' : (curBal < 0 ? '#16a34a' : 'var(--text-muted)') 
-                            }}>
-                              {CURRENCY} {Math.abs(curBal).toFixed(2)} {curBal > 0 ? '(Due)' : (curBal < 0 ? '(Adv)' : '(0.00)')}
-                            </span>
-                          );
-                        })()}
-                      </div>
                     </td>
 
                     <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: 13 }}>
@@ -1441,7 +1776,7 @@ export default function Credit() {
                 {/* Customer Category & Extra Pay */}
                 <div style={{ background: 'var(--surface-2)', padding: 12, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Customer Classification *</label>
-                  <div style={{ display: 'flex', gap: 16 }}>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                       <input 
                         type="radio" 
@@ -1462,7 +1797,34 @@ export default function Credit() {
                       />
                       Employee
                     </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                      <input 
+                        type="radio" 
+                        name="custCategory" 
+                        value="Company" 
+                        checked={category === 'Company'} 
+                        onChange={() => setCategory('Company')} 
+                      />
+                      Company
+                    </label>
                   </div>
+
+                  {/* Company Name field when Company category is selected */}
+                  {category === 'Company' && (
+                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: '1px solid var(--surface-3)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                        Company Name <span style={{ color: 'var(--red)' }}>*</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        required 
+                        placeholder="e.g. Aramco, Al-Baik, Tech Solutions Ltd" 
+                        value={companyName} 
+                        onChange={e => setCompanyName(e.target.value)}
+                        style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', color: 'var(--text)', outline: 'none', fontSize: 13, boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  )}
 
                   {category === 'Employee' && (
                     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--surface-3)', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1923,6 +2285,11 @@ export default function Credit() {
                 {activeCustomer.category === 'Employee' && (
                   <span style={{ fontSize: 11, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 7px', borderRadius: 12, fontWeight: 700 }}>
                     Employee {activeCustomer.is_extra_pay ? '(Extra Pay)' : ''}
+                  </span>
+                )}
+                {activeCustomer.category === 'Company' && (
+                  <span style={{ fontSize: 11, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '1px 7px', borderRadius: 12, fontWeight: 700 }}>
+                    Company {activeCustomer.company_name ? `(${activeCustomer.company_name})` : ''}
                   </span>
                 )}
                 {activeCustomer.discount_package_name && (
@@ -2465,15 +2832,15 @@ export default function Credit() {
                 </div>
 
                 {/* Inputs Row */}
-                <div style={{ display: 'grid', gridTemplateColumns: '120px 145px 1fr auto', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '190px 145px 1fr auto', gap: 10, alignItems: 'center' }}>
                   <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: entryType === 'PAYMENT' ? 'var(--green)' : (entryType === 'EXTRA_PAY' ? '#16a34a' : 'var(--red)'), fontSize: 13 }}>
+                    <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: entryType === 'PAYMENT' ? 'var(--green)' : (entryType === 'EXTRA_PAY' ? '#16a34a' : 'var(--red)'), fontSize: 16 }}>
                       {entryType === 'PAYMENT' ? '-' : '+'}
                     </span>
                     <input 
-                      type="number" step="0.01" required placeholder="Amount"
+                      type="number" step="0.01" required placeholder="0.00"
                       value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} 
-                      style={{ width: '100%', padding: '5px 6px 5px 20px', borderRadius: 6, border: '1.5px solid var(--surface-3)', background: 'var(--bg)', outline: 'none', fontSize: 12.5, boxSizing: 'border-box' }} 
+                      style={{ width: '100%', height: 42, minWidth: 180, padding: '6px 10px 6px 26px', borderRadius: 8, border: '2px solid var(--primary)', background: 'var(--bg)', color: 'var(--text)', outline: 'none', fontSize: 16, fontWeight: 800, boxSizing: 'border-box' }} 
                     />
                   </div>
 
@@ -2518,6 +2885,156 @@ export default function Credit() {
               </form>
             )}
 
+            {/* Date Range Filter & Statement Export Toolbar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 8, flexShrink: 0, background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--surface-3)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowDateRangeFilter(!showDateRangeFilter)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--surface-3)',
+                    background: isDateRangeActive ? 'var(--primary)' : 'var(--surface)',
+                    color: isDateRangeActive ? '#fff' : 'var(--text)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Filter size={13} />
+                  {isDateRangeActive ? 'Date Filter Active' : 'Date Range Filter'}
+                </button>
+
+                {isDateRangeActive && (
+                  <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', fontWeight: 600 }}>
+                    Period: <strong>{filterFromDate}</strong> to <strong>{filterToDate || filterFromDate}</strong>
+                  </span>
+                )}
+              </div>
+
+              {/* 3 Export Actions: Print Slip, Download Excel, Download PDF */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={handlePrintSlip}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--surface-3)',
+                    background: 'var(--surface)',
+                    color: 'var(--text)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                  title="Print customer statement slip"
+                >
+                  <Printer size={13} /> Print Slip
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #bbf7d0',
+                    background: '#f0fdf4',
+                    color: '#166534',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Download structured Excel statement (.xlsx)"
+                >
+                  <Download size={13} /> Download Excel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintSlip}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #bfdbfe',
+                    background: '#eff6ff',
+                    color: '#1d4ed8',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Download / Print statement PDF"
+                >
+                  <FileText size={13} /> Download PDF
+                </button>
+              </div>
+            </div>
+
+            {/* Collapsible Date Range Picker Form */}
+            {showDateRangeFilter && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--surface)', border: '1.5px solid var(--primary)', borderRadius: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700 }}>From Date:</label>
+                  <input 
+                    type="date" 
+                    value={filterFromDate} 
+                    onChange={e => setFilterFromDate(e.target.value)} 
+                    style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--surface-3)', fontSize: 12 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700 }}>To Date:</label>
+                  <input 
+                    type="date" 
+                    value={filterToDate} 
+                    onChange={e => setFilterToDate(e.target.value)} 
+                    style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--surface-3)', fontSize: 12 }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleApplyDateRange}
+                  style={{ padding: '5px 14px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Apply
+                </button>
+                {isDateRangeActive && (
+                  <button
+                    type="button"
+                    onClick={handleClearDateRange}
+                    style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'transparent', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Clear Filter
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Opening Balance Banner (prior to date range or month) */}
+            {(isDateRangeActive || selectedLedgerMonth !== 'All') && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, marginBottom: 6, fontSize: 12 }}>
+                <span style={{ color: '#475569', fontWeight: 700 }}>
+                  {isDateRangeActive ? `Opening Balance (prior to ${filterFromDate}):` : `Opening Balance (prior to ${formatMonthDisplay(selectedLedgerMonth)}):` }
+                </span>
+                <span style={{ fontWeight: 800, fontSize: 13, color: openingBalance > 0 ? '#dc2626' : (openingBalance < 0 ? '#16a34a' : '#475569') }}>
+                  {CURRENCY} {Math.abs(openingBalance).toFixed(2)} {openingBalance > 0 ? '(DR / Dues)' : (openingBalance < 0 ? '(CR / Advance)' : '(0.00)')}
+                </span>
+              </div>
+            )}
+
             {/* Fully Scrollable Transactions List with Sticky Headers */}
             <div style={{ flex: 1, minHeight: 300, overflowY: 'auto', border: '1.5px solid var(--surface-2)', borderRadius: 8, background: 'var(--surface)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -2528,6 +3045,7 @@ export default function Credit() {
                     <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700 }}>Description & Remarks</th>
                     <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700 }}>Classification</th>
                     <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textAlign: 'right' }}>Amount</th>
+                    <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textAlign: 'right' }}>Running Balance</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2642,6 +3160,11 @@ export default function Credit() {
                           <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 700, color: (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? 'var(--red)' : 'var(--green)', textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
                             {(t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}
                           </td>
+
+                          {/* Column 6: Running Balance */}
+                          <td style={{ padding: '8px 12px', fontSize: 12.5, textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', color: (t.running_balance || 0) > 0 ? '#dc2626' : ((t.running_balance || 0) < 0 ? '#16a34a' : 'var(--text-muted)') }}>
+                            {t.running_balance !== undefined ? `${CURRENCY} ${Math.abs(t.running_balance).toFixed(2)} ${t.running_balance > 0 ? '(DR)' : (t.running_balance < 0 ? '(CR)' : '(0.00)')}` : '-'}
+                          </td>
                         </tr>
                       );
                     })
@@ -2650,7 +3173,7 @@ export default function Credit() {
                 {processedTransactions.length > 0 && (
                   <tfoot>
                     <tr style={{ background: 'var(--surface-50)', borderTop: '2px solid var(--surface-2)', fontWeight: 700 }}>
-                      <td colSpan={4} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text-secondary)' }}>
+                      <td colSpan={5} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text-secondary)' }}>
                         {selectedLedgerMonth !== 'All' ? `${formatMonthDisplay(selectedLedgerMonth)} Net Balance:` : 'All Balance (Account Net Total):'}
                       </td>
                       <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', color: visibleSubtotal > 0 ? 'var(--red)' : (visibleSubtotal < 0 ? 'var(--green)' : 'var(--text)') }}>
@@ -2710,6 +3233,7 @@ export default function Credit() {
                     { id: 'All', label: 'All', count: customers.length },
                     { id: 'Employees', label: 'Employees', count: customers.filter(c => c.category === 'Employee').length },
                     { id: 'Customers', label: 'Customers', count: customers.filter(c => c.category === 'Regular Customer').length },
+                    { id: 'Companies', label: 'Companies', count: customers.filter(c => c.category === 'Company').length },
                   ].map(tab => (
                     <button
                       key={tab.id}
@@ -2811,6 +3335,10 @@ export default function Credit() {
                               {c.category === 'Employee' ? (
                                 <span style={{ fontSize: 10.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
                                   Employee
+                                </span>
+                              ) : c.category === 'Company' ? (
+                                <span style={{ fontSize: 10.5, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                  Company
                                 </span>
                               ) : (
                                 <span style={{ fontSize: 10.5, background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
