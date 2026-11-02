@@ -704,11 +704,12 @@ router.get('/:id/ledger', async (req, res) => {
               'item_name', oi.item_name,
               'qty', oi.qty,
               'unit_price', oi.unit_price,
-              'description', COALESCE(i.description, '')
+              'description', COALESCE(cat.name, '')
             )
           )
           FROM order_items oi
           LEFT JOIN items i ON oi.item_id = i.id
+          LEFT JOIN categories cat ON i.category_id = cat.id
           WHERE oi.order_id = ct.order_id
         ) AS order_items
       FROM credit_transactions ct
