@@ -778,7 +778,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       const paidAmount = Math.round((cashPaid + bankPaid) * 100) / 100;
 
       // Status determination: unpaid salaries must remain Pending, not Paid
-      let paymentStatus = 'Pending';
+      paymentStatus = 'Pending';
       if (savedRecord?.status === 'Paid' && (paidAmount > 0 || isSavedPaid)) {
         paymentStatus = 'Paid';
       } else if (empPayments.length > 0) {
