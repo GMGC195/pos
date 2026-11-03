@@ -1126,13 +1126,13 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         if (khataCustRes.rows.length > 0) {
           const cust = khataCustRes.rows[0];
           const existingTx = await client.query(
-            "SELECT id FROM credit_transactions WHERE customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+            "SELECT id FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
             [cust.id, month]
           );
           if (existingTx.rows.length === 0) {
             await client.query(
               `INSERT INTO credit_transactions (
-                customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
+                credit_customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
               ) VALUES ($1, 'PAYMENT', $2, 'Salary Deduction', 'Salary Deduction', $3, $4, NOW())`,
               [cust.id, khataDeductVal, `Auto Khata settlement from ${month} Payroll`, month]
             );
@@ -1172,7 +1172,7 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       if (khataCustRes.rows.length > 0) {
         const cust = khataCustRes.rows[0];
         const existingTx = await client.query(
-          "SELECT id, amount FROM credit_transactions WHERE customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+          "SELECT id, amount FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
           [cust.id, month]
         );
         if (existingTx.rows.length > 0) {
@@ -1622,13 +1622,13 @@ router.post('/payments', authenticateToken, async (req, res) => {
         if (khataCustRes.rows.length > 0) {
           const cust = khataCustRes.rows[0];
           const existingTx = await client.query(
-            "SELECT id FROM credit_transactions WHERE customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+            "SELECT id FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
             [cust.id, month]
           );
           if (existingTx.rows.length === 0) {
             await client.query(
               `INSERT INTO credit_transactions (
-                customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
+                credit_customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
               ) VALUES ($1, 'PAYMENT', $2, 'Salary Deduction', 'Salary Deduction', $3, $4, NOW())`,
               [cust.id, khataDeductVal, `Auto Khata settlement from ${month} Payroll`, month]
             );
