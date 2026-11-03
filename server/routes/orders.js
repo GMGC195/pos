@@ -5,6 +5,20 @@ const { authenticateToken, isAdmin, isAdminOrCashier } = require('../middleware/
 const { Resend } = require('resend');
 const Pusher = require('pusher');
 
+function cleanEnglishOnly(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/\s*-\s*$/, '')
+    .replace(/^\s*-\s*/, '')
+    .replace(/\s*-\s*-+/g, '-')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\[\s*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || String(str).trim();
+}
+
 let pusher = null;
 try {
   if (process.env.PUSHER_APP_ID && process.env.PUSHER_KEY && process.env.PUSHER_SECRET && process.env.PUSHER_CLUSTER) {
@@ -346,7 +360,8 @@ router.post('/', authenticateToken, async (req, res) => {
         else if (effectiveBranch === 'Branch 2') shortBranch = 'B2';
         else if (effectiveBranch === 'Branch 3') shortBranch = 'B3';
 
-        const cleanText = (str) => String(str || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+                const cleanText = (str) => String(str || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+        
         const payload = {
           orderId: order.id,
           orderNumber: slipNumber,
@@ -364,7 +379,7 @@ router.post('/', authenticateToken, async (req, res) => {
           paymentStatus: order.status || "Completed",
           createdAt: new Date().toISOString(),
           items: items.map(item => ({
-            name: cleanText(item.name || ""),
+            name: cleanEnglishOnly(item.name || ""),
             qty: item.qty || 1,
             amount: item.price
           }))
@@ -2632,7 +2647,7 @@ router.post('/:id/reprint', authenticateToken, async (req, res) => {
         paymentStatus: order.status || "Completed",
         createdAt: new Date().toISOString(),
         items: items.map(item => ({
-          name: cleanText(item.item_name || item.name || ""),
+          name: cleanEnglishOnly(item.item_name || item.name || ""),
           qty: item.qty || 1,
           amount: item.unit_price || item.price
         }))

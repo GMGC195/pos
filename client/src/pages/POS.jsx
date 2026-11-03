@@ -1111,9 +1111,8 @@ export default function POS() {
     <div style="font-size: 16px; font-weight: bold; margin: 4px 0; text-align: center;">
       ${shortBranch} - ${currentInfo.orderType}
     </div>
-    <div style="font-size: 11px; text-align: center; margin: 4px 0; line-height: 1.4;">
-      Kitchen slip. Please get original slip from counter.<br/>
-      اصل پرچی کاؤنٹر سے حاصل کریں۔
+    <div style="font-size: 11px; text-align: center; margin: 3px 0; line-height: 1.3;">
+      Kitchen slip. Please get original slip from counter.
     </div>
     ${metaRow}
     <div style="margin: 6px 0; font-size: 15px; font-weight: bold; text-align: center;">
@@ -1125,9 +1124,8 @@ export default function POS() {
     <div style="font-size: 14px; font-weight: bold; margin: 2px 0; text-align: center;">
       ${shortBranch} - ${currentInfo.orderType}
     </div>
-    <div style="font-size: 11px; text-align: center; margin: 4px 0; line-height: 1.4;">
-      Kitchen slip. Please get original slip from counter.<br/>
-      اصل پرچی کاؤنٹر سے حاصل کریں۔
+    <div style="font-size: 11px; text-align: center; margin: 3px 0; line-height: 1.3;">
+      Kitchen slip. Please get original slip from counter.
     </div>
     ${metaRow}
     <div style="margin: 4px 0; font-size: 14px; font-weight: bold; text-align: center;">

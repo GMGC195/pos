@@ -1,213 +1,102 @@
-// ================= ITEM URDU TRANSLATOR / CLEANER FOR FRONTEND =================
-export const ITEM_URDU_MAP = {
-  'garlic bread': 'گارلک بریڈ',
-  'chicken biryani': 'مرغ بریانی',
-  'mutton biryani': 'مٹن بریانی',
-  'beef biryani': 'بیف بریانی',
-  'veg biryani': 'سبزی بریانی',
-  'chicken karahi': 'مرغ کڑاہی',
-  'mutton karahi': 'مٹن کڑاہی',
-  'chicken handi': 'مرغ ہانڈی',
-  'chicken jalfrezi': 'مرغ جلفریزی',
-  'chicken tikka': 'مرغ تکہ',
-  'chicken boti': 'مرغ بوٹی',
-  'chicken kabab': 'مرغ کباب',
-  'seekh kabab': 'سیخ کباب',
-  'reshmi kabab': 'ریشمی کباب',
-  'chicken roast': 'مرغ روسٹ',
-  'chicken broast': 'مرغ بروسٹ',
-  'chicken burger': 'مرغ برگر',
-  'beef burger': 'بیف برگر',
-  'zinger burger': 'زنگر برگر',
-  'chicken shawarma': 'مرغ شوارما',
-  'chicken roll': 'مرغ رول',
-  'paratha roll': 'پراٹھا رول',
-  'french fries': 'فرینچ فرائز',
-  'loaded fries': 'لوڈڈ فرائز',
-  'cheese pizza': 'چیز پیزا',
-  'chicken pizza': 'مرغ پیزا',
-  'fajita pizza': 'فجیتا پیزا',
-  'tikka pizza': 'تکہ پیزا',
-  'bbq pizza': 'بی بی کیو پیزا',
-  'pepperoni pizza': 'پیپرونی پیزا',
-  'pepperoni supreme': 'پیپرونی سپریم پیزا',
-  'margherita classic': 'مارگریٹا کلاسک پیزا',
-  'four cheese': 'فور چیز پیزا',
-  'veggie garden': 'ویجی گارڈن پیزا',
-  'meat lovers': 'میٹ لورز پیزا',
-  'bbq chicken feast': 'بی بی کیو مرغ پیزا',
-  'family feast deal': 'فیملی فیسٹ ڈیل',
-  'couple combo': 'کپل کومبو ڈیل',
-  'gol gappy': 'گول گپے',
-  'gol gappy (l)': 'گول گپے (L)',
-  'mineral water': 'منرل واٹر',
-  'water': 'منرل واٹر',
-  'coca-cola 500ml': 'کوکا کولا 500 ملی',
-  'coca-cola': 'کوکا کولا',
-  'fresh lemonade': 'تازہ لیمونیڈ',
-  'mango smoothie': 'مینگو سموتھی',
-  'mint margarita': 'منٹ مارگریٹا',
-  'cold drink': 'کولڈ ڈرنک',
-  'karak chai': 'کڑک چائے',
-  'green tea': 'سبز چائے',
-  'garlic naan': 'گارلک نان',
-  'cheese naan': 'چیز نان',
-  'chicken wings': 'مرغ ونگز',
-  'biryani': 'بریانی',
-  'burger': 'برگر',
-  'zinger': 'زنگر',
-  'shawarma': 'شوارما',
-  'roll': 'رول',
-  'fries': 'فرائز',
-  'pizza': 'پیزا',
-  'margherita': 'مارگریٹا پیزا',
-  'coke': 'کوک',
-  'pepsi': 'پیپسی',
-  '7up': 'سیون اپ',
-  'sprite': 'سپرائٹ',
-  'raita': 'رائتہ',
-  'salad': 'سلاد',
-  'roti': 'روٹی',
-  'naan': 'نان',
-  'paratha': 'پراٹھا',
-  'nuggets': 'نگیٹس',
-  'wings': 'ونگز'
-};
+// ================= LANGUAGE & MENU ITEM FORMATTER FOR PRINTING =================
+// Rule 1: Urdu is completely removed from the entire system.
+// Rule 2: USB Thermal Printer prints English + Arabic (from DB).
+// Rule 3: Cloud / Network Printer prints English ONLY.
 
-export const WORD_MAP = [
-  [/chicken/i, 'مرغ'],
-  [/garlic bread/i, 'گارلک بریڈ'],
-  [/garlic/i, 'گارلک'],
-  [/bread/i, 'بریڈ'],
-  [/biryani/i, 'بریانی'],
-  [/karahi/i, 'کڑاہی'],
-  [/handi/i, 'ہانڈی'],
-  [/jalfrezi/i, 'جلفریزی'],
-  [/tikka/i, 'تکہ'],
-  [/boti/i, 'بوٹی'],
-  [/kabab/i, 'کباب'],
-  [/kebab/i, 'کباب'],
-  [/zinger/i, 'زنگر'],
-  [/burger/i, 'برگر'],
-  [/shawarma/i, 'شوارما'],
-  [/pizza/i, 'پیزا'],
-  [/fries/i, 'فرائز'],
-  [/roll/i, 'رول'],
-  [/sandwich/i, 'سینڈوچ'],
-  [/nuggets/i, 'نگیٹس'],
-  [/wings/i, 'ونگز'],
-  [/mutton/i, 'مٹن'],
-  [/beef/i, 'بیف'],
-  [/fish/i, 'مچھلی'],
-  [/cheese/i, 'چیز'],
-  [/water/i, 'منرل واٹر'],
-  [/deal/i, 'ڈیل'],
-  [/special/i, 'اسپیشل'],
-  [/salad/i, 'سلاد'],
-  [/sauce/i, 'ساس'],
-  [/small/i, 'چھوٹا'],
-  [/medium/i, 'درمیانہ'],
-  [/large/i, 'بڑا']
-];
+/**
+ * Strips any Urdu-specific characters and known Urdu phrases
+ */
+export function removeUrdu(str) {
+  if (!str) return '';
+  let cleaned = String(str);
 
-export function formatItemUrdu(rawName) {
-  if (!rawName) return '';
-  let str = String(rawName).trim();
+  // Remove known Urdu words/phrases
+  const urduPhrases = [
+    /اصل پرچی کاؤنٹر سے حاصل کریں۔?/g,
+    /مرغ بریانی/g,
+    /گارلک بریڈ/g,
+    /مرغ کڑاہی/g,
+    /مرغ ہانڈی/g,
+    /مرغ تکہ/g,
+    /مرغ بوٹی/g,
+    /مرغ کباب/g,
+    /سیخ کباب/g,
+    /ریشمی کباب/g,
+    /مرغ روسٹ/g,
+    /مرغ بروسٹ/g,
+    /مرغ برگر/g,
+    /بیف برگر/g,
+    /زنگر برگر/g,
+    /مرغ شوارما/g,
+    /مرغ رول/g,
+    /پراٹھا رول/g,
+    /فرینچ فرائز/g,
+    /لوڈڈ فرائز/g,
+    /چیز پیزا/g,
+    /مرغ پیزا/g,
+    /فجیتا پیزا/g,
+    /تکہ پیزا/g,
+    /بی بی کیو پیزا/g,
+    /پیپرونی پیزا/g,
+    /گول گپے/g,
+    /منرل واٹر/g,
+    /کوکا کولا/g,
+    /تازہ لیمونیڈ/g,
+    /مینگو سموتھی/g,
+    /کولڈ ڈرنک/g,
+    /کڑک چائے/g,
+    /سبز چائے/g,
+    /گارلک نان/g,
+    /چیز نان/g,
+    /مرغ ونگز/g,
+    /مرغ/g
+  ];
 
-  // 1. Clean previous inverted Urdu phrases if present
-  str = str.replace(/بریانی مرغ/g, 'مرغ بریانی');
-  str = str.replace(/بریڈ گارلک/g, 'گارلک بریڈ');
-  str = str.replace(/کڑاہی مرغ/g, 'مرغ کڑاہی');
-  str = str.replace(/ہانڈی مرغ/g, 'مرغ ہانڈی');
-  str = str.replace(/تکہ مرغ/g, 'مرغ تکہ');
-  str = str.replace(/بوٹی مرغ/g, 'مرغ بوٹی');
-  str = str.replace(/کباب مرغ/g, 'مرغ کباب');
-  str = str.replace(/قورمہ مرغ/g, 'مرغ قورمہ');
-  str = str.replace(/پلاؤ مرغ/g, 'مرغ پلاؤ');
-  str = str.replace(/شوارما مرغ/g, 'مرغ شوارما');
-  str = str.replace(/بروسٹ مرغ/g, 'مرغ بروسٹ');
-  str = str.replace(/برگر مرغ/g, 'مرغ برگر');
-  str = str.replace(/پیزا مرغ/g, 'مرغ پیزا');
-  str = str.replace(/ونگز مرغ/g, 'مرغ ونگز');
-  str = str.replace(/رول مرغ/g, 'مرغ رول');
-  str = str.replace(/نان گارلک/g, 'گارلک نان');
-
-  // 2. Replace Arabic phrases with proper Urdu (chicken = مرغ pehle)
-  str = str.replace(/برياني دجاج/g, 'مرغ بریانی');
-  str = str.replace(/دجاج برياني/g, 'مرغ بریانی');
-  str = str.replace(/دجاج جالفريزي/g, 'مرغ جلفریزی');
-  str = str.replace(/شواية دجاج/g, 'مرغ شواية');
-  str = str.replace(/دجاج شواية/g, 'مرغ شواية');
-  str = str.replace(/فحم دجاج/g, 'مرغ فحم');
-  str = str.replace(/دجاج فحم/g, 'مرغ فحم');
-  str = str.replace(/دجاج الفحم/g, 'مرغ الفحم');
-  str = str.replace(/دجاج كراهي/g, 'مرغ کڑاہی');
-  str = str.replace(/كراهي دجاج/g, 'مرغ کڑاہی');
-  str = str.replace(/دجاج تكا/g, 'مرغ تکہ');
-  str = str.replace(/تكا دجاج/g, 'مرغ تکہ');
-  str = str.replace(/دجاج بوتي/g, 'مرغ بوٹی');
-  str = str.replace(/هاندي دجاج/g, 'مرغ ہانڈی');
-  str = str.replace(/دجاج هاندي/g, 'مرغ ہانڈی');
-  str = str.replace(/كباب دجاج/g, 'مرغ کباب');
-  str = str.replace(/دجاج كباب/g, 'مرغ کباب');
-  str = str.replace(/دجاج كورما/g, 'مرغ قورمہ');
-  str = str.replace(/كورما دجاج/g, 'مرغ قورمہ');
-  str = str.replace(/بولاو دجاج/g, 'مرغ پلاؤ');
-  str = str.replace(/دجاج بولاو/g, 'مرغ پلاؤ');
-  str = str.replace(/حليم دجاج/g, 'مرغ حلیم');
-  str = str.replace(/شوارما دجاج/g, 'مرغ شوارما');
-  str = str.replace(/دجاج شوارما/g, 'مرغ شوارما');
-  str = str.replace(/بروست دجاج/g, 'مرغ بروسٹ');
-  str = str.replace(/دجاج بروست/g, 'مرغ بروسٹ');
-  str = str.replace(/دجاج بالزبدة/g, 'بٹر چکن (مرغ)');
-  str = str.replace(/دجاج مشوي/g, 'مرغ مشوی');
-  str = str.replace(/دجاج/g, 'مرغ');
-  str = str.replace(/لحم ضأن/g, 'مٹن');
-  str = str.replace(/لحم/g, 'گوشت');
-  str = str.replace(/أرز/g, 'چاول');
-  str = str.replace(/الرز/g, 'چاول');
-  str = str.replace(/ماء/g, 'پانی');
-  str = str.replace(/نان الثوم/g, 'گارلک نان');
-
-  let result = str;
-
-  // If does not contain Urdu/Arabic characters, find Urdu equivalent
-  if (!/[\u0600-\u06FF]/.test(str)) {
-    const cleanKey = str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-
-    if (ITEM_URDU_MAP[cleanKey]) {
-      result = `${str} - ${ITEM_URDU_MAP[cleanKey]}`;
-    } else {
-      const sortedKeys = Object.keys(ITEM_URDU_MAP).sort((a, b) => b.length - a.length);
-      let matched = false;
-      for (const k of sortedKeys) {
-        if (k.includes(' ') && (cleanKey === k || cleanKey.includes(k))) {
-          result = `${str} - ${ITEM_URDU_MAP[k]}`;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) {
-        let urduWords = [];
-        for (const [regex, urdu] of WORD_MAP) {
-          if (regex.test(str)) {
-            urduWords.push(urdu);
-          }
-        }
-        if (urduWords.length > 0) {
-          result = `${str} - ${[...new Set(urduWords)].join(' ')}`;
-        } else {
-          for (const k of sortedKeys) {
-            if (cleanKey.includes(k)) {
-              result = `${str} - ${ITEM_URDU_MAP[k]}`;
-              break;
-            }
-          }
-        }
-      }
-    }
+  for (const regex of urduPhrases) {
+    cleaned = cleaned.replace(regex, '');
   }
 
-  return result;
+  // Remove Urdu specific Unicode codepoints:
+  // \u0679 (ٹ), \u067E (پ), \u0686 (چ), \u0698 (ژ), \u06AF (گ), \u06BA (ں), \u06BE (ھ), \u06C1 (ہ), \u06D2 (ے)
+  cleaned = cleaned.replace(/[\u0679\u067E\u0686\u0698\u06AF\u06BA\u06BE\u06C1\u06D2]/g, '');
+
+  return cleaned.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Extracts clean English-only text from a string that may contain Arabic/Urdu
+ */
+export function extractEnglishOnly(str) {
+  if (!str) return '';
+  const cleaned = removeUrdu(str);
+  // Remove all Arabic & Arabic-supplement characters (\u0600-\u06FF, \u0750-\u077F, \u08A0-\u08FF, \uFB50-\uFDFF, \uFE70-\uFEFF)
+  return cleaned
+    .replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '')
+    .replace(/\s*-\s*$/, '')
+    .replace(/^\s*-\s*/, '')
+    .replace(/\s*-\s*-+/g, '-')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\[\s*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || str.trim();
+}
+
+/**
+ * Format menu item name based on printer destination:
+ * - USB Printer (isUSB = true): English + Arabic (as stored in DB), Urdu completely removed.
+ * - Cloud/Network Printer (isUSB = false): English ONLY, no Arabic, no Urdu.
+ */
+export function formatMenuItemName(rawName, isUSB = true) {
+  if (!rawName) return '';
+  const noUrdu = removeUrdu(rawName);
+
+  if (!isUSB) {
+    return extractEnglishOnly(noUrdu);
+  }
+
+  // USB Thermal printer: English + Arabic from database
+  return noUrdu;
+}
+
+// Backward-compatible alias for existing imports
+export const formatItemUrdu = (rawName, isUSB = true) => formatMenuItemName(rawName, isUSB);

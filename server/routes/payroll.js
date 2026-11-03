@@ -339,6 +339,25 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       console.error('Notice loading payments:', payErr.message);
     }
 
+    // Get Khata credit customers mapped to employees
+    const khataMap = {};
+    try {
+      const khataRes = await pool.query(
+        'SELECT id, name, employee_id, balance, is_extra_pay, status FROM credit_customers WHERE employee_id IS NOT NULL'
+      );
+      khataRes.rows.forEach(c => {
+        khataMap[c.employee_id] = {
+          customer_id: c.id,
+          name: c.name,
+          balance: parseFloat(c.balance || 0),
+          is_extra_pay: !!c.is_extra_pay,
+          status: c.status
+        };
+      });
+    } catch (kErr) {
+      console.error('Notice loading Khata customer mappings:', kErr.message);
+    }
+
     // Get attendance/leave logs for the selected month
     const logsRes = await pool.query(
       `SELECT ea.id, ea.employee_id, ea.check_in, ea.check_out, ea.status, ea.is_paid, ea.shift_hours, ea.total_break_duration_seconds, ea.break_logs, TO_CHAR(ea.date, 'YYYY-MM-DD') as date
@@ -527,7 +546,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
             shift_hours: standardShiftHours,
             ot_minutes: 0,
             short_minutes: 0,
-            isFuture: true
+            isFuture: true,
+            sessions: []
           });
           continue;
         }
@@ -602,7 +622,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
           shift_hours: currentDayShiftHours,
           ot_minutes: dayOtMinutes,
           short_minutes: dayShortMinutes,
-          isFuture: false
+          isFuture: false,
+          sessions: daySessions
         });
       }
 
@@ -691,8 +712,25 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       // Total adjustments (Expenses / Deductions & Additions)
       const totalAdjustments = Math.round((lastMonthBalance + bonus + lastMonthAdj - internet - kafalat - advanceDeduction + otherAdjustments + dynamicAdjustmentsTotal) * 100) / 100;
 
-      // Net salary = Payable salary (earnedSalary) + totalAdjustments (can be negative if deductions exceed earnings)
-      const dynamicNetSalary = Math.round((earnedSalary + totalAdjustments) * 100) / 100;
+      // Khata Balance & Deduction Integration
+      const khataInfo = khataMap[emp.id] || null;
+      const isKhataRegistered = !!khataInfo;
+      const khataBalance = khataInfo ? khataInfo.balance : 0;
+      let khataDeduction = 0;
+
+      if (isKhataRegistered) {
+        if (savedRecord && savedRecord.khata_deduction !== undefined && savedRecord.khata_deduction !== null) {
+          khataDeduction = parseFloat(savedRecord.khata_deduction);
+        } else if (khataBalance > 0) {
+          // Cap deduction at available salary before Khata so Net Salary doesn't go below 0
+          const availableSalary = Math.max(0, earnedSalary + totalAdjustments);
+          khataDeduction = Math.min(khataBalance, availableSalary);
+          khataDeduction = Math.round(khataDeduction * 100) / 100;
+        }
+      }
+
+      // Net salary = Payable salary (earnedSalary) + totalAdjustments - khataDeduction
+      const dynamicNetSalary = Math.round((earnedSalary + totalAdjustments - khataDeduction) * 100) / 100;
 
       // Auto-sync database employee_payroll_records for pending records so it never holds stale data
       if (savedRecord && !isSavedPaid) {
@@ -701,21 +739,21 @@ router.get('/calculate', authenticateToken, async (req, res) => {
             advance_deduction = $1, bonus = $2, last_month_adjustment = $3, 
             internet = $4, kafalat = $5, other_adjustments = $6, recurring_adjustments = $7,
             dynamic_adjustments = $8, total_adjustments = $9, net_salary = $10,
-            payable_salary = $11, deductions = $12
-           WHERE employee_id = $13 AND month = $14 AND status != 'Paid'`,
+            payable_salary = $11, deductions = $12, khata_deduction = $13
+           WHERE employee_id = $14 AND month = $15 AND status != 'Paid'`,
           [
             advanceDeduction, bonus, lastMonthAdj,
             internet, kafalat, manualAdjustments, finalRecurringAdjustments,
             JSON.stringify(dynamicAdjustmentsObj), totalAdjustments, dynamicNetSalary,
-            parseFloat(earnedSalary.toFixed(2)), parseFloat(deductions.toFixed(2)),
+            parseFloat(earnedSalary.toFixed(2)), parseFloat(deductions.toFixed(2)), khataDeduction,
             emp.id, month
           ]
         ).catch(err => console.error('Error auto-syncing pending payroll record:', err));
       }
 
-      // Cash and Bank paid defaults
+      // Cash and Bank paid defaults - Only set from actual recorded payments or previously saved records
       const empPayments = paymentsMap[emp.id] || [];
-      let cashPaid = dynamicNetSalary;
+      let cashPaid = 0;
       let bankPaid = 0;
 
       if (empPayments.length > 0) {
@@ -727,7 +765,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
           .reduce((sum, p) => sum + p.amount, 0);
         cashPaid = Math.round(recordedCash * 100) / 100;
         bankPaid = Math.round(recordedBank * 100) / 100;
-      } else if (savedRecord) {
+      } else if (savedRecord && savedRecord.status === 'Paid') {
         if (savedRecord.cash_paid !== undefined && savedRecord.cash_paid !== null) {
           cashPaid = parseFloat(savedRecord.cash_paid);
         } else if (savedRecord.paid_amount !== undefined && savedRecord.paid_amount !== null) {
@@ -738,6 +776,18 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         }
       }
       const paidAmount = Math.round((cashPaid + bankPaid) * 100) / 100;
+
+      // Status determination: unpaid salaries must remain Pending, not Paid
+      let paymentStatus = 'Pending';
+      if (savedRecord?.status === 'Paid' && (paidAmount > 0 || isSavedPaid)) {
+        paymentStatus = 'Paid';
+      } else if (empPayments.length > 0) {
+        if (dynamicNetSalary > 0 && paidAmount >= dynamicNetSalary) {
+          paymentStatus = 'Paid';
+        } else if (paidAmount > 0) {
+          paymentStatus = 'Partial';
+        }
+      }
 
       return {
         id: emp.id,
@@ -783,6 +833,11 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         internet,
         kafalat,
         total_adjustments: parseFloat(totalAdjustments.toFixed(2)),
+        is_khata_registered: isKhataRegistered,
+        khata_customer_id: khataInfo?.customer_id || null,
+        khata_balance: khataBalance,
+        khata_deduction: khataDeduction,
+        attendance_days: empLogs,
         advance_balance: advanceBalance,
         advance_deduction: advanceDeduction,
         calc_advance_deduction: calcAdvanceDeduction,
@@ -936,7 +991,8 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
     notes,
     zero_out_advance,
     recurring_adjustments,
-    dynamic_adjustments
+    dynamic_adjustments,
+    khata_deduction
   } = req.body;
 
   if (!employee_id || !month) {
@@ -985,11 +1041,11 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
     const result = await client.query(
       `INSERT INTO employee_payroll_records (
         employee_id, month, base_salary, payable_salary, last_month_balance, presents, absents, leaves, holidays, overtime_hours, overtime_pay, deductions,
-        other_adjustments, advance_deduction, recurring_adjustments, bonus, last_month_adjustment, internet, kafalat, expected_hours, actual_hours, dynamic_adjustments, net_salary, cash_paid, bank_paid, paid_amount, status, notes, paid_date
+        other_adjustments, advance_deduction, recurring_adjustments, bonus, last_month_adjustment, internet, kafalat, expected_hours, actual_hours, dynamic_adjustments, net_salary, cash_paid, bank_paid, paid_amount, status, notes, khata_deduction, paid_date
       ) VALUES (
         $1, $2::text, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22::jsonb, $23, $24, $25, $26, $27::text, $28::text, CASE WHEN $27::text = 'Paid' THEN NOW() ELSE NULL END
+        $21, $22::jsonb, $23, $24, $25, $26, $27::text, $28::text, $29, CASE WHEN $27::text = 'Paid' THEN NOW() ELSE NULL END
       ) ON CONFLICT (employee_id, month) DO UPDATE SET
         base_salary = EXCLUDED.base_salary,
         payable_salary = EXCLUDED.payable_salary,
@@ -1017,6 +1073,7 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         paid_amount = EXCLUDED.paid_amount,
         status = EXCLUDED.status,
         notes = EXCLUDED.notes,
+        khata_deduction = EXCLUDED.khata_deduction,
         paid_date = CASE WHEN EXCLUDED.status = 'Paid' AND employee_payroll_records.status != 'Paid' THEN NOW() ELSE employee_payroll_records.paid_date END
       RETURNING *`,
       [
@@ -1047,7 +1104,8 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         bankVal,
         totalPaidAmount,
         status,
-        notes
+        notes,
+        parseFloat(khata_deduction || 0)
       ]
     );
 
@@ -1059,6 +1117,31 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
         await client.query('UPDATE employees SET advance_balance = 0 WHERE id = $1', [employee_id]);
       } else if (advDeduct > 0) {
         await client.query('UPDATE employees SET advance_balance = GREATEST(0, advance_balance - $1) WHERE id = $2', [advDeduct, employee_id]);
+      }
+
+      // Deduct Khata balance and create settlement transaction if employee is registered in Khata
+      const khataDeductVal = parseFloat(khata_deduction || 0);
+      if (khataDeductVal > 0) {
+        const khataCustRes = await client.query('SELECT id, balance FROM credit_customers WHERE employee_id = $1', [employee_id]);
+        if (khataCustRes.rows.length > 0) {
+          const cust = khataCustRes.rows[0];
+          const existingTx = await client.query(
+            "SELECT id FROM credit_transactions WHERE customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+            [cust.id, month]
+          );
+          if (existingTx.rows.length === 0) {
+            await client.query(
+              `INSERT INTO credit_transactions (
+                customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
+              ) VALUES ($1, 'PAYMENT', $2, 'Salary Deduction', 'Salary Deduction', $3, $4, NOW())`,
+              [cust.id, khataDeductVal, `Auto Khata settlement from ${month} Payroll`, month]
+            );
+            await client.query(
+              'UPDATE credit_customers SET balance = balance - $1 WHERE id = $2',
+              [khataDeductVal, cust.id]
+            );
+          }
+        }
       }
       
       // Also update remaining_amount in employee_recurring_adjustments
@@ -1082,6 +1165,21 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       const prevAdvDeduct = parseFloat(advance_deduction || 0);
       if (prevAdvDeduct > 0) {
         await client.query('UPDATE employees SET advance_balance = advance_balance + $1 WHERE id = $2', [prevAdvDeduct, employee_id]);
+      }
+
+      // Revert Khata settlement if status changes back from Paid
+      const khataCustRes = await client.query('SELECT id, balance FROM credit_customers WHERE employee_id = $1', [employee_id]);
+      if (khataCustRes.rows.length > 0) {
+        const cust = khataCustRes.rows[0];
+        const existingTx = await client.query(
+          "SELECT id, amount FROM credit_transactions WHERE customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+          [cust.id, month]
+        );
+        if (existingTx.rows.length > 0) {
+          const txAmt = parseFloat(existingTx.rows[0].amount || 0);
+          await client.query("DELETE FROM credit_transactions WHERE id = $1", [existingTx.rows[0].id]);
+          await client.query("UPDATE credit_customers SET balance = balance + $1 WHERE id = $2", [txAmt, cust.id]);
+        }
       }
     }
 
@@ -1514,6 +1612,33 @@ router.post('/payments', authenticateToken, async (req, res) => {
            paid_date = EXCLUDED.paid_date`,
         [employee_id, month, netSalary, totalCash, totalBank, totalPaid, newStatus, insertPaidDate]
       );
+    }
+
+    // Auto-record Khata settlement if fully Paid and employee has Khata deduction
+    if (newStatus === 'Paid' && curRecordRes.rows[0]?.status !== 'Paid') {
+      const khataDeductVal = parseFloat(curRecordRes.rows[0]?.khata_deduction || 0);
+      if (khataDeductVal > 0) {
+        const khataCustRes = await client.query('SELECT id, balance FROM credit_customers WHERE employee_id = $1', [employee_id]);
+        if (khataCustRes.rows.length > 0) {
+          const cust = khataCustRes.rows[0];
+          const existingTx = await client.query(
+            "SELECT id FROM credit_transactions WHERE customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+            [cust.id, month]
+          );
+          if (existingTx.rows.length === 0) {
+            await client.query(
+              `INSERT INTO credit_transactions (
+                customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
+              ) VALUES ($1, 'PAYMENT', $2, 'Salary Deduction', 'Salary Deduction', $3, $4, NOW())`,
+              [cust.id, khataDeductVal, `Auto Khata settlement from ${month} Payroll`, month]
+            );
+            await client.query(
+              'UPDATE credit_customers SET balance = balance - $1 WHERE id = $2',
+              [khataDeductVal, cust.id]
+            );
+          }
+        }
+      }
     }
 
     // 5. Write audit log entry

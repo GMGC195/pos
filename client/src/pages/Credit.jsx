@@ -937,13 +937,13 @@ export default function Credit() {
     };
   };
 
-  // 1. Redesigned Compact Customer Print Slip (Header, 3-Row Summary, 3-Column Table, Bottom Totals, Print Time)
+  // 1. Redesigned Thermal Printer Optimized Print Slip (Top-aligned, dynamic height, 80mm/58mm friendly)
   const handlePrintSlip = () => {
     const data = getStatementData();
     if (!data) return;
     const { periodLabel, statementMonth, totalBills, totalPayments, openBal, closingBal, sortedTxs } = data;
 
-    const rowsHtml = sortedTxs.map((t) => {
+    const itemsHtml = sortedTxs.map((t) => {
       const isDebit = t.type === 'CHARGE' || t.type === 'CREDIT_ORDER';
       const amt = parseFloat(t.amount || 0);
       const isOrder = t.type === 'CREDIT_ORDER' || t.order_id;
@@ -952,7 +952,7 @@ export default function Credit() {
       let descLine2 = '';
       if (isOrder) {
         const orderNum = t.slip_number || t.order_id || '';
-        descLine1 = orderNum ? `Order #${orderNum}` : 'Order Charge';
+        descLine1 = orderNum ? `Order #${orderNum}` : 'Order Sale';
         let itemNames = '';
         if (Array.isArray(t.order_items) && t.order_items.length > 0) {
           itemNames = t.order_items.map(i => `${i.qty > 1 ? `${i.qty}x ` : ''}${i.item_name}`).join(', ');
@@ -969,17 +969,21 @@ export default function Credit() {
         descLine2 = t.comments || '';
       }
 
+      const txDateStr = new Date(t.created_at).toLocaleDateString() + ' ' + new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
       return `
-        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11.5px;">
-          <td style="padding: 7px 8px; word-break: break-word; vertical-align: top;">
-            <div style="font-weight: 700; color: #0f172a; font-size: 12px;">${descLine1}</div>
-            ${descLine2 ? `<div style="font-size: 11px; color: #475569; margin-top: 2px; line-height: 1.35;">${descLine2}</div>` : ''}
-          </td>
-          <td style="padding: 7px 8px; white-space: nowrap; color: #475569; vertical-align: top;">${new Date(t.created_at).toLocaleDateString()}</td>
-          <td style="padding: 7px 8px; text-align: right; white-space: nowrap; font-weight: 700; vertical-align: top; color: ${isDebit ? '#dc2626' : '#16a34a'};">
-            ${isDebit ? '+' : '-'}SAR ${amt.toFixed(2)}
-          </td>
-        </tr>
+        <div style="padding: 4px 0; border-bottom: 1px dashed #cbd5e1; page-break-inside: avoid;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px;">
+            <span style="color: #64748b; font-size: 9.5px;">${txDateStr}</span>
+            <span style="font-weight: 800; font-size: 11.5px; color: ${isDebit ? '#dc2626' : '#16a34a'};">
+              ${isDebit ? '+' : '-'}SAR ${amt.toFixed(2)}
+            </span>
+          </div>
+          <div style="font-weight: 700; color: #0f172a; font-size: 11px; margin-top: 1px;">
+            ${descLine1}
+          </div>
+          ${descLine2 ? `<div style="font-size: 10px; color: #475569; margin-top: 1px; word-break: break-word; line-height: 1.25;">${descLine2}</div>` : ''}
+        </div>
       `;
     }).join('');
 
@@ -989,77 +993,128 @@ export default function Credit() {
       <meta charset="UTF-8"/>
       <title></title>
       <style>
-        @page { size: A4 portrait; margin: 6mm 10mm 10mm 10mm; }
+        @page {
+          size: 80mm auto;
+          margin: 0mm;
+        }
         @media print {
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          thead { display: table-header-group; }
-          tr { page-break-inside: avoid; }
+          html, body {
+            width: 80mm !important;
+            margin: 0 !important;
+            padding: 2mm 3mm !important;
+            background: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
         }
         * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 0; margin: 0; color: #0f172a; line-height: 1.35; }
-        .heading { margin: 0 0 3px; font-size: 18px; font-weight: 800; text-transform: uppercase; word-break: break-word; color: #0f172a; }
-        .period { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 12px; }
-        .summary-block { margin-bottom: 14px; font-size: 12px; line-height: 1.6; max-width: 440px; }
-        .summary-row { display: flex; justify-content: space-between; padding: 1px 0; }
-        .summary-label { font-weight: 600; color: #334155; }
-        .summary-val { font-weight: 700; color: #0f172a; }
-        table { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; }
-        th { background: #f1f5f9; padding: 7px 8px; font-size: 11.5px; text-align: left; border-top: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8; font-weight: 700; color: #334155; }
-        .bottom-totals { margin-top: 16px; padding: 10px 16px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; max-width: 480px; page-break-inside: avoid; }
-        .total-item { }
-        .total-label { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-        .total-amt { font-size: 15px; font-weight: 800; margin-top: 2px; }
-        .print-date { margin-top: 18px; font-size: 10.5px; color: #64748b; font-style: italic; page-break-inside: avoid; }
+        body {
+          width: 80mm;
+          max-width: 100%;
+          margin: 0;
+          padding: 2mm 3mm;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Courier New", monospace, sans-serif;
+          color: #0f172a;
+          line-height: 1.3;
+          font-size: 11px;
+        }
+        .header {
+          text-align: center;
+          border-bottom: 1.5px dashed #0f172a;
+          padding-bottom: 5px;
+          margin-bottom: 6px;
+        }
+        .cust-name {
+          font-size: 14px;
+          font-weight: 900;
+          text-transform: uppercase;
+          word-break: break-word;
+          margin-bottom: 2px;
+        }
+        .doc-title {
+          font-size: 11.5px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+        }
+        .period-info {
+          font-size: 9.5px;
+          color: #475569;
+          margin-top: 2px;
+        }
+        .summary-box {
+          border-bottom: 1.5px dashed #0f172a;
+          padding-bottom: 5px;
+          margin-bottom: 6px;
+          font-size: 10.5px;
+        }
+        .summary-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 1px 0;
+        }
+        .summary-label {
+          color: #475569;
+          font-weight: 600;
+        }
+        .summary-val {
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .section-title {
+          font-size: 10px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #475569;
+          margin-bottom: 3px;
+        }
+        .footer {
+          text-align: center;
+          border-top: 1.5px dashed #0f172a;
+          margin-top: 8px;
+          padding-top: 5px;
+          font-size: 9.5px;
+          color: #64748b;
+        }
       </style>
     </head>
     <body>
-      <div class="heading">${activeCustomer.name} – KHATA STATEMENT</div>
-      <div class="period">Statement Period: ${periodLabel}</div>
+      <div class="header">
+        <div class="cust-name">${activeCustomer.name}</div>
+        <div class="doc-title">KHATA STATEMENT</div>
+        <div class="period-info">Period: ${periodLabel}</div>
+        <div class="period-info">Month: ${statementMonth}</div>
+      </div>
 
-      <div class="summary-block">
-        <div class="summary-row">
-          <span class="summary-label">Statement Month:</span>
-          <span class="summary-val">${statementMonth}</span>
-        </div>
+      <div class="summary-box">
         <div class="summary-row">
           <span class="summary-label">Opening Balance:</span>
           <span class="summary-val">SAR ${openBal.toFixed(2)}</span>
         </div>
         <div class="summary-row">
-          <span class="summary-label">Closing Balance:</span>
-          <span class="summary-val" style="color: ${closingBal > 0 ? '#dc2626' : (closingBal < 0 ? '#16a34a' : '#0f172a')}; font-weight: 800;">
+          <span class="summary-label">Total Bills (Charges):</span>
+          <span class="summary-val" style="color: #dc2626;">SAR ${totalBills.toFixed(2)}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Total Payments Received:</span>
+          <span class="summary-val" style="color: #16a34a;">SAR ${totalPayments.toFixed(2)}</span>
+        </div>
+        <div class="summary-row" style="border-top: 1px dotted #94a3b8; margin-top: 3px; padding-top: 3px; font-size: 12px; font-weight: 900;">
+          <span class="summary-label" style="font-weight: 800; color: #0f172a;">Closing Balance:</span>
+          <span class="summary-val" style="color: ${closingBal > 0 ? '#dc2626' : (closingBal < 0 ? '#16a34a' : '#0f172a')};">
             SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Adv)' : '(0.00)')}
           </span>
         </div>
       </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 58%;">Description / Activity</th>
-            <th style="width: 18%;">Date</th>
-            <th style="width: 24%; text-align: right;">Total Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml || '<tr><td colspan="3" style="padding: 16px; text-align: center; color: #64748b;">No transactions recorded in this period.</td></tr>'}
-        </tbody>
-      </table>
-
-      <div class="bottom-totals">
-        <div class="total-item">
-          <div class="total-label">Total Bills</div>
-          <div class="total-amt" style="color: #dc2626;">SAR ${totalBills.toFixed(2)}</div>
-        </div>
-        <div style="height: 34px; width: 1px; background: #cbd5e1;"></div>
-        <div class="total-item" style="text-align: right;">
-          <div class="total-label">Total Payments Received</div>
-          <div class="total-amt" style="color: #16a34a;">SAR ${totalPayments.toFixed(2)}</div>
-        </div>
+      <div class="section-title">Transactions (${sortedTxs.length})</div>
+      <div>
+        ${itemsHtml || '<div style="padding: 8px 0; text-align: center; color: #94a3b8; font-style: italic;">No transactions in this period.</div>'}
       </div>
 
-      <div class="print-date">
-        Printed On: ${new Date().toLocaleString()}
+      <div class="footer">
+        <div>Printed: ${new Date().toLocaleString()}</div>
+        <div style="margin-top: 2px; font-weight: 700;">*** Thank You ***</div>
       </div>
     </body>
     </html>`;
@@ -1306,10 +1361,10 @@ export default function Credit() {
       const rowHeights = [];
       const merges = [];
 
-      // Row 0: Merged Main Header Banner (A1:M1)
+      // Row 0: Merged Main Header Banner (A1:N1)
       const headerTitle = `${(activeCustomer.name || 'CUSTOMER').toUpperCase()} – KHATA STATEMENT`;
       const titleRow = [];
-      for (let c = 0; c < 13; c++) {
+      for (let c = 0; c < 14; c++) {
         titleRow.push({
           v: c === 0 ? headerTitle : '',
           t: 's',
@@ -1323,12 +1378,12 @@ export default function Credit() {
       }
       rows.push(titleRow);
       rowHeights.push({ hpt: 32 });
-      merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } });
+      merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 13 } });
 
-      // Row 1: Merged Subtitle Banner (A2:M2)
+      // Row 1: Merged Subtitle Banner (A2:N2)
       const subtitleText = `Statement Period: ${periodLabel}    |    Statement Month: ${statementMonth}    |    Generated: ${new Date().toLocaleString()}`;
       const subtitleRow = [];
-      for (let c = 0; c < 13; c++) {
+      for (let c = 0; c < 14; c++) {
         subtitleRow.push({
           v: c === 0 ? subtitleText : '',
           t: 's',
@@ -1342,18 +1397,18 @@ export default function Credit() {
       }
       rows.push(subtitleRow);
       rowHeights.push({ hpt: 20 });
-      merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 12 } });
+      merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 13 } });
 
       // Row 2: Customer Meta & Balances Info
       // A3:D3 (cols 0-3): Customer & Category
-      // E3:H3 (cols 4-7): Opening Balance
-      // I3:M3 (cols 8-12): Closing Balance
+      // E3:I3 (cols 4-8): Opening Balance
+      // J3:N3 (cols 9-13): Closing Balance
       const custText = `Customer: ${activeCustomer.name || 'Customer'}${activeCustomer.category ? ` (${activeCustomer.category})` : ''}${activeCustomer.company_name ? ` • ${activeCustomer.company_name}` : ''}`;
       const openBalText = `Opening Balance: SAR ${openBal.toFixed(2)}`;
       const closeBalText = `Closing Balance: SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Advance)' : '(0.00)')}`;
 
       const metaRow = [];
-      for (let c = 0; c < 13; c++) {
+      for (let c = 0; c < 14; c++) {
         let v = '';
         let fontColor = '0F172A';
         let bgColor = 'F8FAFC';
@@ -1362,7 +1417,7 @@ export default function Credit() {
           v = custText;
         } else if (c === 4) {
           v = openBalText;
-        } else if (c === 8) {
+        } else if (c === 9) {
           v = closeBalText;
           fontColor = closingBal > 0 ? 'DC2626' : (closingBal < 0 ? '16A34A' : '0F172A');
           bgColor = closingBal > 0 ? 'FEF2F2' : (closingBal < 0 ? 'F0FDF4' : 'F8FAFC');
@@ -1382,16 +1437,17 @@ export default function Credit() {
       rows.push(metaRow);
       rowHeights.push({ hpt: 22 });
       merges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: 3 } });
-      merges.push({ s: { r: 2, c: 4 }, e: { r: 2, c: 7 } });
-      merges.push({ s: { r: 2, c: 8 }, e: { r: 2, c: 12 } });
+      merges.push({ s: { r: 2, c: 4 }, e: { r: 2, c: 8 } });
+      merges.push({ s: { r: 2, c: 9 }, e: { r: 2, c: 13 } });
 
       // Row 3: Blank spacing row
-      rows.push(Array(13).fill({ v: '', t: 's' }));
+      rows.push(Array(14).fill({ v: '', t: 's' }));
       rowHeights.push({ hpt: 8 });
 
       // Row 4: Column Headers
       const colHeaders = [
         'Transaction Date',
+        'Payment Month',
         'Bill / Invoice Number',
         'Transaction Type',
         'Activity / Description',
@@ -1425,6 +1481,7 @@ export default function Credit() {
         const isPayment = t.type === 'PAYMENT';
         const isCharge = t.type === 'CHARGE';
         const txDate = new Date(t.created_at).toLocaleString();
+        const payMonth = t.billing_month ? formatMonthDisplay(t.billing_month) : (t.created_at ? formatMonthDisplay(t.created_at.slice(0, 7)) : '');
         const billNum = t.slip_number ? `Bill #${t.slip_number}` : (t.order_id ? `#${t.order_id}` : '');
         const amt = parseFloat(t.amount || 0);
 
@@ -1442,6 +1499,7 @@ export default function Credit() {
 
             rows.push([
               { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+              { v: payMonth, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
               { v: billNum, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
               { v: 'Order / Sale', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
               { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
@@ -1465,6 +1523,7 @@ export default function Credit() {
 
           rows.push([
             { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: payMonth, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: billNum, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: 'Order / Sale', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
@@ -1487,6 +1546,7 @@ export default function Credit() {
 
           rows.push([
             { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: payMonth, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: 'Payment Received', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
@@ -1509,6 +1569,7 @@ export default function Credit() {
 
           rows.push([
             { v: txDate, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
+            { v: payMonth, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: billNum || '', t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: typeLabel, t: 's', s: { alignment: { horizontal: 'center', vertical: 'center' }, border: borderThin } },
             { v: desc, t: 's', s: { alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: borderThin } },
@@ -1527,12 +1588,12 @@ export default function Credit() {
       });
 
       // Bottom Summary Block
-      rows.push(Array(13).fill({ v: '', t: 's' }));
+      rows.push(Array(14).fill({ v: '', t: 's' }));
       rowHeights.push({ hpt: 10 });
 
       const buildSummaryRow = (label, amtVal, colorRgb, isDebit) => {
         const sRow = [];
-        for (let c = 0; c < 13; c++) {
+        for (let c = 0; c < 14; c++) {
           if (c === 0) {
             sRow.push({
               v: label,
@@ -1544,13 +1605,13 @@ export default function Credit() {
                 border: borderThin
               }
             });
-          } else if (c < 8) {
+          } else if (c < 9) {
             sRow.push({
               v: '',
               t: 's',
               s: { fill: { fgColor: { rgb: 'F8FAFC' } }, border: borderThin }
             });
-          } else if (c === 8 && isDebit) {
+          } else if (c === 9 && isDebit) {
             sRow.push({
               v: amtVal,
               t: 'n',
@@ -1562,7 +1623,7 @@ export default function Credit() {
                 border: borderThin
               }
             });
-          } else if (c === 9 && !isDebit) {
+          } else if (c === 10 && !isDebit) {
             sRow.push({
               v: amtVal,
               t: 'n',
@@ -1574,7 +1635,7 @@ export default function Credit() {
                 border: borderThin
               }
             });
-          } else if (c === 10) {
+          } else if (c === 11) {
             sRow.push({
               v: amtVal,
               t: 'n',
@@ -1601,18 +1662,18 @@ export default function Credit() {
       const rIdxBills = rows.length;
       rows.push(buildSummaryRow('Total Bills (Orders):', totalBills, 'DC2626', true));
       rowHeights.push({ hpt: 22 });
-      merges.push({ s: { r: rIdxBills, c: 0 }, e: { r: rIdxBills, c: 7 } });
+      merges.push({ s: { r: rIdxBills, c: 0 }, e: { r: rIdxBills, c: 8 } });
 
       // Row: Total Payments
       const rIdxPmts = rows.length;
       rows.push(buildSummaryRow('Total Payments Received:', totalPayments, '16A34A', false));
       rowHeights.push({ hpt: 22 });
-      merges.push({ s: { r: rIdxPmts, c: 0 }, e: { r: rIdxPmts, c: 7 } });
+      merges.push({ s: { r: rIdxPmts, c: 0 }, e: { r: rIdxPmts, c: 8 } });
 
       // Row: Opening Balance
       const rIdxOpen = rows.length;
       const openRow = [];
-      for (let c = 0; c < 13; c++) {
+      for (let c = 0; c < 14; c++) {
         if (c === 0) {
           openRow.push({
             v: 'Opening Balance:',
@@ -1624,9 +1685,9 @@ export default function Credit() {
               border: borderThin
             }
           });
-        } else if (c < 8) {
+        } else if (c < 9) {
           openRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: 'F1F5F9' } }, border: borderThin } });
-        } else if (c === 10) {
+        } else if (c === 11) {
           openRow.push({
             v: openBal,
             t: 'n',
@@ -1644,7 +1705,7 @@ export default function Credit() {
       }
       rows.push(openRow);
       rowHeights.push({ hpt: 22 });
-      merges.push({ s: { r: rIdxOpen, c: 0 }, e: { r: rIdxOpen, c: 7 } });
+      merges.push({ s: { r: rIdxOpen, c: 0 }, e: { r: rIdxOpen, c: 8 } });
 
       // Row: Closing Balance
       const rIdxClose = rows.length;
@@ -1652,7 +1713,7 @@ export default function Credit() {
       const closeBg = closingBal > 0 ? 'FEF2F2' : (closingBal < 0 ? 'F0FDF4' : 'F1F5F9');
       const closeLabel = `Closing Balance ${closingBal > 0 ? '(Due / Outstanding):' : (closingBal < 0 ? '(Advance):' : ':')}`;
       const closeRow = [];
-      for (let c = 0; c < 13; c++) {
+      for (let c = 0; c < 14; c++) {
         if (c === 0) {
           closeRow.push({
             v: closeLabel,
@@ -1664,9 +1725,9 @@ export default function Credit() {
               border: borderThin
             }
           });
-        } else if (c < 8) {
+        } else if (c < 9) {
           closeRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: closeBg } }, border: borderThin } });
-        } else if (c === 10) {
+        } else if (c === 11) {
           closeRow.push({
             v: closingBal,
             t: 'n',
@@ -1684,12 +1745,12 @@ export default function Credit() {
       }
       rows.push(closeRow);
       rowHeights.push({ hpt: 24 });
-      merges.push({ s: { r: rIdxClose, c: 0 }, e: { r: rIdxClose, c: 7 } });
+      merges.push({ s: { r: rIdxClose, c: 0 }, e: { r: rIdxClose, c: 8 } });
 
       // Row: Generated At footer
       const rIdxGen = rows.length;
       const genRow = [];
-      for (let c = 0; c < 13; c++) {
+      for (let c = 0; c < 14; c++) {
         genRow.push({
           v: c === 0 ? `Printed / Exported On: ${new Date().toLocaleString()}` : '',
           t: 's',
@@ -1701,7 +1762,7 @@ export default function Credit() {
       }
       rows.push(genRow);
       rowHeights.push({ hpt: 18 });
-      merges.push({ s: { r: rIdxGen, c: 0 }, e: { r: rIdxGen, c: 12 } });
+      merges.push({ s: { r: rIdxGen, c: 0 }, e: { r: rIdxGen, c: 13 } });
 
       // Create sheet & attach properties
       const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1709,6 +1770,7 @@ export default function Credit() {
       ws['!rows'] = rowHeights;
       ws['!cols'] = [
         { wch: 19 }, // Transaction Date
+        { wch: 16 }, // Payment Month
         { wch: 16 }, // Bill / Invoice Number
         { wch: 16 }, // Transaction Type
         { wch: 32 }, // Activity / Description

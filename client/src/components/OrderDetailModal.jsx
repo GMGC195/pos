@@ -182,9 +182,8 @@ ${(Array.isArray(order.credit_payments) && order.credit_payments.length > 1) ? `
   <div style="font-size: 14px; font-weight: 900; margin: 2px 0;">
     ${shortBranch} - ${orderType}
   </div>
-    <div style="font-size: 10px; text-align: center; margin: 4px 0;">
-      Kitchen slip. Please get original slip from counter.<br/>
-      اصل پرچی کاؤنٹر سے حاصل کریں۔
+    <div style="font-size: 11px; text-align: center; margin: 3px 0; line-height: 1.3;">
+      Kitchen slip. Please get original slip from counter.
     </div>
   ${metaRow}
   <div style="margin: 2px 0; font-size: 14px; font-weight: 900;">

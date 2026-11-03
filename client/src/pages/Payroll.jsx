@@ -10,6 +10,7 @@ import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ManageSalaryModal from '../components/ManageSalaryModal'
+import AttendanceDetailModal from '../components/AttendanceDetailModal'
 
 const confirmAction = (message, onConfirm, confirmText = 'Confirm') => {
   toast((t) => (
@@ -131,6 +132,39 @@ export default function Payroll() {
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
   const [mobileSheetViewMode, setMobileSheetViewMode] = useState('cards') // 'cards' | 'table'
   const [refreshing, setRefreshing] = useState(false)
+  const [attendanceModalEmp, setAttendanceModalEmp] = useState(null)
+  const [attendanceModalDate, setAttendanceModalDate] = useState(null)
+
+  const handleOpenAttendanceDetail = (emp, dateStr) => {
+    if (!emp) return;
+    const daysMap = {};
+    if (Array.isArray(emp.daily_breakdown)) {
+      emp.daily_breakdown.forEach(d => {
+        daysMap[d.date] = d.sessions || [];
+      });
+    }
+    const empLogsData = {
+      id: emp.id,
+      employee_id: emp.id,
+      name: emp.name,
+      employee_code: emp.employee_id,
+      role: emp.role || 'Staff',
+      shift: emp.shift || 'R1',
+      shift_hours: emp.shift_hours || 12,
+      presents: emp.presents || 0,
+      absents: emp.absents || 0,
+      onlyOvertimeDays: emp.only_overtime_days || 0,
+      expectedDutyHours: emp.req_duty_hours || emp.expected_hours || 0,
+      totalHours: emp.actual_hours || 0,
+      shortDutyHours: emp.short_duty_hours || 0,
+      onlyOvertimeHours: emp.only_overtime_hours || 0,
+      otherOvertimeHours: emp.other_overtime_hours || 0,
+      totalOvertime: emp.net_overtime_hours || 0,
+      days: (emp.attendance_days && typeof emp.attendance_days === 'object') ? emp.attendance_days : daysMap
+    };
+    setAttendanceModalEmp(empLogsData);
+    setAttendanceModalDate(dateStr);
+  };
 
   useEffect(() => {
     if (selectedMonth) {
@@ -957,7 +991,8 @@ export default function Payroll() {
       bank_paid: bankVal,
       paid_amount: totalPaid,
       status: row.status,
-      notes: row.notes || ''
+      notes: row.notes || '',
+      khata_deduction: parseFloat(row.khata_deduction || 0)
     });
   }
 
@@ -2092,10 +2127,10 @@ export default function Payroll() {
             </div>
           </div>
 
-          {/* Financial Metrics Grid - 2x2 on Mobile, 5 in row on Desktop */}
+          {/* Financial Metrics Grid - 2x2 on Mobile, 5 or 6 in row on Desktop */}
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, minmax(0, 1fr))', 
+            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : (targetEmpData.is_khata_registered ? 'repeat(6, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))'), 
             gap: '8px', 
             marginBottom: '8px' 
           }}>
@@ -2132,6 +2167,18 @@ export default function Payroll() {
               <div style={{ fontSize: '13px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>{CURRENCY} {advBalance.toFixed(2)}</div>
               <span style={{ fontSize: '9px', color: '#64748b', display: 'block' }}>Remaining loan</span>
             </div>
+
+            {targetEmpData.is_khata_registered && (
+              <div style={{ background: '#fff7ed', padding: '8px 10px', borderRadius: '6px', border: '1.5px solid #fed7aa' }}>
+                <span style={{ fontSize: '10px', color: '#c2410c', fontWeight: 700, display: 'block' }}>Khata Balance</span>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#ea580c', marginTop: '2px' }}>
+                  {CURRENCY} {parseFloat(targetEmpData.khata_balance || 0).toFixed(2)}
+                </div>
+                <span style={{ fontSize: '9px', color: '#9a3412', display: 'block' }}>
+                  {targetEmpData.khata_deduction > 0 ? `Deduction: -${CURRENCY} ${parseFloat(targetEmpData.khata_deduction).toFixed(2)}` : 'Registered in Khata'}
+                </span>
+              </div>
+            )}
 
             <div style={{ 
               background: dynamicNetSalary < 0 ? '#fef2f2' : '#ecfdf5', 
@@ -2170,6 +2217,12 @@ export default function Payroll() {
                       <RotateCcw size={10} />
                     </button>
                   )}
+                </span>
+              )}
+
+              {targetEmpData.is_khata_registered && targetEmpData.khata_deduction > 0 && (
+                <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#fff7ed', color: '#c2410c', fontWeight: 600 }}>
+                  Khata Deduction: -{CURRENCY} {parseFloat(targetEmpData.khata_deduction).toFixed(2)}
                 </span>
               )}
 
@@ -3457,6 +3510,7 @@ export default function Payroll() {
                   return (
                     <div
                       key={dayItem.date}
+                      onClick={() => handleOpenAttendanceDetail(targetEmpData, dayItem.date)}
                       style={{
                         background: cardBg,
                         borderRadius: '8px',
@@ -3465,8 +3519,10 @@ export default function Payroll() {
                         flexDirection: 'column',
                         justifyContent: 'space-between',
                         minHeight: '66px',
-                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)'
+                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
+                        cursor: 'pointer'
                       }}
+                      title={`Click to view attendance details for ${dayItem.date}`}
                     >
                       <span style={{ fontSize: '10px', fontWeight: 700, color: subColor, display: 'block', lineHeight: 1 }}>
                         {dayItem.formattedDate}
@@ -5732,6 +5788,15 @@ export default function Payroll() {
           </div>
         );
       })()}
+
+      {/* Shared Attendance Detail Modal */}
+      <AttendanceDetailModal
+        selectedEmployeeLogs={attendanceModalEmp}
+        targetScrollDate={attendanceModalDate}
+        onClose={() => { setAttendanceModalEmp(null); setAttendanceModalDate(null); }}
+        month={selectedMonth}
+        isAdmin={isAdmin}
+      />
 
       <style>{`
         .spin { animation: spin 1s linear infinite; }
