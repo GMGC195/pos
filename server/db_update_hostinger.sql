@@ -199,4 +199,26 @@ ALTER TABLE employee_recurring_adjustments ADD COLUMN IF NOT EXISTS notes TEXT;
 ALTER TABLE employee_recurring_adjustments ADD COLUMN IF NOT EXISTS start_date DATE DEFAULT CURRENT_DATE;
 ALTER TABLE employee_recurring_adjustments ADD COLUMN IF NOT EXISTS end_date DATE;
 
+-- ==============================================================================
+-- 6. CENTRALIZED ACTIVITY LOGS (AUDIT HISTORY ACROSS SALARY, KHATA & ORDERS)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS activity_logs (
+  id SERIAL PRIMARY KEY,
+  module VARCHAR(50) NOT NULL,
+  action VARCHAR(100) NOT NULL,
+  entity_id VARCHAR(100),
+  entity_name VARCHAR(255),
+  description TEXT,
+  reason TEXT,
+  old_data JSONB,
+  new_data JSONB,
+  performed_by VARCHAR(100),
+  branch VARCHAR(100),
+  month VARCHAR(7),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_module ON activity_logs(module);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_month ON activity_logs(month);
+
 COMMIT;

@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import axios from '../api'
 import { 
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
   TrendingUp, Search, RefreshCw, X, AlertTriangle, AlertCircle, FileText, Percent, 
   CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock,
-  Table, Unlock, RotateCcw, ArrowRightCircle, CreditCard, BookOpen
+  Table, Unlock, RotateCcw, ArrowRightCircle, CreditCard, BookOpen, FileSpreadsheet, Download
 } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
@@ -13,6 +14,7 @@ import ManageSalaryModal from '../components/ManageSalaryModal'
 import AttendanceDetailModal from '../components/AttendanceDetailModal'
 import EditAttendanceModal from '../components/EditAttendanceModal'
 import EmployeeKhataModal from '../components/EmployeeKhataModal'
+import { getSaudiCurrentMonthStr, getSaudiPreviousMonthStr, formatSaudiDateTime } from '../utils/timezone'
 
 const confirmAction = (message, onConfirm, confirmText = 'Confirm') => {
   toast((t) => (
@@ -115,9 +117,9 @@ export default function Payroll() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(() => {
     try {
-      return sessionStorage.getItem('payroll_selected_month') || getLastMonth()
+      return sessionStorage.getItem('payroll_selected_month') || getSaudiCurrentMonthStr()
     } catch {
-      return getLastMonth()
+      return getSaudiCurrentMonthStr()
     }
   })
   const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail' (always defaults to sheet on full page reload)
@@ -1716,6 +1718,683 @@ export default function Payroll() {
       }, 1000);
     }, 400);
   }
+
+  // Export Single Employee Salary Details to Excel (.xlsx)
+  const handleExportEmpSalaryExcel = (emp) => {
+    if (!emp) return;
+    const baseSal = parseFloat(emp.base_salary || 0);
+    const payableSal = parseFloat(emp.payable_salary !== undefined ? emp.payable_salary : (baseSal - parseFloat(emp.deductions || 0)));
+    const cashPaid = parseFloat(emp.cash_paid || 0);
+    const bankPaid = parseFloat(emp.bank_paid || 0);
+    const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
+    const netSalary = parseFloat(emp.net_salary || 0);
+    const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+    const khataDeduct = parseFloat(emp.khata_balance || emp.khata_balance_net || 0);
+    const otHours = parseFloat(emp.overtime_hours || 0);
+    const otPay = parseFloat(emp.overtime_pay || 0);
+    const bonus = parseFloat(emp.bonus || 0);
+    const tips = parseFloat(emp.tips || 0);
+    const internet = parseFloat(emp.internet || 0);
+    const kafalat = parseFloat(emp.kafalat || 0);
+    const otherAdj = parseFloat(emp.other_adjustments || 0);
+    const deductions = parseFloat(emp.deductions || 0);
+
+    const rows = [
+      ['PIZZA SHOP - EMPLOYEE SALARY STATEMENT', '', '', '', ''],
+      [`Pay Period: ${selectedMonth}`, '', `Date Generated: ${new Date().toISOString().slice(0, 10)}`, '', ''],
+      [],
+      ['EMPLOYEE INFORMATION', '', '', '', ''],
+      ['Employee Name:', emp.name || '-', 'Employee Code / ID:', emp.employee_code || emp.id || '-', ''],
+      ['Branch:', emp.branch || 'Branch 1', 'Role / Designation:', emp.role || emp.designation || 'Staff', ''],
+      [],
+      ['EARNINGS & DUTY BREAKDOWN', '', 'AMOUNT (SAR)', '', ''],
+      ['Monthly Base Salary', '', baseSal.toFixed(2), '', ''],
+      ['Worked Duty Hours', '', `${emp.duty_hours || emp.worked_hours || 0} hrs`, '', ''],
+      ['Payable Base Salary', '', payableSal.toFixed(2), '', ''],
+      ['Overtime Hours & Pay', `${otHours} hrs`, otPay.toFixed(2), '', ''],
+      ['Bonus', '', bonus.toFixed(2), '', ''],
+      ['Tips', '', tips.toFixed(2), '', ''],
+      ['Internet Allowance', '', internet.toFixed(2), '', ''],
+      ['Other Additions / Adjustments', '', otherAdj.toFixed(2), '', ''],
+      ['Gross Earnings', '', (payableSal + otPay + bonus + tips + internet + otherAdj).toFixed(2), '', ''],
+      [],
+      ['DEDUCTIONS & ADJUSTMENTS', '', 'AMOUNT (SAR)', '', ''],
+      ['Attendance / Hours Deductions', '', deductions.toFixed(2), '', ''],
+      ['Kafalat Deduction', '', kafalat.toFixed(2), '', ''],
+      ['Khata Dues Deducted', '', khataDeduct.toFixed(2), '', ''],
+      ['Total Deductions', '', (deductions + kafalat + khataDeduct).toFixed(2), '', ''],
+      [],
+      ['NET SALARY SUMMARY', '', 'AMOUNT (SAR)', '', ''],
+      ['Net Payable Salary', '', netSalary.toFixed(2), '', ''],
+      ['Amount Paid (Cash)', '', cashPaid.toFixed(2), '', ''],
+      ['Amount Paid (Bank)', '', bankPaid.toFixed(2), '', ''],
+      ['Total Amount Paid', '', totalPaid.toFixed(2), '', ''],
+      ['Remaining Balance Unpaid', '', remaining.toFixed(2), '', ''],
+      ['Payment Status', '', emp.payment_status || (remaining <= 0 ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending')), '', ''],
+      []
+    ];
+
+    if (emp.payments && emp.payments.length > 0) {
+      rows.push(['PAYMENT INSTALLMENTS HISTORY', '', '', '', '']);
+      rows.push(['Date', 'Method', 'Amount (SAR)', 'Reference', 'Cashier / Paid By']);
+      emp.payments.forEach(p => {
+        rows.push([
+          p.payment_date ? p.payment_date.slice(0, 10) : (p.created_at ? p.created_at.slice(0, 10) : '-'),
+          p.payment_method || 'Cash',
+          parseFloat(p.amount || 0).toFixed(2),
+          p.reference || '-',
+          p.paid_by || 'Cashier'
+        ]);
+      });
+      rows.push(['Total Paid Sum', '', totalPaid.toFixed(2), '', '']);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 18 }, { wch: 20 }, { wch: 20 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Salary Statement');
+    const safeName = (emp.name || 'Employee').replace(/[^a-zA-Z0-9_-]/g, '_');
+    XLSX.writeFile(wb, `Salary_Statement_${safeName}_${selectedMonth}.xlsx`);
+    toast.success('Salary statement exported to Excel successfully!');
+  };
+
+  // Print Employee Salary Statement on Standard A4 Format
+  const handlePrintA4SalarySlip = (emp) => {
+    if (!emp) return;
+    const baseSal = parseFloat(emp.base_salary || 0);
+    const payableSal = parseFloat(emp.payable_salary !== undefined ? emp.payable_salary : (baseSal - parseFloat(emp.deductions || 0)));
+    const cashPaid = parseFloat(emp.cash_paid || 0);
+    const bankPaid = parseFloat(emp.bank_paid || 0);
+    const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
+    const netSalary = parseFloat(emp.net_salary || 0);
+    const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+    const khataDeduct = parseFloat(emp.khata_balance || emp.khata_balance_net || 0);
+    const otHours = parseFloat(emp.overtime_hours || 0);
+    const otPay = parseFloat(emp.overtime_pay || 0);
+    const bonus = parseFloat(emp.bonus || 0);
+    const tips = parseFloat(emp.tips || 0);
+    const internet = parseFloat(emp.internet || 0);
+    const kafalat = parseFloat(emp.kafalat || 0);
+    const otherAdj = parseFloat(emp.other_adjustments || 0);
+    const deductions = parseFloat(emp.deductions || 0);
+    const grossEarnings = payableSal + otPay + bonus + tips + internet + otherAdj;
+    const totalDeductions = deductions + kafalat + khataDeduct;
+    const statusText = emp.payment_status || (remaining <= 0 ? 'PAID' : (totalPaid > 0 ? 'PARTIAL' : 'DUE / UNPAID'));
+
+    const printDate = new Date().toLocaleString('en-US', {
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Salary Statement - ${emp.name}</title>
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 15mm 18mm;
+          }
+          * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+          }
+          body {
+            margin: 0;
+            padding: 0;
+            color: #1e293b;
+            font-size: 13px;
+            line-height: 1.4;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+          }
+          .brand-title {
+            font-size: 22px;
+            font-weight: 900;
+            color: #0f172a;
+            letter-spacing: 0.5px;
+          }
+          .sub-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #64748b;
+            margin-top: 2px;
+          }
+          .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 18px;
+          }
+          .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+            font-size: 12.5px;
+          }
+          .info-label {
+            font-weight: 600;
+            color: #64748b;
+          }
+          .info-val {
+            font-weight: 800;
+            color: #0f172a;
+          }
+          .tables-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 18px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+          }
+          th {
+            background: #f1f5f9;
+            color: #0f172a;
+            font-weight: 700;
+            text-align: left;
+            padding: 8px 10px;
+            border: 1px solid #cbd5e1;
+            font-size: 11.5px;
+            text-transform: uppercase;
+          }
+          td {
+            padding: 6px 10px;
+            border: 1px solid #e2e8f0;
+          }
+          .text-right { text-align: right; }
+          .highlight-row {
+            font-weight: 800;
+            background: #f8fafc;
+          }
+          .net-box {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border: 2px solid #86efac;
+            border-radius: 10px;
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+          }
+          .net-item {
+            text-align: center;
+          }
+          .net-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #166534;
+            margin-bottom: 3px;
+          }
+          .net-val {
+            font-size: 20px;
+            font-weight: 900;
+            color: #14532d;
+          }
+          .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 800;
+            background: ${remaining <= 0 ? '#dcfce7' : (totalPaid > 0 ? '#fef3c7' : '#fee2e2')};
+            color: ${remaining <= 0 ? '#15803d' : (totalPaid > 0 ? '#b45309' : '#b91c1c')};
+            border: 1px solid ${remaining <= 0 ? '#86efac' : (totalPaid > 0 ? '#fde68a' : '#fecaca')};
+          }
+          .signatures {
+            margin-top: 45px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            padding-top: 15px;
+          }
+          .sig-box {
+            border-top: 1.5px dashed #94a3b8;
+            padding-top: 8px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: #475569;
+          }
+          @media print {
+            body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="brand-title">PIZZA SHOP</div>
+            <div class="sub-title">OFFICIAL EMPLOYEE SALARY STATEMENT</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 15px; font-weight: 800; color: #0f172a;">Period: ${selectedMonth}</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Printed: ${printDate}</div>
+          </div>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Employee Name:</span>
+            <span class="info-val">${emp.name || '-'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Employee Code / ID:</span>
+            <span class="info-val">${emp.employee_code || emp.id || '-'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Branch:</span>
+            <span class="info-val">${emp.branch || 'Branch 1'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Designation / Role:</span>
+            <span class="info-val">${emp.role || emp.designation || 'Staff'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Worked Duty Hours:</span>
+            <span class="info-val">${emp.duty_hours || emp.worked_hours || 0} hrs</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Attendance:</span>
+            <span class="info-val">P: ${emp.presents || 0} | A: ${emp.absents || 0} | L: ${emp.leaves || 0}</span>
+          </div>
+        </div>
+
+        <div class="tables-row">
+          <!-- Earnings Table -->
+          <div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Earnings & Additions</th>
+                  <th class="text-right">Amount (SAR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Base Salary (Monthly)</td>
+                  <td class="text-right">${baseSal.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>Base Earned (Hours Worked)</td>
+                  <td class="text-right">${payableSal.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>Overtime Pay (${otHours} hrs)</td>
+                  <td class="text-right">${otPay.toFixed(2)}</td>
+                </tr>
+                ${bonus > 0 ? `<tr><td>Bonus</td><td class="text-right">${bonus.toFixed(2)}</td></tr>` : ''}
+                ${tips > 0 ? `<tr><td>Tips</td><td class="text-right">${tips.toFixed(2)}</td></tr>` : ''}
+                ${internet > 0 ? `<tr><td>Internet Allowance</td><td class="text-right">${internet.toFixed(2)}</td></tr>` : ''}
+                ${otherAdj > 0 ? `<tr><td>Other Additions</td><td class="text-right">${otherAdj.toFixed(2)}</td></tr>` : ''}
+                <tr class="highlight-row">
+                  <td>Gross Earnings</td>
+                  <td class="text-right">${grossEarnings.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Deductions Table -->
+          <div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Deductions & Khata</th>
+                  <th class="text-right">Amount (SAR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Attendance / Absence Deductions</td>
+                  <td class="text-right">${deductions.toFixed(2)}</td>
+                </tr>
+                ${kafalat > 0 ? `<tr><td>Kafalat Deduction</td><td class="text-right">${kafalat.toFixed(2)}</td></tr>` : ''}
+                ${khataDeduct > 0 ? `<tr><td>Khata Dues Deducted</td><td class="text-right">${khataDeduct.toFixed(2)}</td></tr>` : ''}
+                <tr class="highlight-row">
+                  <td>Total Deductions</td>
+                  <td class="text-right">${totalDeductions.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Net Salary & Payment Summary Box -->
+        <div class="net-box">
+          <div class="net-item">
+            <div class="net-label">Net Payable Salary</div>
+            <div class="net-val">SAR ${netSalary.toFixed(2)}</div>
+          </div>
+          <div class="net-item">
+            <div class="net-label">Total Amount Paid</div>
+            <div class="net-val" style="color: #0369a1;">SAR ${totalPaid.toFixed(2)}</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Cash: ${cashPaid.toFixed(2)} | Bank: ${bankPaid.toFixed(2)}</div>
+          </div>
+          <div class="net-item">
+            <div class="net-label">Remaining Balance</div>
+            <div class="net-val" style="color: ${remaining > 0 ? '#b91c1c' : '#15803d'};">SAR ${remaining.toFixed(2)}</div>
+          </div>
+          <div class="net-item">
+            <div class="net-label">Status</div>
+            <div class="status-badge">${statusText}</div>
+          </div>
+        </div>
+
+        <!-- Payment Installments Table if any -->
+        ${(emp.payments && emp.payments.length > 0) ? `
+          <div style="margin-bottom: 20px;">
+            <div style="font-size: 12px; font-weight: 800; color: #0f172a; text-transform: uppercase; margin-bottom: 6px;">Payment Installments Received</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Date & Time</th>
+                  <th>Method</th>
+                  <th>Reference / Note</th>
+                  <th>Cashier</th>
+                  <th class="text-right">Amount (SAR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${emp.payments.map((p, idx) => `
+                  <tr>
+                    <td>${idx + 1}</td>
+                    <td>${p.payment_date ? p.payment_date.slice(0, 10) : (p.created_at ? p.created_at.slice(0, 10) : '-')}</td>
+                    <td><b>${p.payment_method || 'Cash'}</b></td>
+                    <td>${p.reference || '-'}</td>
+                    <td>${p.paid_by || 'Cashier'}</td>
+                    <td class="text-right" style="font-weight: 800;">SAR ${parseFloat(p.amount || 0).toFixed(2)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+
+        <div class="signatures">
+          <div class="sig-box">Employee Signature</div>
+          <div class="sig-box">Authorized Management Signature</div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    iframe.contentDocument.write(htmlContent);
+    iframe.contentDocument.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 1000);
+    }, 400);
+  };
+
+  // Export Monthly Salary Sheet to Excel (.xlsx)
+  const handleExportMonthlySalarySheetExcel = () => {
+    if (!calculatedData || calculatedData.length === 0) {
+      toast.error('No salary records available to export.');
+      return;
+    }
+
+    const filtered = calculatedData.filter(emp => {
+      if (selectedBranchFilter !== 'ALL' && emp.branch) {
+        const branchNum = selectedBranchFilter.replace('R', '');
+        if (!emp.branch.includes(branchNum)) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (emp.name || '').toLowerCase().includes(q) || (emp.employee_code || '').toLowerCase().includes(q);
+      }
+      return true;
+    });
+
+    const rows = [
+      [`PIZZA SHOP - MONTHLY PAYROLL SHEET (${selectedMonth})`, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+      [`Date Exported: ${new Date().toISOString().slice(0, 10)}`, '', `Branch Filter: ${selectedBranchFilter}`, '', `Total Employees: ${filtered.length}`, '', '', '', '', '', '', '', '', '', '', '', ''],
+      [],
+      [
+        '#', 'Employee Name', 'Employee Code', 'Branch', 'Role',
+        'Base Salary', 'Duty Hours', 'OT Hours', 'Base Earned',
+        'OT Pay', 'Additions / Bonus', 'Deductions', 'Khata Deducted',
+        'Net Payable', 'Total Paid', 'Remaining', 'Status'
+      ]
+    ];
+
+    let sumBase = 0;
+    let sumEarned = 0;
+    let sumOT = 0;
+    let sumNet = 0;
+    let sumPaid = 0;
+    let sumRem = 0;
+
+    filtered.forEach((emp, idx) => {
+      const base = parseFloat(emp.base_salary || 0);
+      const earned = parseFloat(emp.payable_salary !== undefined ? emp.payable_salary : base);
+      const ot = parseFloat(emp.overtime_pay || 0);
+      const adds = parseFloat(emp.bonus || 0) + parseFloat(emp.tips || 0) + parseFloat(emp.internet || 0) + parseFloat(emp.other_adjustments || 0);
+      const ded = parseFloat(emp.deductions || 0) + parseFloat(emp.kafalat || 0);
+      const khata = parseFloat(emp.khata_balance || emp.khata_balance_net || 0);
+      const net = parseFloat(emp.net_salary || 0);
+      const paid = parseFloat(emp.cash_paid || 0) + parseFloat(emp.bank_paid || 0);
+      const rem = Math.round((net - paid) * 100) / 100;
+
+      sumBase += base;
+      sumEarned += earned;
+      sumOT += ot;
+      sumNet += net;
+      sumPaid += paid;
+      sumRem += rem;
+
+      rows.push([
+        idx + 1,
+        emp.name || '-',
+        emp.employee_code || emp.id || '-',
+        emp.branch || 'Branch 1',
+        emp.role || emp.designation || 'Staff',
+        base.toFixed(2),
+        `${emp.duty_hours || emp.worked_hours || 0} hrs`,
+        `${emp.overtime_hours || 0} hrs`,
+        earned.toFixed(2),
+        ot.toFixed(2),
+        adds.toFixed(2),
+        ded.toFixed(2),
+        khata.toFixed(2),
+        net.toFixed(2),
+        paid.toFixed(2),
+        rem.toFixed(2),
+        emp.payment_status || (rem <= 0 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'))
+      ]);
+    });
+
+    rows.push([]);
+    rows.push([
+      'TOTALS', '', '', '', '',
+      sumBase.toFixed(2), '', '', sumEarned.toFixed(2),
+      sumOT.toFixed(2), '', '', '',
+      sumNet.toFixed(2), sumPaid.toFixed(2), sumRem.toFixed(2), ''
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 5 }, { wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 14 },
+      { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 14 },
+      { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 14 },
+      { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Payroll ${selectedMonth}`);
+    XLSX.writeFile(wb, `Monthly_Payroll_Sheet_${selectedMonth}.xlsx`);
+    toast.success('Monthly payroll sheet exported to Excel successfully!');
+  };
+
+  // Print Monthly Salary Sheet (A4 Landscape)
+  const handlePrintMonthlySalarySheet = () => {
+    if (!calculatedData || calculatedData.length === 0) {
+      toast.error('No salary records available to print.');
+      return;
+    }
+
+    const filtered = calculatedData.filter(emp => {
+      if (selectedBranchFilter !== 'ALL' && emp.branch) {
+        const branchNum = selectedBranchFilter.replace('R', '');
+        if (!emp.branch.includes(branchNum)) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (emp.name || '').toLowerCase().includes(q) || (emp.employee_code || '').toLowerCase().includes(q);
+      }
+      return true;
+    });
+
+    let sumBase = 0;
+    let sumNet = 0;
+    let sumPaid = 0;
+    let sumRem = 0;
+
+    const tableRows = filtered.map((emp, idx) => {
+      const base = parseFloat(emp.base_salary || 0);
+      const net = parseFloat(emp.net_salary || 0);
+      const paid = parseFloat(emp.cash_paid || 0) + parseFloat(emp.bank_paid || 0);
+      const rem = Math.round((net - paid) * 100) / 100;
+      sumBase += base;
+      sumNet += net;
+      sumPaid += paid;
+      sumRem += rem;
+
+      return `
+        <tr>
+          <td style="text-align: center;">${idx + 1}</td>
+          <td><b>${emp.name}</b></td>
+          <td>${emp.employee_code || emp.id || '-'}</td>
+          <td>${emp.branch || 'Branch 1'}</td>
+          <td class="text-right">${base.toFixed(2)}</td>
+          <td class="text-center">${emp.duty_hours || emp.worked_hours || 0}h</td>
+          <td class="text-center">${emp.overtime_hours || 0}h</td>
+          <td class="text-right">${parseFloat(emp.payable_salary || base).toFixed(2)}</td>
+          <td class="text-right" style="font-weight: 800; color: #166534;">${net.toFixed(2)}</td>
+          <td class="text-right" style="font-weight: 800; color: #0369a1;">${paid.toFixed(2)}</td>
+          <td class="text-right" style="font-weight: 800; color: ${rem > 0 ? '#b91c1c' : '#15803d'};">${rem.toFixed(2)}</td>
+          <td class="text-center"><b>${emp.payment_status || (rem <= 0 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'))}</b></td>
+        </tr>
+      `;
+    }).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Monthly Payroll Sheet - ${selectedMonth}</title>
+        <style>
+          @page {
+            size: A4 landscape;
+            margin: 10mm 12mm;
+          }
+          * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+          body { margin: 0; padding: 0; color: #0f172a; font-size: 11px; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
+          .title { font-size: 18px; font-weight: 900; }
+          table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+          th { background: #f1f5f9; padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700; text-transform: uppercase; }
+          td { padding: 5px 8px; border: 1px solid #e2e8f0; }
+          .text-right { text-align: right; }
+          .text-center { text-align: center; }
+          .totals-row { background: #f8fafc; font-weight: 900; border-top: 2px solid #0f172a; font-size: 11px; }
+          @media print { body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">PIZZA SHOP - MONTHLY PAYROLL SHEET</div>
+            <div style="font-size: 11px; color: #64748b;">Branch: ${selectedBranchFilter} • Total Accounts: ${filtered.length}</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 14px; font-weight: 800;">Month: ${selectedMonth}</div>
+            <div style="font-size: 10px; color: #64748b;">Printed: ${new Date().toLocaleString()}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Employee Name</th>
+              <th>Code</th>
+              <th>Branch</th>
+              <th class="text-right">Base (SAR)</th>
+              <th class="text-center">Duty Hrs</th>
+              <th class="text-center">OT Hrs</th>
+              <th class="text-right">Base Earned</th>
+              <th class="text-right">Net Salary</th>
+              <th class="text-right">Paid</th>
+              <th class="text-right">Remaining</th>
+              <th class="text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+            <tr class="totals-row">
+              <td colspan="4" style="text-align: right;">GRAND TOTALS:</td>
+              <td class="text-right">${sumBase.toFixed(2)}</td>
+              <td colspan="2"></td>
+              <td class="text-right"></td>
+              <td class="text-right" style="color: #166534;">SAR ${sumNet.toFixed(2)}</td>
+              <td class="text-right" style="color: #0369a1;">SAR ${sumPaid.toFixed(2)}</td>
+              <td class="text-right" style="color: ${sumRem > 0 ? '#b91c1c' : '#15803d'};">SAR ${sumRem.toFixed(2)}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    iframe.contentDocument.write(htmlContent);
+    iframe.contentDocument.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 1000);
+    }, 400);
+  };
 
   // Synchronize employee adjustment totals and breakdown across state immediately
   const updateEmployeeAdjustmentsState = (empId, nextRecurring, nextOneTime) => {
@@ -3805,6 +4484,30 @@ export default function Payroll() {
                   {savingAll ? 'Saving...' : 'Save All'}
                 </button>
               )}
+              {viewMode === 'sheet' && (
+                <>
+                  <button 
+                    type="button"
+                    onClick={handlePrintMonthlySalarySheet}
+                    className="btn btn-secondary"
+                    title="Print Monthly Payroll Sheet (A4 Landscape)"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 8px', borderRadius: '6px', fontWeight: 700, fontSize: '11px', background: 'var(--surface-2)', color: 'var(--text-primary)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    <Printer size={13} style={{ color: 'var(--primary)' }} />
+                    <span>Print Sheet</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={handleExportMonthlySalarySheetExcel}
+                    className="btn btn-secondary"
+                    title="Export Monthly Payroll Sheet to Excel (.xlsx)"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 8px', borderRadius: '6px', fontWeight: 700, fontSize: '11px', background: 'rgba(22, 163, 74, 0.08)', color: '#15803d', border: '1px solid rgba(22, 163, 74, 0.25)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    <FileSpreadsheet size={13} />
+                    <span>Export Excel</span>
+                  </button>
+                </>
+              )}
             </>
           )}
 
@@ -4961,6 +5664,50 @@ export default function Payroll() {
                       <RefreshCw size={12} className={(refreshing || loading) ? 'spin' : ''} />
                       Refresh
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handlePrintA4SalarySlip(currentEmpData)}
+                      title="Print Professional A4 Salary Statement"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #cbd5e1',
+                        background: '#f1f5f9',
+                        color: '#334155',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Printer size={12} style={{ color: 'var(--primary)' }} />
+                      Print A4
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleExportEmpSalaryExcel(currentEmpData)}
+                      title="Download Salary Statement to Excel (.xlsx)"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #86efac',
+                        background: '#f0fdf4',
+                        color: '#15803d',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <FileSpreadsheet size={12} />
+                      Excel
+                    </button>
                   </div>
                 </div>
 
@@ -5046,6 +5793,50 @@ export default function Payroll() {
                     />
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handlePrintA4SalarySlip(currentEmpData)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--surface-3)',
+                    background: 'var(--surface-2)',
+                    color: 'var(--text-primary)',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Print Professional A4 Salary Statement"
+                >
+                  <Printer size={15} style={{ color: 'var(--primary)' }} />
+                  <span>Print A4 Slip</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExportEmpSalaryExcel(currentEmpData)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #16a34a',
+                    background: 'rgba(22, 163, 74, 0.08)',
+                    color: '#15803d',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Download Salary Statement to Excel (.xlsx)"
+                >
+                  <FileSpreadsheet size={15} />
+                  <span>Download Excel</span>
+                </button>
 
                 <button onClick={() => { setShowEmpModal(false); setSelectedEmployeeForModal(null); }} style={{ background: 'var(--surface-2)', border: 'none', cursor: 'pointer', color: 'var(--text-primary)', padding: '6px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Close Modal">
                   <X size={20} />

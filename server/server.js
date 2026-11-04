@@ -710,6 +710,30 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       await pool.query('ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS updated_by VARCHAR(100)');
     } catch (e) {}
 
+    // Create activity_logs table for unified central activity tracking
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id SERIAL PRIMARY KEY,
+        module VARCHAR(50) NOT NULL,
+        action VARCHAR(100) NOT NULL,
+        entity_id VARCHAR(100),
+        entity_name VARCHAR(255),
+        description TEXT,
+        reason TEXT,
+        old_data JSONB,
+        new_data JSONB,
+        performed_by VARCHAR(100),
+        branch VARCHAR(100),
+        month VARCHAR(7),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    try {
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_module ON activity_logs(module)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_month ON activity_logs(month)');
+    } catch (e) {}
+
     // Ensure columns exist if table was created previously without them
     try {
       await pool.query('ALTER TABLE employee_financial_adjustments ADD COLUMN custom_label VARCHAR(150)');
@@ -922,6 +946,8 @@ app.use('/api/tables', require('./routes/tables'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/credit', require('./routes/credit'));
 app.use('/api/employee-portal', require('./routes/employeePortal'));
+app.use('/api/logs', require('./routes/activityLogs').router);
+app.use('/api/activity-logs', require('./routes/activityLogs').router);
 
 // Health check
 app.get('/api/health', (req, res) => {

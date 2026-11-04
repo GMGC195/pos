@@ -28,6 +28,7 @@ const AttendanceReports    = lazy(() => import('./pages/AttendanceReports'))
 const TodayAttendance      = lazy(() => import('./pages/TodayAttendance'))
 const Payroll              = lazy(() => import('./pages/Payroll'))
 const SalarySpreadsheet    = lazy(() => import('./pages/SalarySpreadsheet'))
+const Logs                 = lazy(() => import('./pages/Logs'))
 const EditAttendanceLogs   = lazy(() => import('./pages/EditAttendanceLogs'))
 const EmployeePortal       = lazy(() => import('./pages/EmployeePortal'))
 
@@ -98,7 +99,8 @@ export default function App() {
                 <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager', 'Operator']}><TodayAttendance /></ProtectedRoute>} />
                 <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><AttendanceReports /></ProtectedRoute>} />
                 <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><Payroll /></ProtectedRoute>} />
-                <Route path="/salary-spreadsheet" element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><SalarySpreadsheet /></ProtectedRoute>} />
+                <Route path="/logs"               element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><Logs /></ProtectedRoute>} />
+                <Route path="/salary-spreadsheet" element={<Navigate to="/logs" replace />} />
                 <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin', 'HR Manager', 'Operator']}><EditAttendanceLogs /></ProtectedRoute>} />
 
                 {/* Universal */}

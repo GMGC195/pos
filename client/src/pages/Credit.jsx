@@ -434,11 +434,12 @@ export default function Credit() {
   const [applyOnSearch, setApplyOnSearch] = useState('');
   const [applyOnSelectedIds, setApplyOnSelectedIds] = useState(new Set());
 
-  // Reset All Balances Modal State (Admin & Developer Only)
-  const [showResetBalancesModal, setShowResetBalancesModal] = useState(false);
-  const [resetConfirmInput, setResetConfirmInput] = useState('');
-  const [resetReason, setResetReason] = useState('Admin zero-balance reset');
-  const [resettingBalances, setResettingBalances] = useState(false);
+  // Reset Balance Modal State (Admin & Developer Only - Single Customer)
+  const [resetCustomerTarget, setResetCustomerTarget] = useState(null);
+  const [singleResetConfirmInput, setSingleResetConfirmInput] = useState('');
+  const [singleResetReason, setSingleResetReason] = useState('');
+  const [resettingSingleBalance, setResettingSingleBalance] = useState(false);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
 
   // Edit/Delete Transaction Modal State (Admin & Developer Only)
   const [editingTxModal, setEditingTxModal] = useState(null); // { isOpen: true, tx, amount, type, classification, comments, billing_month, reason }
@@ -882,29 +883,42 @@ export default function Credit() {
     reloadLedger(m, ledgerClassificationFilter);
   };
 
-  // Reset All Balances Handler (Admin & Developer Only)
-  const handleResetAllBalances = async () => {
-    if (resetConfirmInput.trim().toUpperCase() !== 'RESET') {
+  // Reset Single Customer Balance Handler (Admin & Developer Only)
+  const handleResetSingleCustomerBalance = async () => {
+    if (!resetCustomerTarget) return;
+    if (singleResetConfirmInput.trim().toUpperCase() !== 'RESET') {
       toast.error('Please type RESET to confirm.');
       return;
     }
-    setResettingBalances(true);
+    if (!singleResetReason.trim()) {
+      toast.error('Please provide a mandatory reason for resetting balance.');
+      return;
+    }
+    setResettingSingleBalance(true);
     try {
-      const res = await axios.post('/api/credit/reset-all-balances', {
-        reason: resetReason || 'Admin zero-balance reset'
+      const res = await axios.post(`/api/credit/${resetCustomerTarget.id}/reset-balance`, {
+        reason: singleResetReason.trim()
       });
-      toast.success(res.data?.message || 'All Khata balances reset to zero successfully!');
-      setShowResetBalancesModal(false);
-      setResetConfirmInput('');
-      fetchCustomers();
-      if (activeCustomer) {
+      toast.success(res.data?.message || `Balance for ${resetCustomerTarget.name} reset to 0.00 successfully!`);
+      
+      // Update customers array in state
+      setCustomers(prev => prev.map(c => c.id === resetCustomerTarget.id ? { ...c, balance: 0 } : c));
+      
+      // If modal is open for this customer, update activeCustomer & reload ledger
+      if (activeCustomer && activeCustomer.id === resetCustomerTarget.id) {
+        setActiveCustomer(prev => ({ ...prev, balance: 0 }));
         reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
       }
+      
+      setResetCustomerTarget(null);
+      setSingleResetConfirmInput('');
+      setSingleResetReason('');
+      fetchCustomers();
     } catch (err) {
-      console.error('Error resetting balances:', err);
-      toast.error(err.response?.data?.error || 'Failed to reset Khata balances');
+      console.error('Error resetting customer balance:', err);
+      toast.error(err.response?.data?.error || 'Failed to reset customer balance');
     } finally {
-      setResettingBalances(false);
+      setResettingSingleBalance(false);
     }
   };
 
@@ -2110,6 +2124,8 @@ export default function Credit() {
   // Process Transaction: Exactly 3 options (Receive Major Payment, Add Debit, Extra Pay)
   const handleAddPayment = async (e) => {
     e.preventDefault();
+    if (submittingPayment) return;
+
     let amountStr = paymentAmount;
     const finalAmount = Math.abs(Number(amountStr));
     
@@ -2135,6 +2151,7 @@ export default function Credit() {
       classification = 'Extra Pay';
     }
     
+    setSubmittingPayment(true);
     try {
       await axios.post(`/api/credit/${activeCustomer.id}/payment`, { 
         amount: finalAmount,
@@ -2167,6 +2184,8 @@ export default function Credit() {
       fetchCustomers(); 
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to process transaction');
+    } finally {
+      setSubmittingPayment(false);
     }
   };
 
@@ -2408,32 +2427,6 @@ export default function Credit() {
               }}
             >
               <Tag size={16} /> Discount Packages
-            </button>
-          )}
-
-          {isAdmin && (
-            <button
-              onClick={() => {
-                setResetConfirmInput('');
-                setShowResetBalancesModal(true);
-              }}
-              title="Reset all customer Khata balances to 0 with an auditable settlement (Admin & Developer Only)"
-              style={{
-                background: 'rgba(239, 68, 68, 0.1)',
-                color: '#dc2626',
-                border: '1.5px solid rgba(239, 68, 68, 0.3)',
-                padding: '10px 14px',
-                borderRadius: 8,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontWeight: 700,
-                fontSize: 13,
-                transition: 'all 0.2s'
-              }}
-            >
-              <RotateCcw size={16} /> Reset All Balances
             </button>
           )}
 
@@ -2829,6 +2822,38 @@ export default function Credit() {
                                   >
                                     <Trash2 size={15} /> Delete
                                   </button>
+                                  {(isAdmin || isDeveloper) && (
+                                    <button 
+                                      type="button"
+                                      onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        setActionMenuOpenId(null); 
+                                        setResetCustomerTarget(c);
+                                        setSingleResetReason('');
+                                        setSingleResetConfirmInput('');
+                                      }} 
+                                      style={{ 
+                                        width: '100%', 
+                                        background: 'transparent', 
+                                        border: 'none', 
+                                        borderTop: '1px solid var(--surface-2)',
+                                        padding: '8px 14px', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: 8, 
+                                        fontSize: 13, 
+                                        fontWeight: 600,
+                                        color: '#dc2626', 
+                                        cursor: 'pointer',
+                                        textAlign: 'left'
+                                      }}
+                                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'}
+                                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                      title="Reset this user's Khata balance to 0.00"
+                                    >
+                                      <RotateCcw size={14} style={{ color: '#dc2626' }} /> Reset Balance
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -3471,6 +3496,35 @@ export default function Credit() {
                       {CURRENCY} {Math.abs(activeCustomer.balance).toFixed(2)} {activeCustomer.balance > 0 ? '(DR / Dues)' : (activeCustomer.balance < 0 ? '(CR / Advance)' : '(Settled)')}
                     </span>
                   </div>
+
+                  {(isAdmin || isDeveloper) && (
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setResetCustomerTarget(activeCustomer);
+                        setSingleResetReason('');
+                        setSingleResetConfirmInput('');
+                      }} 
+                      title={`Reset ${activeCustomer.name}'s balance to 0.00`}
+                      style={{ 
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '5px 12px',
+                        borderRadius: 8,
+                        border: '1.5px solid rgba(239, 68, 68, 0.35)',
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        color: '#dc2626',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s'
+                      }}
+                    >
+                      <RotateCcw size={13} />
+                      <span>Reset Balance</span>
+                    </button>
+                  )}
                 </div>
 
                 {isAdmin && (
@@ -3982,6 +4036,7 @@ export default function Credit() {
 
                   <button 
                     type="submit" 
+                    disabled={submittingPayment}
                     style={{ 
                       background: entryType === 'PAYMENT' ? 'var(--green)' : (entryType === 'EXTRA_PAY' ? '#16a34a' : 'var(--red)'), 
                       color: '#fff', 
@@ -3989,12 +4044,21 @@ export default function Credit() {
                       padding: '6px 14px', 
                       borderRadius: 6, 
                       fontWeight: 700, 
-                      cursor: 'pointer', 
+                      cursor: submittingPayment ? 'not-allowed' : 'pointer', 
                       fontSize: 12, 
-                      whiteSpace: 'nowrap' 
+                      whiteSpace: 'nowrap',
+                      opacity: submittingPayment ? 0.75 : 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6
                     }}
                   >
-                    {entryType === 'PAYMENT' ? 'Receive Payment' : (entryType === 'EXTRA_PAY' ? '+ Add Extra Pay' : '+ Add Debit')}
+                    {submittingPayment && <RotateCcw size={12} className="spin" />}
+                    <span>
+                      {submittingPayment 
+                        ? 'Processing...' 
+                        : (entryType === 'PAYMENT' ? 'Receive Payment' : (entryType === 'EXTRA_PAY' ? '+ Add Extra Pay' : '+ Add Debit'))}
+                    </span>
                   </button>
                 </div>
               </form>
@@ -4568,15 +4632,15 @@ export default function Credit() {
         </div>
       )}
 
-      {/* Reset All Balances Modal (Admin & Developer Only) */}
-      {showResetBalancesModal && (
+      {/* Per-User Reset Balance Modal (Admin & Developer Only - Targets Selected User Only) */}
+      {resetCustomerTarget && (
         <div style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(0, 0, 0, 0.6)',
+          background: 'rgba(0, 0, 0, 0.65)',
           backdropFilter: 'blur(3px)',
           display: 'flex',
           alignItems: 'center',
@@ -4587,9 +4651,9 @@ export default function Credit() {
           <div style={{
             background: 'var(--surface)',
             borderRadius: 14,
-            maxWidth: 480,
+            maxWidth: 500,
             width: '100%',
-            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
+            boxShadow: '0 25px 50px rgba(0, 0, 0, 0.35)',
             border: '1.5px solid #fca5a5',
             overflow: 'hidden'
           }}>
@@ -4607,16 +4671,16 @@ export default function Credit() {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#991b1b' }}>
-                    Reset All Khata Balances
+                    Reset Khata Balance (Single User)
                   </h3>
                   <span style={{ fontSize: 11, color: '#b91c1c' }}>
-                    Admin & Developer Action • Settle to 0.00
+                    Target Account: <strong>{resetCustomerTarget.name}</strong>
                   </span>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setShowResetBalancesModal(false)}
+                onClick={() => setResetCustomerTarget(null)}
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#991b1b', padding: 4 }}
               >
                 <X size={18} />
@@ -4624,25 +4688,39 @@ export default function Credit() {
             </div>
 
             <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Account summary banner */}
+              <div style={{ background: 'var(--surface-2)', border: '1px solid var(--surface-3)', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{resetCustomerTarget.name}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Category: {resetCustomerTarget.category || 'Customer'} • Branch: {resetCustomerTarget.branch || 'All'}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Current Balance</div>
+                  <div style={{ fontSize: 15, fontWeight: 900, color: resetCustomerTarget.balance > 0 ? 'var(--red)' : (resetCustomerTarget.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
+                    {CURRENCY} {Math.abs(Number(resetCustomerTarget.balance || 0)).toFixed(2)} {resetCustomerTarget.balance > 0 ? '(Due)' : (resetCustomerTarget.balance < 0 ? '(Advance)' : '(0.00)')}
+                  </div>
+                </div>
+              </div>
+
               <div style={{ background: '#fef2f2', border: '1px solid #fee2e2', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#991b1b', lineHeight: 1.5 }}>
-                <strong>CRITICAL NOTICE:</strong> This action will zero out all customer outstanding balances across the system by recording an official, auditable zero-balance settlement entry.
-                <br /><br />
-                • Transaction history will <strong>NOT</strong> be deleted.
-                <br />
-                • Each account will receive a balancing settlement entry.
-                <br />
-                • This action will be logged in the permanent audit trail.
+                <strong>SAFETY CONFIRMATION:</strong>
+                <ul style={{ margin: '6px 0 0 0', paddingLeft: 18 }}>
+                  <li>This action will reset <strong>ONLY {resetCustomerTarget.name}'s</strong> balance to 0.00.</li>
+                  <li>No other customer accounts or transactions will be changed.</li>
+                  <li>An official balancing settlement transaction will be created.</li>
+                  <li>This reset will be recorded in the audit logs with your username and reason.</li>
+                </ul>
               </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
-                  Reason for Balance Reset:
+                  Mandatory Reason for Balance Reset: <span style={{ color: '#dc2626' }}>*</span>
                 </label>
                 <input
                   type="text"
-                  value={resetReason}
-                  onChange={(e) => setResetReason(e.target.value)}
-                  placeholder="e.g. Month-end reconciliation, Annual balance reset"
+                  value={singleResetReason}
+                  onChange={(e) => setSingleResetReason(e.target.value)}
+                  placeholder="e.g. Full settlement in cash, Month-end reconciliation, Annual zeroing"
                   style={{
                     width: '100%',
                     padding: '8px 12px',
@@ -4658,12 +4736,12 @@ export default function Credit() {
 
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>
-                  Type "RESET" to confirm:
+                  Type "RESET" to confirm: <span style={{ color: '#dc2626' }}>*</span>
                 </label>
                 <input
                   type="text"
-                  value={resetConfirmInput}
-                  onChange={(e) => setResetConfirmInput(e.target.value)}
+                  value={singleResetConfirmInput}
+                  onChange={(e) => setSingleResetConfirmInput(e.target.value)}
                   placeholder="RESET"
                   style={{
                     width: '100%',
@@ -4690,7 +4768,7 @@ export default function Credit() {
             }}>
               <button
                 type="button"
-                onClick={() => setShowResetBalancesModal(false)}
+                onClick={() => setResetCustomerTarget(null)}
                 style={{
                   padding: '8px 16px',
                   background: 'var(--surface)',
@@ -4706,24 +4784,24 @@ export default function Credit() {
               </button>
               <button
                 type="button"
-                disabled={resetConfirmInput.trim().toUpperCase() !== 'RESET' || resettingBalances}
-                onClick={handleResetAllBalances}
+                disabled={singleResetConfirmInput.trim().toUpperCase() !== 'RESET' || !singleResetReason.trim() || resettingSingleBalance}
+                onClick={handleResetSingleCustomerBalance}
                 style={{
                   padding: '8px 18px',
-                  background: resetConfirmInput.trim().toUpperCase() === 'RESET' ? '#dc2626' : '#9ca3af',
+                  background: (singleResetConfirmInput.trim().toUpperCase() === 'RESET' && singleResetReason.trim()) ? '#dc2626' : '#9ca3af',
                   color: '#fff',
                   border: 'none',
                   borderRadius: 6,
                   fontWeight: 700,
                   fontSize: 12,
-                  cursor: resetConfirmInput.trim().toUpperCase() === 'RESET' && !resettingBalances ? 'pointer' : 'not-allowed',
+                  cursor: (singleResetConfirmInput.trim().toUpperCase() === 'RESET' && singleResetReason.trim() && !resettingSingleBalance) ? 'pointer' : 'not-allowed',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6
                 }}
               >
-                {resettingBalances ? <RotateCcw size={13} className="spin" /> : <AlertTriangle size={13} />}
-                <span>{resettingBalances ? 'Resetting...' : 'Confirm Reset All Balances'}</span>
+                {resettingSingleBalance ? <RotateCcw size={13} className="spin" /> : <AlertTriangle size={13} />}
+                <span>{resettingSingleBalance ? 'Resetting...' : `Confirm Reset for ${resetCustomerTarget.name}`}</span>
               </button>
             </div>
           </div>

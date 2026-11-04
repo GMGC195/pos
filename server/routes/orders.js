@@ -4,6 +4,7 @@ const pool = require('../db');
 const { authenticateToken, isAdmin, isAdminOrCashier } = require('../middleware/auth');
 const { Resend } = require('resend');
 const Pusher = require('pusher');
+const { recordActivityLog } = require('./activityLogs');
 
 function cleanEnglishOnly(str) {
   if (!str) return '';
@@ -1150,6 +1151,23 @@ router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) 
     await returnStock(req.params.id, client);
     await reverseCreditTransactions(req.params.id, client);
 
+    const updatedOrder = orderResult.rows[0];
+    try {
+      await recordActivityLog(client, {
+        module: 'Orders',
+        action: updateTo === 'Returned' ? 'Order Returned' : 'Order Cancelled',
+        entity_id: req.params.id,
+        entity_name: `Slip #${updatedOrder.slip_number || req.params.id}`,
+        description: `Order #${updatedOrder.slip_number || req.params.id} marked as ${updateTo} (${updatedOrder.order_type || 'Dine In'}, SAR ${updatedOrder.grand_total})`,
+        reason: finalReason,
+        old_data: { status: 'Completed' },
+        new_data: { status: updateTo, grand_total: updatedOrder.grand_total, customer_name: updatedOrder.customer_name },
+        performed_by: req.user?.username || 'Cashier',
+        branch: updatedOrder.branch || 'Branch 1',
+        month: updatedOrder.created_at ? new Date(updatedOrder.created_at).toISOString().slice(0, 7) : null
+      });
+    } catch (e) {}
+
     await client.query('COMMIT');
     const updatedOrder = orderResult.rows[0];
     if (req.io) req.io.emit('orderUpdated', updatedOrder);
@@ -1203,6 +1221,21 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
          [req.params.id]
        );
        await reverseCreditTransactions(req.params.id, client);
+       const updatedOrder = orderResult.rows[0];
+       try {
+         await recordActivityLog(client, {
+           module: 'Orders',
+           action: 'Order Cancelled',
+           entity_id: req.params.id,
+           entity_name: `Slip #${updatedOrder.slip_number || req.params.id}`,
+           description: `Order #${updatedOrder.slip_number || req.params.id} cancellation approved (${updatedOrder.order_type || 'Dine In'}, SAR ${updatedOrder.grand_total})`,
+           reason: updatedOrder.cancel_reason || 'Cancellation approved by manager',
+           new_data: { status: 'Cancelled', grand_total: updatedOrder.grand_total },
+           performed_by: req.user?.username || 'Admin',
+           branch: updatedOrder.branch || 'Branch 1',
+           month: updatedOrder.created_at ? new Date(updatedOrder.created_at).toISOString().slice(0, 7) : null
+         });
+       } catch (e) {}
        await client.query('COMMIT');
        const updatedOrder = orderResult.rows[0];
        if (req.io) req.io.emit('orderUpdated', updatedOrder);

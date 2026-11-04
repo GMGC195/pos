@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { recordActivityLog } = require('./activityLogs');
 // KSA (UTC+3) Current Month Helper
 const getKsaCurrentMonthStr = () => {
   const now = new Date();
@@ -917,30 +918,45 @@ router.post('/:id/payment', async (req, res) => {
   try {
     await pool.query('BEGIN');
 
+    // Duplicate submission prevention: check for identical transaction within 4 seconds
+    const transactionType = action === 'CHARGE' ? 'CHARGE' : 'PAYMENT';
+    const dupCheck = await pool.query(
+      `SELECT id FROM credit_transactions 
+       WHERE credit_customer_id = $1 
+         AND type = $2 
+         AND amount = $3 
+         AND billing_month = $4 
+         AND created_at >= NOW() - INTERVAL '4 seconds'`,
+      [id, transactionType, numAmount, targetBillingMonth]
+    );
+    if (dupCheck.rows.length > 0) {
+      await pool.query('ROLLBACK');
+      return res.status(409).json({ error: 'Duplicate transaction detected. Please wait a moment.', duplicate: true });
+    }
+
     // Retrieve customer details to inherit classification if employee
-    const custRes = await pool.query('SELECT name, balance, is_extra_pay, status FROM credit_customers WHERE id = $1 FOR UPDATE', [id]);
+    const custRes = await pool.query('SELECT name, balance, is_extra_pay, status, branch FROM credit_customers WHERE id = $1 FOR UPDATE', [id]);
     if (custRes.rows.length === 0) {
       await pool.query('ROLLBACK');
       return res.status(404).json({ error: 'Customer not found' });
     }
     const customer = custRes.rows[0];
 
-    const transactionType = action === 'CHARGE' ? 'CHARGE' : 'PAYMENT';
     // CHARGE adds to the balance (debt increases), PAYMENT subtracts from balance (debt decreases).
     const balanceChange = transactionType === 'CHARGE' ? numAmount : -numAmount;
 
     let targetBranch = req.body?.branch || (req.user?.branch ? req.user.branch.split(',')[0].trim() : 'Branch 1');
-    if (targetBranch === 'All' || !targetBranch) targetBranch = 'Branch 1';
+    if (targetBranch === 'All' || !targetBranch) targetBranch = customer.branch || 'Branch 1';
     const effectiveCashier = cashier_name || req.user?.username || 'Cashier';
 
     // Set classification: Explicitly passed, or inherit from employee is_extra_pay
     const finalClassification = classification || (customer.is_extra_pay ? 'Extra Pay' : 'Regular');
 
-    await pool.query(
+    const txInsertRes = await pool.query(
       `INSERT INTO credit_transactions (
         credit_customer_id, type, amount, cashier_name, payment_method, branch, 
         billing_month, comments, classification, is_shift_closed, is_daily_closed
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, FALSE)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, FALSE) RETURNING *`,
       [
         id, 
         transactionType, 
@@ -958,6 +974,26 @@ router.post('/:id/payment', async (req, res) => {
       'UPDATE credit_customers SET balance = balance + $1 WHERE id = $2 RETURNING *',
       [balanceChange, id]
     );
+
+    // Record into centralized activity_logs
+    await recordActivityLog(pool, {
+      module: 'Khata',
+      action: transactionType === 'PAYMENT' ? 'Receive Payment' : (finalClassification === 'Extra Pay' ? 'Add Extra Pay' : 'Add Debit'),
+      entity_id: id,
+      entity_name: customer.name,
+      description: `${transactionType === 'PAYMENT' ? 'Payment' : 'Debit'} of SAR ${numAmount.toFixed(2)} (${payment_method || 'Cash'}) allocated to ${targetBillingMonth}`,
+      reason: comments ? comments.trim() : null,
+      new_data: { 
+        amount: numAmount, 
+        type: transactionType, 
+        billing_month: targetBillingMonth, 
+        payment_method: payment_method || 'Cash',
+        classification: finalClassification
+      },
+      performed_by: effectiveCashier,
+      branch: targetBranch,
+      month: targetBillingMonth
+    });
 
     if (transactionType === 'PAYMENT') {
       try {
@@ -1095,6 +1131,21 @@ router.put('/transactions/:txId', async (req, res) => {
       ]
     );
 
+    // Record in unified activity_logs
+    await recordActivityLog(client, {
+      module: 'Khata',
+      action: 'Modify Khata Transaction',
+      entity_id: customer.id,
+      entity_name: customer.name,
+      description: `Transaction #${txId} modified from ${oldTx.type} SAR ${oldTx.amount} to ${newType} SAR ${numAmount}`,
+      reason: reason ? reason.trim() : 'Admin corrected transaction',
+      old_data: oldTx,
+      new_data: updateTxRes.rows[0],
+      performed_by: req.user?.username || 'Admin',
+      branch: customer.branch || 'All',
+      month: oldTx.billing_month
+    });
+
     await client.query('COMMIT');
     res.json({
       success: true,
@@ -1166,6 +1217,21 @@ router.delete('/transactions/:txId', async (req, res) => {
       ]
     );
 
+    // Record in unified activity_logs
+    await recordActivityLog(client, {
+      module: 'Khata',
+      action: 'Delete Khata Transaction',
+      entity_id: customer.id,
+      entity_name: customer.name,
+      description: `Transaction #${txId} (${oldTx.type} SAR ${oldAmt}) deleted/voided`,
+      reason: reason ? reason.trim() : 'Admin deleted transaction',
+      old_data: oldTx,
+      new_data: { status: 'DELETED' },
+      performed_by: req.user?.username || 'Admin',
+      branch: customer.branch || 'All',
+      month: oldTx.billing_month
+    });
+
     await client.query('COMMIT');
     res.json({
       success: true,
@@ -1181,11 +1247,16 @@ router.delete('/transactions/:txId', async (req, res) => {
   }
 });
 
-// POST /api/credit/reset-all-balances - Reset all customer and employee balances to 0 atomically
-router.post('/reset-all-balances', async (req, res) => {
+// POST /api/credit/:id/reset-balance - Reset only the selected individual customer's Khata balance to 0.00
+router.post('/:id/reset-balance', async (req, res) => {
   if (!ensureAdminOrDeveloper(req, res)) return;
 
+  const { id } = req.params;
   const { reason } = req.body || {};
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'A mandatory reason is required to reset a customer balance.' });
+  }
+
   const currentMonth = getKsaCurrentMonthStr();
   const performedBy = req.user?.username || 'Admin';
   const performedRole = req.user?.role || 'Admin';
@@ -1194,79 +1265,109 @@ router.post('/reset-all-balances', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Fetch all customers with non-zero balances
+    // Fetch and lock only the target customer row
     const custRes = await client.query(
-      'SELECT id, name, balance, employee_id FROM credit_customers WHERE balance != 0 FOR UPDATE'
+      'SELECT id, name, balance, employee_id, category, branch FROM credit_customers WHERE id = $1 FOR UPDATE',
+      [id]
     );
-    const affectedCustomers = custRes.rows;
-
-    let totalResetAmount = 0;
-
-    for (const cust of affectedCustomers) {
-      const bal = parseFloat(cust.balance || 0);
-      if (bal === 0) continue;
-
-      totalResetAmount += Math.abs(bal);
-
-      // If bal > 0 (customer owes debt): insert a PAYMENT of bal to zero it out
-      // If bal < 0 (customer has advance): insert a CHARGE of abs(bal) to zero it out
-      const txType = bal > 0 ? 'PAYMENT' : 'CHARGE';
-      const txAmount = Math.abs(bal);
-
-      await client.query(
-        `INSERT INTO credit_transactions (
-           credit_customer_id, type, amount, cashier_name, payment_method, branch,
-           billing_month, comments, classification, is_shift_closed, is_daily_closed, created_at
-         ) VALUES ($1, $2, $3, $4, 'Balance Reset', 'All', $5, $6, 'Balance Reset', FALSE, FALSE, NOW())`,
-        [
-          cust.id,
-          txType,
-          txAmount,
-          performedBy,
-          currentMonth,
-          `Reset All Khata Balances by ${performedBy}`
-        ]
-      );
-
-      await client.query('UPDATE credit_customers SET balance = 0 WHERE id = $1', [cust.id]);
+    if (custRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Customer not found.' });
     }
 
-    // Log the bulk reset in audit log
+    const customer = custRes.rows[0];
+    const bal = parseFloat(customer.balance || 0);
+
+    if (bal === 0) {
+      await client.query('COMMIT');
+      return res.json({
+        success: true,
+        message: `Balance for ${customer.name} is already 0.00. No adjustment needed.`,
+        customer
+      });
+    }
+
+    // If bal > 0 (customer owes debt): insert a PAYMENT of bal to zero it out
+    // If bal < 0 (customer has advance): insert a CHARGE of abs(bal) to zero it out
+    const txType = bal > 0 ? 'PAYMENT' : 'CHARGE';
+    const txAmount = Math.abs(bal);
+
+    const txRes = await client.query(
+      `INSERT INTO credit_transactions (
+         credit_customer_id, type, amount, cashier_name, payment_method, branch,
+         billing_month, comments, classification, is_shift_closed, is_daily_closed, created_at
+       ) VALUES ($1, $2, $3, $4, 'Balance Reset', $5, $6, $7, 'Balance Reset', FALSE, FALSE, NOW())
+       RETURNING *`,
+      [
+        customer.id,
+        txType,
+        txAmount,
+        performedBy,
+        customer.branch || 'Branch 1',
+        currentMonth,
+        `Individual Balance Reset to 0.00: ${reason.trim()} (by ${performedBy})`
+      ]
+    );
+
+    const updatedCustRes = await client.query(
+      'UPDATE credit_customers SET balance = 0 WHERE id = $1 RETURNING *',
+      [customer.id]
+    );
+
+    // Record in credit_audit_logs
     await client.query(
       `INSERT INTO credit_audit_logs (
          transaction_id, credit_customer_id, action, performed_by, performed_by_role,
          previous_values, new_values, reason, created_at
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
       [
-        null,
-        affectedCustomers[0]?.id || null,
-        'RESET_ALL_BALANCES',
+        txRes.rows[0].id,
+        customer.id,
+        'RESET_USER_BALANCE',
         performedBy,
         performedRole,
-        JSON.stringify({
-          affected_count: affectedCustomers.length,
-          total_reset_amount: totalResetAmount,
-          customers: affectedCustomers.map(c => ({ id: c.id, name: c.name, balance: c.balance }))
-        }),
+        JSON.stringify({ previous_balance: bal, reset_type: txType, reset_amount: txAmount }),
         JSON.stringify({ new_balance: 0 }),
-        reason ? reason.trim() : 'Authorized Admin reset all outstanding Khata balances to 0'
+        reason.trim()
       ]
     );
+
+    // Record in unified activity_logs
+    await recordActivityLog(client, {
+      module: 'Khata',
+      action: 'Reset Balance',
+      entity_id: customer.id,
+      entity_name: customer.name,
+      description: `Khata balance for ${customer.name} reset from SAR ${bal.toFixed(2)} to 0.00`,
+      reason: reason.trim(),
+      old_data: { balance: bal },
+      new_data: { balance: 0, transaction_id: txRes.rows[0].id },
+      performed_by: performedBy,
+      branch: customer.branch || 'All',
+      month: currentMonth
+    });
 
     await client.query('COMMIT');
     res.json({
       success: true,
-      message: `Successfully reset balances for ${affectedCustomers.length} accounts to 0.00.`,
-      affected_count: affectedCustomers.length,
-      total_reset_amount: totalResetAmount
+      message: `Balance for ${customer.name} has been reset to 0.00 successfully.`,
+      customer: updatedCustRes.rows[0],
+      transaction: txRes.rows[0]
     });
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error resetting all balances:', err);
-    res.status(500).json({ error: 'Failed to reset balances: ' + err.message });
+    console.error('Error resetting individual customer balance:', err);
+    res.status(500).json({ error: 'Failed to reset customer balance: ' + err.message });
   } finally {
     client.release();
   }
+});
+
+// Deprecated global reset endpoint - disabled for security & data safety
+router.post('/reset-all-balances', async (req, res) => {
+  return res.status(403).json({
+    error: 'Global balance reset has been disabled. Please reset balances per individual user from customer details.'
+  });
 });
 
 // GET /api/credit/audit-logs - View audit logs (Admin & Developer only)
