@@ -1136,7 +1136,7 @@ export default function Credit() {
     }, 400);
   };
 
-  // 2. Redesigned Detailed PDF Statement Download (Multi-page, Product Breakdown, jsPDF + AutoTable)
+  // 2. Redesigned Detailed PDF Statement Download (Multi-page, Product Breakdown, jsPDF + AutoTable + Arabic Font & Shaping)
   const handleExportPDF = async () => {
     const data = getStatementData();
     if (!data) return;
@@ -1145,45 +1145,66 @@ export default function Credit() {
     try {
       const { default: jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
+      const { loadArabicPdfFonts, formatArabicForDocText, formatArabicForTable } = await import('../utils/arabicPdfHelper');
 
       const doc = new jsPDF('p', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 14;
 
+      // Register Arabic TrueType Fonts (Amiri-Regular & Amiri-Bold)
+      try {
+        await loadArabicPdfFonts(doc);
+        doc.setFont('Amiri', 'bold');
+      } catch (fontErr) {
+        console.warn('Could not load Amiri font, falling back to standard font:', fontErr);
+        doc.setFont('helvetica', 'bold');
+      }
+      const activeFont = doc.getFontList()['Amiri'] ? 'Amiri' : 'helvetica';
+
       // 1. Heading
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(activeFont, 'bold');
       doc.setFontSize(15);
       doc.setTextColor(15, 23, 42); // #0f172a
-      const titleText = `${activeCustomer.name.toUpperCase()} – KHATA STATEMENT`;
-      const titleLines = doc.splitTextToSize(titleText, pageWidth - (margin * 2));
+      const titleRaw = `${(activeCustomer.name || 'CUSTOMER').toUpperCase()} – KHATA STATEMENT`;
+      const titleFormatted = formatArabicForDocText(titleRaw);
+      const titleLines = doc.splitTextToSize(titleFormatted, pageWidth - (margin * 2));
       doc.text(titleLines, margin, 18);
 
       let currentY = 18 + (titleLines.length * 6);
 
       // 2. Statement Period
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(activeFont, 'normal');
       doc.setFontSize(10);
       doc.setTextColor(71, 85, 105); // #475569
       doc.text(`Statement Period: ${periodLabel}`, margin, currentY);
       currentY += 8;
 
-      // 3. Three-Row Summary
+      // 3. Summary & Customer Details
       doc.setFontSize(9.5);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(activeFont, 'bold');
       doc.setTextColor(51, 65, 85);
       doc.text('Statement Month:', margin, currentY);
-      doc.setFont('helvetica', 'normal');
-      doc.text(statementMonth, margin + 40, currentY);
+      doc.setFont(activeFont, 'normal');
+      doc.text(formatArabicForDocText(statementMonth), margin + 40, currentY);
       currentY += 5.5;
 
-      doc.setFont('helvetica', 'bold');
+      if (activeCustomer.category || activeCustomer.company_name) {
+        doc.setFont(activeFont, 'bold');
+        doc.text('Customer Info:', margin, currentY);
+        doc.setFont(activeFont, 'normal');
+        const custMeta = `${activeCustomer.name || 'Customer'}${activeCustomer.category ? ` (${activeCustomer.category})` : ''}${activeCustomer.company_name ? ` • ${activeCustomer.company_name}` : ''}`;
+        doc.text(formatArabicForDocText(custMeta), margin + 40, currentY);
+        currentY += 5.5;
+      }
+
+      doc.setFont(activeFont, 'bold');
       doc.text('Opening Balance:', margin, currentY);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(activeFont, 'normal');
       doc.text(`SAR ${openBal.toFixed(2)}`, margin + 40, currentY);
       currentY += 5.5;
 
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(activeFont, 'bold');
       doc.text('Closing Balance:', margin, currentY);
       if (closingBal > 0) doc.setTextColor(220, 38, 38);
       else if (closingBal < 0) doc.setTextColor(22, 163, 74);
@@ -1191,8 +1212,8 @@ export default function Credit() {
       doc.text(`SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Adv)' : '(0.00)')}`, margin + 40, currentY);
       currentY += 8;
 
-      // 4. Detailed Table
-      const tableHeaders = [['Date', 'Bill #', 'Description / Product Details', 'Qty', 'Unit Price', 'Debit (+)', 'Credit (-)']];
+      // 4. Detailed Table with Month Column & Shaped Arabic Text
+      const tableHeaders = [['Date', 'Month', 'Bill #', 'Description / Product Details', 'Qty', 'Unit Price', 'Debit (+)', 'Credit (-)']];
       const tableBody = [];
 
       sortedTxs.forEach((t) => {
@@ -1200,6 +1221,8 @@ export default function Credit() {
         const isPayment = t.type === 'PAYMENT';
         const isCharge = t.type === 'CHARGE';
         const txDate = new Date(t.created_at).toLocaleDateString();
+        const txMonth = t.billing_month || (t.created_at ? t.created_at.slice(0, 7) : '');
+        const monthLabel = txMonth ? formatMonthDisplay(txMonth) : '-';
         const billNum = t.slip_number ? `#${t.slip_number}` : (t.order_id ? `#${t.order_id}` : '-');
         const amt = parseFloat(t.amount || 0);
 
@@ -1210,8 +1233,9 @@ export default function Credit() {
             const lineTotal = q * uPrice;
             tableBody.push([
               idx === 0 ? txDate : '',
+              idx === 0 ? monthLabel : '',
               idx === 0 ? billNum : '',
-              `${item.item_name}${item.description ? ` (${item.description})` : ''}`,
+              formatArabicForTable(`${item.item_name || 'Item'}${item.description ? ` (${item.description})` : ''}`),
               String(q),
               `SAR ${uPrice.toFixed(2)}`,
               `SAR ${lineTotal.toFixed(2)}`,
@@ -1221,8 +1245,9 @@ export default function Credit() {
         } else if (isOrder) {
           tableBody.push([
             txDate,
+            monthLabel,
             billNum,
-            t.comments || 'Order Charge',
+            formatArabicForTable(t.comments || 'Order Charge'),
             '1',
             `SAR ${amt.toFixed(2)}`,
             `SAR ${amt.toFixed(2)}`,
@@ -1231,8 +1256,9 @@ export default function Credit() {
         } else if (isPayment) {
           tableBody.push([
             txDate,
+            monthLabel,
             billNum !== '-' ? billNum : '',
-            `Payment Received${t.payment_method ? ` (${t.payment_method})` : ''}${t.comments ? ` – ${t.comments}` : ''}`,
+            formatArabicForTable(`Payment Received${t.payment_method ? ` (${t.payment_method})` : ''}${t.comments ? ` – ${t.comments}` : ''}`),
             '-',
             '-',
             '-',
@@ -1242,8 +1268,9 @@ export default function Credit() {
           // Manual Charge or Adjustment
           tableBody.push([
             txDate,
+            monthLabel,
             billNum,
-            isCharge ? `Manual Debit${t.comments ? ` – ${t.comments}` : ''}` : `${t.type}${t.comments ? ` – ${t.comments}` : ''}`,
+            formatArabicForTable(isCharge ? `Manual Debit${t.comments ? ` – ${t.comments}` : ''}` : `${t.type}${t.comments ? ` – ${t.comments}` : ''}`),
             '1',
             `SAR ${amt.toFixed(2)}`,
             `SAR ${amt.toFixed(2)}`,
@@ -1253,7 +1280,7 @@ export default function Credit() {
       });
 
       if (tableBody.length === 0) {
-        tableBody.push(['-', '-', 'No transactions recorded in this period.', '-', '-', '-', '-']);
+        tableBody.push(['-', '-', '-', 'No transactions recorded in this period.', '-', '-', '-', '-']);
       }
 
       autoTable(doc, {
@@ -1263,30 +1290,33 @@ export default function Credit() {
         theme: 'striped',
         margin: { left: margin, right: margin, top: 20, bottom: 20 },
         styles: {
+          font: activeFont,
           fontSize: 8.5,
           cellPadding: 2.5,
           overflow: 'linebreak',
           textColor: [30, 41, 59]
         },
         headStyles: {
+          font: activeFont,
           fillColor: [30, 41, 59],
           textColor: [255, 255, 255],
           fontStyle: 'bold',
           halign: 'left'
         },
         columnStyles: {
-          0: { cellWidth: 22 }, // Date
-          1: { cellWidth: 18 }, // Bill #
-          2: { cellWidth: 'auto' }, // Description
-          3: { cellWidth: 12, halign: 'center' }, // Qty
-          4: { cellWidth: 22, halign: 'right' }, // Unit Price
-          5: { cellWidth: 24, halign: 'right', textColor: [220, 38, 38], fontStyle: 'bold' }, // Debit
-          6: { cellWidth: 24, halign: 'right', textColor: [22, 163, 74], fontStyle: 'bold' } // Credit
+          0: { cellWidth: 20 }, // Date
+          1: { cellWidth: 24 }, // Month
+          2: { cellWidth: 16 }, // Bill #
+          3: { cellWidth: 'auto' }, // Description
+          4: { cellWidth: 12, halign: 'center' }, // Qty
+          5: { cellWidth: 22, halign: 'right' }, // Unit Price
+          6: { cellWidth: 22, halign: 'right', textColor: [220, 38, 38], fontStyle: 'bold' }, // Debit
+          7: { cellWidth: 22, halign: 'right', textColor: [22, 163, 74], fontStyle: 'bold' } // Credit
         },
         didDrawPage: (data) => {
           // Print Date & Page Number on each page footer
           doc.setFontSize(8);
-          doc.setFont('helvetica', 'italic');
+          doc.setFont(activeFont, 'normal');
           doc.setTextColor(148, 163, 184);
           doc.text(`Printed On: ${new Date().toLocaleString()}`, margin, pageHeight - 8);
           doc.text(`Page ${data.pageNumber}`, pageWidth - margin - 12, pageHeight - 8);
@@ -1306,7 +1336,7 @@ export default function Credit() {
       doc.roundedRect(margin, summaryY, pageWidth - (margin * 2), 24, 2, 2, 'FD');
 
       doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(activeFont, 'bold');
       doc.setTextColor(100, 116, 139);
       doc.text('TOTAL BILLS (DEBIT):', margin + 6, summaryY + 8);
       doc.setTextColor(220, 38, 38);
@@ -1314,7 +1344,7 @@ export default function Credit() {
       doc.text(`SAR ${totalBills.toFixed(2)}`, margin + 6, summaryY + 18);
 
       doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(activeFont, 'bold');
       doc.setTextColor(100, 116, 139);
       doc.text('TOTAL PAYMENTS RECEIVED (CREDIT):', margin + 65, summaryY + 8);
       doc.setTextColor(22, 163, 74);
@@ -1322,7 +1352,7 @@ export default function Credit() {
       doc.text(`SAR ${totalPayments.toFixed(2)}`, margin + 65, summaryY + 18);
 
       doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(activeFont, 'bold');
       doc.setTextColor(100, 116, 139);
       doc.text('CLOSING BALANCE:', margin + 140, summaryY + 8);
       if (closingBal > 0) doc.setTextColor(220, 38, 38);
@@ -1331,7 +1361,7 @@ export default function Credit() {
       doc.setFontSize(11.5);
       doc.text(`SAR ${Math.abs(closingBal).toFixed(2)} ${closingBal > 0 ? '(Due)' : (closingBal < 0 ? '(Adv)' : '(0.00)')}`, margin + 140, summaryY + 18);
 
-      const safeName = (activeCustomer.name || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');
+      const safeName = (activeCustomer.name || 'Customer').replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_');
       doc.save(`Khata_Statement_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
       toast.success('PDF statement downloaded successfully!');
     } catch (err) {
