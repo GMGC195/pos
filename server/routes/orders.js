@@ -1169,7 +1169,6 @@ router.patch('/:id/void', authenticateToken, isAdminOrCashier, async (req, res) 
     } catch (e) {}
 
     await client.query('COMMIT');
-    const updatedOrder = orderResult.rows[0];
     if (req.io) req.io.emit('orderUpdated', updatedOrder);
     res.json({ success: true, order: updatedOrder });
   } catch (err) {
@@ -1237,7 +1236,6 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
          });
        } catch (e) {}
        await client.query('COMMIT');
-       const updatedOrder = orderResult.rows[0];
        if (req.io) req.io.emit('orderUpdated', updatedOrder);
        return res.json({ success: true, message: 'Cancellation request approved', order: updatedOrder });
     } else {
