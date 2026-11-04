@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { X, ArrowRight, Plus, Edit } from 'lucide-react';
-import { getSaudiDateString } from '../utils/timezone';
+import { getSaudiDateString, getSaudiTodayDate } from '../utils/timezone';
 
 const formatLocalDate = (date) => {
   if (!date) return '';
@@ -144,8 +144,30 @@ export default function AttendanceDetailModal({
         </button>
         
         <div style={{ marginBottom: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4, flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{selectedEmployeeLogs.name}</h3>
+            {isAdmin && onEdit && (
+              <button 
+                type="button"
+                onClick={() => onEdit(selectedEmployeeLogs.employee_id || selectedEmployeeLogs.id, targetScrollDate || getSaudiTodayDate(), 'add')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'var(--primary)',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '4px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+                title="Add an additional attendance session (+)"
+              >
+                <Plus size={14} /> Add Plus Session
+              </button>
+            )}
             {pendingRequests.some(r => r.employee_id === (selectedEmployeeLogs.employee_id || selectedEmployeeLogs.id) && r.request_type === 'Overtime' && r.status === 'Pending') && (
               <button 
                 onClick={() => { window.location.href = '/edited-logs?tab=overtime'; }}
@@ -371,24 +393,48 @@ export default function AttendanceDetailModal({
                         </span>
                       </td>
                       {isAdmin && onEdit && (
-                        <td style={{ padding: 10, textAlign: 'center' }}>
-                          <button 
-                            onClick={() => onEdit(selectedEmployeeLogs.employee_id || selectedEmployeeLogs.id, dateStr, '')}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              cursor: 'pointer',
-                              color: 'var(--primary)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              padding: 4,
-                              borderRadius: 4
-                            }}
-                            title="Edit this day's attendance"
-                          >
-                            <Edit size={14} />
-                          </button>
+                        <td style={{ padding: 10, textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <button 
+                              type="button"
+                              onClick={() => onEdit(selectedEmployeeLogs.employee_id || selectedEmployeeLogs.id, dateStr, 'add')}
+                              style={{
+                                background: 'rgba(var(--primary-rgb), 0.1)',
+                                border: '1px solid rgba(var(--primary-rgb), 0.3)',
+                                cursor: 'pointer',
+                                color: 'var(--primary)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: '3px 7px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                gap: 3
+                              }}
+                              title="Add an additional session for this day (+)"
+                            >
+                              <Plus size={12} /> Session
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => onEdit(selectedEmployeeLogs.employee_id || selectedEmployeeLogs.id, dateStr, '')}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: 'var(--text-muted)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: 4,
+                                borderRadius: 4
+                              }}
+                              title="Edit this day's attendance"
+                            >
+                              <Edit size={14} />
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>

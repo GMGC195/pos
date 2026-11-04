@@ -339,17 +339,58 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       console.error('Notice loading payments:', payErr.message);
     }
 
-    // Get Khata credit customers mapped to employees
+    // Get Khata credit customers mapped to employees with separate monthly balances
     const khataMap = {};
     try {
       const khataRes = await pool.query(
         'SELECT id, name, employee_id, balance, is_extra_pay, status FROM credit_customers WHERE employee_id IS NOT NULL'
       );
+      const custIds = khataRes.rows.map(c => c.id);
+      
+      let breakdownMap = {};
+      if (custIds.length > 0) {
+        const breakdownRes = await pool.query(
+          `SELECT 
+             credit_customer_id,
+             COALESCE(SUM(CASE 
+               WHEN COALESCE(billing_month, TO_CHAR(created_at, 'YYYY-MM')) = $1 THEN
+                 CASE 
+                   WHEN type IN ('CHARGE', 'CREDIT_ORDER', 'PAYMENT_CANCELLED') THEN amount
+                   WHEN type IN ('PAYMENT', 'ORDER_CANCELLED') AND classification != 'Salary Deduction' THEN -amount
+                   ELSE 0
+                 END
+               ELSE 0
+             END), 0) AS this_month_khata,
+             COALESCE(SUM(CASE 
+               WHEN COALESCE(billing_month, TO_CHAR(created_at, 'YYYY-MM')) < $1 THEN
+                 CASE 
+                   WHEN type IN ('CHARGE', 'CREDIT_ORDER', 'PAYMENT_CANCELLED') THEN amount
+                   WHEN type IN ('PAYMENT', 'ORDER_CANCELLED') THEN -amount
+                   ELSE 0
+                 END
+               ELSE 0
+             END), 0) AS prev_month_remaining_khata
+           FROM credit_transactions
+           WHERE credit_customer_id = ANY($2::int[])
+           GROUP BY credit_customer_id`,
+          [month, custIds]
+        );
+        breakdownRes.rows.forEach(b => {
+          breakdownMap[b.credit_customer_id] = {
+            this_month_khata: parseFloat(b.this_month_khata || 0),
+            prev_month_remaining_khata: parseFloat(b.prev_month_remaining_khata || 0)
+          };
+        });
+      }
+
       khataRes.rows.forEach(c => {
+        const b = breakdownMap[c.id] || { this_month_khata: 0, prev_month_remaining_khata: 0 };
         khataMap[c.employee_id] = {
           customer_id: c.id,
           name: c.name,
           balance: parseFloat(c.balance || 0),
+          this_month_khata: b.this_month_khata,
+          prev_month_remaining_khata: b.prev_month_remaining_khata,
           is_extra_pay: !!c.is_extra_pay,
           status: c.status
         };
@@ -834,6 +875,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         is_khata_registered: isKhataRegistered,
         khata_customer_id: khataInfo?.customer_id || null,
         khata_balance: khataBalance,
+        this_month_khata: khataInfo ? khataInfo.this_month_khata : 0,
+        prev_month_remaining_khata: khataInfo ? khataInfo.prev_month_remaining_khata : 0,
         khata_deduction: khataDeduction,
         attendance_days: empLogs,
         advance_balance: advanceBalance,

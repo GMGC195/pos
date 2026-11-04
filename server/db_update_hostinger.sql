@@ -48,6 +48,24 @@ CREATE INDEX IF NOT EXISTS idx_credit_transactions_classification ON credit_tran
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS credit_customer_id INTEGER REFERENCES credit_customers(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_orders_credit_customer_id ON orders(credit_customer_id);
 
+-- E. Create credit_audit_logs table for Khata transaction modifications & balance resets
+CREATE TABLE IF NOT EXISTS credit_audit_logs (
+  id SERIAL PRIMARY KEY,
+  transaction_id INTEGER REFERENCES credit_transactions(id) ON DELETE SET NULL,
+  credit_customer_id INTEGER REFERENCES credit_customers(id) ON DELETE CASCADE,
+  action VARCHAR(50) NOT NULL,
+  performed_by VARCHAR(100) NOT NULL,
+  performed_by_role VARCHAR(50),
+  previous_values JSONB,
+  new_values JSONB,
+  reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_credit_audit_customer ON credit_audit_logs(credit_customer_id);
+CREATE INDEX IF NOT EXISTS idx_credit_audit_created ON credit_audit_logs(created_at DESC);
+ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS updated_by VARCHAR(100);
+
 
 -- ==============================================================================
 -- 2. SHIFT CLOSING NEW COLUMNS (CARD DIFFERENCE & CASH DIFFERENCE)

@@ -5,7 +5,7 @@ import {
   Plus, Edit, Trash2, FileText, X, Percent, Tag, Calendar, 
   MessageSquare, Check, AlertTriangle, Filter, ArrowDownRight, 
   ArrowUpRight, UserCheck, UserX, ChevronDown, Layers, ShieldCheck,
-  Users, Search, Printer, Download, MoreVertical
+  Users, Search, Printer, Download, MoreVertical, RotateCcw, Edit2
 } from 'lucide-react';
 import { CURRENCY } from '../config';
 import { useAuth } from '../contexts/AuthContext';
@@ -433,6 +433,18 @@ export default function Credit() {
   const [applyOnFilter, setApplyOnFilter] = useState('All'); // 'All' | 'Employees' | 'Customers'
   const [applyOnSearch, setApplyOnSearch] = useState('');
   const [applyOnSelectedIds, setApplyOnSelectedIds] = useState(new Set());
+
+  // Reset All Balances Modal State (Admin & Developer Only)
+  const [showResetBalancesModal, setShowResetBalancesModal] = useState(false);
+  const [resetConfirmInput, setResetConfirmInput] = useState('');
+  const [resetReason, setResetReason] = useState('Admin zero-balance reset');
+  const [resettingBalances, setResettingBalances] = useState(false);
+
+  // Edit/Delete Transaction Modal State (Admin & Developer Only)
+  const [editingTxModal, setEditingTxModal] = useState(null); // { isOpen: true, tx, amount, type, classification, comments, billing_month, reason }
+  const [savingTxEdit, setSavingTxEdit] = useState(false);
+  const [deletingTxModal, setDeletingTxModal] = useState(null); // { isOpen: true, tx, reason }
+  const [deletingTx, setDeletingTx] = useState(false);
   const [savingApplyOn, setSavingApplyOn] = useState(false);
 
   // Items/Cats for dropdowns
@@ -868,6 +880,128 @@ export default function Credit() {
     setFilterToDate('');
     setBillingMonth(m !== 'All' ? m : getCurrentMonthStr());
     reloadLedger(m, ledgerClassificationFilter);
+  };
+
+  // Reset All Balances Handler (Admin & Developer Only)
+  const handleResetAllBalances = async () => {
+    if (resetConfirmInput.trim().toUpperCase() !== 'RESET') {
+      toast.error('Please type RESET to confirm.');
+      return;
+    }
+    setResettingBalances(true);
+    try {
+      const res = await axios.post('/api/credit/reset-all-balances', {
+        reason: resetReason || 'Admin zero-balance reset'
+      });
+      toast.success(res.data?.message || 'All Khata balances reset to zero successfully!');
+      setShowResetBalancesModal(false);
+      setResetConfirmInput('');
+      fetchCustomers();
+      if (activeCustomer) {
+        reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
+      }
+    } catch (err) {
+      console.error('Error resetting balances:', err);
+      toast.error(err.response?.data?.error || 'Failed to reset Khata balances');
+    } finally {
+      setResettingBalances(false);
+    }
+  };
+
+  // Transaction Edit / Delete Handlers (Admin & Developer Only)
+  const handleOpenEditTxModal = (tx) => {
+    setEditingTxModal({
+      isOpen: true,
+      tx,
+      amount: tx.amount,
+      type: tx.type,
+      classification: tx.classification || (tx.type === 'CREDIT_ORDER' || tx.type === 'CHARGE' ? 'Order' : 'Payment'),
+      comments: tx.comments || '',
+      billing_month: tx.billing_month || '',
+      reason: ''
+    });
+  };
+
+  const handleSaveTxEdit = async () => {
+    if (!editingTxModal) return;
+    const { tx, amount, type, classification, comments, billing_month, reason } = editingTxModal;
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast.error('Please enter a valid positive amount.');
+      return;
+    }
+    if (!reason || !reason.trim()) {
+      toast.error('Reason for modification is mandatory for the audit log.');
+      return;
+    }
+
+    setSavingTxEdit(true);
+    try {
+      const res = await axios.put(`/api/credit/transactions/${tx.id}`, {
+        amount: numAmount,
+        type,
+        classification,
+        comments,
+        billing_month: billing_month || null,
+        reason: reason.trim()
+      });
+      toast.success(res.data?.message || 'Transaction updated successfully!');
+      setEditingTxModal(null);
+      if (activeCustomer) {
+        reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
+        const custRes = await axios.get('/api/credit');
+        setCustomers(custRes.data || []);
+        const updated = custRes.data.find(c => c.id === activeCustomer.id);
+        if (updated) setActiveCustomer(updated);
+      } else {
+        fetchCustomers();
+      }
+    } catch (err) {
+      console.error('Error editing transaction:', err);
+      toast.error(err.response?.data?.error || 'Failed to update transaction');
+    } finally {
+      setSavingTxEdit(false);
+    }
+  };
+
+  const handleOpenDeleteTxModal = (tx) => {
+    setDeletingTxModal({
+      isOpen: true,
+      tx,
+      reason: ''
+    });
+  };
+
+  const handleConfirmDeleteTx = async () => {
+    if (!deletingTxModal) return;
+    const { tx, reason } = deletingTxModal;
+    if (!reason || !reason.trim()) {
+      toast.error('Please provide a reason for deleting this transaction.');
+      return;
+    }
+
+    setDeletingTx(true);
+    try {
+      const res = await axios.delete(`/api/credit/transactions/${tx.id}`, {
+        data: { reason: reason.trim() }
+      });
+      toast.success(res.data?.message || 'Transaction deleted and balance recalculated.');
+      setDeletingTxModal(null);
+      if (activeCustomer) {
+        reloadLedger(selectedLedgerMonth, ledgerClassificationFilter);
+        const custRes = await axios.get('/api/credit');
+        setCustomers(custRes.data || []);
+        const updated = custRes.data.find(c => c.id === activeCustomer.id);
+        if (updated) setActiveCustomer(updated);
+      } else {
+        fetchCustomers();
+      }
+    } catch (err) {
+      console.error('Error deleting transaction:', err);
+      toast.error(err.response?.data?.error || 'Failed to delete transaction');
+    } finally {
+      setDeletingTx(false);
+    }
   };
 
   const handleApplyDateRange = () => {
@@ -2274,6 +2408,32 @@ export default function Credit() {
               }}
             >
               <Tag size={16} /> Discount Packages
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setResetConfirmInput('');
+                setShowResetBalancesModal(true);
+              }}
+              title="Reset all customer Khata balances to 0 with an auditable settlement (Admin & Developer Only)"
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                color: '#dc2626',
+                border: '1.5px solid rgba(239, 68, 68, 0.3)',
+                padding: '10px 14px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontWeight: 700,
+                fontSize: 13,
+                transition: 'all 0.2s'
+              }}
+            >
+              <RotateCcw size={16} /> Reset All Balances
             </button>
           )}
 
@@ -4001,12 +4161,13 @@ export default function Credit() {
                     <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700 }}>Classification</th>
                     <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textAlign: 'right' }}>Amount</th>
                     <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textAlign: 'right' }}>Running Balance</th>
+                    {isAdmin && <th style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textAlign: 'center' }}>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {processedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={isAdmin ? 7 : 6} style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>
                         No transactions found for {selectedLedgerMonth !== 'All' ? formatMonthDisplay(selectedLedgerMonth) : 'this account'}.
                       </td>
                     </tr>
@@ -4120,6 +4281,55 @@ export default function Credit() {
                           <td style={{ padding: '8px 12px', fontSize: 12.5, textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', color: (t.running_balance || 0) > 0 ? '#dc2626' : ((t.running_balance || 0) < 0 ? '#16a34a' : 'var(--text-muted)') }}>
                             {t.running_balance !== undefined ? `${CURRENCY} ${Math.abs(t.running_balance).toFixed(2)} ${t.running_balance > 0 ? '(DR)' : (t.running_balance < 0 ? '(CR)' : '(0.00)')}` : '-'}
                           </td>
+
+                          {/* Column 7: Actions (Admin & Developer Only) */}
+                          {isAdmin && (
+                            <td onClick={(e) => e.stopPropagation()} style={{ padding: '8px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  title="Edit Transaction (Admin / Developer)"
+                                  onClick={() => handleOpenEditTxModal(t)}
+                                  style={{
+                                    padding: '3px 8px',
+                                    background: 'rgba(59, 130, 246, 0.1)',
+                                    color: '#2563eb',
+                                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                                    borderRadius: 4,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 11,
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  <Edit2 size={11} />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Delete Transaction (Admin / Developer)"
+                                  onClick={() => handleOpenDeleteTxModal(t)}
+                                  style={{
+                                    padding: '3px 8px',
+                                    background: 'rgba(239, 68, 68, 0.1)',
+                                    color: '#dc2626',
+                                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                                    borderRadius: 4,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 11,
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -4128,16 +4338,17 @@ export default function Credit() {
                 {processedTransactions.length > 0 && (
                   <tfoot>
                     <tr style={{ background: 'var(--surface-50)', borderTop: '2px solid var(--surface-2)', fontWeight: 700 }}>
-                      <td colSpan={5} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text-secondary)' }}>
+                      <td colSpan={isAdmin ? 6 : 5} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text-secondary)' }}>
                         {selectedLedgerMonth !== 'All' ? `${formatMonthDisplay(selectedLedgerMonth)} Net Balance:` : 'All Balance (Account Net Total):'}
                       </td>
                       <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', color: visibleSubtotal > 0 ? 'var(--red)' : (visibleSubtotal < 0 ? 'var(--green)' : 'var(--text)') }}>
                         {visibleSubtotal > 0 ? '+' : (visibleSubtotal < 0 ? '-' : '')} {CURRENCY} {Math.abs(visibleSubtotal).toFixed(2)}
                       </td>
+                      {isAdmin && <td />}
                     </tr>
                     {selectedLedgerMonth !== 'All' && (
                       <tr style={{ background: 'var(--surface-2)', borderTop: '1px solid var(--surface-3)', fontWeight: 800 }}>
-                        <td colSpan={4} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text)' }}>
+                        <td colSpan={isAdmin ? 5 : 4} style={{ padding: '8px 12px', fontSize: 12, textAlign: 'right', color: 'var(--text)' }}>
                           All Balance (Overall Account Total):
                         </td>
                         <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 900, whiteSpace: 'nowrap', color: activeCustomer.balance > 0 ? 'var(--red)' : (activeCustomer.balance < 0 ? 'var(--green)' : 'var(--text)') }}>
@@ -4354,6 +4565,559 @@ export default function Credit() {
       {selectedOrder && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 3000 }}>
           <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+        </div>
+      )}
+
+      {/* Reset All Balances Modal (Admin & Developer Only) */}
+      {showResetBalancesModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: 16
+        }}>
+          <div style={{
+            background: 'var(--surface)',
+            borderRadius: 14,
+            maxWidth: 480,
+            width: '100%',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
+            border: '1.5px solid #fca5a5',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+              padding: '16px 20px',
+              borderBottom: '1px solid #fca5a5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ background: '#dc2626', color: '#fff', borderRadius: 8, padding: 6, display: 'flex' }}>
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#991b1b' }}>
+                    Reset All Khata Balances
+                  </h3>
+                  <span style={{ fontSize: 11, color: '#b91c1c' }}>
+                    Admin & Developer Action • Settle to 0.00
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetBalancesModal(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#991b1b', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: '#fef2f2', border: '1px solid #fee2e2', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#991b1b', lineHeight: 1.5 }}>
+                <strong>CRITICAL NOTICE:</strong> This action will zero out all customer outstanding balances across the system by recording an official, auditable zero-balance settlement entry.
+                <br /><br />
+                • Transaction history will <strong>NOT</strong> be deleted.
+                <br />
+                • Each account will receive a balancing settlement entry.
+                <br />
+                • This action will be logged in the permanent audit trail.
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                  Reason for Balance Reset:
+                </label>
+                <input
+                  type="text"
+                  value={resetReason}
+                  onChange={(e) => setResetReason(e.target.value)}
+                  placeholder="e.g. Month-end reconciliation, Annual balance reset"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid var(--surface-3)',
+                    background: 'var(--surface-2)',
+                    fontSize: 13,
+                    color: 'var(--text)',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>
+                  Type "RESET" to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={resetConfirmInput}
+                  onChange={(e) => setResetConfirmInput(e.target.value)}
+                  placeholder="RESET"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1.5px solid #dc2626',
+                    background: '#fff',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    outline: 'none',
+                    letterSpacing: 1.5
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{
+              padding: '12px 20px',
+              background: 'var(--surface-2)',
+              borderTop: '1px solid var(--surface-3)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 10
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowResetBalancesModal(false)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--surface)',
+                  color: 'var(--text-muted)',
+                  border: '1px solid var(--surface-3)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={resetConfirmInput.trim().toUpperCase() !== 'RESET' || resettingBalances}
+                onClick={handleResetAllBalances}
+                style={{
+                  padding: '8px 18px',
+                  background: resetConfirmInput.trim().toUpperCase() === 'RESET' ? '#dc2626' : '#9ca3af',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: resetConfirmInput.trim().toUpperCase() === 'RESET' && !resettingBalances ? 'pointer' : 'not-allowed',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                {resettingBalances ? <RotateCcw size={13} className="spin" /> : <AlertTriangle size={13} />}
+                <span>{resettingBalances ? 'Resetting...' : 'Confirm Reset All Balances'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction Modal (Admin & Developer Only) */}
+      {editingTxModal && editingTxModal.isOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: 16
+        }}>
+          <div style={{
+            background: 'var(--surface)',
+            borderRadius: 14,
+            maxWidth: 480,
+            width: '100%',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
+            border: '1px solid var(--surface-3)',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+              padding: '14px 18px',
+              borderBottom: '1px solid #bfdbfe',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ background: '#2563eb', color: '#fff', borderRadius: 8, padding: 6, display: 'flex' }}>
+                  <Edit2 size={16} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#1e40af' }}>
+                    Edit Transaction #{editingTxModal.tx.id}
+                  </h3>
+                  <span style={{ fontSize: 11, color: '#3b82f6' }}>
+                    Admin / Developer Modification with Audit Log
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingTxModal(null)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#1e40af', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                    Amount ({CURRENCY}) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editingTxModal.amount}
+                    onChange={(e) => setEditingTxModal(prev => ({ ...prev, amount: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: '1px solid var(--surface-3)',
+                      background: 'var(--surface-2)',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: 'var(--text)',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                    Type *
+                  </label>
+                  <select
+                    value={editingTxModal.type}
+                    onChange={(e) => setEditingTxModal(prev => ({ ...prev, type: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: '1px solid var(--surface-3)',
+                      background: 'var(--surface-2)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: 'var(--text)',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="CREDIT_ORDER">CREDIT_ORDER (Order Debit)</option>
+                    <option value="CHARGE">CHARGE (Manual Debit)</option>
+                    <option value="PAYMENT">PAYMENT (Major Payment)</option>
+                    <option value="EXTRA_PAY">EXTRA_PAY (Advance / Extra)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                    Classification
+                  </label>
+                  <select
+                    value={editingTxModal.classification}
+                    onChange={(e) => setEditingTxModal(prev => ({ ...prev, classification: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: '1px solid var(--surface-3)',
+                      background: 'var(--surface-2)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: 'var(--text)',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="Order">Order</option>
+                    <option value="Payment">Payment</option>
+                    <option value="Adjustment">Adjustment</option>
+                    <option value="Correction">Correction</option>
+                    <option value="Settlement">Settlement</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                    Billing Month (YYYY-MM)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 2026-11"
+                    value={editingTxModal.billing_month || ''}
+                    onChange={(e) => setEditingTxModal(prev => ({ ...prev, billing_month: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: '1px solid var(--surface-3)',
+                      background: 'var(--surface-2)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: 'var(--text)',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                  Description / Comments
+                </label>
+                <input
+                  type="text"
+                  value={editingTxModal.comments || ''}
+                  onChange={(e) => setEditingTxModal(prev => ({ ...prev, comments: e.target.value }))}
+                  placeholder="Comments"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--surface-3)',
+                    background: 'var(--surface-2)',
+                    fontSize: 13,
+                    color: 'var(--text)',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>
+                  Reason for Modification (Mandatory for Audit Trail) *
+                </label>
+                <textarea
+                  rows={2}
+                  value={editingTxModal.reason || ''}
+                  onChange={(e) => setEditingTxModal(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Explain why this transaction was modified..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: '1.5px solid #f87171',
+                    background: '#fff',
+                    fontSize: 12.5,
+                    color: 'var(--text)',
+                    outline: 'none',
+                    resize: 'none'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{
+              padding: '12px 20px',
+              background: 'var(--surface-2)',
+              borderTop: '1px solid var(--surface-3)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 10
+            }}>
+              <button
+                type="button"
+                onClick={() => setEditingTxModal(null)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--surface)',
+                  color: 'var(--text-muted)',
+                  border: '1px solid var(--surface-3)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingTxEdit}
+                onClick={handleSaveTxEdit}
+                style={{
+                  padding: '8px 18px',
+                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: savingTxEdit ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                {savingTxEdit ? <RotateCcw size={13} className="spin" /> : <Check size={13} />}
+                <span>{savingTxEdit ? 'Saving...' : 'Save Changes'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Transaction Confirmation Modal (Admin & Developer Only) */}
+      {deletingTxModal && deletingTxModal.isOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: 16
+        }}>
+          <div style={{
+            background: 'var(--surface)',
+            borderRadius: 14,
+            maxWidth: 440,
+            width: '100%',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
+            border: '1px solid #fed7aa',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+              padding: '14px 18px',
+              borderBottom: '1px solid #fed7aa',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ background: '#ea580c', color: '#fff', borderRadius: 8, padding: 6, display: 'flex' }}>
+                  <Trash2 size={16} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#9a3412' }}>
+                    Delete Transaction #{deletingTxModal.tx.id}
+                  </h3>
+                  <span style={{ fontSize: 11, color: '#c2410c' }}>
+                    Reverses {CURRENCY} {parseFloat(deletingTxModal.tx.amount || 0).toFixed(2)} from balance
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeletingTxModal(null)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9a3412', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}>
+                Are you sure you want to delete this transaction of <strong>{CURRENCY} {parseFloat(deletingTxModal.tx.amount || 0).toFixed(2)}</strong>?
+                The customer balance will be adjusted automatically.
+              </p>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>
+                  Reason for Deletion (Recorded in Audit Trail) *
+                </label>
+                <textarea
+                  rows={2}
+                  value={deletingTxModal.reason || ''}
+                  onChange={(e) => setDeletingTxModal(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Explain why this transaction was deleted..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: '1.5px solid #f87171',
+                    background: '#fff',
+                    fontSize: 12.5,
+                    color: 'var(--text)',
+                    outline: 'none',
+                    resize: 'none'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{
+              padding: '12px 18px',
+              background: 'var(--surface-2)',
+              borderTop: '1px solid var(--surface-3)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 10
+            }}>
+              <button
+                type="button"
+                onClick={() => setDeletingTxModal(null)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--surface)',
+                  color: 'var(--text-muted)',
+                  border: '1px solid var(--surface-3)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingTx}
+                onClick={handleConfirmDeleteTx}
+                style={{
+                  padding: '8px 18px',
+                  background: '#dc2626',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: deletingTx ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                {deletingTx ? <RotateCcw size={13} className="spin" /> : <Trash2 size={13} />}
+                <span>{deletingTx ? 'Deleting...' : 'Delete Transaction'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

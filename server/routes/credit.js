@@ -11,6 +11,43 @@ const getKsaCurrentMonthStr = () => {
   return `${year}-${month}`;
 };
 
+// Helper to determine the correct payroll allocation month for an employee Khata transaction
+async function getEffectivePayrollMonth(poolClient, creditCustomerId, fallbackMonth) {
+  const currentMonth = fallbackMonth || getKsaCurrentMonthStr();
+  try {
+    const custRes = await poolClient.query(
+      'SELECT employee_id FROM credit_customers WHERE id = $1',
+      [creditCustomerId]
+    );
+    const empId = custRes.rows[0]?.employee_id;
+    if (!empId) {
+      return currentMonth;
+    }
+
+    const payrollRes = await poolClient.query(
+      'SELECT status FROM employee_payroll_records WHERE employee_id = $1 AND month = $2',
+      [empId, currentMonth]
+    );
+
+    if (payrollRes.rows.length > 0 && payrollRes.rows[0].status === 'Paid') {
+      const [yearStr, monthStr] = currentMonth.split('-');
+      let y = parseInt(yearStr, 10);
+      let m = parseInt(monthStr, 10) + 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+
+    return currentMonth;
+  } catch (err) {
+    console.error('Error determining effective payroll month:', err);
+    return currentMonth;
+  }
+}
+
+
 
 // Middleware to parse JSON
 router.use(express.json());
@@ -939,6 +976,324 @@ router.post('/:id/payment', async (req, res) => {
     await pool.query('ROLLBACK');
     console.error('Error processing payment:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// ==========================================
+// 5. KHATA TRANSACTION MODIFICATION & RESET (ADMIN & DEVELOPER ONLY)
+// ==========================================
+
+// Helper for admin/developer authorization check
+const ensureAdminOrDeveloper = (req, res) => {
+  const role = req.user?.role?.trim().toLowerCase();
+  if (role !== 'admin' && role !== 'developer') {
+    res.status(403).json({ error: 'Access denied: Admin or Developer privileges required.' });
+    return false;
+  }
+  return true;
+};
+
+// PUT /api/credit/transactions/:txId - Modify an existing Khata transaction
+router.put('/transactions/:txId', async (req, res) => {
+  if (!ensureAdminOrDeveloper(req, res)) return;
+
+  const { txId } = req.params;
+  const { amount, type, comments, billing_month, classification, payment_method, reason } = req.body;
+
+  const numAmount = parseFloat(amount);
+  if (isNaN(numAmount) || numAmount < 0) {
+    return res.status(400).json({ error: 'Valid positive amount is required.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch old transaction
+    const oldTxRes = await client.query(
+      'SELECT * FROM credit_transactions WHERE id = $1 FOR UPDATE',
+      [txId]
+    );
+    if (oldTxRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transaction not found.' });
+    }
+    const oldTx = oldTxRes.rows[0];
+
+    // 2. Fetch customer
+    const custRes = await client.query(
+      'SELECT id, name, balance, employee_id FROM credit_customers WHERE id = $1 FOR UPDATE',
+      [oldTx.credit_customer_id]
+    );
+    if (custRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Customer not found.' });
+    }
+    const customer = custRes.rows[0];
+
+    // 3. Calculate old vs new balance effect
+    // Old impact on debt:
+    // If CHARGE/CREDIT_ORDER: debt increased by oldAmount
+    // If PAYMENT/ORDER_CANCELLED: debt decreased by oldAmount
+    const oldAmt = parseFloat(oldTx.amount || 0);
+    const oldIsDebt = ['CHARGE', 'CREDIT_ORDER', 'PAYMENT_CANCELLED'].includes(oldTx.type);
+    const oldImpact = oldIsDebt ? oldAmt : -oldAmt;
+
+    const newType = type || oldTx.type;
+    const newIsDebt = ['CHARGE', 'CREDIT_ORDER', 'PAYMENT_CANCELLED'].includes(newType);
+    const newImpact = newIsDebt ? numAmount : -numAmount;
+
+    const balanceDelta = newImpact - oldImpact;
+
+    // 4. Update the transaction
+    const updateTxRes = await client.query(
+      `UPDATE credit_transactions SET 
+         amount = $1,
+         type = $2,
+         comments = $3,
+         billing_month = $4,
+         classification = $5,
+         payment_method = $6,
+         updated_at = NOW(),
+         updated_by = $7
+       WHERE id = $8
+       RETURNING *`,
+      [
+        numAmount,
+        newType,
+        comments !== undefined ? (comments ? comments.trim() : null) : oldTx.comments,
+        billing_month !== undefined ? (billing_month ? billing_month.trim() : oldTx.billing_month) : oldTx.billing_month,
+        classification !== undefined ? classification : oldTx.classification,
+        payment_method !== undefined ? payment_method : oldTx.payment_method,
+        req.user?.username || 'Admin',
+        txId
+      ]
+    );
+
+    // 5. Update customer balance
+    const updateCustRes = await client.query(
+      'UPDATE credit_customers SET balance = balance + $1 WHERE id = $2 RETURNING *',
+      [balanceDelta, customer.id]
+    );
+
+    // 6. Record append-only audit log
+    await client.query(
+      `INSERT INTO credit_audit_logs (
+         transaction_id, credit_customer_id, action, performed_by, performed_by_role,
+         previous_values, new_values, reason, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+      [
+        txId,
+        customer.id,
+        'MODIFY_TRANSACTION',
+        req.user?.username || 'Admin',
+        req.user?.role || 'Admin',
+        JSON.stringify(oldTx),
+        JSON.stringify(updateTxRes.rows[0]),
+        reason ? reason.trim() : 'Admin corrected transaction'
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Transaction modified successfully.',
+      transaction: updateTxRes.rows[0],
+      customer: updateCustRes.rows[0]
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error modifying transaction:', err);
+    res.status(500).json({ error: 'Failed to modify transaction: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/credit/transactions/:txId - Void/Delete an incorrect Khata transaction
+router.delete('/transactions/:txId', async (req, res) => {
+  if (!ensureAdminOrDeveloper(req, res)) return;
+
+  const { txId } = req.params;
+  const { reason } = req.body || {};
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const oldTxRes = await client.query(
+      'SELECT * FROM credit_transactions WHERE id = $1 FOR UPDATE',
+      [txId]
+    );
+    if (oldTxRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transaction not found.' });
+    }
+    const oldTx = oldTxRes.rows[0];
+
+    const custRes = await client.query(
+      'SELECT id, name, balance FROM credit_customers WHERE id = $1 FOR UPDATE',
+      [oldTx.credit_customer_id]
+    );
+    const customer = custRes.rows[0];
+
+    const oldAmt = parseFloat(oldTx.amount || 0);
+    const oldIsDebt = ['CHARGE', 'CREDIT_ORDER', 'PAYMENT_CANCELLED'].includes(oldTx.type);
+    const balanceReversal = oldIsDebt ? -oldAmt : oldAmt;
+
+    await client.query('DELETE FROM credit_transactions WHERE id = $1', [txId]);
+
+    const updateCustRes = await client.query(
+      'UPDATE credit_customers SET balance = balance + $1 WHERE id = $2 RETURNING *',
+      [balanceReversal, customer.id]
+    );
+
+    await client.query(
+      `INSERT INTO credit_audit_logs (
+         transaction_id, credit_customer_id, action, performed_by, performed_by_role,
+         previous_values, new_values, reason, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+      [
+        null,
+        customer.id,
+        'DELETE_TRANSACTION',
+        req.user?.username || 'Admin',
+        req.user?.role || 'Admin',
+        JSON.stringify(oldTx),
+        JSON.stringify({ status: 'DELETED' }),
+        reason ? reason.trim() : 'Admin deleted transaction'
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Transaction deleted and balance reversed successfully.',
+      customer: updateCustRes.rows[0]
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting transaction:', err);
+    res.status(500).json({ error: 'Failed to delete transaction: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/credit/reset-all-balances - Reset all customer and employee balances to 0 atomically
+router.post('/reset-all-balances', async (req, res) => {
+  if (!ensureAdminOrDeveloper(req, res)) return;
+
+  const { reason } = req.body || {};
+  const currentMonth = getKsaCurrentMonthStr();
+  const performedBy = req.user?.username || 'Admin';
+  const performedRole = req.user?.role || 'Admin';
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Fetch all customers with non-zero balances
+    const custRes = await client.query(
+      'SELECT id, name, balance, employee_id FROM credit_customers WHERE balance != 0 FOR UPDATE'
+    );
+    const affectedCustomers = custRes.rows;
+
+    let totalResetAmount = 0;
+
+    for (const cust of affectedCustomers) {
+      const bal = parseFloat(cust.balance || 0);
+      if (bal === 0) continue;
+
+      totalResetAmount += Math.abs(bal);
+
+      // If bal > 0 (customer owes debt): insert a PAYMENT of bal to zero it out
+      // If bal < 0 (customer has advance): insert a CHARGE of abs(bal) to zero it out
+      const txType = bal > 0 ? 'PAYMENT' : 'CHARGE';
+      const txAmount = Math.abs(bal);
+
+      await client.query(
+        `INSERT INTO credit_transactions (
+           credit_customer_id, type, amount, cashier_name, payment_method, branch,
+           billing_month, comments, classification, is_shift_closed, is_daily_closed, created_at
+         ) VALUES ($1, $2, $3, $4, 'Balance Reset', 'All', $5, $6, 'Balance Reset', FALSE, FALSE, NOW())`,
+        [
+          cust.id,
+          txType,
+          txAmount,
+          performedBy,
+          currentMonth,
+          `Reset All Khata Balances by ${performedBy}`
+        ]
+      );
+
+      await client.query('UPDATE credit_customers SET balance = 0 WHERE id = $1', [cust.id]);
+    }
+
+    // Log the bulk reset in audit log
+    await client.query(
+      `INSERT INTO credit_audit_logs (
+         transaction_id, credit_customer_id, action, performed_by, performed_by_role,
+         previous_values, new_values, reason, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+      [
+        null,
+        affectedCustomers[0]?.id || null,
+        'RESET_ALL_BALANCES',
+        performedBy,
+        performedRole,
+        JSON.stringify({
+          affected_count: affectedCustomers.length,
+          total_reset_amount: totalResetAmount,
+          customers: affectedCustomers.map(c => ({ id: c.id, name: c.name, balance: c.balance }))
+        }),
+        JSON.stringify({ new_balance: 0 }),
+        reason ? reason.trim() : 'Authorized Admin reset all outstanding Khata balances to 0'
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: `Successfully reset balances for ${affectedCustomers.length} accounts to 0.00.`,
+      affected_count: affectedCustomers.length,
+      total_reset_amount: totalResetAmount
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error resetting all balances:', err);
+    res.status(500).json({ error: 'Failed to reset balances: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/credit/audit-logs - View audit logs (Admin & Developer only)
+router.get('/audit-logs', async (req, res) => {
+  if (!ensureAdminOrDeveloper(req, res)) return;
+
+  const { customer_id, limit = 100 } = req.query;
+  try {
+    let query = `
+      SELECT cal.*, cc.name as customer_name 
+      FROM credit_audit_logs cal
+      LEFT JOIN credit_customers cc ON cal.credit_customer_id = cc.id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (customer_id) {
+      params.push(customer_id);
+      query += ` AND cal.credit_customer_id = ${params.length}`;
+    }
+    query += ` ORDER BY cal.created_at DESC LIMIT ${params.length + 1}`;
+    params.push(parseInt(limit, 10) || 100);
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching credit audit logs:', err);
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
   }
 });
 

@@ -167,6 +167,17 @@ const CreditCustomerDropdown = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+  const [openUpward, setOpenUpward] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      // If space below is less than 320px and space above is sufficient, open upward
+      setOpenUpward(spaceBelow < 320 && rect.top > 250);
+    }
+  }, [isOpen]);
 
   const filteredCustomers = creditCustomers.filter(c => 
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -220,7 +231,7 @@ const CreditCustomerDropdown = ({
     <div style={{ padding: 12, background: isExceeded ? 'rgba(255,0,0,0.05)' : 'rgba(59,130,246,0.05)', borderRadius: 8, border: isExceeded ? '1px solid rgba(255,0,0,0.3)' : '1px solid rgba(59,130,246,0.2)', marginTop: 8 }}>
       <label style={{ fontSize: 11, color: isExceeded ? 'var(--red)' : 'var(--text-secondary)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Select Credit Customer *</label>
       
-      <div style={{ position: 'relative' }}>
+      <div ref={containerRef} style={{ position: 'relative' }}>
         <div 
           onClick={() => setIsOpen(!isOpen)}
           style={{ width: '100%', padding: '8px', fontSize: 13, borderRadius: 6, border: isExceeded ? '1px solid rgba(255,0,0,0.5)' : '1px solid var(--surface-2)', background: 'white', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -232,7 +243,20 @@ const CreditCustomerDropdown = ({
         {isOpen && (
           <>
             <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setIsOpen(false)} />
-            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid var(--surface-2)', borderRadius: 6, marginTop: 4, zIndex: 100, maxHeight: 350, display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+            <div style={{ 
+              position: 'absolute', 
+              ...(openUpward ? { bottom: '100%', marginBottom: 6 } : { top: '100%', marginTop: 6 }), 
+              left: 0, 
+              right: 0, 
+              background: 'white', 
+              border: '1px solid var(--surface-3, #cbd5e1)', 
+              borderRadius: 8, 
+              zIndex: 1000, 
+              maxHeight: 'min(350px, 45vh)', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.1)' 
+            }}>
               <div style={{ padding: 8, borderBottom: '1px solid var(--surface-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Search size={14} color="var(--text-muted)" />
               <input 

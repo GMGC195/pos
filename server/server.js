@@ -689,6 +689,27 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
       await pool.query('CREATE INDEX IF NOT EXISTS idx_salary_audit_logs_created ON salary_audit_logs(created_at DESC)');
     } catch (e) {}
 
+    // Create credit_audit_logs table for Khata adjustments & balance reset tracking
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS credit_audit_logs (
+        id SERIAL PRIMARY KEY,
+        transaction_id INTEGER REFERENCES credit_transactions(id) ON DELETE SET NULL,
+        credit_customer_id INTEGER REFERENCES credit_customers(id) ON DELETE CASCADE,
+        action VARCHAR(50) NOT NULL,
+        performed_by VARCHAR(100) NOT NULL,
+        performed_by_role VARCHAR(50),
+        previous_values JSONB,
+        new_values JSONB,
+        reason TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    try {
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_credit_audit_customer ON credit_audit_logs(credit_customer_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_credit_audit_created ON credit_audit_logs(created_at DESC)');
+      await pool.query('ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS updated_by VARCHAR(100)');
+    } catch (e) {}
+
     // Ensure columns exist if table was created previously without them
     try {
       await pool.query('ALTER TABLE employee_financial_adjustments ADD COLUMN custom_label VARCHAR(150)');
@@ -900,6 +921,7 @@ app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/tables', require('./routes/tables'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/credit', require('./routes/credit'));
+app.use('/api/employee-portal', require('./routes/employeePortal'));
 
 // Health check
 app.get('/api/health', (req, res) => {

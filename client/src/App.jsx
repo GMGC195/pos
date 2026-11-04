@@ -29,6 +29,7 @@ const TodayAttendance      = lazy(() => import('./pages/TodayAttendance'))
 const Payroll              = lazy(() => import('./pages/Payroll'))
 const SalarySpreadsheet    = lazy(() => import('./pages/SalarySpreadsheet'))
 const EditAttendanceLogs   = lazy(() => import('./pages/EditAttendanceLogs'))
+const EmployeePortal       = lazy(() => import('./pages/EmployeePortal'))
 
 // Minimal full-screen spinner shown while a page chunk is loading
 function PageLoader() {
@@ -91,6 +92,7 @@ export default function App() {
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><ProductCostManagement /></ProtectedRoute>} />
 
                 {/* Employee & Attendance routes */}
+                <Route path="/employee-portal"    element={<ProtectedRoute allowedRoles={['Employee', 'Developer', 'Admin', 'Management']}><EmployeePortal /></ProtectedRoute>} />
                 <Route path="/employees"          element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><Employees /></ProtectedRoute>} />
                 <Route path="/attendance"         element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'Employee', 'HR Manager', 'Operator']}><AttendanceTracker /></ProtectedRoute>} />
                 <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager', 'Operator']}><TodayAttendance /></ProtectedRoute>} />

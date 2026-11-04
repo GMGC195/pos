@@ -40,7 +40,8 @@ import {
   CalendarRange,
   BookOpen,
   FileSpreadsheet,
-  Bike
+  Bike,
+  UserCheck
 } from 'lucide-react'
 
 const navGroups = [
@@ -74,6 +75,7 @@ const navGroups = [
   {
     title: 'Employees & Attendance',
     items: [
+      { to: '/employee-portal', icon: <UserCheck size={18} strokeWidth={2.2} />, label: 'My Portal', roles: ['Employee', 'Developer', 'Admin', 'Management'] },
       { to: '/employees', icon: <Users size={18} strokeWidth={2.2} />, label: 'Manage Employees', roles: ['Admin', 'Management', 'HR Manager'] },
       { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Management', 'Employee', 'HR Manager', 'Operator'] },
       { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Management', 'HR Manager', 'Operator'] },
@@ -218,7 +220,7 @@ export default function Layout() {
   useEffect(() => {
     const role = user?.role?.trim().toLowerCase();
     if (role === 'employee' && location.pathname === '/') {
-      navigate('/attendance', { replace: true });
+      navigate('/employee-portal', { replace: true });
     } else if ((role === 'order taker' || role === 'cashier') && location.pathname === '/') {
       navigate('/pos', { replace: true });
     }

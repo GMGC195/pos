@@ -289,6 +289,30 @@ router.post('/', authenticateToken, async (req, res) => {
         const month = String(ksaDate.getMonth() + 1).padStart(2, '0');
         return `${year}-${month}`;
       })();
+
+      // If customer is an employee whose salary for current month is already PAID,
+      // rollover this new purchase to the NEXT month's payroll so paid payroll is never altered
+      let effectiveBillingMonth = currentMonthStr;
+      try {
+        let empId = creditCustInfo?.employee_id;
+        if (!empId) {
+          const empCheck = await client.query('SELECT employee_id FROM credit_customers WHERE id = $1', [credit_customer_id]);
+          empId = empCheck.rows[0]?.employee_id;
+        }
+        if (empId) {
+          const payCheck = await client.query('SELECT status FROM employee_payroll_records WHERE employee_id = $1 AND month = $2', [empId, currentMonthStr]);
+          if (payCheck.rows.length > 0 && payCheck.rows[0].status === 'Paid') {
+            const [yS, mS] = currentMonthStr.split('-');
+            let y = parseInt(yS, 10);
+            let m = parseInt(mS, 10) + 1;
+            if (m > 12) { m = 1; y += 1; }
+            effectiveBillingMonth = `${y}-${String(m).padStart(2, '0')}`;
+          }
+        }
+      } catch (e) {
+        console.error('Error checking employee payroll status:', e);
+      }
+
       const custClassification = creditCustInfo?.is_extra_pay ? 'Extra Pay' : 'Regular';
       const txComments = comments ? String(comments).trim() : `Order #${order.id} - ${order.slip_number || ''}`;
 
@@ -296,7 +320,7 @@ router.post('/', authenticateToken, async (req, res) => {
       await client.query(
         `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount, billing_month, comments, classification, branch) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [credit_customer_id, order.id, 'CREDIT_ORDER', finalGrandTotal, currentMonthStr, txComments, custClassification, finalBranch]
+        [credit_customer_id, order.id, 'CREDIT_ORDER', finalGrandTotal, effectiveBillingMonth, txComments, custClassification, finalBranch]
       );
       
       let balanceChange = parseFloat(finalGrandTotal);
@@ -307,7 +331,7 @@ router.post('/', authenticateToken, async (req, res) => {
         await client.query(
           `INSERT INTO credit_transactions (credit_customer_id, order_id, type, amount, billing_month, comments, classification, branch) 
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [credit_customer_id, order.id, 'PAYMENT', paymentAmt, currentMonthStr, 'Payment with order', custClassification, finalBranch]
+          [credit_customer_id, order.id, 'PAYMENT', paymentAmt, effectiveBillingMonth, 'Payment with order', custClassification, finalBranch]
         );
         balanceChange -= paymentAmt;
       }

@@ -20,7 +20,7 @@ export default function ProtectedRoute({ children, allowedRoles }) {
     // If not allowed, redirect to a safe page depending on role
     if (userRole === 'order taker') return <Navigate to="/pos" replace />
     if (userRole === 'operator') return <Navigate to="/pos" replace />
-    if (userRole === 'employee') return <Navigate to="/attendance" replace />
+    if (userRole === 'employee') return <Navigate to="/employee-portal" replace />
     if (userRole === 'hr manager') return <Navigate to="/employees" replace />
     if (userRole === 'cashier') return <Navigate to="/pos" replace />
     

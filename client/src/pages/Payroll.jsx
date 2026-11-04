@@ -4,13 +4,15 @@ import {
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
   TrendingUp, Search, RefreshCw, X, AlertTriangle, AlertCircle, FileText, Percent, 
   CheckCircle, HelpCircle, Edit2, Printer, Save, Trash2, MoreVertical, Lock,
-  Table, Unlock, RotateCcw, ArrowRightCircle, CreditCard
+  Table, Unlock, RotateCcw, ArrowRightCircle, CreditCard, BookOpen
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import ManageSalaryModal from '../components/ManageSalaryModal'
 import AttendanceDetailModal from '../components/AttendanceDetailModal'
+import EditAttendanceModal from '../components/EditAttendanceModal'
+import EmployeeKhataModal from '../components/EmployeeKhataModal'
 
 const confirmAction = (message, onConfirm, confirmText = 'Confirm') => {
   toast((t) => (
@@ -164,6 +166,26 @@ export default function Payroll() {
     };
     setAttendanceModalEmp(empLogsData);
     setAttendanceModalDate(dateStr);
+  };
+
+  // State for Attendance Session Add/Edit Modal from Payroll
+  const [showAttendanceEditModal, setShowAttendanceEditModal] = useState(false);
+  const [attendanceEditEmpId, setAttendanceEditEmpId] = useState(null);
+  const [attendanceEditDate, setAttendanceEditDate] = useState(null);
+  const [attendanceEditMode, setAttendanceEditMode] = useState('add');
+
+  // State for Employee Khata Ledger Modal from Payroll
+  const [showEmployeeKhataModal, setShowEmployeeKhataModal] = useState(false);
+  const [khataModalEmp, setKhataModalEmp] = useState(null);
+
+  // State for Khata Pay Confirmation Modal
+  const [khataPayConfirmation, setKhataPayConfirmation] = useState(null);
+
+  const handleEditAttendanceFromModal = (empId, dateStr, mode = 'add') => {
+    setAttendanceEditEmpId(empId);
+    setAttendanceEditDate(dateStr);
+    setAttendanceEditMode(mode);
+    setShowAttendanceEditModal(true);
   };
 
   useEffect(() => {
@@ -770,6 +792,22 @@ export default function Payroll() {
         overpaymentAmount: overpaymentAmt,
         cashVal,
         bankVal
+      });
+      return;
+    }
+
+    // Khata Deduction Confirmation Check
+    const khataDeduct = parseFloat(row.khata_deduction || 0);
+    if (row.is_khata_registered && khataDeduct > 0) {
+      setKhataPayConfirmation({
+        isOpen: true,
+        empId,
+        row,
+        cashVal,
+        bankVal,
+        khataAmount: khataDeduct,
+        netPayable: net,
+        month: selectedMonth
       });
       return;
     }
@@ -2132,7 +2170,7 @@ export default function Payroll() {
           {/* Financial Metrics Grid - 2x2 on Mobile, 5 or 6 in row on Desktop */}
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : (targetEmpData.is_khata_registered ? 'repeat(6, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))'), 
+            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : (targetEmpData.is_khata_registered ? 'repeat(7, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))'), 
             gap: '8px', 
             marginBottom: '8px' 
           }}>
@@ -2171,15 +2209,63 @@ export default function Payroll() {
             </div>
 
             {targetEmpData.is_khata_registered && (
-              <div style={{ background: '#fff7ed', padding: '8px 10px', borderRadius: '6px', border: '1.5px solid #fed7aa' }}>
-                <span style={{ fontSize: '10px', color: '#c2410c', fontWeight: 700, display: 'block' }}>Khata Balance</span>
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#ea580c', marginTop: '2px' }}>
-                  {CURRENCY} {parseFloat(targetEmpData.khata_balance || 0).toFixed(2)}
+              <>
+                {/* Khata Card 1: Prev Month Remaining Khata */}
+                <div 
+                  onClick={() => {
+                    setKhataModalEmp(targetEmpData);
+                    setShowEmployeeKhataModal(true);
+                  }}
+                  title="Click to view detailed employee Khata statement"
+                  style={{ 
+                    background: '#fff7ed', 
+                    padding: '8px 10px', 
+                    borderRadius: '6px', 
+                    border: '1.5px solid #fed7aa',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '10px', color: '#c2410c', fontWeight: 700, display: 'block' }}>Prev M. Khata</span>
+                    <BookOpen size={11} color="#ea580c" />
+                  </div>
+                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#ea580c', marginTop: '2px' }}>
+                    {CURRENCY} {parseFloat(targetEmpData.prev_month_remaining_khata || 0).toFixed(2)}
+                  </div>
+                  <span style={{ fontSize: '9px', color: '#9a3412', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    Past carryover
+                  </span>
                 </div>
-                <span style={{ fontSize: '9px', color: '#9a3412', display: 'block' }}>
-                  {targetEmpData.khata_deduction > 0 ? `Deduction: -${CURRENCY} ${parseFloat(targetEmpData.khata_deduction).toFixed(2)}` : 'Registered in Khata'}
-                </span>
-              </div>
+
+                {/* Khata Card 2: This Month Khata */}
+                <div 
+                  onClick={() => {
+                    setKhataModalEmp(targetEmpData);
+                    setShowEmployeeKhataModal(true);
+                  }}
+                  title="Click to view detailed employee Khata statement"
+                  style={{ 
+                    background: '#fff1f2', 
+                    padding: '8px 10px', 
+                    borderRadius: '6px', 
+                    border: '1.5px solid #fecdd3',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '10px', color: '#be123c', fontWeight: 700, display: 'block' }}>This Month Khata</span>
+                    <BookOpen size={11} color="#e11d48" />
+                  </div>
+                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#e11d48', marginTop: '2px' }}>
+                    {CURRENCY} {parseFloat(targetEmpData.this_month_khata || 0).toFixed(2)}
+                  </div>
+                  <span style={{ fontSize: '9px', color: '#9f1239', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {targetEmpData.khata_deduction > 0 ? `Deduct: -${CURRENCY} ${parseFloat(targetEmpData.khata_deduction).toFixed(2)}` : 'New charges'}
+                  </span>
+                </div>
+              </>
             )}
 
             <div style={{ 
@@ -5798,7 +5884,201 @@ export default function Payroll() {
         onClose={() => { setAttendanceModalEmp(null); setAttendanceModalDate(null); }}
         month={selectedMonth}
         isAdmin={isAdmin}
+        onEdit={handleEditAttendanceFromModal}
       />
+
+      {/* Edit Attendance Modal (Add Session / Edit Sessions) */}
+      <EditAttendanceModal
+        isOpen={showAttendanceEditModal}
+        onClose={() => setShowAttendanceEditModal(false)}
+        employeesList={employeesList}
+        initialEmployeeId={attendanceEditEmpId}
+        initialDate={attendanceEditDate}
+        initialMode={attendanceEditMode}
+        onSessionSaved={() => {
+          loadPayroll(true);
+          setShowAttendanceEditModal(false);
+          setAttendanceModalEmp(null);
+          setAttendanceModalDate(null);
+        }}
+      />
+
+      {/* Employee Khata Ledger Modal */}
+      <EmployeeKhataModal
+        isOpen={showEmployeeKhataModal}
+        onClose={() => setShowEmployeeKhataModal(false)}
+        employee={khataModalEmp}
+        initialMonth={selectedMonth}
+      />
+
+      {/* Khata Deduction Confirmation Modal on Salary Pay */}
+      {khataPayConfirmation && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '14px',
+            maxWidth: '460px',
+            width: '100%',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
+            border: '1px solid #fed7aa',
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{
+              background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+              padding: '14px 18px',
+              borderBottom: '1px solid #fed7aa',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ background: '#f97316', color: '#fff', borderRadius: '8px', padding: '6px', display: 'flex' }}>
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#9a3412' }}>
+                    Khata Deduction Confirmation
+                  </h3>
+                  <span style={{ fontSize: '11px', color: '#c2410c' }}>
+                    {khataPayConfirmation.row?.name} ({khataPayConfirmation.month})
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setKhataPayConfirmation(null)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9a3412', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <p style={{ fontSize: '13px', color: '#334155', lineHeight: 1.5, margin: 0 }}>
+                Your employee <strong>{khataPayConfirmation.row?.name}</strong> has an outstanding Khata balance of <strong style={{ color: '#ea580c' }}>{CURRENCY} {parseFloat(khataPayConfirmation.khataAmount || 0).toFixed(2)}</strong> for {khataPayConfirmation.month}.
+                This amount will be deducted from the salary. Do you want to continue?
+              </p>
+
+              {/* Breakdown Box */}
+              <div style={{
+                background: '#fafaf9',
+                borderRadius: '8px',
+                border: '1px solid #e7e5e4',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                fontSize: '12px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Base / Payable Salary:</span>
+                  <span style={{ fontWeight: 700, color: '#1e293b' }}>
+                    {CURRENCY} {parseFloat(khataPayConfirmation.row?.payable_salary || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Total Adjustments:</span>
+                  <span style={{ fontWeight: 700, color: '#1e293b' }}>
+                    {calculateTotalAdjustments(khataPayConfirmation.row) >= 0 ? '+' : ''}{CURRENCY} {calculateTotalAdjustments(khataPayConfirmation.row).toFixed(2)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ea580c' }}>
+                  <span style={{ fontWeight: 600 }}>Khata Deduction:</span>
+                  <span style={{ fontWeight: 800 }}>
+                    -{CURRENCY} {parseFloat(khataPayConfirmation.khataAmount || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  borderTop: '1px solid #e2e8f0',
+                  paddingTop: '8px',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  color: '#059669'
+                }}>
+                  <span>Net Payable Salary:</span>
+                  <span>{CURRENCY} {parseFloat(khataPayConfirmation.netPayable || 0).toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                  <span>Payment to execute now:</span>
+                  <span style={{ fontWeight: 700, color: '#0f172a' }}>
+                    {CURRENCY} {(parseFloat(khataPayConfirmation.cashVal || 0) + parseFloat(khataPayConfirmation.bankVal || 0)).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{
+              padding: '12px 18px',
+              background: '#f8fafc',
+              borderTop: '1px solid #f1f5f9',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setKhataPayConfirmation(null)}
+                style={{
+                  padding: '8px 16px',
+                  background: '#e2e8f0',
+                  color: '#475569',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={payingRowId === khataPayConfirmation.empId}
+                onClick={async () => {
+                  const { empId, cashVal, bankVal } = khataPayConfirmation;
+                  setKhataPayConfirmation(null);
+                  await executePayment(empId, cashVal, bankVal);
+                }}
+                style={{
+                  padding: '8px 18px',
+                  background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: payingRowId === khataPayConfirmation.empId ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 6px rgba(234, 88, 12, 0.35)'
+                }}
+              >
+                {payingRowId === khataPayConfirmation.empId ? <RefreshCw size={13} className="spin" /> : <CheckCircle size={13} />}
+                <span>Confirm & Pay Salary</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .spin { animation: spin 1s linear infinite; }
