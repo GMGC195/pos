@@ -10,14 +10,22 @@ import {
 import { CURRENCY } from '../config';
 import { useAuth } from '../contexts/AuthContext';
 import OrderDetailModal from '../components/OrderDetailModal';
+import { getSaudiCurrentMonthStr, getSaudiPreviousMonthStr } from '../utils/timezone';
 
 const AVAILABLE_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3'];
 
 const getCurrentMonthStr = () => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
+  return getSaudiCurrentMonthStr();
+};
+
+const getShortMonthDisplay = (monthStr) => {
+  if (!monthStr || monthStr === 'All') return 'Mo Bal:';
+  const parts = monthStr.split('-');
+  if (parts.length < 2) return `${monthStr}:`;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = new Date(y, m - 1, 1);
+  return !isNaN(d.getTime()) ? `${d.toLocaleString('en-US', { month: 'short' })} Bal:` : `${monthStr}:`;
 };
 
 const getBranchShortName = (b) => {
@@ -776,10 +784,10 @@ export default function Credit() {
     setPaymentMethod('Cash');
     setPaymentComment('');
     
-    // Default to current month automatically
-    const currentMonth = getCurrentMonthStr();
-    setSelectedLedgerMonth(currentMonth);
-    setBillingMonth(currentMonth);
+    // Respect selectedMainMonth from main page (if set and valid, otherwise current month)
+    const initialMonth = (selectedMainMonth && selectedMainMonth !== '') ? selectedMainMonth : getCurrentMonthStr();
+    setSelectedLedgerMonth(initialMonth);
+    setBillingMonth(initialMonth !== 'All' ? initialMonth : getCurrentMonthStr());
     setLedgerClassificationFilter('All');
     setShowLedgerDiscounts(false);
 
@@ -808,8 +816,12 @@ export default function Credit() {
     setOpeningBalance(0);
 
     try {
+      const ledgerParams = { with_meta: 'true' };
+      if (initialMonth !== 'All') {
+        ledgerParams.month = initialMonth;
+      }
       const [ledgerRes, summaryRes] = await Promise.all([
-        axios.get(`/api/credit/${customer.id}/ledger`, { params: { month: currentMonth, with_meta: 'true' } }),
+        axios.get(`/api/credit/${customer.id}/ledger`, { params: ledgerParams }),
         axios.get(`/api/credit/${customer.id}/monthly-summary`)
       ]);
       const txs = Array.isArray(ledgerRes.data) ? ledgerRes.data : (ledgerRes.data?.transactions || []);
@@ -2035,14 +2047,16 @@ export default function Credit() {
   // Generate Available Months List (Sorted chronologically descending)
   const availableMonths = useMemo(() => {
     const monthMap = new Map();
-    const now = new Date();
+    const currKey = getCurrentMonthStr();
+    let mKey = currKey;
     
-    // Always include current month and past 12 months
+    // Always include current month and past 12 months using Saudi timezone sequence
     for (let i = 0; i < 12; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const label = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-      monthMap.set(key, label);
+      const parts = mKey.split('-');
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+      const label = !isNaN(d.getTime()) ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : mKey;
+      monthMap.set(mKey, label);
+      mKey = getSaudiPreviousMonthStr(mKey);
     }
 
     // Include any additional months from transactions
@@ -2194,16 +2208,15 @@ export default function Credit() {
               onChange={e => setSelectedMainMonth(e.target.value)}
               style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--surface-3)', background: 'var(--surface)', fontSize: 12.5, fontWeight: 600, outline: 'none', cursor: 'pointer' }}
             >
-              <option value={getCurrentMonthStr()}>{formatMonthDisplay(getCurrentMonthStr())} • Current</option>
-              {/* Previous 12 months */}
-              {Array.from({ length: 12 }, (_, i) => {
-                const d = new Date();
-                d.setDate(1);
-                d.setMonth(d.getMonth() - (i + 1));
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const key = `${y}-${m}`;
-                return <option key={key} value={key}>{formatMonthDisplay(key)}</option>;
+              <option value={getCurrentMonthStr()}>{formatMonthDisplay(getCurrentMonthStr())} (Current)</option>
+              <option value={getSaudiPreviousMonthStr()}>{formatMonthDisplay(getSaudiPreviousMonthStr())} (Previous)</option>
+              {/* Previous 10 months beyond previous month */}
+              {Array.from({ length: 10 }, (_, i) => {
+                let mKey = getSaudiPreviousMonthStr();
+                for (let j = 0; j <= i; j++) {
+                  mKey = getSaudiPreviousMonthStr(mKey);
+                }
+                return <option key={mKey} value={mKey}>{formatMonthDisplay(mKey)}</option>;
               })}
               <option value="All">All Months (Full History)</option>
             </select>
@@ -2426,7 +2439,7 @@ export default function Credit() {
                       {/* Current / Selected Month Balance */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
                         <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)' }}>
-                          {selectedMainMonth !== 'All' ? `${formatMonthDisplay(selectedMainMonth).slice(0, 7)}:` : 'Mo Bal:'}
+                          {getShortMonthDisplay(selectedMainMonth)}
                         </span>
                         {(() => {
                           const curBal = parseFloat(c.current_month_balance || 0);
@@ -3488,11 +3501,16 @@ export default function Credit() {
                   }}
                 >
                   <option value="All">All Months (Complete History)</option>
-                  {availableMonths.map(m => (
-                    <option key={m.key} value={m.key}>
-                      {m.label} {m.key === getCurrentMonthStr() ? '• Current Month' : ''}
-                    </option>
-                  ))}
+                  {availableMonths.map(m => {
+                    let tag = '';
+                    if (m.key === getCurrentMonthStr()) tag = ' (Current)';
+                    else if (m.key === getSaudiPreviousMonthStr()) tag = ' (Previous)';
+                    return (
+                      <option key={m.key} value={m.key}>
+                        {m.label}{tag}
+                      </option>
+                    );
+                  })}
                 </select>
                 <button 
                   type="button"

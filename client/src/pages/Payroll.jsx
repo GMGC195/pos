@@ -511,7 +511,8 @@ export default function Payroll() {
     const baseSal = parseFloat(row.base_salary || 0);
     const payable = parseFloat(row.payable_salary !== undefined ? row.payable_salary : (baseSal - parseFloat(row.deductions || 0)));
     const totalAdj = calculateTotalAdjustments(row);
-    const dynamicNet = Math.round((payable + totalAdj) * 100) / 100;
+    const khataDeduct = parseFloat(row.khata_deduction || 0);
+    const dynamicNet = Math.round((payable + totalAdj - khataDeduct) * 100) / 100;
     return dynamicNet;
   }
 
@@ -2030,7 +2031,8 @@ export default function Payroll() {
       ? Math.round((lastMonthBal + totalGiven - totalDeduct + dynamicAdjTotal) * 100) / 100
       : calculateTotalAdjustments(targetEmpData);
 
-    const dynamicNetSalary = Math.round((payableSal + totalAdj) * 100) / 100;
+    const khataDeduct = parseFloat(targetEmpData.khata_deduction || 0);
+    const dynamicNetSalary = Math.round((payableSal + totalAdj - khataDeduct) * 100) / 100;
     const bonusVal = parseFloat(targetEmpData.bonus || 0);
     const advVal = parseFloat(targetEmpData.this_month_adv || 0);
     const netVal = parseFloat(targetEmpData.internet || 0);
@@ -2192,7 +2194,7 @@ export default function Payroll() {
             }}>
               <div>
                 <span style={{ fontSize: '11px', color: dynamicNetSalary < 0 ? '#b91c1c' : '#047857', fontWeight: 800, display: 'block' }}>Net Payable Salary</span>
-                <span style={{ fontSize: '9px', color: dynamicNetSalary < 0 ? '#b91c1c' : '#047857', display: 'block' }}>Payable + Adj</span>
+                <span style={{ fontSize: '9px', color: dynamicNetSalary < 0 ? '#b91c1c' : '#047857', display: 'block' }}>Payable + Adj{khataDeduct > 0 ? ' - Khata' : ''}</span>
               </div>
               <div style={{ fontSize: isMobile ? '16px' : '13px', fontWeight: 900, color: dynamicNetSalary < 0 ? '#dc2626' : '#059669', marginTop: isMobile ? 0 : '1px' }}>
                 {CURRENCY} {Number(dynamicNetSalary || 0).toFixed(2)}
@@ -3914,7 +3916,7 @@ export default function Payroll() {
                       </div>
                       <div>
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#047857', textTransform: 'uppercase' }}>Net Pay</div>
-                        <div style={{ fontSize: '12px', fontWeight: 900, color: '#059669', whiteSpace: 'nowrap' }}>{Number(item.net_salary || 0).toFixed(2)}</div>
+                        <div style={{ fontSize: '12px', fontWeight: 900, color: (parseFloat(item.net_salary || 0) < 0) ? '#dc2626' : '#059669', whiteSpace: 'nowrap' }}>{Number(item.net_salary || 0).toFixed(2)}</div>
                       </div>
                       <div>
                         <div style={{ fontSize: '9px', fontWeight: 700, color: '#059669', textTransform: 'uppercase' }}>Total Paid</div>
@@ -4647,7 +4649,7 @@ export default function Payroll() {
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-secondary)' }}>
                       <span>ID: {emp.employee_id} • {emp.role || 'Staff'}</span>
-                      <span style={{ fontWeight: 800, color: '#059669', fontSize: '12px' }}>{CURRENCY} {Number(emp.net_salary || 0).toFixed(2)}</span>
+                      <span style={{ fontWeight: 800, color: (parseFloat(emp.net_salary || 0) < 0) ? '#dc2626' : '#059669', fontSize: '12px' }}>{CURRENCY} {Number(emp.net_salary || 0).toFixed(2)}</span>
                     </div>
 
                     {/* Attendance Mini Badges */}
@@ -4777,7 +4779,7 @@ export default function Payroll() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-secondary)' }}>
                       <span>ID: {emp.employee_id}</span>
-                      <span style={{ fontWeight: 700, color: '#059669' }}>{CURRENCY} {Number(emp.net_salary || 0).toFixed(2)}</span>
+                      <span style={{ fontWeight: 700, color: (parseFloat(emp.net_salary || 0) < 0) ? '#dc2626' : '#059669' }}>{CURRENCY} {Number(emp.net_salary || 0).toFixed(2)}</span>
                     </div>
                   </div>
                 );

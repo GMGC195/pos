@@ -722,10 +722,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
         if (savedRecord && savedRecord.khata_deduction !== undefined && savedRecord.khata_deduction !== null) {
           khataDeduction = parseFloat(savedRecord.khata_deduction);
         } else if (khataBalance > 0) {
-          // Cap deduction at available salary before Khata so Net Salary doesn't go below 0
-          const availableSalary = Math.max(0, earnedSalary + totalAdjustments);
-          khataDeduction = Math.min(khataBalance, availableSalary);
-          khataDeduction = Math.round(khataDeduction * 100) / 100;
+          // Full Khata balance is deducted, allowing Net Salary to be negative when Khata exceeds salary
+          khataDeduction = Math.round(khataBalance * 100) / 100;
         }
       }
 

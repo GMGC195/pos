@@ -159,3 +159,27 @@ export const saudiTimeToISO = (dateStr, timeStr) => {
   const d = new Date(isoWithOffset);
   return isNaN(d.getTime()) ? null : d.toISOString();
 };
+
+/**
+ * Returns current month formatted as 'YYYY-MM' in Asia/Riyadh timezone.
+ */
+export const getSaudiCurrentMonthStr = () => {
+  return getSaudiTodayDate().slice(0, 7);
+};
+
+/**
+ * Returns previous month formatted as 'YYYY-MM' in Asia/Riyadh timezone.
+ * Optionally accepts a base 'YYYY-MM' month string.
+ */
+export const getSaudiPreviousMonthStr = (baseMonthStr) => {
+  const base = baseMonthStr || getSaudiCurrentMonthStr();
+  const [yearStr, monthStr] = base.split('-');
+  let year = parseInt(yearStr, 10);
+  let month = parseInt(monthStr, 10) - 1;
+  if (month < 1) {
+    month = 12;
+    year -= 1;
+  }
+  return `${year}-${String(month).padStart(2, '0')}`;
+};
+
