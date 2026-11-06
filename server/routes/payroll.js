@@ -4,6 +4,15 @@ const pool = require('../db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { clampBreakLogsToDutyWindow } = require('../utils/attendanceHelper');
 
+// KSA Current Month Helper (Asia/Riyadh - UTC+3)
+const getKsaCurrentMonthStr = () => {
+  const now = new Date();
+  const ksaDate = new Date(now.getTime() + (3 * 60 + now.getTimezoneOffset()) * 60000);
+  const year = ksaDate.getFullYear();
+  const month = String(ksaDate.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
 /**
  * Record an append-only salary audit log in salary_audit_logs table.
  * Supports passing either an existing transactional client or the connection pool.
@@ -39,7 +48,7 @@ async function recordSalaryAuditLog(clientOrPool, {
       ? parseFloat(amount)
       : null;
 
-    const safeMonth = month || new Date().toISOString().substring(0, 7);
+    const safeMonth = month || getKsaCurrentMonthStr();
     const safeUser = performed_by || 'Admin';
 
     await clientOrPool.query(
@@ -66,6 +75,111 @@ async function recordSalaryAuditLog(clientOrPool, {
 }
 
 
+
+
+const getNextMonthStr = (monthStr) => {
+  const [year, monthNum] = monthStr.split('-').map(Number);
+  let nextYear = year;
+  let nextMonthNum = monthNum + 1;
+  if (nextMonthNum > 12) {
+    nextMonthNum = 1;
+    nextYear = year + 1;
+  }
+  return `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
+};
+
+const getMonthName = (monthStr) => {
+  const [year, monthNum] = monthStr.split('-').map(Number);
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  return `${months[monthNum - 1]} ${year}`;
+};
+
+async function settleEmployeeKhataForPayroll(client, employeeId, month, khataDeductVal, performedBy = 'System') {
+  const deductAmt = Math.round(parseFloat(khataDeductVal || 0) * 100) / 100;
+  if (deductAmt <= 0) return;
+
+  const khataCustRes = await client.query('SELECT id, balance, name FROM credit_customers WHERE employee_id = $1', [employeeId]);
+  if (khataCustRes.rows.length === 0) return;
+
+  const cust = khataCustRes.rows[0];
+  const empRes = await client.query('SELECT name, employee_id FROM employees WHERE id = $1', [employeeId]);
+  const empName = empRes.rows[0]?.name || cust.name || 'Employee';
+  const empCode = empRes.rows[0]?.employee_id || `EMP-${employeeId}`;
+  const prevMonthName = getMonthName(month);
+  const nextMonth = getNextMonthStr(month);
+
+  // 1. Settle in current payroll month (PAYMENT deduction)
+  const existingTx = await client.query(
+    "SELECT id FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+    [cust.id, month]
+  );
+
+  if (existingTx.rows.length === 0) {
+    await client.query(
+      `INSERT INTO credit_transactions (
+        credit_customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
+      ) VALUES ($1, 'PAYMENT', $2, 'Salary Deduction', 'Salary Deduction', $3, $4, NOW())`,
+      [cust.id, deductAmt, `${prevMonthName} salary paid – Khata deduction settled (Ref: PR-${month}-${employeeId})`, month]
+    );
+    await client.query(
+      'UPDATE credit_customers SET balance = balance - $1 WHERE id = $2',
+      [deductAmt, cust.id]
+    );
+  }
+
+  // 2. Settlement History entry in next month (SETTLEMENT_NOTICE)
+  const noticeComments = `${prevMonthName.split(' ')[0]} salary paid – Previous month Khata cleared`;
+  const existingNotice = await client.query(
+    "SELECT id FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Settlement History'",
+    [cust.id, nextMonth]
+  );
+
+  if (existingNotice.rows.length === 0) {
+    await client.query(
+      `INSERT INTO credit_transactions (
+        credit_customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
+      ) VALUES ($1, 'SETTLEMENT_NOTICE', $2, 'Salary Settlement', 'Settlement History', $3, $4, NOW())`,
+      [cust.id, deductAmt, `${noticeComments} (Emp: ${empName}, Ref: PR-${month}-${employeeId})`, nextMonth]
+    );
+  }
+
+  // 3. Salary audit log
+  await recordSalaryAuditLog(client, {
+    employee_id: employeeId,
+    employee_name: empName,
+    employee_code: empCode,
+    month: month,
+    action: 'KHATA_SETTLED',
+    amount: deductAmt,
+    description: `${performedBy} settled SAR ${deductAmt.toFixed(2)} Khata for ${empName} via ${month} payroll payment. Settlement history recorded in ${nextMonth}.`,
+    performed_by: performedBy
+  });
+}
+
+async function revertEmployeeKhataForPayroll(client, employeeId, month, performedBy = 'System') {
+  const khataCustRes = await client.query('SELECT id, balance, name FROM credit_customers WHERE employee_id = $1', [employeeId]);
+  if (khataCustRes.rows.length === 0) return;
+
+  const cust = khataCustRes.rows[0];
+  const nextMonth = getNextMonthStr(month);
+
+  // 1. Find existing payment transaction
+  const existingTx = await client.query(
+    "SELECT id, amount FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
+    [cust.id, month]
+  );
+  if (existingTx.rows.length > 0) {
+    const txAmt = parseFloat(existingTx.rows[0].amount || 0);
+    await client.query('DELETE FROM credit_transactions WHERE id = $1', [existingTx.rows[0].id]);
+    await client.query('UPDATE credit_customers SET balance = balance + $1 WHERE id = $2', [txAmt, cust.id]);
+  }
+
+  // 2. Remove next month's settlement history entry
+  await client.query(
+    "DELETE FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Settlement History'",
+    [cust.id, nextMonth]
+  );
+}
 
 // GET all payroll settings
 router.get('/settings', authenticateToken, async (req, res) => {
@@ -130,7 +244,7 @@ router.post('/overrides/:employee_id', authenticateToken, isAdmin, async (req, r
           employee_id,
           employee_name: curEmp.rows[0]?.name,
           employee_code: curEmp.rows[0]?.employee_id,
-          month: month || new Date().toISOString().substring(0, 7),
+          month: month || getKsaCurrentMonthStr(),
           action: 'BASE_SALARY_UPDATE',
           previous_value: `Base Salary: ${oldSal.toFixed(2)}`,
           new_value: `Base Salary: ${newSal.toFixed(2)}`,
@@ -756,7 +870,13 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       // Khata Balance & Deduction Integration
       const khataInfo = khataMap[emp.id] || null;
       const isKhataRegistered = !!khataInfo;
-      const khataBalance = khataInfo ? khataInfo.balance : 0;
+      // Month-specific Khata deduction:
+      const thisMKhata = Math.max(0, parseFloat(khataInfo?.this_month_khata || 0));
+      let priorUnsettledKhata = 0;
+      if (!prevRecord) {
+        priorUnsettledKhata = Math.max(0, parseFloat(khataInfo?.prev_month_remaining_khata || 0));
+      }
+      const khataBalance = Math.round((thisMKhata + priorUnsettledKhata) * 100) / 100;
       let khataDeduction = 0;
 
       if (isKhataRegistered) {
@@ -1161,29 +1281,7 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       }
 
       // Deduct Khata balance and create settlement transaction if employee is registered in Khata
-      const khataDeductVal = parseFloat(khata_deduction || 0);
-      if (khataDeductVal > 0) {
-        const khataCustRes = await client.query('SELECT id, balance FROM credit_customers WHERE employee_id = $1', [employee_id]);
-        if (khataCustRes.rows.length > 0) {
-          const cust = khataCustRes.rows[0];
-          const existingTx = await client.query(
-            "SELECT id FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
-            [cust.id, month]
-          );
-          if (existingTx.rows.length === 0) {
-            await client.query(
-              `INSERT INTO credit_transactions (
-                credit_customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
-              ) VALUES ($1, 'PAYMENT', $2, 'Salary Deduction', 'Salary Deduction', $3, $4, NOW())`,
-              [cust.id, khataDeductVal, `Auto Khata settlement from ${month} Payroll`, month]
-            );
-            await client.query(
-              'UPDATE credit_customers SET balance = balance - $1 WHERE id = $2',
-              [khataDeductVal, cust.id]
-            );
-          }
-        }
-      }
+      await settleEmployeeKhataForPayroll(client, employee_id, month, parseFloat(khata_deduction || 0), performedBy);
       
       // Also update remaining_amount in employee_recurring_adjustments
       // We will deduct the monthly amount for any active deductions
@@ -1209,19 +1307,7 @@ router.post('/record', authenticateToken, isAdmin, async (req, res) => {
       }
 
       // Revert Khata settlement if status changes back from Paid
-      const khataCustRes = await client.query('SELECT id, balance FROM credit_customers WHERE employee_id = $1', [employee_id]);
-      if (khataCustRes.rows.length > 0) {
-        const cust = khataCustRes.rows[0];
-        const existingTx = await client.query(
-          "SELECT id, amount FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
-          [cust.id, month]
-        );
-        if (existingTx.rows.length > 0) {
-          const txAmt = parseFloat(existingTx.rows[0].amount || 0);
-          await client.query("DELETE FROM credit_transactions WHERE id = $1", [existingTx.rows[0].id]);
-          await client.query("UPDATE credit_customers SET balance = balance + $1 WHERE id = $2", [txAmt, cust.id]);
-        }
-      }
+      await revertEmployeeKhataForPayroll(client, employee_id, month, performedBy);
     }
 
     // Update employee master salary if base_salary is provided
@@ -1657,29 +1743,7 @@ router.post('/payments', authenticateToken, async (req, res) => {
 
     // Auto-record Khata settlement if fully Paid and employee has Khata deduction
     if (newStatus === 'Paid' && curRecordRes.rows[0]?.status !== 'Paid') {
-      const khataDeductVal = parseFloat(curRecordRes.rows[0]?.khata_deduction || 0);
-      if (khataDeductVal > 0) {
-        const khataCustRes = await client.query('SELECT id, balance FROM credit_customers WHERE employee_id = $1', [employee_id]);
-        if (khataCustRes.rows.length > 0) {
-          const cust = khataCustRes.rows[0];
-          const existingTx = await client.query(
-            "SELECT id FROM credit_transactions WHERE credit_customer_id = $1 AND billing_month = $2 AND classification = 'Salary Deduction'",
-            [cust.id, month]
-          );
-          if (existingTx.rows.length === 0) {
-            await client.query(
-              `INSERT INTO credit_transactions (
-                credit_customer_id, type, amount, payment_method, classification, comments, billing_month, created_at
-              ) VALUES ($1, 'PAYMENT', $2, 'Salary Deduction', 'Salary Deduction', $3, $4, NOW())`,
-              [cust.id, khataDeductVal, `Auto Khata settlement from ${month} Payroll`, month]
-            );
-            await client.query(
-              'UPDATE credit_customers SET balance = balance - $1 WHERE id = $2',
-              [khataDeductVal, cust.id]
-            );
-          }
-        }
-      }
+      await settleEmployeeKhataForPayroll(client, employee_id, month, parseFloat(curRecordRes.rows[0]?.khata_deduction || 0), paidBy);
     }
 
     // 5. Write audit log entry
@@ -1964,7 +2028,7 @@ router.post('/salaries/batch', authenticateToken, isAdmin, async (req, res) => {
             employee_id: item.employee_id,
             employee_name: curEmp.rows[0]?.name,
             employee_code: curEmp.rows[0]?.employee_id,
-            month: month || new Date().toISOString().substring(0, 7),
+            month: month || getKsaCurrentMonthStr(),
             action: 'BASE_SALARY_UPDATE',
             previous_value: `Base Salary: ${oldSal.toFixed(2)}`,
             new_value: `Base Salary: ${val.toFixed(2)}`,

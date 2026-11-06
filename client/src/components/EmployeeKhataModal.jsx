@@ -1,19 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from '../api';
 import { X, BookOpen, Calendar, ArrowUpRight, ArrowDownRight, CreditCard, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CURRENCY } from '../config';
-import { formatSaudiDateTime, getSaudiCurrentMonthStr, getSaudiPreviousMonthStr } from '../utils/timezone';
-
-const formatMonthDisplay = (monthStr) => {
-  if (!monthStr || monthStr === 'All') return 'All Months (Full History)';
-  const parts = monthStr.split('-');
-  if (parts.length < 2) return monthStr;
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  const d = new Date(y, m - 1, 1);
-  return !isNaN(d.getTime()) ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : monthStr;
-};
+import { 
+  formatSaudiDateTime, 
+  getSaudiCurrentMonthStr, 
+  getSaudiPreviousMonthStr,
+  formatMonthDisplay 
+} from '../utils/timezone';
 
 export default function EmployeeKhataModal({
   isOpen,
@@ -172,6 +167,13 @@ export default function EmployeeKhataModal({
             >
               <option value={currentMonthKey}>{formatMonthDisplay(currentMonthKey)} (Current Month)</option>
               <option value={previousMonthKey}>{formatMonthDisplay(previousMonthKey)} (Previous Month)</option>
+              {Array.from({ length: 10 }, (_, i) => {
+                let mKey = previousMonthKey;
+                for (let j = 0; j <= i; j++) {
+                  mKey = getSaudiPreviousMonthStr(mKey);
+                }
+                return <option key={mKey} value={mKey}>{formatMonthDisplay(mKey)}</option>;
+              })}
               <option value="All">All Months (Full History)</option>
             </select>
           </div>
@@ -220,15 +222,16 @@ export default function EmployeeKhataModal({
                   const isDebit = ['CHARGE', 'CREDIT_ORDER', 'PAYMENT_CANCELLED'].includes(t.type);
                   const isPayment = ['PAYMENT', 'ORDER_CANCELLED'].includes(t.type);
                   const isSalaryDeduct = t.classification === 'Salary Deduction';
+                  const isSettlementNotice = t.type === 'SETTLEMENT_NOTICE' || t.classification === 'Settlement History';
                   const amt = parseFloat(t.amount || 0);
 
                   return (
-                    <tr key={t.id || idx} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                    <tr key={t.id || idx} style={{ borderBottom: '1px solid var(--surface-2)', background: isSettlementNotice ? '#f8fafc' : 'transparent' }}>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontSize: 11.5 }}>
                         {formatSaudiDateTime(t.created_at)}
                       </td>
                       <td style={{ padding: '8px 10px', fontSize: 11.5, fontWeight: 600 }}>
-                        {t.slip_number ? `#${t.slip_number}` : (t.order_id ? `Order #${t.order_id}` : `TX-${t.id}`)}
+                        {t.slip_number ? `#${t.slip_number}` : (t.order_id ? `Order #${t.order_id}` : (isSettlementNotice ? 'Settlement' : `TX-${t.id}`))}
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <span style={{
@@ -236,17 +239,22 @@ export default function EmployeeKhataModal({
                           fontWeight: 700,
                           padding: '2px 6px',
                           borderRadius: 4,
-                          background: isSalaryDeduct ? '#ecfdf5' : isDebit ? '#fef2f2' : '#f0fdf4',
-                          color: isSalaryDeduct ? '#047857' : isDebit ? '#b91c1c' : '#15803d',
-                          border: `1px solid ${isSalaryDeduct ? '#a7f3d0' : isDebit ? '#fecaca' : '#bbf7d0'}`
+                          background: isSettlementNotice ? '#eff6ff' : isSalaryDeduct ? '#ecfdf5' : isDebit ? '#fef2f2' : '#f0fdf4',
+                          color: isSettlementNotice ? '#1d4ed8' : isSalaryDeduct ? '#047857' : isDebit ? '#b91c1c' : '#15803d',
+                          border: `1px solid ${isSettlementNotice ? '#bfdbfe' : isSalaryDeduct ? '#a7f3d0' : isDebit ? '#fecaca' : '#bbf7d0'}`
                         }}>
-                          {isSalaryDeduct ? 'Salary Deduction' : t.type}
+                          {isSettlementNotice ? 'Settlement History' : isSalaryDeduct ? 'Salary Deduction' : t.type}
                         </span>
                       </td>
                       <td style={{ padding: '8px 10px', maxWidth: 260 }}>
-                        <div style={{ fontWeight: 600 }}>
+                        <div style={{ fontWeight: 600, color: isSettlementNotice ? '#1e293b' : 'inherit' }}>
                           {t.comments || (t.order_id ? 'Credit Order' : 'Manual Entry')}
                         </div>
+                        {isSettlementNotice && (
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>
+                            Cleared Amount: {CURRENCY} {amt.toFixed(2)} (Informational Entry)
+                          </div>
+                        )}
                         {Array.isArray(t.order_items) && t.order_items.length > 0 && (
                           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>
                             {t.order_items.map(i => `${i.qty}x ${i.item_name}`).join(', ')}

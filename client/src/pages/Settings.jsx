@@ -98,6 +98,7 @@ export default function Settings() {
 
   // User Management State
   const [users, setUsers] = useState([])
+  const [employeeOptions, setEmployeeOptions] = useState([])
   const [shifts, setShifts] = useState([])
   const [isAddingUser, setIsAddingUser] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
@@ -109,7 +110,8 @@ export default function Settings() {
     password: '',
     role: 'Operator',
     shift: '',
-    branch: ''
+    branch: '',
+    employee_id: ''
   })
   
   const SHIFT_OPTIONS = ['Day', 'Night'];
@@ -169,6 +171,7 @@ export default function Settings() {
     if (activeTab === 'users' && isAdminRole) {
       fetchUsers()
       fetchShifts()
+      fetchEmployeeOptions()
     }
     if (activeTab === 'hardware' || ((activeTab === 'pos_settings' || activeTab === 'report_emails') && isAdminRole)) {
       fetchSettings()
@@ -314,6 +317,15 @@ export default function Settings() {
     }
   }
 
+    const fetchEmployeeOptions = async () => {
+    try {
+      const res = await api.get('/api/auth/employee-options')
+      setEmployeeOptions(res.data || [])
+    } catch (err) {
+      console.error('Failed to load employee options:', err)
+    }
+  }
+
   const fetchUsers = async () => {
     try {
       const res = await api.get('/api/auth/users')
@@ -391,7 +403,7 @@ export default function Settings() {
       await api.post('/api/auth/users', payload)
       toast.success('User created successfully')
       setIsAddingUser(false)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '', employee_id: '' })
       setShowUserPass(false)
       setShowShiftDropdown(false)
       setShowBranchDropdown(false)
@@ -414,7 +426,7 @@ export default function Settings() {
       await api.put(`/api/auth/users/${editingUser.id}`, payload)
       toast.success('User updated successfully')
       setEditingUser(null)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '', employee_id: '' })
       setShowUserPass(false)
       setShowShiftDropdown(false)
       setShowBranchDropdown(false)
@@ -451,7 +463,8 @@ export default function Settings() {
       password: '',
       role: u.role,
       shift: u.shift || '',
-      branch: u.branch || ''
+      branch: u.branch || '',
+      employee_id: u.employee_id || ''
     })
     setIsAddingUser(true)
     setShowShiftDropdown(false)
@@ -1249,6 +1262,61 @@ export default function Settings() {
                           </select>
                         </div>
                       )}
+                                            {userForm.role === 'Employee' && (
+                        <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: 700 }}>
+                            <span>Linked Employee Record *</span>
+                            {userForm.employee_id && (
+                              <span style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 600 }}>
+                                #{userForm.employee_id} Selected
+                              </span>
+                            )}
+                          </label>
+                          <select 
+                            value={userForm.employee_id || ''}
+                            onChange={e => {
+                              const selectedId = e.target.value;
+                              const matched = employeeOptions.find(opt => String(opt.id) === String(selectedId));
+                              const updates = { ...userForm, employee_id: selectedId };
+                              if (matched) {
+                                if (!editingUser) {
+                                  if (!userForm.username) updates.username = (matched.name || '').toLowerCase().replace(/\s+/g, '_');
+                                  if (!userForm.email && matched.email) updates.email = matched.email;
+                                }
+                                if (matched.branch) updates.branch = matched.branch;
+                              }
+                              setUserForm(updates);
+                            }}
+                            required
+                            style={{
+                              padding: '12px 14px',
+                              borderRadius: '12px',
+                              border: '1.5px solid var(--surface-2)',
+                              background: 'var(--surface)',
+                              fontSize: '14px',
+                              width: '100%',
+                              color: 'var(--text-primary)'
+                            }}
+                          >
+                            <option value="">-- Select an Employee from Database --</option>
+                            {employeeOptions.map(emp => {
+                              const isLinkedToOther = emp.linked_user_id && (!editingUser || emp.linked_user_id !== editingUser.id);
+                              return (
+                                <option 
+                                  key={emp.id} 
+                                  value={emp.id}
+                                  disabled={isLinkedToOther}
+                                >
+                                  {emp.name} ({emp.employee_code || `EMP-${emp.id}`}) — {emp.role || 'Staff'} {emp.branch ? `[${emp.branch}]` : ''} {isLinkedToOther ? `⚠️ (Already linked to @${emp.linked_username})` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                            Linking an employee connects this login account to their Employee Portal, attendance, and Khata.
+                          </p>
+                        </div>
+                      )}
                       {(userForm.role === 'Operator' || userForm.role === 'Employee') && (
                         <div className="form-group" style={{ position: 'relative' }} ref={shiftDropdownRef}>
                           <label>Assigned Shift(s)</label>
@@ -1460,7 +1528,7 @@ export default function Settings() {
                         onClick={() => {
                           setIsAddingUser(false)
                           setEditingUser(null)
-                          setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '' })
+                          setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '', employee_id: '' })
                           setShowUserPass(false)
                         }}
                       >
@@ -1668,7 +1736,19 @@ export default function Settings() {
                                   {u.role}
                                 </span>
                               </td>
-                              <td style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{u.role === 'Operator' ? (u.shift || 'None') : '--'}</td>
+                              <td style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                                {u.role === 'Employee' ? (
+                                  u.employee_name ? (
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                      👤 {u.employee_name} ({u.employee_code || `EMP-${u.employee_id}`})
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>
+                                      ⚠️ Not Linked
+                                    </span>
+                                  )
+                                ) : (u.role === 'Operator' ? (u.shift || 'None') : '--')}
+                              </td>
                               <td>{new Date(u.created_at).toLocaleDateString()}</td>
                               <td>
                                 <div className="user-actions">
@@ -2306,6 +2386,11 @@ function UserMobileCard({ u, currentUser, onEdit, onDelete }) {
             {u.role === 'Operator' && (
               <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)', fontWeight: 600 }}>
                 • Shift {u.shift || 'None'}
+              </span>
+            )}
+            {u.role === 'Employee' && (
+              <span style={{ fontSize: '10.5px', color: u.employee_name ? 'var(--primary)' : '#f59e0b', fontWeight: 600 }}>
+                • {u.employee_name ? `👤 ${u.employee_name}` : '⚠️ Not linked'}
               </span>
             )}
           </div>

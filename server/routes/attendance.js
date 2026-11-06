@@ -2177,6 +2177,21 @@ router.post('/edit-requests', authenticateToken, async (req, res) => {
       if (activeSession.rows.length > 0) {
         return res.status(400).json({ error: 'You are already checked in. Please check out first.' });
       }
+      const pendingCheckIn = await pool.query(
+        `SELECT id FROM attendance_edit_requests WHERE employee_id = $1 AND request_type = 'Check-In' AND status = 'Pending'`,
+        [employee_id]
+      );
+      if (pendingCheckIn.rows.length > 0) {
+        return res.status(400).json({ error: 'A check-in request is already pending approval.' });
+      }
+    } else if (type === 'Check-Out') {
+      const pendingCheckOut = await pool.query(
+        `SELECT id FROM attendance_edit_requests WHERE employee_id = $1 AND request_type = 'Check-Out' AND status = 'Pending'`,
+        [employee_id]
+      );
+      if (pendingCheckOut.rows.length > 0) {
+        return res.status(400).json({ error: 'A check-out request is already pending approval.' });
+      }
     }
 
     const result = await pool.query(
@@ -2211,7 +2226,18 @@ router.get('/edit-requests', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    if (userRole === 'admin' || userRole === 'developer') {
+    if (req.query.my_requests === 'true') {
+      // Show user's own employee requests regardless of role
+      const empRes = await pool.query(
+        `SELECT id FROM employees WHERE LOWER(name) = LOWER($1) OR LOWER(employee_id) = LOWER($1) OR id = (SELECT employee_id FROM users WHERE id = $2)`,
+        [username, req.user.id]
+      );
+      if (empRes.rows.length === 0) {
+        return res.json([]);
+      }
+      query += ` WHERE r.employee_id = $1`;
+      params.push(empRes.rows[0].id);
+    } else if (userRole === 'admin' || userRole === 'developer') {
       query += ` WHERE r.target_role IN ('Admin', 'Both')`;
     } else if (userRole === 'operator') {
       query += ` WHERE r.target_role IN ('Operator', 'Both')`;
@@ -2357,6 +2383,8 @@ router.post('/edit-requests/:id/action', authenticateToken, async (req, res) => 
           `UPDATE employee_attendance 
            SET check_in = COALESCE($1, check_in),
                check_out = COALESCE($2, check_out),
+               on_break = false,
+               break_start = null,
                remarks = 'Updated via request approval'
            WHERE id = $3`,
           [effectiveCheckIn, effectiveCheckOut, finalAttendanceId]

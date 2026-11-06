@@ -14,7 +14,7 @@ import {
 } from '../branding'
 import { useAuth } from '../contexts/AuthContext'
 
-export default function OrderDetailModal({ order, onClose, onEdit }) {
+export default function OrderDetailModal({ order, onClose, onEdit, allowPrint = true }) {
   const { user } = useAuth();
   const isManagement = user?.role?.trim().toLowerCase() === 'management';
   const [isPrinting, setIsPrinting] = useState(false);
@@ -430,9 +430,11 @@ ${slipBody}
               <Edit size={18} /> Edit
             </button>
           )}
-          <button className="btn btn-primary" onClick={handlePrint} disabled={isPrinting} style={{ flex: onEdit ? 1 : 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <Printer size={18} /> {isPrinting ? 'Printing...' : (onEdit ? 'Print' : 'Print Receipt')}
-          </button>
+          {allowPrint && (
+            <button className="btn btn-primary" onClick={handlePrint} disabled={isPrinting} style={{ flex: onEdit ? 1 : 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Printer size={18} /> {isPrinting ? 'Printing...' : (onEdit ? 'Print' : 'Print Receipt')}
+            </button>
+          )}
         </div>
       </div>
       {showKitchenModal && (

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import BaseSaleSurplusChart from '../components/BaseSaleSurplusChart'
 import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
@@ -37,7 +38,8 @@ import {
   Eye,
   ArrowLeft,
   FileText,
-  X
+  X,
+  Layers
 } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler)
@@ -834,6 +836,8 @@ export default function Dashboard() {
   const [salesSelectedClosing, setSalesSelectedClosing] = useState('current')
   const [pastClosings, setPastClosings] = useState([])
   const [salesSelectedDate, setSalesSelectedDate] = useState(() => getSaudiTodayDate())
+  const [shiftAnalytics, setShiftAnalytics] = useState(null)
+  const [loadingShiftAnalytics, setLoadingShiftAnalytics] = useState(false)
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('')
   const [attendanceSelectedDayNight, setAttendanceSelectedDayNight] = useState('All')
   const [attendanceSelectedStatus, setAttendanceSelectedStatus] = useState('All')
@@ -845,6 +849,21 @@ export default function Dashboard() {
   const [topItemsToDate, setTopItemsToDate] = useState('')
   const [topItemsData, setTopItemsData] = useState([])
   const topItemsFilterRef = useRef(null)
+
+    const loadShiftAnalytics = async () => {
+    if (!canViewPosAndReports) return;
+    try {
+      setLoadingShiftAnalytics(true);
+      const res = await axios.get('/api/stats/shift-closing-analytics', {
+        params: { date: salesSelectedDate || getSaudiTodayDate() }
+      });
+      setShiftAnalytics(res.data);
+    } catch (err) {
+      console.error('Error fetching shift closing analytics:', err);
+    } finally {
+      setLoadingShiftAnalytics(false);
+    }
+  };
 
   const loadStats = () => {
     setLoading(true)
@@ -859,6 +878,7 @@ export default function Dashboard() {
 
     // Fetch sales stats if user is developer, admin, or management
     if (canViewPosAndReports) {
+      loadShiftAnalytics();
       const statsParams = { branch: salesSelectedBranch, date: salesSelectedDate }
       if (salesSelectedClosing !== 'current') {
         statsParams.closing_id = salesSelectedClosing
@@ -1195,7 +1215,100 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Charts */}
+        {/* Shift Closing Analytics Graph & Restaurant-Wise Comparison (Above 7 Days Sales Graph) */}
+        {canViewPosAndReports && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+            
+            {/* Base Sale and Surplus Per Shift Chart (Replaces Shift Closing Analytics with Vertical Stacked Bars) */}
+            <BaseSaleSurplusChart
+              restaurants={shiftAnalytics?.restaurants}
+              currency={CURRENCY}
+              loading={loading}
+              style={{ gridColumn: 'span 2' }}
+            />
+
+            {/* Restaurant-Wise Sales Comparison Graph (R1 vs R2 vs R3) */}
+            <div className="chart-card">
+              <div style={{ marginBottom: 14 }}>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                  <TrendingUp size={20} color="var(--primary)" /> Restaurant Comparison
+                </h3>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  R1 vs R2 vs R3 total revenue & branch share
+                </span>
+              </div>
+
+              {(() => {
+                const restaurants = shiftAnalytics?.restaurants || [
+                  { restaurant_id: 'R1', restaurant_name: 'Restaurant 1', total_actual_sales: 0 },
+                  { restaurant_id: 'R2', restaurant_name: 'Restaurant 2', total_actual_sales: 0 },
+                  { restaurant_id: 'R3', restaurant_name: 'Restaurant 3', total_actual_sales: 0 }
+                ];
+
+                const grandTotal = restaurants.reduce((sum, r) => sum + (r.total_actual_sales || 0), 0) || 1;
+                const maxRestVal = Math.max(1, ...restaurants.map(r => r.total_actual_sales || 0));
+
+                const colors = [
+                  { primary: 'var(--primary)', light: '#fee2e2', text: '#b91c1c' },
+                  { primary: '#3b82f6', light: '#eff6ff', text: '#1d4ed8' },
+                  { primary: '#10b981', light: '#ecfdf5', text: '#047857' }
+                ];
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {restaurants.map((rest, idx) => {
+                      const c = colors[idx % colors.length];
+                      const pct = Math.round((rest.total_actual_sales / grandTotal) * 100);
+                      const barWidthPct = Math.min(100, Math.round((rest.total_actual_sales / maxRestVal) * 100));
+
+                      return (
+                        <div key={rest.restaurant_id} style={{ background: 'var(--surface-2)', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--surface-3)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ background: c.primary, color: '#fff', fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 5 }}>
+                                {rest.restaurant_id}
+                              </span>
+                              <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{rest.restaurant_name}</strong>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: 13, fontWeight: 900, color: 'var(--text-primary)' }}>
+                                {CURRENCY} {rest.total_actual_sales.toFixed(2)}
+                              </span>
+                              <span style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block' }}>
+                                {pct}% share
+                              </span>
+                            </div>
+                          </div>
+
+                          <div style={{ height: 10, background: 'var(--surface-3)', borderRadius: 5, overflow: 'hidden' }}>
+                            <div 
+                              style={{ 
+                                height: '100%', 
+                                width: `${barWidthPct}%`, 
+                                background: c.primary, 
+                                borderRadius: 5,
+                                transition: 'width 0.4s ease'
+                              }} 
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <div style={{ marginTop: 8, padding: '10px 14px', background: 'var(--surface)', borderRadius: 8, border: '1px dashed var(--surface-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Total Branch Sales:</span>
+                      <strong style={{ fontSize: 14, fontWeight: 900, color: 'var(--primary)' }}>
+                        {CURRENCY} {restaurants.reduce((s, r) => s + (r.total_actual_sales || 0), 0).toFixed(2)}
+                      </strong>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* Charts Grid: 7 Days Sales Graph (Moved Below Shift Closing Analytics) */}
         <div className="charts-grid">
           <div className="chart-card">
             <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><TrendingUp size={20} color="var(--red)" /> Sales — Last 7 Days</h3>

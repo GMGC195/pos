@@ -33,7 +33,9 @@ import {
 import {
   savePendingOrder,
   getAllPendingOrders,
-  removePendingOrder
+  removePendingOrder,
+  markOrderSynced,
+  updatePendingOrderStatus
 } from '../utils/db'
 import { printViaRawBT } from '../utils/rawbtPrinter'
 import { formatItemUrdu } from '../utils/urduHelper'
@@ -747,11 +749,15 @@ export default function POS() {
     let successCount = 0
     for (const order of orders) {
       try {
+        await updatePendingOrderStatus(order.client_order_id, 'Syncing')
         await axios.post('/api/orders', order)
+        // Mark as Synced (confirmed by server)
+        await markOrderSynced(order.client_order_id)
         await removePendingOrder(order.client_order_id)
         successCount++
       } catch (err) {
         console.error('Failed to sync order:', order.client_order_id, err)
+        await updatePendingOrderStatus(order.client_order_id, 'Failed', err?.message || 'Network/Server Error')
       }
     }
     if (successCount > 0) {

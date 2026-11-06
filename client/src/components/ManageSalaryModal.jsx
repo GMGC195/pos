@@ -3,6 +3,7 @@ import { Banknote, Search, Save, RefreshCw, X, AlertCircle, CheckCircle, Calcula
 import axios from '../api'
 import toast from 'react-hot-toast'
 import { CURRENCY } from '../config'
+import { getSaudiCurrentMonthStr } from '../utils/timezone'
 
 export default function ManageSalaryModal({ isOpen, onClose, onUpdated, month }) {
   const [employees, setEmployees] = useState([])
@@ -15,7 +16,7 @@ export default function ManageSalaryModal({ isOpen, onClose, onUpdated, month })
   const [savingAll, setSavingAll] = useState(false)
 
   // Determine days in month
-  const currentMonthStr = month || new Date().toISOString().substring(0, 7)
+  const currentMonthStr = month || getSaudiCurrentMonthStr()
   const [yearStr, monthStr] = currentMonthStr.split('-')
   const daysInMonth = new Date(parseInt(yearStr), parseInt(monthStr), 0).getDate()
 

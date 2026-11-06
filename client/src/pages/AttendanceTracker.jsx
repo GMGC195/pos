@@ -269,7 +269,7 @@ export default function AttendanceTracker() {
     }
   };
 
-  const handleDirectRequest = async (type, log = null) => {
+  const handleDirectRequest = async (type, log = null, customReason = null) => {
     setRequestSubmitting(true);
     try {
       const now = new Date();
@@ -277,7 +277,7 @@ export default function AttendanceTracker() {
         attendance_id: log?.id || null,
         requested_check_in: type === 'Check-In' ? now.toISOString() : null,
         requested_check_out: type === 'Check-Out' ? now.toISOString() : null,
-        reason: `Self ${type}`,
+        reason: customReason || `Self ${type}`,
         target_role: 'Both',
         request_type: type
       });
@@ -667,6 +667,68 @@ export default function AttendanceTracker() {
     proceedWithCheckout(empId, name, '');
   };
 
+  const handleEmployeeCheckOutClick = (emp) => {
+    if (!emp) return;
+    const checkInTime = new Date(emp.check_in).getTime();
+    const shiftHours = parseFloat(emp.shift_hours || 12.0);
+    let totalBreakSecs = emp.total_break_duration_seconds || 0;
+    if (emp.on_break && emp.break_start) {
+      totalBreakSecs += Math.floor((Date.now() - new Date(emp.break_start).getTime()) / 1000);
+    }
+    let prevSessionsMs = 0;
+    let completedSessionsCount = 0;
+    if (emp.sessions && emp.sessions.length > 0) {
+      emp.sessions.forEach(s => {
+        if (s.check_out && (s.attendance_id !== emp.attendance_id)) {
+          completedSessionsCount += 1;
+          const pIn = new Date(s.check_in).getTime();
+          const pOut = new Date(s.check_out).getTime();
+          const pBreak = (s.total_break_duration_seconds || 0) * 1000;
+          prevSessionsMs += Math.max(0, pOut - pIn - pBreak);
+        }
+      });
+    }
+
+    const shiftName = emp.shift || 'R1';
+    const matchedShift = shiftsList.find(s => s.name?.toUpperCase() === shiftName.toUpperCase()) || {};
+    const isSplitShift = Boolean(emp.is_split_shift ?? matchedShift.is_split_shift);
+    const shift1Start = emp.shift_start_time || emp.sessions?.[emp.sessions.length - 1]?.shift_start_time || matchedShift.start_time || '10:00';
+    const shift1End = emp.shift_end_time || emp.sessions?.[emp.sessions.length - 1]?.shift_end_time || matchedShift.end_time;
+    const shift2Start = emp.shift_start_time_2 || emp.start_time_2 || matchedShift.start_time_2;
+    const shift2End = emp.shift_end_time_2 || emp.end_time_2 || matchedShift.end_time_2;
+
+    const cleanDate = getSaudiDateString(emp.date || emp.check_in || new Date());
+    const actualCheckoutTime = Date.now();
+
+    const { expectedCheckoutTime } = calculateShiftScheduleDetailsClient({
+      cleanDate,
+      checkInTime,
+      actualCheckoutTime,
+      shiftHoursVal: shiftHours,
+      prevSessionsMs,
+      totalBreakSecs,
+      shift1Start,
+      shift1End,
+      isSplitShift,
+      shift2Start,
+      shift2End,
+      hasPreviousSessionsToday: completedSessionsCount > 0
+    });
+
+    const overtimeMins = Math.floor((actualCheckoutTime - expectedCheckoutTime) / (1000 * 60));
+
+    if (overtimeMins > 0) {
+      setOvertimeModal({ empId: emp.employee_id || emp.id, name: emp.name, overtimeMins, attendanceId: emp.attendance_id || emp.id, isRequest: true });
+      setOvertimeReason('');
+      setOvertimeWithSameTime(true);
+      setOvertimeManualHours(Math.floor(overtimeMins / 60));
+      setOvertimeManualMins(overtimeMins % 60);
+      return;
+    }
+
+    handleDirectRequest('Check-Out', { id: emp.attendance_id || emp.id });
+  };
+
   const proceedWithCheckout = async (empId, name, reason = '', ignore_overtime = false, requested_overtime_minutes = null) => {
     const actionKey = `check-out-${empId}`;
     if (pendingActions[actionKey]) return;
@@ -932,7 +994,7 @@ export default function AttendanceTracker() {
                         className="btn btn-secondary" 
                         onClick={(e) => {
                           e.preventDefault();
-                          handleDirectRequest('Check-Out', { id: emp.attendance_id });
+                          handleEmployeeCheckOutClick(emp);
                         }}
                         style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px', color: 'var(--red)', borderColor: 'var(--red)' }}
                       >
@@ -2411,7 +2473,11 @@ export default function AttendanceTracker() {
               <button 
                 className="btn btn-secondary" 
                 onClick={() => {
-                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, '', true);
+                  if (overtimeModal.isRequest) {
+                    handleDirectRequest('Check-Out', { id: overtimeModal.attendanceId }, 'Self Check-Out (Overtime Ignored)');
+                  } else {
+                    proceedWithCheckout(overtimeModal.empId, overtimeModal.name, '', true);
+                  }
                   setOvertimeModal(null);
                 }}
                 style={{ flex: 1, padding: '10px 12px', fontWeight: 600, fontSize: 14, background: 'var(--surface-2)', color: 'var(--text)', whiteSpace: 'nowrap' }}
@@ -2425,8 +2491,12 @@ export default function AttendanceTracker() {
                     toast.error('Overtime reason is required.');
                     return;
                   }
-                  const reqMins = overtimeWithSameTime ? null : (overtimeManualHours * 60) + overtimeManualMins;
-                  proceedWithCheckout(overtimeModal.empId, overtimeModal.name, overtimeReason, false, reqMins);
+                  const reqMins = overtimeWithSameTime ? overtimeModal.overtimeMins : (overtimeManualHours * 60) + overtimeManualMins;
+                  if (overtimeModal.isRequest) {
+                    handleDirectRequest('Check-Out', { id: overtimeModal.attendanceId }, `Overtime (${reqMins} min): ${overtimeReason}`);
+                  } else {
+                    proceedWithCheckout(overtimeModal.empId, overtimeModal.name, overtimeReason, false, reqMins);
+                  }
                   setOvertimeModal(null);
                 }}
                 disabled={!overtimeReason.trim()}

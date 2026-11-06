@@ -3,6 +3,15 @@ const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 
+// KSA Current Month Helper (Asia/Riyadh - UTC+3)
+const getKsaCurrentMonthStr = () => {
+  const now = new Date();
+  const ksaDate = new Date(now.getTime() + (3 * 60 + now.getTimezoneOffset()) * 60000);
+  const year = ksaDate.getFullYear();
+  const month = String(ksaDate.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
 // GET comprehensive stats for Dashboard
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -188,7 +197,7 @@ router.get('/', authenticateToken, async (req, res) => {
     `, params);
 
     // Payroll Stats
-    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const currentMonth = getKsaCurrentMonthStr(); // YYYY-MM
     let payrollStats = { total_salary_paid: 0, total_advance_given: 0 };
     
     if (isAdmin) {
@@ -268,6 +277,158 @@ router.get('/top-items', authenticateToken, async (req, res) => {
       value: parseInt(r.total_qty),
     })));
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/stats/shift-closing-analytics
+router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
+  try {
+    const { date } = req.query;
+    const targetDateExpr = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
+      ? `'${date}'::date`
+      : `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date`;
+
+    // Query shift closings for the target date or latest recent closings
+    const closingsRes = await pool.query(`
+      SELECT 
+        id, branch, cashier_name, total_sales, cash_sales, card_sales, closing_cash, closing_card,
+        login_time, logout_time, closing_type, shifts_summary, created_at,
+        EXTRACT(HOUR FROM (COALESCE(login_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as login_hour,
+        EXTRACT(HOUR FROM (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as logout_hour
+      FROM shift_closings
+      WHERE (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr}
+      ORDER BY id ASC
+    `);
+
+    // Also get active cashier shifts for live info
+    const liveShiftsRes = await pool.query(`
+      SELECT cs.id, cs.cashier_name, cs.branch, cs.start_time, cs.status,
+        EXTRACT(HOUR FROM (cs.start_time AT TIME ZONE 'Asia/Riyadh')) as start_hour
+      FROM cashier_shifts cs
+      WHERE (cs.start_time AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr}
+      ORDER BY cs.id ASC
+    `).catch(() => ({ rows: [] }));
+
+    // Also get live unclosed order sales by branch and cashier for today
+    const liveOrdersRes = await pool.query(`
+      SELECT branch, completed_by, SUM(grand_total) as live_sales, COUNT(*) as live_orders
+      FROM orders
+      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr}
+        AND status = 'Completed'
+        AND is_shift_closed = FALSE
+      GROUP BY branch, completed_by
+    `).catch(() => ({ rows: [] }));
+
+    // Fallback: If no closings on targetDate, fetch the latest closings overall to populate baseline analytics
+    let fallbackClosings = [];
+    if (closingsRes.rows.length === 0) {
+      const fbRes = await pool.query(`
+        SELECT 
+          id, branch, cashier_name, total_sales, cash_sales, card_sales, closing_cash, closing_card,
+          login_time, logout_time, closing_type, shifts_summary, created_at,
+          EXTRACT(HOUR FROM (COALESCE(login_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as login_hour,
+          EXTRACT(HOUR FROM (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as logout_hour
+        FROM shift_closings
+        ORDER BY id DESC
+        LIMIT 30
+      `).catch(() => ({ rows: [] }));
+      fallbackClosings = fbRes.rows;
+    }
+
+    const allRows = closingsRes.rows.length > 0 ? closingsRes.rows : fallbackClosings;
+
+    // Branches definition
+    const branchConfigs = [
+      { id: 'R1', name: 'Restaurant 1', aliases: ['restaurant 1', 'branch 1', 'r1', 'b1'] },
+      { id: 'R2', name: 'Restaurant 2', aliases: ['restaurant 2', 'branch 2', 'r2', 'b2'] },
+      { id: 'R3', name: 'Restaurant 3', aliases: ['restaurant 3', 'branch 3', 'r3', 'b3'] }
+    ];
+
+    const matchBranch = (branchStr, config) => {
+      if (!branchStr) return false;
+      const bNorm = branchStr.trim().toLowerCase();
+      return config.aliases.some(a => bNorm.includes(a));
+    };
+
+    const restaurantData = branchConfigs.map(bConfig => {
+      const branchClosings = allRows.filter(r => matchBranch(r.branch, bConfig));
+      const branchLiveOrders = liveOrdersRes.rows.filter(r => matchBranch(r.branch, bConfig));
+      const branchLiveShifts = liveShiftsRes.rows.filter(r => matchBranch(r.branch, bConfig));
+
+      // Separate Day and Night shifts
+      let dayShiftRecord = branchClosings.find(r => {
+        const h = r.login_hour !== null ? r.login_hour : (r.logout_hour !== null ? r.logout_hour : 12);
+        return h >= 6 && h < 18;
+      });
+
+      let nightShiftRecord = branchClosings.find(r => {
+        const h = r.login_hour !== null ? r.login_hour : (r.logout_hour !== null ? r.logout_hour : 0);
+        return (h >= 18 || h < 6);
+      });
+
+      if (!dayShiftRecord && !nightShiftRecord && branchClosings.length > 0) {
+        dayShiftRecord = branchClosings[0];
+        if (branchClosings.length > 1) nightShiftRecord = branchClosings[1];
+      }
+
+      const liveDay = branchLiveShifts.find(s => s.start_hour >= 6 && s.start_hour < 18);
+      const liveNight = branchLiveShifts.find(s => s.start_hour >= 18 || s.start_hour < 6);
+
+      const dayLiveSales = (liveDay ? branchLiveOrders.filter(o => o.completed_by === liveDay.cashier_name) : branchLiveOrders)
+        .reduce((sum, o) => sum + parseFloat(o.live_sales || 0), 0);
+      const nightLiveSales = (liveNight ? branchLiveOrders.filter(o => o.completed_by === liveNight.cashier_name) : [])
+        .reduce((sum, o) => sum + parseFloat(o.live_sales || 0), 0);
+
+      // Day Shift Values
+      const daySys = dayShiftRecord ? parseFloat(dayShiftRecord.total_sales || 0) : dayLiveSales;
+      const dayAct = dayShiftRecord 
+        ? ((dayShiftRecord.closing_cash !== null && dayShiftRecord.closing_cash !== undefined)
+            ? (parseFloat(dayShiftRecord.closing_cash || 0) + parseFloat(dayShiftRecord.closing_card || 0))
+            : daySys)
+        : dayLiveSales;
+      const dayCashier = dayShiftRecord?.cashier_name || liveDay?.cashier_name || 'Day Cashier';
+
+      // Night Shift Values
+      const nightSys = nightShiftRecord ? parseFloat(nightShiftRecord.total_sales || 0) : nightLiveSales;
+      const nightAct = nightShiftRecord
+        ? ((nightShiftRecord.closing_cash !== null && nightShiftRecord.closing_cash !== undefined)
+            ? (parseFloat(nightShiftRecord.closing_cash || 0) + parseFloat(nightShiftRecord.closing_card || 0))
+            : nightSys)
+        : nightLiveSales;
+      const nightCashier = nightShiftRecord?.cashier_name || liveNight?.cashier_name || 'Night Cashier';
+
+      const totalBranchSys = Math.round((daySys + nightSys) * 100) / 100;
+      const totalBranchAct = Math.round((dayAct + nightAct) * 100) / 100;
+
+      return {
+        restaurant_id: bConfig.id,
+        restaurant_name: bConfig.name,
+        day_shift: {
+          shift_name: 'Day Shift',
+          system_sales: Math.round(daySys * 100) / 100,
+          actual_sales: Math.round(dayAct * 100) / 100,
+          cashier_name: dayCashier,
+          is_closed: !!dayShiftRecord
+        },
+        night_shift: {
+          shift_name: 'Night Shift',
+          system_sales: Math.round(nightSys * 100) / 100,
+          actual_sales: Math.round(nightAct * 100) / 100,
+          cashier_name: nightCashier,
+          is_closed: !!nightShiftRecord
+        },
+        total_system_sales: totalBranchSys,
+        total_actual_sales: totalBranchAct
+      };
+    });
+
+    res.json({
+      date: date || new Date().toISOString().slice(0, 10),
+      restaurants: restaurantData
+    });
+  } catch (err) {
+    console.error('Error in shift-closing-analytics:', err);
     res.status(500).json({ error: err.message });
   }
 });

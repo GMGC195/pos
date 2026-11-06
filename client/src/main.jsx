@@ -2,6 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import { initAutomaticCacheCleanup } from './utils/cacheManager'
+
+// Initialize safe automatic cache cleanup (runs daily / every 24-48h, preserves pending offline orders)
+initAutomaticCacheCleanup();
 
 // Force all local date/time formatting to use Saudi Arabia time (Asia/Riyadh)
 const tz = 'Asia/Riyadh';

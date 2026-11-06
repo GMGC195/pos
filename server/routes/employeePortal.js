@@ -336,14 +336,43 @@ router.get('/khata', async (req, res) => {
 
     const month = (req.query.month && req.query.month.trim()) ? req.query.month.trim() : 'All';
 
-    const custRes = await pool.query('SELECT * FROM credit_customers WHERE employee_id = $1', [emp.id]);
+    // 1. Find credit customer by employee_id
+    let custRes = await pool.query('SELECT * FROM credit_customers WHERE employee_id = $1', [emp.id]);
+
+    // 2. Fallback: match by name, phone, or employee reference code
     if (custRes.rows.length === 0) {
-      return res.json({
-        is_registered: false,
-        message: 'You are not currently registered as a Khata credit customer.',
-        balance: 0,
-        transactions: []
-      });
+      const matchRes = await pool.query(
+        `SELECT * FROM credit_customers 
+         WHERE (category = 'Employee' AND (LOWER(TRIM(name)) = LOWER(TRIM($1)) OR (phone IS NOT NULL AND phone != '' AND phone = $2)))
+            OR LOWER(TRIM(name)) = LOWER(TRIM($1))
+            OR reference = $3
+         ORDER BY (category = 'Employee') DESC, id ASC
+         LIMIT 1`,
+        [emp.name, emp.phone || '', emp.employee_id || `EMP-${emp.id}`]
+      );
+
+      if (matchRes.rows.length > 0) {
+        const matched = matchRes.rows[0];
+        await pool.query("UPDATE credit_customers SET employee_id = $1, category = 'Employee' WHERE id = $2", [emp.id, matched.id]);
+        custRes = await pool.query('SELECT * FROM credit_customers WHERE id = $1', [matched.id]);
+      } else {
+        // 3. Auto-create staff credit customer record so employee is ALWAYS registered
+        const createRes = await pool.query(
+          `INSERT INTO credit_customers (
+             name, phone, category, is_extra_pay, employee_id, status, balance, available_branches, reference
+           ) VALUES (
+             $1, $2, 'Employee', FALSE, $3, 'Active', 0, $4, $5
+           ) RETURNING *`,
+          [
+            emp.name,
+            emp.phone || null,
+            emp.id,
+            ['Branch 1', 'Branch 2', 'Branch 3'],
+            emp.employee_id || `EMP-${emp.id}`
+          ]
+        );
+        custRes = createRes;
+      }
     }
 
     const customer = custRes.rows[0];
@@ -449,6 +478,94 @@ router.get('/khata', async (req, res) => {
   } catch (err) {
     console.error('Error in employee-portal/khata:', err);
     res.status(500).json({ error: 'Failed to load employee Khata records' });
+  }
+});
+
+router.get('/orders', async (req, res) => {
+  try {
+    const emp = await getAuthEmployee(req.user);
+    if (!emp) {
+      return res.status(404).json({ error: 'No employee record linked to this user account.' });
+    }
+
+    const month = (req.query.month && req.query.month.trim()) ? req.query.month.trim() : getKsaCurrentMonthStr();
+
+    // Find credit customer id if exists
+    const custRes = await pool.query('SELECT id FROM credit_customers WHERE employee_id = $1', [emp.id]);
+    const custId = custRes.rows[0]?.id || null;
+
+    let query = `
+      SELECT 
+        o.id,
+        o.slip_number,
+        o.created_at,
+        o.subtotal,
+        o.tax,
+        o.grand_total,
+        o.discount,
+        o.status,
+        o.order_type,
+        o.table_number,
+        o.order_taker,
+        o.branch,
+        o.completed_by,
+        o.completed_at,
+        o.comments,
+        o.payment_method,
+        (
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'id', oi.id,
+              'item_id', oi.item_id,
+              'item_name', oi.item_name,
+              'qty', oi.qty,
+              'unit_price', oi.unit_price,
+              'notes', oi.notes
+            )
+          )
+          FROM order_items oi
+          WHERE oi.order_id = o.id
+        ) AS items
+      FROM orders o
+      WHERE (
+        (o.created_at AT TIME ZONE 'Asia/Riyadh')::date >= ($1 || '-01')::date
+        AND (o.created_at AT TIME ZONE 'Asia/Riyadh')::date <= (($1 || '-01')::date + INTERVAL '1 month - 1 day')::date
+      )
+      AND (
+        ($2::int IS NOT NULL AND o.credit_customer_id = $2::int)
+        OR LOWER(COALESCE(o.order_taker, '')) = LOWER($3)
+        OR LOWER(COALESCE(o.completed_by, '')) = LOWER($3)
+        OR LOWER(COALESCE(o.order_taker, '')) = LOWER($4)
+        OR LOWER(COALESCE(o.completed_by, '')) = LOWER($4)
+      )
+      ORDER BY o.created_at DESC
+    `;
+
+    const result = await pool.query(query, [
+      month,
+      custId,
+      emp.name || '',
+      req.user.username || ''
+    ]);
+
+    const orders = result.rows.map(o => ({
+      ...o,
+      subtotal: parseFloat(o.subtotal || 0),
+      tax: parseFloat(o.tax || 0),
+      grand_total: parseFloat(o.grand_total || 0),
+      discount: parseFloat(o.discount || 0),
+      items: o.items || []
+    }));
+
+    res.json({
+      month,
+      employee_id: emp.id,
+      count: orders.length,
+      orders
+    });
+  } catch (err) {
+    console.error('Error in employee-portal/orders:', err);
+    res.status(500).json({ error: 'Failed to load employee orders' });
   }
 });
 

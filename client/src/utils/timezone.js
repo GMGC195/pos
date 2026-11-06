@@ -183,3 +183,35 @@ export const getSaudiPreviousMonthStr = (baseMonthStr) => {
   return `${year}-${String(month).padStart(2, '0')}`;
 };
 
+/**
+ * Formats 'YYYY-MM' into full month display string, e.g. "November 2026".
+ * Anchors at day 15 at midday to eliminate any possible timezone boundary rollover.
+ */
+export const formatMonthDisplay = (monthStr) => {
+  if (!monthStr || monthStr === 'All') return 'All Months';
+  const parts = String(monthStr).trim().split('-');
+  if (parts.length < 2) return monthStr;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return monthStr;
+  const d = new Date(y, m - 1, 15, 12, 0, 0);
+  return d.toLocaleString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    month: 'long',
+    year: 'numeric'
+  });
+};
+
+/**
+ * Formats 'YYYY-MM' to short month display label, e.g. "Nov Bal:"
+ */
+export const getShortMonthDisplay = (monthStr) => {
+  if (!monthStr || monthStr === 'All') return 'Mo Bal:';
+  const parts = String(monthStr).trim().split('-');
+  if (parts.length < 2) return `${monthStr}:`;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return `${monthStr}:`;
+  const d = new Date(y, m - 1, 15, 12, 0, 0);
+  return `${d.toLocaleString('en-US', { timeZone: 'Asia/Riyadh', month: 'short' })} Bal:`;
+};

@@ -5,10 +5,15 @@ const ASSETS_TO_CACHE = [
   '/pizza-placeholder.png',
 ];
 
+// Maximum dynamic API items allowed in cache to prevent storage quota exhaustion
+const MAX_API_CACHE_ENTRIES = 50;
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(ASSETS_TO_CACHE);
+    }).catch(err => {
+      console.warn('[SW] Pre-caching assets warning:', err);
     })
   );
   self.skipWaiting();
@@ -30,13 +35,39 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Helper: only cache GET responses
+// Helper: safe cache put with size-limiting and quota error handling
 function safeCachePut(request, response) {
   if (request.method !== 'GET') return;
   if (!response || response.status !== 200) return;
-  caches.open(CACHE_NAME).then((cache) => {
-    cache.put(request, response);
-  });
+
+  try {
+    caches.open(CACHE_NAME).then(async (cache) => {
+      try {
+        await cache.put(request, response);
+
+        // Periodically limit cache size for API requests to avoid filling browser quota
+        const url = new URL(request.url);
+        if (url.pathname.startsWith('/api/')) {
+          const keys = await cache.keys();
+          const apiKeys = keys.filter(k => new URL(k.url).pathname.startsWith('/api/'));
+          if (apiKeys.length > MAX_API_CACHE_ENTRIES) {
+            // Prune oldest API cache entries
+            const toDelete = apiKeys.slice(0, apiKeys.length - MAX_API_CACHE_ENTRIES);
+            for (const oldKey of toDelete) {
+              await cache.delete(oldKey);
+            }
+          }
+        }
+      } catch (putErr) {
+        // QuotaExceededError or transient storage error - gracefully ignore so page never crashes
+        console.warn('[SW] safeCachePut failed safely:', putErr.name || putErr.message);
+      }
+    }).catch((err) => {
+      console.warn('[SW] caches.open failed safely:', err);
+    });
+  } catch (outerErr) {
+    console.warn('[SW] Outer cache error ignored safely:', outerErr);
+  }
 }
 
 self.addEventListener('fetch', (event) => {
@@ -49,10 +80,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   // ── Never intercept non-GET API mutations (POST/PUT/PATCH/DELETE) ─────────
-  // The Cache API cannot store non-GET requests.
-  // Let POST/PUT/PATCH/DELETE go straight to the network with no SW interference.
   if (event.request.method !== 'GET' && url.pathname.startsWith('/api/')) {
-    return; // fall through to browser default network handling
+    return;
   }
 
   // ── Cache-first for Categories and Items (read-only rate lists) ───────────
@@ -87,7 +116,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ── SPA Navigation: always serve index.html ───────────────────────────────
+  // ── SPA Navigation: always serve index.html to guarantee no blank screen ──
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
@@ -96,7 +125,7 @@ self.addEventListener('fetch', (event) => {
             safeCachePut(event.request, networkResponse.clone());
             return networkResponse;
           }
-          if (networkResponse.status === 404) {
+          if (networkResponse && networkResponse.status === 404) {
             return caches.match('/index.html') || caches.match('/') || networkResponse;
           }
           return networkResponse;
@@ -104,7 +133,7 @@ self.addEventListener('fetch', (event) => {
         .catch(() => 
           caches.match('/index.html')
             .then(cached => cached || caches.match('/'))
-            .then(cached => cached || new Response('Network error. Please reload the page.', { status: 503, headers: { 'Content-Type': 'text/plain' } }))
+            .then(cached => cached || new Response('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Pizza Shop</title></head><body><div id="root"></div><script>location.reload()</script></body></html>', { status: 200, headers: { 'Content-Type': 'text/html' } }))
         )
     );
     return;
@@ -114,7 +143,6 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Return cached immediately, refresh in background
         fetch(event.request).then((networkResponse) => {
           safeCachePut(event.request, networkResponse.clone());
         }).catch(() => {});
@@ -124,7 +152,7 @@ self.addEventListener('fetch', (event) => {
         safeCachePut(event.request, networkResponse.clone());
         return networkResponse;
       });
-    })
+    }).catch(() => fetch(event.request))
   );
 });
 

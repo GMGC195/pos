@@ -108,7 +108,7 @@ router.get('/', authenticateToken, async (req, res) => {
         cal.previous_values AS old_data,
         cal.new_values AS new_data,
         cal.performed_by,
-        COALESCE(cc.branch, 'All') AS branch,
+        'All' AS branch,
         TO_CHAR(cal.created_at, 'YYYY-MM') AS month,
         cal.created_at
       FROM credit_audit_logs cal
@@ -142,10 +142,10 @@ router.get('/', authenticateToken, async (req, res) => {
         'Salary Payment' AS action,
         pay.employee_id::text AS entity_id,
         COALESCE(e.name, 'Employee #' || pay.employee_id) AS entity_name,
-        'Payment of SAR ' || pay.amount || ' via ' || pay.payment_method || ' (Ref: ' || COALESCE(pay.reference, '-') || ')' AS description,
-        pay.reference AS reason,
+        'Payment of SAR ' || pay.amount || ' via ' || pay.payment_method || ' (Notes: ' || COALESCE(pay.notes, '-') || ')' AS description,
+        pay.notes AS reason,
         NULL::jsonb AS old_data,
-        jsonb_build_object('amount', pay.amount, 'payment_method', pay.payment_method, 'reference', pay.reference) AS new_data,
+        jsonb_build_object('amount', pay.amount, 'payment_method', pay.payment_method, 'notes', pay.notes) AS new_data,
         pay.paid_by AS performed_by,
         COALESCE(e.branch, 'All') AS branch,
         pay.month,

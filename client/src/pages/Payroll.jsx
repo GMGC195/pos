@@ -116,13 +116,9 @@ export default function Payroll() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    try {
-      return sessionStorage.getItem('payroll_selected_month') || getSaudiCurrentMonthStr()
-    } catch {
-      return getSaudiCurrentMonthStr()
-    }
+    return getSaudiCurrentMonthStr()
   })
-  const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'detail' (always defaults to sheet on full page reload)
+  const [viewMode, setViewMode] = useState('detail') // 'detail' by default | 'sheet' as alternative
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('ALL') // 'ALL' | 'R1' | 'R2' | 'R3'
   const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(() => {
     try {

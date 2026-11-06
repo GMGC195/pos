@@ -912,7 +912,7 @@ router.post('/:id/payment', async (req, res) => {
   }
 
   // Determine current/fallback billing month if not provided
-  const currentMonth = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  const currentMonth = getKsaCurrentMonthStr(); // 'YYYY-MM'
   const targetBillingMonth = (billing_month && billing_month.trim()) ? billing_month.trim() : currentMonth;
 
   try {

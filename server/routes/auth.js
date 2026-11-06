@@ -91,7 +91,33 @@ router.post('/change-password', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 router.get('/users', authenticateToken, isAdmin, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username, email, role, shift, branch, created_at FROM users ORDER BY created_at DESC');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER').catch(() => {});
+    const result = await pool.query(`
+      SELECT 
+        u.id, u.username, u.email, u.role, u.shift, u.branch, u.created_at, u.employee_id,
+        e.name AS employee_name, e.employee_id AS employee_code, e.role AS employee_role, e.branch AS employee_branch, e.department AS employee_department
+      FROM users u
+      LEFT JOIN employees e ON u.employee_id = e.id
+      ORDER BY u.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/auth/employee-options (For linking in User Management)
+router.get('/employee-options', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        e.id, e.name, e.employee_id AS employee_code, e.role, e.department, e.branch, e.status,
+        u.id AS linked_user_id, u.username AS linked_username
+      FROM employees e
+      LEFT JOIN users u ON u.employee_id = e.id
+      ORDER BY e.name ASC
+    `);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -103,13 +129,25 @@ router.get('/users', authenticateToken, isAdmin, async (req, res) => {
 // POST /api/auth/users (Admin only)
 // -------------------------------------------------------------
 router.post('/users', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role, shift, branch } = req.body;
+  const { username, email, password, role, shift, branch, employee_id } = req.body;
 
   try {
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER').catch(() => {});
+
     // Check if user exists
     const check = await pool.query('SELECT * FROM users WHERE username = $1 OR email = $2', [username, email]);
     if (check.rows.length > 0) {
       return res.status(400).json({ error: 'Username or Email already exists' });
+    }
+
+    const parsedEmpId = employee_id ? parseInt(employee_id) : null;
+    if (parsedEmpId) {
+      const existingLink = await pool.query('SELECT id, username FROM users WHERE employee_id = $1', [parsedEmpId]);
+      if (existingLink.rows.length > 0) {
+        return res.status(400).json({ 
+          error: `This employee is already linked to user account '${existingLink.rows[0].username}'. Please choose another employee or unlink first.` 
+        });
+      }
     }
 
     const password_hash = await bcrypt.hash(password, 10);
@@ -118,8 +156,8 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
     if (role === 'Operator' && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Restaurant 1';
 
     const result = await pool.query(
-      'INSERT INTO users (username, email, password_hash, role, shift, branch) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, username, email, role, shift, branch',
-      [username, email, password_hash, role || 'Operator', shift || null, finalBranch || null]
+      'INSERT INTO users (username, email, password_hash, role, shift, branch, employee_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, username, email, role, shift, branch, employee_id',
+      [username, email, password_hash, role || 'Operator', shift || null, finalBranch || null, parsedEmpId]
     );
 
     res.status(201).json(result.rows[0]);
@@ -133,32 +171,44 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
 // PUT /api/auth/users/:id (Admin only)
 // -------------------------------------------------------------
 router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role, shift, branch } = req.body;
+  const { username, email, password, role, shift, branch, employee_id } = req.body;
   const { id } = req.params;
 
   try {
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER').catch(() => {});
+
     // Protection: Cannot edit a Developer user
     const role_check = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
     if (role_check.rows[0]?.role?.toLowerCase() === 'developer' && req.user.role?.toLowerCase() !== 'developer') {
       return res.status(403).json({ error: 'Only Developers can modify Developer accounts' });
     }
 
+    const parsedEmpId = (employee_id !== undefined && employee_id !== null && employee_id !== '') ? parseInt(employee_id) : null;
+    if (parsedEmpId) {
+      const existingLink = await pool.query('SELECT id, username FROM users WHERE employee_id = $1 AND id != $2', [parsedEmpId, id]);
+      if (existingLink.rows.length > 0) {
+        return res.status(400).json({ 
+          error: `This employee is already linked to user account '${existingLink.rows[0].username}'. Please choose another employee or unlink first.` 
+        });
+      }
+    }
+
     let finalBranch = branch;
     if (['Order Taker', 'Cashier'].includes(role) && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Branch 1';
     if (role === 'Operator' && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Restaurant 1';
 
-    let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4, branch = $5';
-    const params = [username, email, role, shift || null, finalBranch || null, id];
+    let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4, branch = $5, employee_id = $6';
+    const params = [username, email, role, shift || null, finalBranch || null, parsedEmpId, id];
 
     if (password) {
       const password_hash = await bcrypt.hash(password, 10);
-      query += ', password_hash = $7 WHERE id = $6';
+      query += ', password_hash = $8 WHERE id = $7';
       params.push(password_hash);
     } else {
-      query += ' WHERE id = $6';
+      query += ' WHERE id = $7';
     }
 
-    const result = await pool.query(query + ' RETURNING id, username, email, role, shift, branch', params);
+    const result = await pool.query(query + ' RETURNING id, username, email, role, shift, branch, employee_id', params);
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);

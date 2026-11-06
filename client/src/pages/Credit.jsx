@@ -10,7 +10,12 @@ import {
 import { CURRENCY } from '../config';
 import { useAuth } from '../contexts/AuthContext';
 import OrderDetailModal from '../components/OrderDetailModal';
-import { getSaudiCurrentMonthStr, getSaudiPreviousMonthStr } from '../utils/timezone';
+import { 
+  getSaudiCurrentMonthStr, 
+  getSaudiPreviousMonthStr,
+  formatMonthDisplay,
+  getShortMonthDisplay 
+} from '../utils/timezone';
 
 const AVAILABLE_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3'];
 
@@ -18,31 +23,11 @@ const getCurrentMonthStr = () => {
   return getSaudiCurrentMonthStr();
 };
 
-const getShortMonthDisplay = (monthStr) => {
-  if (!monthStr || monthStr === 'All') return 'Mo Bal:';
-  const parts = monthStr.split('-');
-  if (parts.length < 2) return `${monthStr}:`;
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  const d = new Date(y, m - 1, 1);
-  return !isNaN(d.getTime()) ? `${d.toLocaleString('en-US', { month: 'short' })} Bal:` : `${monthStr}:`;
-};
-
 const getBranchShortName = (b) => {
   if (!b || b === 'All') return 'All';
   const match = b.match(/\d+/);
   if (match) return `B${match[0]}`;
   return b.length > 5 ? b.substring(0, 4) : b;
-};
-
-const formatMonthDisplay = (monthStr) => {
-  if (!monthStr || monthStr === 'All') return 'All Months';
-  const parts = monthStr.split('-');
-  if (parts.length < 2) return monthStr;
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  const d = new Date(y, m - 1, 1);
-  return !isNaN(d.getTime()) ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : monthStr;
 };
 
 // ── MultiSelect Dropdown with Search ──────────────────────────────────────────
@@ -2205,9 +2190,7 @@ export default function Credit() {
     
     // Always include current month and past 12 months using Saudi timezone sequence
     for (let i = 0; i < 12; i++) {
-      const parts = mKey.split('-');
-      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
-      const label = !isNaN(d.getTime()) ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : mKey;
+      const label = formatMonthDisplay(mKey);
       monthMap.set(mKey, label);
       mKey = getSaudiPreviousMonthStr(mKey);
     }
@@ -2217,9 +2200,7 @@ export default function Credit() {
       monthlySummary.forEach(s => {
         const mKey = s.billing_month || s.month;
         if (mKey && typeof mKey === 'string' && mKey.includes('-') && !monthMap.has(mKey)) {
-          const parts = mKey.split('-');
-          const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
-          const label = !isNaN(d.getTime()) ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : mKey;
+          const label = formatMonthDisplay(mKey);
           monthMap.set(mKey, label);
         }
       });
@@ -4308,7 +4289,9 @@ export default function Credit() {
                           {/* Column 3: Description & Remarks */}
                           <td style={{ padding: '8px 12px', fontSize: 12 }}>
                             <div>
-                              {t.type === 'CREDIT_ORDER' ? (
+                              {t.type === 'SETTLEMENT_NOTICE' ? (
+                                <span style={{ fontWeight: 700, color: '#2563eb' }}>Settlement History Notice</span>
+                              ) : t.type === 'CREDIT_ORDER' ? (
                                 <span style={{ fontWeight: 600 }}>Order Charge {hasOrder ? '🔍 (Click row to view slip)' : ''}</span>
                               ) : t.type === 'CHARGE' ? (
                                 <span>Manual Charge {t.cashier_name ? `(by ${t.cashier_name})` : ''}</span>
@@ -4329,6 +4312,10 @@ export default function Credit() {
                               <span style={{ fontSize: 10.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
                                 Extra Pay
                               </span>
+                            ) : (t.classification === 'Settlement History' || t.type === 'SETTLEMENT_NOTICE') ? (
+                              <span style={{ fontSize: 10.5, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                Settlement History
+                              </span>
                             ) : (
                               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                                 -
@@ -4337,8 +4324,12 @@ export default function Credit() {
                           </td>
 
                           {/* Column 5: Amount */}
-                          <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 700, color: (t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? 'var(--red)' : 'var(--green)', textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
-                            {(t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}
+                          <td style={{ padding: '8px 12px', fontSize: 13, textAlign: 'right', fontWeight: 700, color: t.type === 'SETTLEMENT_NOTICE' ? '#2563eb' : ((t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? 'var(--red)' : 'var(--green)'), textDecoration: t.isCancelled ? 'line-through' : 'none' }}>
+                            {t.type === 'SETTLEMENT_NOTICE' ? (
+                              <span>{CURRENCY} {Number(t.amount).toFixed(2)}</span>
+                            ) : (
+                              <span>{(t.type === 'CREDIT_ORDER' || t.type === 'CHARGE') ? '+' : '-'} {CURRENCY} {Number(t.amount).toFixed(2)}</span>
+                            )}
                           </td>
 
                           {/* Column 6: Running Balance */}
