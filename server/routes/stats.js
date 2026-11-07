@@ -401,22 +401,48 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
       const totalBranchSys = Math.round((daySys + nightSys) * 100) / 100;
       const totalBranchAct = Math.round((dayAct + nightAct) * 100) / 100;
 
+      const dayDiff = Math.round((dayAct - daySys) * 100) / 100;
+      const dayDiffPct = daySys > 0 ? Math.round(((dayAct - daySys) / daySys) * 1000) / 10 : 0;
+
+      const nightDiff = Math.round((nightAct - nightSys) * 100) / 100;
+      const nightDiffPct = nightSys > 0 ? Math.round(((nightAct - nightSys) / nightSys) * 1000) / 10 : 0;
+
       return {
         restaurant_id: bConfig.id,
         restaurant_name: bConfig.name,
         day_shift: {
+          id: dayShiftRecord?.id || null,
+          shift_id: dayShiftRecord?.id || liveDay?.id || null,
+          shift_number: dayShiftRecord?.id ? `Shift #${dayShiftRecord.id}` : (liveDay ? `Shift #${liveDay.id}` : 'Shift 1'),
           shift_name: 'Day Shift',
           system_sales: Math.round(daySys * 100) / 100,
           actual_sales: Math.round(dayAct * 100) / 100,
+          closing_cash: dayShiftRecord?.closing_cash !== null && dayShiftRecord?.closing_cash !== undefined ? parseFloat(dayShiftRecord.closing_cash) : null,
+          closing_card: dayShiftRecord?.closing_card !== null && dayShiftRecord?.closing_card !== undefined ? parseFloat(dayShiftRecord.closing_card) : null,
+          start_time: dayShiftRecord?.login_time || liveDay?.start_time || null,
+          closing_time: dayShiftRecord?.logout_time || dayShiftRecord?.created_at || (liveDay ? 'Active (In-Progress)' : null),
+          difference_amount: dayDiff,
+          difference_percentage: dayDiffPct,
           cashier_name: dayCashier,
-          is_closed: !!dayShiftRecord
+          is_closed: !!dayShiftRecord,
+          branch: bConfig.name
         },
         night_shift: {
+          id: nightShiftRecord?.id || null,
+          shift_id: nightShiftRecord?.id || liveNight?.id || null,
+          shift_number: nightShiftRecord?.id ? `Shift #${nightShiftRecord.id}` : (liveNight ? `Shift #${liveNight.id}` : 'Shift 2'),
           shift_name: 'Night Shift',
           system_sales: Math.round(nightSys * 100) / 100,
           actual_sales: Math.round(nightAct * 100) / 100,
+          closing_cash: nightShiftRecord?.closing_cash !== null && nightShiftRecord?.closing_card !== undefined ? parseFloat(nightShiftRecord.closing_cash) : null,
+          closing_card: nightShiftRecord?.closing_card !== null && nightShiftRecord?.closing_card !== undefined ? parseFloat(nightShiftRecord.closing_card) : null,
+          start_time: nightShiftRecord?.login_time || liveNight?.start_time || null,
+          closing_time: nightShiftRecord?.logout_time || nightShiftRecord?.created_at || (liveNight ? 'Active (In-Progress)' : null),
+          difference_amount: nightDiff,
+          difference_percentage: nightDiffPct,
           cashier_name: nightCashier,
-          is_closed: !!nightShiftRecord
+          is_closed: !!nightShiftRecord,
+          branch: bConfig.name
         },
         total_system_sales: totalBranchSys,
         total_actual_sales: totalBranchAct

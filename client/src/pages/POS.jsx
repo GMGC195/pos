@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import toast from 'react-hot-toast'
 import { CURRENCY } from '../config'
@@ -28,7 +29,8 @@ import {
   ChevronUp,
   ChevronLeft,
   Ban,
-  Move
+  Move,
+  ArrowLeftRight
 } from 'lucide-react'
 import {
   savePendingOrder,
@@ -366,6 +368,7 @@ const CreditCustomerDropdown = ({
 };
 
 export default function POS() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isManagement = user?.role?.trim().toLowerCase() === 'management';
   const {
@@ -2373,7 +2376,50 @@ export default function POS() {
                     />
                   )}
 
-                  <div style={{ paddingTop: window.innerWidth <= 900 ? 12 : 4, paddingBottom: window.innerWidth <= 900 ? 12 : 0, display: 'flex', gap: window.innerWidth <= 900 ? 6 : 10, position: window.innerWidth <= 900 ? 'sticky' : 'static', bottom: window.innerWidth <= 900 ? -12 : 'auto', background: 'white', zIndex: 10, borderTop: window.innerWidth <= 900 ? '1px solid #eee' : 'none', marginTop: window.innerWidth <= 900 ? 12 : 0 }}>
+                  <div style={{ marginTop: 10 }}>
+                    <button
+                      type="button"
+                      style={{
+                        width: '100%',
+                        padding: window.innerWidth <= 900 ? '9px 10px' : '10px 14px',
+                        fontSize: window.innerWidth <= 900 ? 11.5 : 13,
+                        fontWeight: 700,
+                        borderRadius: 8,
+                        border: '1.5px solid #0284c7',
+                        background: '#f0f9ff',
+                        color: '#0369a1',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        transition: 'all 0.2s ease'
+                      }}
+                      onClick={() => {
+                        if (!cart || cart.length === 0) {
+                          toast.error('Cart is empty.');
+                          return;
+                        }
+                        const transferItems = cart.map((c) => ({
+                          item_id: c.id || null,
+                          dish_name: c.name || '',
+                          uom: c.uom || 'Plate (P)',
+                          requested_qty: parseFloat(c.qty) || 1,
+                          image_url: c.image_url || null,
+                          price: c.price || null,
+                          remarks: c.instructions || ''
+                        }));
+                        sessionStorage.setItem('pending_internal_transfer_items', JSON.stringify(transferItems));
+                        setConfirmModal(false);
+                        navigate('/internal-branch?source=pos');
+                      }}
+                    >
+                      <ArrowLeftRight size={16} color="#0284c7" />
+                      <span>Create Internal Branch Transfer ({cart.reduce((sum, item) => sum + (parseInt(item.qty, 10) || 1), 0)} items)</span>
+                    </button>
+                  </div>
+
+                  <div style={{ paddingTop: window.innerWidth <= 900 ? 8 : 4, paddingBottom: window.innerWidth <= 900 ? 12 : 0, display: 'flex', gap: window.innerWidth <= 900 ? 6 : 10, position: window.innerWidth <= 900 ? 'sticky' : 'static', bottom: window.innerWidth <= 900 ? -12 : 'auto', background: 'white', zIndex: 10, borderTop: window.innerWidth <= 900 ? '1px solid #eee' : 'none', marginTop: window.innerWidth <= 900 ? 8 : 4 }}>
                     <button className="btn btn-secondary" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: window.innerWidth <= 900 ? '10px 4px' : '10px 16px', fontSize: window.innerWidth <= 900 ? 11 : 14, cursor: isManagement ? 'not-allowed' : 'pointer', opacity: isManagement ? 0.6 : 1 }} onClick={() => { if (!isManagement) handlePlaceOrder(paymentMethod, false) }} disabled={processing !== false || isManagement}>
                       {processing === 'punch' ? 'Completing...' : 'Complete'}
                     </button>

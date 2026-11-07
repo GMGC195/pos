@@ -31,6 +31,7 @@ const SalarySpreadsheet    = lazy(() => import('./pages/SalarySpreadsheet'))
 const Logs                 = lazy(() => import('./pages/Logs'))
 const EditAttendanceLogs   = lazy(() => import('./pages/EditAttendanceLogs'))
 const EmployeePortal       = lazy(() => import('./pages/EmployeePortal'))
+const InternalBranch       = lazy(() => import('./pages/InternalBranch'))
 
 // Minimal full-screen spinner shown while a page chunk is loading
 function PageLoader() {
@@ -89,6 +90,7 @@ export default function App() {
                 <Route path="/reports"         element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management']}><Reports isTodaySales={false} /></ProtectedRoute>} />
                 <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Cashier']}><CancelRequests /></ProtectedRoute>} />
                 <Route path="/credit"          element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Cashier']}><Credit /></ProtectedRoute>} />
+                <Route path="/internal-branch" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator', 'Cashier', 'Order Taker']}><InternalBranch /></ProtectedRoute>} />
                 <Route path="/stock-management" element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><StockManagement /></ProtectedRoute>} />
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><ProductCostManagement /></ProtectedRoute>} />
 

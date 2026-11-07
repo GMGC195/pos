@@ -42,7 +42,8 @@ import {
   FileSpreadsheet,
   Bike,
   UserCheck,
-  History
+  History,
+  ArrowLeftRight
 } from 'lucide-react'
 
 const navGroups = [
@@ -55,6 +56,7 @@ const navGroups = [
       { to: '/held-deliveries', icon: <Bike size={18} strokeWidth={2.2} />, label: 'Held Deliveries', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
       { to: '/credit', icon: <BookOpen size={18} strokeWidth={2.2} />, label: 'Credit (Khata)', roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
+      { to: '/internal-branch', icon: <ArrowLeftRight size={18} strokeWidth={2.2} />, label: 'Internal Branch', roles: ['Developer', 'Admin', 'Management', 'Operator', 'Cashier', 'Order Taker'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
     ]
   },

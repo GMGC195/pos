@@ -1,40 +1,72 @@
 import React, { useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import EditShiftClosingModal from './EditShiftClosingModal';
+import { Edit3 } from 'lucide-react';
 
 /**
  * BaseSaleSurplusChart
  * Replicates the "Base sale and surplus per shift" stacked bar visualization
  * with dynamic badge threshold indicators (under 25%, 25–50%, over 50%).
+ * Features an enriched hover tooltip displaying:
+ * - Shift Name / Shift Number
+ * - Cashier Name
+ * - Shift Start Time & Closing Time
+ * - System Sale (ERP transaction calculated)
+ * - Actual Sale (Cashier closing entered)
+ * - Difference Amount & Difference Percentage
+ * Plus controlled Edit capability for Admin & Developer roles.
  */
 export default function BaseSaleSurplusChart({ 
   restaurants = [], 
   currency = 'SAR', 
-  loading = false 
+  loading = false,
+  onShiftUpdated
 }) {
+  const { user } = useAuth();
+  const userRole = user?.role?.trim().toLowerCase();
+  const isAdminOrDev = userRole === 'admin' || userRole === 'developer';
+
   const [hoveredShift, setHoveredShift] = useState(null);
+  const [editingClosing, setEditingClosing] = useState(null);
 
   // Normalize restaurants list (ensuring R1, R2, R3 exist)
   const defaultRestaurants = [
     {
       restaurant_id: 'R1',
       restaurant_name: 'Branch 1',
-      night_shift: { shift_name: 'Night', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' },
-      day_shift: { shift_name: 'Day', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' }
+      night_shift: { shift_name: 'Night Shift', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' },
+      day_shift: { shift_name: 'Day Shift', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' }
     },
     {
       restaurant_id: 'R2',
       restaurant_name: 'Branch 2',
-      night_shift: { shift_name: 'Night', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' },
-      day_shift: { shift_name: 'Day', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' }
+      night_shift: { shift_name: 'Night Shift', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' },
+      day_shift: { shift_name: 'Day Shift', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' }
     },
     {
       restaurant_id: 'R3',
       restaurant_name: 'Branch 3',
-      night_shift: { shift_name: 'Night', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' },
-      day_shift: { shift_name: 'Day', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' }
+      night_shift: { shift_name: 'Night Shift', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' },
+      day_shift: { shift_name: 'Day Shift', system_sales: 0, actual_sales: 0, cashier_name: 'Unassigned' }
     }
   ];
 
   const branchList = (restaurants && restaurants.length > 0) ? restaurants : defaultRestaurants;
+
+  // Format date/time helper
+  const formatTime = (timeVal) => {
+    if (!timeVal) return 'N/A';
+    if (typeof timeVal === 'string' && (timeVal.toLowerCase().includes('active') || timeVal.toLowerCase().includes('progress'))) {
+      return timeVal;
+    }
+    try {
+      const d = new Date(timeVal);
+      if (isNaN(d.getTime())) return String(timeVal);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {
+      return String(timeVal);
+    }
+  };
 
   // Process metrics for a shift
   const computeShiftMetrics = (shift, fallbackCashier = 'Unassigned') => {
@@ -66,6 +98,10 @@ export default function BaseSaleSurplusChart({
       badgeCategory = 'over 50%';
     }
 
+    // Difference calculations
+    const diffAmount = act - sys;
+    const diffPct = sys > 0 ? ((act - sys) / sys) * 100 : 0;
+
     return {
       sys,
       act,
@@ -76,7 +112,14 @@ export default function BaseSaleSurplusChart({
       rateStr,
       badgeColor,
       badgeCategory,
-      cashier: shift?.cashier_name || fallbackCashier
+      diffAmount,
+      diffPct,
+      cashier: shift?.cashier_name || fallbackCashier,
+      shiftId: shift?.id || shift?.shift_id || null,
+      shiftNumber: shift?.shift_number || (shift?.id ? `Shift #${shift.id}` : null),
+      startTime: formatTime(shift?.start_time),
+      closingTime: formatTime(shift?.closing_time),
+      rawShift: shift
     };
   };
 
@@ -118,17 +161,38 @@ export default function BaseSaleSurplusChart({
   const barWidth = 46;
   const barGap = 22;
 
+  const handleEditClick = (shiftInfo) => {
+    if (!isAdminOrDev || !shiftInfo?.shiftId) return;
+    setEditingClosing({
+      id: shiftInfo.shiftId,
+      branch: shiftInfo.branch,
+      cashier_name: shiftInfo.cashier,
+      closing_type: shiftInfo.shift,
+      total_sales: shiftInfo.sys,
+      closing_cash: shiftInfo.rawShift?.closing_cash,
+      closing_card: shiftInfo.rawShift?.closing_card,
+      difference: shiftInfo.diffAmount
+    });
+  };
+
   return (
     <div className="base-sale-surplus-card" style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', position: 'relative' }}>
       
       {/* Header */}
-      <div style={{ marginBottom: 18 }}>
-        <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0', letterSpacing: '-0.01em' }}>
-          Base sale and surplus per shift
-        </h3>
-        <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-          Bar = system base (blue) + exceeded surplus (orange). Badge = surplus ÷ base.
-        </p>
+      <div style={{ marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0', letterSpacing: '-0.01em' }}>
+            Base sale and surplus per shift
+          </h3>
+          <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+            Bar = system base (blue) + exceeded surplus (orange). Badge = surplus ÷ base.
+          </p>
+        </div>
+        {isAdminOrDev && (
+          <span style={{ fontSize: 11, background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Edit3 size={12} /> Admin Edit Enabled
+          </span>
+        )}
       </div>
 
       {/* SVG Chart with horizontal scrolling wrapper for mobile safety */}
@@ -216,23 +280,38 @@ export default function BaseSaleSurplusChart({
                     const badgeX = s.x + (barWidth / 2) - (badgeW / 2);
                     const badgeY = (surplusH > 0 ? surplusY : baseY) - 17;
 
+                    const shiftPayload = {
+                      id: s.id,
+                      branch: branchLabel,
+                      shift: s.type,
+                      shiftNumber: m.shiftNumber || `${s.type} Shift`,
+                      cashier: m.cashier,
+                      startTime: m.startTime,
+                      closingTime: m.closingTime,
+                      sys: m.sys,
+                      act: m.act,
+                      base: m.base,
+                      surplus: m.surplus,
+                      diffAmount: m.diffAmount,
+                      diffPct: m.diffPct,
+                      rateStr: m.rateStr,
+                      badgeCategory: m.badgeCategory,
+                      badgeColor: m.badgeColor,
+                      shiftId: m.shiftId,
+                      rawShift: m.rawShift
+                    };
+
                     return (
                       <g 
                         key={s.id} 
-                        style={{ cursor: 'pointer' }}
-                        onMouseEnter={() => setHoveredShift({
-                          id: s.id,
-                          branch: branchLabel,
-                          shift: s.type,
-                          cashier: m.cashier,
-                          base: m.base,
-                          surplus: m.surplus,
-                          actual: m.act,
-                          rateStr: m.rateStr,
-                          badgeCategory: m.badgeCategory,
-                          badgeColor: m.badgeColor
-                        })}
+                        style={{ cursor: isAdminOrDev && m.shiftId ? 'pointer' : 'default' }}
+                        onMouseEnter={() => setHoveredShift(shiftPayload)}
                         onMouseLeave={() => setHoveredShift(null)}
+                        onClick={() => {
+                          if (isAdminOrDev && m.shiftId) {
+                            handleEditClick(shiftPayload);
+                          }
+                        }}
                       >
                         {/* Hover Column Background Glow */}
                         {isHovered && (
@@ -279,14 +358,13 @@ export default function BaseSaleSurplusChart({
                             height={badgeH}
                             rx={badgeH / 2}
                             fill={m.badgeColor}
-                            filter="drop-shadow(0px 1px 2px rgba(0,0,0,0.15))"
                           />
                           <text
-                            x={s.x + barWidth / 2}
+                            x={badgeX + badgeW / 2}
                             y={badgeY + 13.5}
                             textAnchor="middle"
                             fontSize="11"
-                            fontWeight="700"
+                            fontWeight="800"
                             fill="#ffffff"
                             fontFamily="system-ui, -apple-system, sans-serif"
                           >
@@ -294,18 +372,20 @@ export default function BaseSaleSurplusChart({
                           </text>
                         </g>
 
-                        {/* X-Axis Labels: Shift Name & Cashier Username */}
+                        {/* Shift Label Under Axis */}
                         <text
                           x={s.x + barWidth / 2}
                           y={yBase + 18}
                           textAnchor="middle"
                           fontSize="13"
-                          fontWeight="600"
+                          fontWeight="700"
                           fill="#1e293b"
                           fontFamily="system-ui, -apple-system, sans-serif"
                         >
                           {s.type}
                         </text>
+
+                        {/* Cashier Name Under Shift Label */}
                         <text
                           x={s.x + barWidth / 2}
                           y={yBase + 34}
@@ -352,41 +432,111 @@ export default function BaseSaleSurplusChart({
       {hoveredShift && (
         <div style={{
           position: 'absolute',
-          top: 16,
-          right: 24,
+          top: 14,
+          right: 20,
           background: '#0f172a',
           color: '#ffffff',
-          borderRadius: 8,
-          padding: '8px 14px',
+          borderRadius: 10,
+          padding: '12px 16px',
           fontSize: 12,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
-          pointerEvents: 'none',
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)',
+          pointerEvents: isAdminOrDev && hoveredShift.shiftId ? 'auto' : 'none',
           display: 'flex',
           flexDirection: 'column',
-          gap: 3,
-          zIndex: 10
+          gap: 4,
+          zIndex: 20,
+          minWidth: 260
         }}>
-          <div style={{ fontWeight: 700, fontSize: 13, borderBottom: '1px solid rgba(255,255,255,0.15)', paddingBottom: 4 }}>
-            {hoveredShift.branch} — {hoveredShift.shift} Shift ({hoveredShift.cashier})
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.15)', paddingBottom: 6 }}>
+            <span style={{ fontWeight: 800, fontSize: 13.5, color: '#ffffff' }}>
+              {hoveredShift.branch} — {hoveredShift.shift} Shift
+            </span>
+            {hoveredShift.shiftNumber && (
+              <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.15)', padding: '2px 6px', borderRadius: 4, color: '#e2e8f0' }}>
+                {hoveredShift.shiftNumber}
+              </span>
+            )}
           </div>
+
+          {/* Cashier Name */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 2 }}>
+            <span style={{ color: '#94a3b8' }}>Cashier:</span>
+            <strong style={{ color: '#f8fafc' }}>{hoveredShift.cashier}</strong>
+          </div>
+
+          {/* Times */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ color: '#94a3b8' }}>Shift Start:</span>
+            <span style={{ color: '#e2e8f0' }}>{hoveredShift.startTime}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ color: '#94a3b8' }}>Shift Closing:</span>
+            <span style={{ color: '#e2e8f0' }}>{hoveredShift.closingTime}</span>
+          </div>
+
+          {/* System Sale & Actual Sale */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4, paddingTop: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+              <span style={{ color: '#93c5fd' }}>System Sale:</span>
+              <strong style={{ color: '#bfdbfe' }}>{currency} {hoveredShift.sys.toFixed(2)}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginTop: 2 }}>
+              <span style={{ color: '#fdba74' }}>Actual Sale:</span>
+              <strong style={{ color: '#fed7aa' }}>{currency} {hoveredShift.act.toFixed(2)}</strong>
+            </div>
+          </div>
+
+          {/* Difference Amount & Difference Percentage */}
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginTop: 2 }}>
-            <span style={{ color: '#93c5fd' }}>System Base:</span>
-            <strong>{currency} {hoveredShift.base.toFixed(2)}</strong>
+            <span style={{ color: '#cbd5e1' }}>Difference:</span>
+            <strong style={{ color: hoveredShift.diffAmount >= 0 ? '#4ade80' : '#f87171' }}>
+              {hoveredShift.diffAmount >= 0 ? '+' : ''}{currency} {hoveredShift.diffAmount.toFixed(2)}
+            </strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-            <span style={{ color: '#fdba74' }}>Exceeded Surplus:</span>
-            <strong>{currency} {hoveredShift.surplus.toFixed(2)}</strong>
+            <span style={{ color: '#cbd5e1' }}>Difference %:</span>
+            <strong style={{ color: hoveredShift.diffPct >= 0 ? '#4ade80' : '#f87171' }}>
+              {hoveredShift.diffPct >= 0 ? '+' : ''}{hoveredShift.diffPct.toFixed(1)}%
+            </strong>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-            <span style={{ color: '#cbd5e1' }}>Actual Total:</span>
-            <strong>{currency} {hoveredShift.actual.toFixed(2)}</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 4, marginTop: 2 }}>
-            <span>Surplus Rate:</span>
+
+          {/* Surplus Rate Badge info */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: 4, marginTop: 2 }}>
+            <span style={{ color: '#94a3b8' }}>Surplus Rate:</span>
             <span style={{ color: hoveredShift.badgeColor, fontWeight: 800 }}>
               {hoveredShift.rateStr} ({hoveredShift.badgeCategory})
             </span>
           </div>
+
+          {/* Admin Edit Action Button */}
+          {isAdminOrDev && hoveredShift.shiftId && (
+            <button
+              type="button"
+              onClick={() => handleEditClick(hoveredShift)}
+              style={{
+                marginTop: 6,
+                padding: '6px 10px',
+                background: '#dc2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                fontSize: 11.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                transition: 'background 0.15s'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#b91c1c'}
+              onMouseLeave={e => e.currentTarget.style.background = '#dc2626'}
+            >
+              <Edit3 size={12} /> Edit Shift Closing (Admin)
+            </button>
+          )}
+
         </div>
       )}
 
@@ -435,6 +585,18 @@ export default function BaseSaleSurplusChart({
           </span>
         </div>
       </div>
+
+      {/* Controlled Edit Modal for Admin & Developer */}
+      {editingClosing && (
+        <EditShiftClosingModal
+          closing={editingClosing}
+          currency={currency}
+          onClose={() => setEditingClosing(null)}
+          onSuccess={() => {
+            if (onShiftUpdated) onShiftUpdated();
+          }}
+        />
+      )}
 
     </div>
   );

@@ -915,12 +915,13 @@ router.post('/:id/payment', async (req, res) => {
   const currentMonth = getKsaCurrentMonthStr(); // 'YYYY-MM'
   const targetBillingMonth = (billing_month && billing_month.trim()) ? billing_month.trim() : currentMonth;
 
+  const client = await pool.connect();
   try {
-    await pool.query('BEGIN');
+    await client.query('BEGIN');
 
     // Duplicate submission prevention: check for identical transaction within 4 seconds
     const transactionType = action === 'CHARGE' ? 'CHARGE' : 'PAYMENT';
-    const dupCheck = await pool.query(
+    const dupCheck = await client.query(
       `SELECT id FROM credit_transactions 
        WHERE credit_customer_id = $1 
          AND type = $2 
@@ -930,14 +931,17 @@ router.post('/:id/payment', async (req, res) => {
       [id, transactionType, numAmount, targetBillingMonth]
     );
     if (dupCheck.rows.length > 0) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Duplicate transaction detected. Please wait a moment.', duplicate: true });
     }
 
     // Retrieve customer details to inherit classification if employee
-    const custRes = await pool.query('SELECT name, balance, is_extra_pay, status, branch FROM credit_customers WHERE id = $1 FOR UPDATE', [id]);
+    const custRes = await client.query(
+      'SELECT name, balance, is_extra_pay, status, branch, available_branches FROM credit_customers WHERE id = $1 FOR UPDATE', 
+      [id]
+    );
     if (custRes.rows.length === 0) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Customer not found' });
     }
     const customer = custRes.rows[0];
@@ -945,14 +949,27 @@ router.post('/:id/payment', async (req, res) => {
     // CHARGE adds to the balance (debt increases), PAYMENT subtracts from balance (debt decreases).
     const balanceChange = transactionType === 'CHARGE' ? numAmount : -numAmount;
 
-    let targetBranch = req.body?.branch || (req.user?.branch ? req.user.branch.split(',')[0].trim() : 'Branch 1');
-    if (targetBranch === 'All' || !targetBranch) targetBranch = customer.branch || 'Branch 1';
+    let defaultCustBranch = customer.branch;
+    if (!defaultCustBranch) {
+      if (Array.isArray(customer.available_branches) && customer.available_branches.length > 0) {
+        defaultCustBranch = customer.available_branches[0];
+      } else if (typeof customer.available_branches === 'string') {
+        try {
+          const parsed = JSON.parse(customer.available_branches);
+          if (Array.isArray(parsed) && parsed.length > 0) defaultCustBranch = parsed[0];
+        } catch (e) {}
+      }
+    }
+    if (!defaultCustBranch) defaultCustBranch = 'Branch 1';
+
+    let targetBranch = req.body?.branch || (req.user?.branch ? req.user.branch.split(',')[0].trim() : defaultCustBranch);
+    if (targetBranch === 'All' || !targetBranch) targetBranch = defaultCustBranch;
     const effectiveCashier = cashier_name || req.user?.username || 'Cashier';
 
     // Set classification: Explicitly passed, or inherit from employee is_extra_pay
     const finalClassification = classification || (customer.is_extra_pay ? 'Extra Pay' : 'Regular');
 
-    const txInsertRes = await pool.query(
+    const txInsertRes = await client.query(
       `INSERT INTO credit_transactions (
         credit_customer_id, type, amount, cashier_name, payment_method, branch, 
         billing_month, comments, classification, is_shift_closed, is_daily_closed
@@ -970,13 +987,13 @@ router.post('/:id/payment', async (req, res) => {
       ]
     );
 
-    const updateResult = await pool.query(
+    const updateResult = await client.query(
       'UPDATE credit_customers SET balance = balance + $1 WHERE id = $2 RETURNING *',
       [balanceChange, id]
     );
 
     // Record into centralized activity_logs
-    await recordActivityLog(pool, {
+    await recordActivityLog(client, {
       module: 'Khata',
       action: transactionType === 'PAYMENT' ? 'Receive Payment' : (finalClassification === 'Extra Pay' ? 'Add Extra Pay' : 'Add Debit'),
       entity_id: id,
@@ -997,7 +1014,7 @@ router.post('/:id/payment', async (req, res) => {
 
     if (transactionType === 'PAYMENT') {
       try {
-        await pool.query(
+        await client.query(
           "INSERT INTO notifications (message, type, target_roles) VALUES ($1, 'CREDIT_PAYMENT', '[\"admin\"]'::jsonb)",
           [`Payment of SAR ${numAmount.toFixed(2)} (${payment_method || 'Cash'}) allocated to Month ${targetBillingMonth} received from ${customer.name}`]
         );
@@ -1006,12 +1023,14 @@ router.post('/:id/payment', async (req, res) => {
       }
     }
 
-    await pool.query('COMMIT');
+    await client.query('COMMIT');
     res.json(updateResult.rows[0]);
   } catch (error) {
-    await pool.query('ROLLBACK');
+    await client.query('ROLLBACK');
     console.error('Error processing payment:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1267,7 +1286,7 @@ router.post('/:id/reset-balance', async (req, res) => {
 
     // Fetch and lock only the target customer row
     const custRes = await client.query(
-      'SELECT id, name, balance, employee_id, category, branch FROM credit_customers WHERE id = $1 FOR UPDATE',
+      'SELECT id, name, balance, employee_id, category, branch, available_branches FROM credit_customers WHERE id = $1 FOR UPDATE',
       [id]
     );
     if (custRes.rows.length === 0) {
@@ -1287,6 +1306,19 @@ router.post('/:id/reset-balance', async (req, res) => {
       });
     }
 
+    let defaultCustBranch = customer.branch;
+    if (!defaultCustBranch) {
+      if (Array.isArray(customer.available_branches) && customer.available_branches.length > 0) {
+        defaultCustBranch = customer.available_branches[0];
+      } else if (typeof customer.available_branches === 'string') {
+        try {
+          const parsed = JSON.parse(customer.available_branches);
+          if (Array.isArray(parsed) && parsed.length > 0) defaultCustBranch = parsed[0];
+        } catch (e) {}
+      }
+    }
+    if (!defaultCustBranch) defaultCustBranch = 'Branch 1';
+
     // If bal > 0 (customer owes debt): insert a PAYMENT of bal to zero it out
     // If bal < 0 (customer has advance): insert a CHARGE of abs(bal) to zero it out
     const txType = bal > 0 ? 'PAYMENT' : 'CHARGE';
@@ -1303,7 +1335,7 @@ router.post('/:id/reset-balance', async (req, res) => {
         txType,
         txAmount,
         performedBy,
-        customer.branch || 'Branch 1',
+        defaultCustBranch,
         currentMonth,
         `Individual Balance Reset to 0.00: ${reason.trim()} (by ${performedBy})`
       ]

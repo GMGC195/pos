@@ -21,10 +21,12 @@ import {
   History, 
   ChevronRight, 
   X, 
-  Filter 
+  Filter,
+  Edit3
 } from 'lucide-react'
 import { CURRENCY } from '../config'
 import OrderDetailModal from '../components/OrderDetailModal'
+import EditShiftClosingModal from '../components/EditShiftClosingModal'
 import { 
   getSaudiTodayDate, 
   getSaudiYesterdayDate, 
@@ -98,6 +100,7 @@ export default function Reports({ isTodaySales = false }) {
   const [historyFrom, setHistoryFrom] = useState(today())
   const [historyTo, setHistoryTo] = useState(today())
   const [selectedHistoryReport, setSelectedHistoryReport] = useState(null)
+  const [editingShiftClosing, setEditingShiftClosing] = useState(null)
   
   // History Filters
   const [historyFilterBranch, setHistoryFilterBranch] = useState('All')
@@ -2799,6 +2802,30 @@ export default function Reports({ isTodaySales = false }) {
                   </div>
 
                   <div style={{ padding: 24 }}>
+                    {/* Admin / Developer Edit Button */}
+                    {isAdminOrDev && selectedHistoryReport.id && !String(selectedHistoryReport.id).startsWith('live_') && (
+                      <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditingShiftClosing(selectedHistoryReport)}
+                          style={{
+                            background: '#dc2626',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: 6,
+                            padding: '6px 12px',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6
+                          }}
+                        >
+                          <Edit3 size={13} /> Edit Shift Closing (Admin / Dev)
+                        </button>
+                      </div>
+                    )}
                     {/* Difference Banner */}
                     {(() => {
                       const diffVal = parseFloat(selectedHistoryReport.difference || 0);
@@ -3151,6 +3178,19 @@ export default function Reports({ isTodaySales = false }) {
             </div>
           </div>
         </div>
+      )}
+      {editingShiftClosing && (
+        <EditShiftClosingModal
+          closing={editingShiftClosing}
+          currency={CURRENCY}
+          onClose={() => setEditingShiftClosing(null)}
+          onSuccess={(updated) => {
+            setSelectedHistoryReport(prev => (prev ? { ...prev, ...updated } : null));
+            axios.get('/api/orders/closings', { params: { from: historyFrom, to: historyTo, branch: historyFilterBranch } })
+              .then(res => setClosingHistory(res.data))
+              .catch(() => {});
+          }}
+        />
       )}
     </>
   )

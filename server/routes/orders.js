@@ -591,6 +591,155 @@ router.get('/closings', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/orders/closings/:id - Edit Shift Closing (Admin & Developer Only)
+router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { closing_cash, closing_card, reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Reason for editing is mandatory.' });
+    }
+
+    const newCash = parseFloat(closing_cash);
+    const newCard = parseFloat(closing_card);
+
+    if (isNaN(newCash) || newCash < 0) {
+      return res.status(400).json({ error: 'Actual Cash Amount must be a valid non-negative number.' });
+    }
+    if (isNaN(newCard) || newCard < 0) {
+      return res.status(400).json({ error: 'Actual Card Amount must be a valid non-negative number.' });
+    }
+
+    await client.query('BEGIN');
+
+    // Fetch previous closing record
+    const prevRes = await client.query('SELECT * FROM shift_closings WHERE id = $1 FOR UPDATE', [id]);
+    if (prevRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Shift closing record not found.' });
+    }
+
+    const prev = prevRes.rows[0];
+
+    // Recalculate differences without altering system sales
+    const prevCashSales = parseFloat(prev.cash_sales || 0);
+    const prevCardSales = parseFloat(prev.card_sales || 0);
+
+    const newCashDiff = newCash - prevCashSales;
+    const newCardDiff = newCard - prevCardSales;
+    const newDiff = newCashDiff + newCardDiff;
+
+    // Append edit note to difference_reason
+    const editTimestamp = new Date().toISOString();
+    const editAuthor = req.user.name || req.user.username || 'Admin';
+    const auditNote = `[Edited on ${editTimestamp} by ${editAuthor} (${req.user.role})]: ${reason.trim()}`;
+    const updatedReason = prev.difference_reason 
+      ? `${prev.difference_reason}\n${auditNote}` 
+      : auditNote;
+
+    // Update shift_closings record
+    const updateRes = await client.query(`
+      UPDATE shift_closings
+      SET closing_cash = $1,
+          closing_card = $2,
+          cash_difference = $3,
+          card_difference = $4,
+          difference = $5,
+          difference_reason = $6
+      WHERE id = $7
+      RETURNING *
+    `, [newCash, newCard, newCashDiff, newCardDiff, newDiff, updatedReason, id]);
+
+    const updatedRecord = updateRes.rows[0];
+
+    // Also update cashier_shifts if matching shift exists
+    try {
+      await client.query(`
+        UPDATE cashier_shifts
+        SET closing_cash = $1
+        WHERE branch = $2 AND cashier_name = $3 
+          AND start_time <= $4 AND (end_time >= $4 OR end_time IS NULL)
+      `, [newCash, prev.branch, prev.cashier_name, prev.logout_time || prev.created_at]);
+    } catch (_) {}
+
+    // Insert Mandatory Audit Log
+    const prevCash = prev.closing_cash !== null ? parseFloat(prev.closing_cash) : null;
+    const prevCard = prev.closing_card !== null ? parseFloat(prev.closing_card) : null;
+    const prevDifference = prev.difference !== null ? parseFloat(prev.difference) : null;
+
+    await client.query(`
+      INSERT INTO shift_closing_audit_logs (
+        shift_closing_id, shift_id, branch, edited_by_user_id, edited_by_name,
+        user_role, previous_cash, updated_cash, previous_card, updated_card,
+        previous_difference, updated_difference, reason, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+    `, [
+      id,
+      id,
+      prev.branch,
+      req.user.id || null,
+      editAuthor,
+      req.user.role || 'Admin',
+      prevCash,
+      newCash,
+      prevCard,
+      newCard,
+      prevDifference,
+      newDiff,
+      reason.trim()
+    ]);
+
+    await client.query('COMMIT');
+
+    // Record activity log
+    try {
+      recordActivityLog({
+        userId: req.user.id,
+        action: 'EDIT_SHIFT_CLOSING',
+        details: `Edited shift closing #${id} (${prev.branch}): Cash ${prevCash} -> ${newCash}, Card ${prevCard} -> ${newCard}. Reason: ${reason.trim()}`
+      });
+    } catch (_) {}
+
+    // Emit socket event for real-time dashboard refresh
+    if (req.io) {
+      req.io.emit('shift_closing_updated', {
+        id: updatedRecord.id,
+        branch: updatedRecord.branch,
+        updated_by: editAuthor
+      });
+    }
+
+    res.json({
+      message: 'Shift closing updated successfully',
+      closing: updatedRecord
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating shift closing:', err);
+    res.status(500).json({ error: err.message || 'Failed to update shift closing' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/orders/closings/:id/audit-logs - Audit logs for a shift closing
+router.get('/closings/:id/audit-logs', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const logsRes = await pool.query(`
+      SELECT * FROM shift_closing_audit_logs
+      WHERE shift_closing_id = $1 OR shift_id = $1
+      ORDER BY created_at DESC
+    `, [id]);
+    res.json(logsRes.rows);
+  } catch (err) {
+    console.error('Error fetching shift closing audit logs:', err);
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
+  }
+});
+
 // GET closing preview stats and shifts breakdown for modal
 router.get('/closing-preview', authenticateToken, isAdminOrCashier, async (req, res) => {
   try {

@@ -950,14 +950,20 @@ export default function Dashboard() {
     
     // Real-time socket events
     const handleOrderEvent = () => loadStats();
+    const handleShiftClosingEvent = () => {
+      loadShiftAnalytics();
+      loadStats();
+    };
     socket.on('newOrder', handleOrderEvent);
     socket.on('orderUpdated', handleOrderEvent);
+    socket.on('shift_closing_updated', handleShiftClosingEvent);
 
     return () => {
       clearInterval(interval)
       if (socket) {
         socket.off('newOrder', handleOrderEvent)
         socket.off('orderUpdated', handleOrderEvent)
+        socket.off('shift_closing_updated', handleShiftClosingEvent)
       }
     }
   }, [user, navigate, isAdminOrDev, canViewPosAndReports, salesSelectedBranch, salesSelectedClosing, salesSelectedDate])
@@ -1224,6 +1230,10 @@ export default function Dashboard() {
               restaurants={shiftAnalytics?.restaurants}
               currency={CURRENCY}
               loading={loading}
+              onShiftUpdated={() => {
+                loadShiftAnalytics();
+                loadStats();
+              }}
               style={{ gridColumn: 'span 2' }}
             />
 

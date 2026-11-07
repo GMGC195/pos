@@ -166,6 +166,7 @@ async function runMigration() {
       ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS is_extra_pay BOOLEAN DEFAULT FALSE;
       ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS discount_package_id INTEGER REFERENCES discount_packages(id) ON DELETE SET NULL;
       ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL;
+      ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS branch VARCHAR(100);
 
       CREATE INDEX IF NOT EXISTS idx_credit_customers_employee_id ON credit_customers(employee_id);
       CREATE INDEX IF NOT EXISTS idx_credit_customers_discount_package_id ON credit_customers(discount_package_id);
@@ -178,6 +179,8 @@ async function runMigration() {
       ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS is_shift_closed BOOLEAN DEFAULT FALSE;
       ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS is_daily_closed BOOLEAN DEFAULT FALSE;
       ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS branch VARCHAR(100);
+      ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100);
+      ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);
       ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
       ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS updated_by VARCHAR(100);
 
@@ -351,6 +354,75 @@ async function runMigration() {
     } catch (e) {}
 
     console.log(`   ✓ Synced ${syncCashRes.rowCount} cash payments & ${syncBankRes.rowCount} bank payments.`);
+
+    // 13. Internal Branch Transfer Tables & Shift Closing Audit Logs
+    console.log('📌 [13/13] Creating internal_branch_transfers, transfer items and shift_closing_audit_logs...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS internal_branch_transfers (
+        id SERIAL PRIMARY KEY,
+        transfer_id VARCHAR(50) UNIQUE NOT NULL,
+        from_branch VARCHAR(100) NOT NULL,
+        to_branch VARCHAR(100) NOT NULL,
+        requested_by_user_id INTEGER,
+        requested_by_name VARCHAR(150),
+        request_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        needed_by_time VARCHAR(50),
+        status VARCHAR(30) DEFAULT 'Pending',
+        dispatched_at TIMESTAMPTZ,
+        dispatched_by_user_id INTEGER,
+        dispatched_by_name VARCHAR(150),
+        received_at TIMESTAMPTZ,
+        received_by_user_id INTEGER,
+        received_by_name VARCHAR(150),
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ibt_from_branch ON internal_branch_transfers(from_branch);
+      CREATE INDEX IF NOT EXISTS idx_ibt_to_branch ON internal_branch_transfers(to_branch);
+      CREATE INDEX IF NOT EXISTS idx_ibt_status ON internal_branch_transfers(status);
+      CREATE INDEX IF NOT EXISTS idx_ibt_request_date ON internal_branch_transfers(request_date);
+
+      CREATE TABLE IF NOT EXISTS internal_branch_transfer_items (
+        id SERIAL PRIMARY KEY,
+        transfer_id INTEGER REFERENCES internal_branch_transfers(id) ON DELETE CASCADE,
+        item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+        dish_name VARCHAR(255) NOT NULL,
+        uom VARCHAR(50) NOT NULL,
+        requested_qty NUMERIC(12,3) NOT NULL,
+        sent_qty NUMERIC(12,3),
+        received_qty NUMERIC(12,3),
+        variance_qty NUMERIC(12,3),
+        remarks TEXT,
+        image_url TEXT,
+        price NUMERIC(10,2),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ibti_transfer_id ON internal_branch_transfer_items(transfer_id);
+
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS is_external BOOLEAN DEFAULT FALSE;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS price NUMERIC(10,2);
+
+      CREATE TABLE IF NOT EXISTS shift_closing_audit_logs (
+        id SERIAL PRIMARY KEY,
+        shift_closing_id INTEGER REFERENCES shift_closings(id) ON DELETE CASCADE,
+        shift_id INTEGER,
+        branch VARCHAR(100),
+        edited_by_user_id INTEGER,
+        edited_by_name VARCHAR(150),
+        user_role VARCHAR(50),
+        previous_cash NUMERIC(12,2),
+        updated_cash NUMERIC(12,2),
+        previous_card NUMERIC(12,2),
+        updated_card NUMERIC(12,2),
+        previous_difference NUMERIC(12,2),
+        updated_difference NUMERIC(12,2),
+        reason TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_scal_shift_closing_id ON shift_closing_audit_logs(shift_closing_id);
+    `);
 
     await client.query('COMMIT');
     console.log('\x1b[32m%s\x1b[0m', '==================================================');
