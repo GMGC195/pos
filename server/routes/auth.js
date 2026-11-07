@@ -361,4 +361,67 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// POST /api/auth/verify-developer
+// Validates developer credentials and issues short-lived dev token
+// -------------------------------------------------------------
+router.post('/verify-developer', async (req, res) => {
+  const { usernameOrEmail, password } = req.body;
+
+  if (!usernameOrEmail || !password) {
+    return res.status(400).json({ error: 'Username/Email and Password are required.' });
+  }
+
+  try {
+    const queryFn = pool.queryWithRetry ? pool.queryWithRetry.bind(pool) : pool.query.bind(pool);
+    const result = await queryFn(
+      'SELECT id, username, email, password_hash, role, branch FROM "users" WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)',
+      [usernameOrEmail.trim()]
+    );
+
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials. User not found.' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid password. Please check your credentials.' });
+    }
+
+    const userRole = (user.role || '').trim().toLowerCase();
+    if (userRole !== 'developer') {
+      return res.status(403).json({ 
+        error: `Access Denied: Account '${user.username}' has role '${user.role}'. Only authorized Developer accounts can edit closed shift records.` 
+      });
+    }
+
+    // Generate short-lived developer authorization token (valid for 15 minutes)
+    const devToken = jwt.sign(
+      {
+        id: user.id,
+        username: user.username,
+        role: 'developer',
+        purpose: 'shift_closing_edit'
+      },
+      process.env.JWT_SECRET || 'fallback_secret',
+      { expiresIn: '15m' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Developer authenticated successfully.',
+      devToken,
+      developer: {
+        id: user.id,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (err) {
+    console.error('Error verifying developer:', err);
+    res.status(500).json({ error: 'Internal server error while verifying developer.' });
+  }
+});
+
 module.exports = router;

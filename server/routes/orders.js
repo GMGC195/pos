@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const jwt = require('jsonwebtoken');
 const { authenticateToken, isAdmin, isAdminOrCashier } = require('../middleware/auth');
 const { Resend } = require('resend');
 const Pusher = require('pusher');
@@ -591,12 +592,35 @@ router.get('/closings', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/orders/closings/:id - Edit Shift Closing (Admin & Developer Only)
+// PUT /api/orders/closings/:id - Edit Shift Closing (Developer Authorization Required)
 router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
     const { closing_cash, closing_card, reason } = req.body;
+
+    // Verify Developer authorization strictly on backend
+    let developerInfo = null;
+    const devToken = req.headers['x-developer-token'] || req.body.dev_token;
+
+    if (devToken) {
+      try {
+        const decoded = jwt.verify(devToken, process.env.JWT_SECRET || 'fallback_secret');
+        if (decoded && (decoded.role || '').toLowerCase() === 'developer') {
+          developerInfo = decoded;
+        }
+      } catch (tokenErr) {
+        return res.status(403).json({ error: 'Developer authorization token expired or invalid. Please re-authenticate as Developer.' });
+      }
+    } else if ((req.user.role || '').trim().toLowerCase() === 'developer') {
+      developerInfo = req.user;
+    }
+
+    if (!developerInfo) {
+      return res.status(403).json({ 
+        error: 'Developer authorization required. Only authorized Developers can edit closed shift records.' 
+      });
+    }
 
     if (!reason || !reason.trim()) {
       return res.status(400).json({ error: 'Reason for editing is mandatory.' });
@@ -633,8 +657,8 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
 
     // Append edit note to difference_reason
     const editTimestamp = new Date().toISOString();
-    const editAuthor = req.user.name || req.user.username || 'Admin';
-    const auditNote = `[Edited on ${editTimestamp} by ${editAuthor} (${req.user.role})]: ${reason.trim()}`;
+    const devAuthorName = developerInfo.name || developerInfo.username || 'Developer';
+    const auditNote = `[Edited on ${editTimestamp} by Developer ${devAuthorName} (User ID: ${developerInfo.id || req.user.id})]: ${reason.trim()}`;
     const updatedReason = prev.difference_reason 
       ? `${prev.difference_reason}\n${auditNote}` 
       : auditNote;
@@ -679,9 +703,9 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
       id,
       id,
       prev.branch,
-      req.user.id || null,
-      editAuthor,
-      req.user.role || 'Admin',
+      developerInfo.id || req.user.id || null,
+      devAuthorName,
+      'developer',
       prevCash,
       newCash,
       prevCard,
@@ -696,9 +720,9 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
     // Record activity log
     try {
       recordActivityLog({
-        userId: req.user.id,
+        userId: developerInfo.id || req.user.id,
         action: 'EDIT_SHIFT_CLOSING',
-        details: `Edited shift closing #${id} (${prev.branch}): Cash ${prevCash} -> ${newCash}, Card ${prevCard} -> ${newCard}. Reason: ${reason.trim()}`
+        details: `Developer ${devAuthorName} edited shift closing #${id} (${prev.branch}): Cash ${prevCash} -> ${newCash}, Card ${prevCard} -> ${newCard}. Reason: ${reason.trim()}`
       });
     } catch (_) {}
 
@@ -707,12 +731,12 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
       req.io.emit('shift_closing_updated', {
         id: updatedRecord.id,
         branch: updatedRecord.branch,
-        updated_by: editAuthor
+        updated_by: devAuthorName
       });
     }
 
     res.json({
-      message: 'Shift closing updated successfully',
+      message: 'Shift closing updated successfully by authorized Developer',
       closing: updatedRecord
     });
   } catch (err) {

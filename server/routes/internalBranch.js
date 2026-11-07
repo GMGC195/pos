@@ -25,8 +25,8 @@ router.get('/branches', authenticateToken, async (req, res) => {
     
     // Remove 'Restaurant 1', 'Restaurant 2', 'Restaurant 3' as requested by user
     const filtered = combined.filter(b => {
-      const lower = b.trim().toLowerCase();
-      return !lower.startsWith('restaurant');
+      const lower = String(b).trim().toLowerCase();
+      return !lower.includes('restaurant');
     });
 
     // Ensure 'Other' is at the end

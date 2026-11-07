@@ -576,7 +576,7 @@ export default function InternalBranch() {
       .then(res => {
         if (Array.isArray(res.data) && res.data.length > 0) {
           // Remove any Restaurant 1, Restaurant 2, Restaurant 3
-          const cleaned = res.data.filter(b => !b.trim().toLowerCase().startsWith('restaurant'));
+          const cleaned = res.data.filter(b => typeof b === 'string' && !b.trim().toLowerCase().includes('restaurant'));
           if (!cleaned.includes('Other')) cleaned.push('Other');
           setBranches(cleaned);
           // Set default target branch

@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import BaseSaleSurplusChart from '../components/BaseSaleSurplusChart'
+import DeveloperAuthModal from '../components/DeveloperAuthModal'
+import EditShiftClosingModal from '../components/EditShiftClosingModal'
 import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
@@ -39,7 +41,8 @@ import {
   ArrowLeft,
   FileText,
   X,
-  Layers
+  Layers,
+  Edit3
 } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler)
@@ -158,6 +161,35 @@ export default function Dashboard() {
   const [historyFilterType, setHistoryFilterType] = useState('All')
   const [historyFilterUser, setHistoryFilterUser] = useState('All')
   const [selectedHistoryReport, setSelectedHistoryReport] = useState(null)
+  const [editingShiftClosing, setEditingShiftClosing] = useState(null)
+  const [devAuthTarget, setDevAuthTarget] = useState(null)
+  const [developerSession, setDeveloperSession] = useState(null)
+
+  const handleInitiateEditClosing = (closing) => {
+    if (!closing) return;
+    const isDev = user?.role?.trim().toLowerCase() === 'developer';
+    if (isDev || developerSession?.devToken) {
+      setEditingShiftClosing(closing);
+    } else {
+      setDevAuthTarget(closing);
+    }
+  };
+
+  const handleDeveloperAuthorized = ({ devToken, developer }) => {
+    setDeveloperSession({ devToken, developer });
+    if (devAuthTarget) {
+      setEditingShiftClosing(devAuthTarget);
+      setDevAuthTarget(null);
+    }
+  };
+
+  const handleClosingEditSuccess = (updatedRecord) => {
+    if (!updatedRecord) return;
+    setSelectedHistoryReport(prev => prev && String(prev.id) === String(updatedRecord.id) ? { ...prev, ...updatedRecord } : prev);
+    loadClosingHistory();
+    fetchStats();
+    toast.success('Shift closing report and dashboard data successfully updated!');
+  };
 
   const loadClosingHistory = async (fDate, tDate, b, t, u) => {
     setClosingHistoryLoading(true)
@@ -1536,7 +1568,15 @@ export default function Dashboard() {
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleInitiateEditClosing(selectedClosingObj)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#dc2626', borderColor: '#fca5a5', fontWeight: 600 }}
+                    title="Edit Shift Closing (Developer Authorization)"
+                  >
+                    <Edit3 size={14} /> Edit Shift Closing
+                  </button>
                   <button 
                     className="btn btn-secondary btn-sm"
                     onClick={() => printClosingReport(selectedClosingObj)}
@@ -2018,18 +2058,41 @@ export default function Dashboard() {
           </div>
         ) : selectedHistoryReport ? (
           /* Report Detail View */
-          <div className="card" style={{ padding: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div className="card" style={{ padding: 24, position: 'relative' }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 20,
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
+              background: '#fff',
+              padding: '10px 0',
+              borderBottom: '1px solid #e2e8f0'
+            }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setSelectedHistoryReport(null)}>
                 ← Back to List
               </button>
-              <button 
-                className="btn btn-primary btn-sm" 
-                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                onClick={() => printClosingReport(selectedHistoryReport)}
-              >
-                <Printer size={15} /> Reprint Report
-              </button>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button 
+                  className="btn btn-primary btn-sm" 
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#dc2626', borderColor: '#dc2626', color: '#fff', fontWeight: 600 }}
+                  onClick={() => handleInitiateEditClosing(selectedHistoryReport)}
+                  title="Developer Authorized Edit"
+                >
+                  <Edit3 size={15} /> Edit Shift Closing
+                </button>
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => printClosingReport(selectedHistoryReport)}
+                >
+                  <Printer size={15} /> Reprint Report
+                </button>
+              </div>
             </div>
 
             {/* Email-identical Report Card */}
@@ -2388,6 +2451,14 @@ export default function Dashboard() {
                           Cash: {CURRENCY}{parseFloat(c.cash_sales || 0).toFixed(0)} | Card: {CURRENCY}{parseFloat(c.card_sales || 0).toFixed(0)}
                         </div>
                       </div>
+                      <button 
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4, color: '#dc2626', borderColor: '#fca5a5' }}
+                        onClick={(e) => { e.stopPropagation(); handleInitiateEditClosing(c); }}
+                        title="Edit Shift Closing (Developer)"
+                      >
+                        <Edit3 size={14} />
+                      </button>
                       <button 
                         className="btn btn-secondary btn-sm"
                         style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
@@ -3585,6 +3656,29 @@ export default function Dashboard() {
               </table>
             </div>
           </div>
+        )}
+
+        {/* Developer Authorization Modal */}
+        {devAuthTarget && (
+          <DeveloperAuthModal
+            isOpen={Boolean(devAuthTarget)}
+            title="Developer Authorization Required"
+            actionDescription={`Editing closed shift #${devAuthTarget.id} (${devAuthTarget.branch || 'Branch'}) requires verified Developer credentials for financial audit logging.`}
+            onClose={() => setDevAuthTarget(null)}
+            onAuthorized={handleDeveloperAuthorized}
+          />
+        )}
+
+        {/* Edit Shift Closing Modal */}
+        {editingShiftClosing && (
+          <EditShiftClosingModal
+            closing={editingShiftClosing}
+            currency={CURRENCY}
+            devToken={developerSession?.devToken}
+            developer={developerSession?.developer}
+            onClose={() => setEditingShiftClosing(null)}
+            onSuccess={handleClosingEditSuccess}
+          />
         )}
       </div>
     </>

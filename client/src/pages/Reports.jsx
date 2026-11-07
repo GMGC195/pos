@@ -27,6 +27,7 @@ import {
 import { CURRENCY } from '../config'
 import OrderDetailModal from '../components/OrderDetailModal'
 import EditShiftClosingModal from '../components/EditShiftClosingModal'
+import DeveloperAuthModal from '../components/DeveloperAuthModal'
 import { 
   getSaudiTodayDate, 
   getSaudiYesterdayDate, 
@@ -101,6 +102,37 @@ export default function Reports({ isTodaySales = false }) {
   const [historyTo, setHistoryTo] = useState(today())
   const [selectedHistoryReport, setSelectedHistoryReport] = useState(null)
   const [editingShiftClosing, setEditingShiftClosing] = useState(null)
+  const [devAuthTarget, setDevAuthTarget] = useState(null)
+  const [developerSession, setDeveloperSession] = useState(null)
+
+  // Prevent background scrolling when History Modal is open
+  useEffect(() => {
+    if (showHistoryModal) {
+      const orig = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = orig || 'unset';
+      };
+    }
+  }, [showHistoryModal]);
+
+  const handleInitiateEditClosing = (closing) => {
+    if (!closing) return;
+    const isDev = user?.role?.trim().toLowerCase() === 'developer';
+    if (isDev || developerSession?.devToken) {
+      setEditingShiftClosing(closing);
+    } else {
+      setDevAuthTarget(closing);
+    }
+  };
+
+  const handleDeveloperAuthorized = ({ devToken, developer }) => {
+    setDeveloperSession({ devToken, developer });
+    if (devAuthTarget) {
+      setEditingShiftClosing(devAuthTarget);
+      setDevAuthTarget(null);
+    }
+  };
   
   // History Filters
   const [historyFilterBranch, setHistoryFilterBranch] = useState('All')
@@ -2699,11 +2731,13 @@ export default function Reports({ isTodaySales = false }) {
       {/* ── HISTORY MODAL ── */}
       {showHistoryModal && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) { setShowHistoryModal(false); setSelectedHistoryReport(null); } }}>
-          <div className="modal" style={{ maxWidth: 720, width: '95vw', padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
-            <div className="modal-header" style={{ marginBottom: 16 }}>
-              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><History size={20} /> Past Closing Reports</h3>
+          <div className="modal" style={{ maxWidth: 740, width: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden', borderRadius: 14 }}>
+            <div className="modal-header" style={{ padding: '16px 24px', borderBottom: '1px solid #e2e8f0', background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, marginBottom: 0 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}><History size={20} /> Past Closing Reports</h3>
               <button className="modal-close" onClick={() => { setShowHistoryModal(false); setSelectedHistoryReport(null); }}>✕</button>
             </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 24 }}>
 
             {/* Date filter & Toggle */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -2802,27 +2836,28 @@ export default function Reports({ isTodaySales = false }) {
                   </div>
 
                   <div style={{ padding: 24 }}>
-                    {/* Admin / Developer Edit Button */}
-                    {isAdminOrDev && selectedHistoryReport.id && !String(selectedHistoryReport.id).startsWith('live_') && (
+                    {/* Developer Edit Button */}
+                    {selectedHistoryReport.id && !String(selectedHistoryReport.id).startsWith('live_') && (
                       <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>
                         <button
                           type="button"
-                          onClick={() => setEditingShiftClosing(selectedHistoryReport)}
+                          onClick={() => handleInitiateEditClosing(selectedHistoryReport)}
                           style={{
                             background: '#dc2626',
                             color: '#ffffff',
                             border: 'none',
                             borderRadius: 6,
-                            padding: '6px 12px',
+                            padding: '6px 14px',
                             fontSize: 12,
                             fontWeight: 700,
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 6
+                            gap: 6,
+                            boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)'
                           }}
                         >
-                          <Edit3 size={13} /> Edit Shift Closing (Admin / Dev)
+                          <Edit3 size={13} /> Edit Shift Closing (Developer)
                         </button>
                       </div>
                     )}
@@ -3133,8 +3168,19 @@ export default function Reports({ isTodaySales = false }) {
                             </div>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <span style={{ fontWeight: 800, color: 'var(--primary)', fontSize: 15 }}>{CURRENCY}{parseFloat(c.total_sales || 0).toFixed(2)}</span>
+                          {c.id && !String(c.id).startsWith('live_') && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '4px 8px', color: '#dc2626', borderColor: '#fca5a5', display: 'flex', alignItems: 'center' }}
+                              onClick={(e) => { e.stopPropagation(); handleInitiateEditClosing(c); }}
+                              title="Edit Shift Closing (Developer)"
+                            >
+                              <Edit3 size={13} />
+                            </button>
+                          )}
                           <ChevronRight size={18} color="var(--text-muted)" />
                         </div>
                       </div>
@@ -3144,6 +3190,7 @@ export default function Reports({ isTodaySales = false }) {
                 })()}
               </div>
             )}
+            </div>
           </div>
         </div>
       )}
@@ -3179,16 +3226,32 @@ export default function Reports({ isTodaySales = false }) {
           </div>
         </div>
       )}
+
+      {/* Developer Authorization Modal */}
+      {devAuthTarget && (
+        <DeveloperAuthModal
+          isOpen={Boolean(devAuthTarget)}
+          title="Developer Authorization Required"
+          actionDescription={`Editing closed shift #${devAuthTarget.id} (${devAuthTarget.branch || 'Branch'}) requires verified Developer credentials for financial audit logging.`}
+          onClose={() => setDevAuthTarget(null)}
+          onAuthorized={handleDeveloperAuthorized}
+        />
+      )}
+
+      {/* Edit Shift Closing Modal */}
       {editingShiftClosing && (
         <EditShiftClosingModal
           closing={editingShiftClosing}
           currency={CURRENCY}
+          devToken={developerSession?.devToken}
+          developer={developerSession?.developer}
           onClose={() => setEditingShiftClosing(null)}
           onSuccess={(updated) => {
-            setSelectedHistoryReport(prev => (prev ? { ...prev, ...updated } : null));
+            setSelectedHistoryReport(prev => (prev && String(prev.id) === String(updated.id) ? { ...prev, ...updated } : prev));
             axios.get('/api/orders/closings', { params: { from: historyFrom, to: historyTo, branch: historyFilterBranch } })
               .then(res => setClosingHistory(res.data))
               .catch(() => {});
+            load();
           }}
         />
       )}
