@@ -3,20 +3,31 @@ const router = express.Router();
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 
+function normalizeBranch(b) {
+  if (!b) return null;
+  const lower = String(b).trim().toLowerCase();
+  if (lower === 'restaurant 1' || lower === 'r1') return 'Branch 1';
+  if (lower === 'restaurant 2' || lower === 'r2') return 'Branch 2';
+  if (lower === 'restaurant 3' || lower === 'r3') return 'Branch 3';
+  return b.trim();
+}
+
 // GET all items with category name
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { category, search } = req.query;
+    const { category, search, all } = req.query;
     // Branch isolation for Order Taker / Operator / Cashier
     const userRole = req.user.role?.trim().toLowerCase();
     const userBranch = req.user.branch;
     
     let targetBranch = null;
 
-    if (['order taker', 'operator', 'cashier'].includes(userRole) && userBranch) {
-      targetBranch = userBranch;
+    if (all === 'true') {
+      targetBranch = null; // Unrestricted centralized catalog requested
+    } else if (['order taker', 'operator', 'cashier'].includes(userRole) && userBranch) {
+      targetBranch = normalizeBranch(userBranch);
     } else if (req.query.branch && req.query.branch !== 'All') {
-      targetBranch = req.query.branch;
+      targetBranch = normalizeBranch(req.query.branch);
     }
 
     let query = `

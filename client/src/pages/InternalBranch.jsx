@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import axios from '../api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
+import { usePOS } from '../contexts/POSContext';
+import { getMenuItems as getCachedMenuItems } from '../utils/db';
 import { socket } from '../socket';
 import { 
   playIncomingTransferAlert, 
@@ -365,11 +367,17 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const safeDishes = Array.isArray(dishes) ? dishes : [];
+
   const filteredDishes = useMemo(() => {
     const term = (searchTerm || '').trim().toLowerCase();
-    if (!term) return dishes.slice(0, 60);
-    return dishes.filter(d => d.name && d.name.toLowerCase().includes(term)).slice(0, 60);
-  }, [dishes, searchTerm]);
+    if (!term) return safeDishes.slice(0, 80);
+    return safeDishes.filter(d => {
+      if (!d) return false;
+      const name = String(d.name || d.dish_name || '').toLowerCase();
+      return name.includes(term);
+    }).slice(0, 80);
+  }, [safeDishes, searchTerm]);
 
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
@@ -410,11 +418,15 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
             placeholder="Search menu dish..."
             value={searchTerm}
             onFocus={() => setIsOpen(true)}
+            onClick={() => setIsOpen(true)}
             onChange={(e) => {
               const val = e.target.value;
               setSearchTerm(val);
               setIsOpen(true);
-              const found = dishes.find(d => d.name && d.name.toLowerCase() === val.toLowerCase());
+              const found = safeDishes.find(d => {
+                const name = String(d?.name || d?.dish_name || '').toLowerCase();
+                return name === val.toLowerCase();
+              });
               if (found) {
                 onSelect(found);
               } else {
@@ -523,13 +535,23 @@ export default function InternalBranch() {
   const userRole = user?.role?.trim().toLowerCase();
   const isSuperUser = userRole === 'admin' || userRole === 'developer' || userRole === 'management' || userRole === 'general manager';
 
+  // POS Menu System integration
+  const { items: posItems, categories: posCategories, loadData: reloadPOSData } = usePOS();
+
   // Active Tab
   const [activeTab, setActiveTab] = useState('new'); // 'new' | 'incoming' | 'receivals' | 'logs'
 
   // Branches & Menu Items
   const [branches, setBranches] = useState(INITIAL_BRANCHES);
-  const [dishes, setDishes] = useState([]);
+  const [dishes, setDishes] = useState(() => (Array.isArray(posItems) && posItems.length > 0 ? posItems : []));
   const [loadingDishes, setLoadingDishes] = useState(false);
+
+  // Sync dishes whenever POSContext items update
+  useEffect(() => {
+    if (Array.isArray(posItems) && posItems.length > 0) {
+      setDishes(posItems);
+    }
+  }, [posItems]);
 
   // Stats / Badges
   const [stats, setStats] = useState({
@@ -663,21 +685,41 @@ export default function InternalBranch() {
 
   const allMenuCategories = useMemo(() => {
     const cats = new Set();
-    dishes.forEach(d => {
-      if (Array.isArray(d.category_names)) {
-        d.category_names.forEach(c => { if (c) cats.add(c); });
-      }
+    const list = Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : []);
+    list.forEach(d => {
+      if (!d) return;
+      const itemCats = Array.isArray(d.category_names)
+        ? d.category_names
+        : (d.category_name ? [d.category_name] : (d.category ? [d.category] : []));
+      itemCats.forEach(c => {
+        if (c && typeof c === 'string' && c.trim()) cats.add(c.trim());
+      });
     });
-    return ['All', ...Array.from(cats)];
-  }, [dishes]);
+    if (Array.isArray(posCategories)) {
+      posCategories.forEach(c => {
+        const cName = typeof c === 'string' ? c : c?.name;
+        if (cName && typeof cName === 'string' && cName.trim()) cats.add(cName.trim());
+      });
+    }
+    return ['All', ...Array.from(cats).sort()];
+  }, [dishes, posItems, posCategories]);
 
   const filteredBrowserDishes = useMemo(() => {
-    return dishes.filter(d => {
-      const matchSearch = !menuBrowserSearch || d.name.toLowerCase().includes(menuBrowserSearch.toLowerCase());
-      const matchCat = menuBrowserCategory === 'All' || (Array.isArray(d.category_names) && d.category_names.includes(menuBrowserCategory));
+    const list = Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : []);
+    const searchLower = (menuBrowserSearch || '').trim().toLowerCase();
+    return list.filter(d => {
+      if (!d) return false;
+      const name = String(d.name || d.dish_name || '').toLowerCase();
+      const matchSearch = !searchLower || name.includes(searchLower);
+      
+      const itemCats = Array.isArray(d.category_names)
+        ? d.category_names
+        : (d.category_name ? [d.category_name] : (d.category ? [d.category] : []));
+      
+      const matchCat = menuBrowserCategory === 'All' || itemCats.some(c => String(c).trim().toLowerCase() === menuBrowserCategory.trim().toLowerCase());
       return matchSearch && matchCat;
     });
-  }, [dishes, menuBrowserSearch, menuBrowserCategory]);
+  }, [dishes, posItems, menuBrowserSearch, menuBrowserCategory]);
 
   const handleAddDishFromBrowser = (dish) => {
     const units = getItemUnits(dish);
@@ -737,6 +779,53 @@ export default function InternalBranch() {
   // Audio test state
   const [audioEnabled, setAudioEnabled] = useState(true);
 
+  // Fetch centralized dishes from POS system, IndexedDB cache, and APIs
+  const fetchDishes = useCallback(() => {
+    setLoadingDishes(true);
+
+    // 1. If posItems is already in memory from POSContext, use immediately
+    if (Array.isArray(posItems) && posItems.length > 0) {
+      setDishes(posItems);
+      setLoadingDishes(false);
+      return;
+    }
+
+    // 2. Check IndexedDB cache for instant display
+    getCachedMenuItems().then(cached => {
+      if (Array.isArray(cached) && cached.length > 0) {
+        setDishes(prev => prev.length > 0 ? prev : cached);
+      }
+    }).catch(console.error);
+
+    // 3. Centralized dishes endpoint
+    axios.get('/api/internal-branch/dishes')
+      .then(res => {
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          setDishes(res.data);
+        } else {
+          // 4. Fallback to /api/items?all=true
+          return axios.get('/api/items?all=true').then(fallbackRes => {
+            if (Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
+              setDishes(fallbackRes.data);
+            } else if (typeof reloadPOSData === 'function') {
+              reloadPOSData(true);
+            }
+          });
+        }
+      })
+      .catch(() => {
+        // 5. Fallback to /api/items?all=true
+        return axios.get('/api/items?all=true')
+          .then(fallbackRes => {
+            if (Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
+              setDishes(fallbackRes.data);
+            }
+          })
+          .catch(err => console.error('Failed to load menu dishes:', err));
+      })
+      .finally(() => setLoadingDishes(false));
+  }, [posItems, reloadPOSData]);
+
   // Load initial branches, dishes, and stats
   useEffect(() => {
     // Branches
@@ -758,28 +847,10 @@ export default function InternalBranch() {
       });
 
     // Dishes from centralized items
-    setLoadingDishes(true);
-    axios.get('/api/internal-branch/dishes')
-      .then(res => {
-        if (Array.isArray(res.data) && res.data.length > 0) {
-          setDishes(res.data);
-        } else {
-          // Direct fallback to /api/items to guarantee restaurant dishes always load
-          return axios.get('/api/items').then(fallbackRes => {
-            setDishes(fallbackRes.data || []);
-          });
-        }
-      })
-      .catch(() => {
-        // Fallback to /api/items if dishes endpoint encountered any error
-        return axios.get('/api/items')
-          .then(fallbackRes => setDishes(fallbackRes.data || []))
-          .catch(err => console.error('Failed to load menu dishes:', err));
-      })
-      .finally(() => setLoadingDishes(false));
+    fetchDishes();
 
     fetchStats();
-  }, [defaultFromBranch]);
+  }, [defaultFromBranch, fetchDishes]);
 
   const fetchStats = useCallback(() => {
     axios.get('/api/internal-branch/stats')
@@ -2100,7 +2171,10 @@ export default function InternalBranch() {
                 <div>
                   <button
                     type="button"
-                    onClick={() => setShowMenuBrowser(true)}
+                    onClick={() => {
+                      setShowMenuBrowser(true);
+                      if (!dishes || dishes.length === 0) fetchDishes();
+                    }}
                     style={{
                       background: '#eff6ff',
                       border: '1.5px solid #3b82f6',
@@ -2149,7 +2223,7 @@ export default function InternalBranch() {
                         <DishSearchDropdown
                           value={row.dish_name}
                           imageUrl={row.image_url}
-                          dishes={dishes}
+                          dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
                           onSelect={(dish) => handleSelectDish(row.id, dish)}
                         />
                       </div>
@@ -4100,12 +4174,33 @@ export default function InternalBranch() {
             {/* Dishes Grid */}
             <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
               {loadingDishes ? (
-                <div style={{ textAlign: 'center', padding: 50, color: '#64748b' }}>Loading menu items...</div>
+                <div style={{ textAlign: 'center', padding: 50, color: '#64748b' }}>
+                  <div style={{ width: 32, height: 32, border: '3px solid #2563eb', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+                  <strong>Loading menu items from restaurant catalog...</strong>
+                </div>
               ) : filteredBrowserDishes.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 50, color: '#64748b' }}>
                   <Utensils size={40} color="#cbd5e1" style={{ margin: '0 auto 10px' }} />
                   <p style={{ margin: 0, fontWeight: 700, fontSize: 15, color: '#334155' }}>No dishes found</p>
-                  <span style={{ fontSize: 12, color: '#94a3b8' }}>Try adjusting your search query or selected category</span>
+                  <span style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 14 }}>
+                    Try adjusting your search query, or click reload to refresh from menu
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => fetchDishes()}
+                    style={{
+                      background: '#eff6ff',
+                      border: '1.5px solid #2563eb',
+                      borderRadius: 6,
+                      padding: '7px 16px',
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      color: '#2563eb',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔄 Reload Menu Items
+                  </button>
                 </div>
               ) : (
                 <div style={{

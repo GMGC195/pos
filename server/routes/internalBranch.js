@@ -71,9 +71,12 @@ router.get('/dishes', authenticateToken, async (req, res) => {
     const { search } = req.query;
     let query = `
       SELECT i.id, i.name, i.price, i.image_url, i.available_branches, i.size_options,
-        (SELECT json_agg(c.name) FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = i.id) as category_names
+        COALESCE(
+          (SELECT json_agg(c.name) FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = i.id),
+          '[]'::json
+        ) as category_names
       FROM items i 
-      WHERE 1=1
+      WHERE i.name IS NOT NULL AND TRIM(i.name) != ''
     `;
     const params = [];
     if (search && search.trim()) {
