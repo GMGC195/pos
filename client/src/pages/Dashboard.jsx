@@ -167,8 +167,9 @@ export default function Dashboard() {
 
   const handleInitiateEditClosing = (closing) => {
     if (!closing) return;
-    const isDev = user?.role?.trim().toLowerCase() === 'developer';
-    if (isDev || developerSession?.devToken) {
+    const role = user?.role?.trim().toLowerCase();
+    const isAuthorized = role === 'admin' || role === 'developer';
+    if (isAuthorized || developerSession?.devToken) {
       setEditingShiftClosing(closing);
     } else {
       setDevAuthTarget(closing);

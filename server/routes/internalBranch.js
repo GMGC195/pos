@@ -12,6 +12,33 @@ function isSuperUser(user) {
   return role === 'admin' || role === 'developer' || role === 'management' || role === 'general manager';
 }
 
+// Activity logging helper
+async function logTransferActivity(client, { transferId, action, fromBranch, toBranch, user, details, metadata = {} }) {
+  try {
+    const performedById = user?.id || null;
+    const performedByName = user?.name || user?.username || 'System';
+    await client.query(`
+      INSERT INTO internal_branch_activity_logs (
+        transfer_id, action, from_branch, to_branch, performed_by_id, performed_by_name, details, metadata, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+    `, [transferId, action, fromBranch, toBranch, performedById, performedByName, details, JSON.stringify(metadata)]);
+  } catch (err) {
+    console.warn('Failed to log transfer activity:', err.message);
+  }
+}
+
+// System notification helper
+async function createBranchNotification(client, { targetBranch, message, type = 'INTERNAL_TRANSFER' }) {
+  try {
+    await client.query(`
+      INSERT INTO notifications (message, type, target_roles, created_at)
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+    `, [message, type, JSON.stringify(['admin', 'developer', targetBranch])]);
+  } catch (err) {
+    console.warn('Failed to insert notification:', err.message);
+  }
+}
+
 // GET /api/internal-branch/branches - List all available branches
 router.get('/branches', authenticateToken, async (req, res) => {
   try {
@@ -92,7 +119,7 @@ async function generateTransferId(client) {
 router.post('/transfers', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { to_branch, needed_by_time, notes, items, is_external } = req.body;
+    const { to_branch, needed_by_time, delivery_minutes, notes, items, is_external } = req.body;
     let from_branch = req.body.from_branch;
 
     // Detect user branch
@@ -155,11 +182,15 @@ router.post('/transfers', authenticateToken, async (req, res) => {
     const transferId = await generateTransferId(client);
     const requestedByName = req.user.name || req.user.username || 'Staff';
 
+    // Calculate expected delivery timestamp
+    const mins = parseInt(delivery_minutes, 10) || 30;
+    const expectedDeliveryAt = new Date(Date.now() + mins * 60 * 1000);
+
     const insertTransferRes = await client.query(`
       INSERT INTO internal_branch_transfers (
         transfer_id, from_branch, to_branch, requested_by_user_id, requested_by_name,
-        request_date, needed_by_time, status, notes, is_external
-      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, 'Pending', $7, $8)
+        request_date, needed_by_time, delivery_minutes, expected_delivery_at, status, notes, is_external
+      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, 'Pending', $9, $10)
       RETURNING *
     `, [
       transferId,
@@ -167,7 +198,9 @@ router.post('/transfers', authenticateToken, async (req, res) => {
       to_branch,
       req.user.id || null,
       requestedByName,
-      needed_by_time || null,
+      needed_by_time || `${mins} mins`,
+      mins,
+      expectedDeliveryAt,
       notes || null,
       isExternalBranch
     ]);
@@ -178,8 +211,8 @@ router.post('/transfers', authenticateToken, async (req, res) => {
     for (const item of items) {
       const itemRes = await client.query(`
         INSERT INTO internal_branch_transfer_items (
-          transfer_id, item_id, dish_name, uom, requested_qty, remarks, image_url, price
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
       `, [
         createdTransfer.id,
@@ -187,12 +220,31 @@ router.post('/transfers', authenticateToken, async (req, res) => {
         item.dish_name.trim(),
         item.uom.trim(),
         parseFloat(item.requested_qty),
+        parseFloat(item.requested_qty), // Default confirmed_qty equals requested_qty
         item.remarks ? item.remarks.trim() : null,
         item.image_url || null,
         item.price ? parseFloat(item.price) : null
       ]);
       insertedItems.push(itemRes.rows[0]);
     }
+
+    // Record activity log
+    await logTransferActivity(client, {
+      transferId: createdTransfer.id,
+      action: 'REQUEST_CREATED',
+      fromBranch: from_branch,
+      toBranch: to_branch,
+      user: req.user,
+      details: `Request created with ${items.length} item(s). Expected delivery in ${mins} minutes.`,
+      metadata: { itemsCount: items.length, deliveryMinutes: mins, neededBy: needed_by_time }
+    });
+
+    // Notify receiving branch
+    await createBranchNotification(client, {
+      targetBranch: to_branch,
+      message: `🔔 New Internal Khata Request #${transferId} from ${from_branch} (${items.length} items, needed in ${mins}m).`,
+      type: 'INTERNAL_TRANSFER_NEW'
+    });
 
     await client.query('COMMIT');
 
@@ -201,7 +253,6 @@ router.post('/transfers', authenticateToken, async (req, res) => {
       items: insertedItems
     };
 
-    // Emit real-time notification
     if (req.io) {
       req.io.emit('internal_transfer_created', responsePayload);
     }
@@ -216,12 +267,12 @@ router.post('/transfers', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/internal-branch/transfers - Query transfers with filtering and role isolation
+// GET /api/internal-branch/transfers - Query transfers with filtering, branch direction & role isolation
 router.get('/transfers', authenticateToken, async (req, res) => {
   try {
     const { 
-      status, from_branch, to_branch, period, 
-      from_date, to_date, dish_name, search, tab 
+      status, from_branch, to_branch, branch, branch_direction,
+      period, from_date, to_date, dish_name, search, tab 
     } = req.query;
 
     const superUser = isSuperUser(req.user);
@@ -236,10 +287,12 @@ router.get('/transfers', authenticateToken, async (req, res) => {
             'dish_name', ti.dish_name,
             'uom', ti.uom,
             'requested_qty', ti.requested_qty,
+            'confirmed_qty', ti.confirmed_qty,
             'sent_qty', ti.sent_qty,
             'received_qty', ti.received_qty,
             'variance_qty', ti.variance_qty,
             'remarks', ti.remarks,
+            'quantity_change_reason', ti.quantity_change_reason,
             'image_url', COALESCE(ti.image_url, i.image_url),
             'price', COALESCE(ti.price, i.price)
           ) ORDER BY ti.id ASC
@@ -266,30 +319,47 @@ router.get('/transfers', authenticateToken, async (req, res) => {
         query += ` AND (t.from_branch = $${params.length - 1} OR t.to_branch = $${params.length})`;
       }
     } else {
-      if (from_branch && from_branch !== 'All') {
-        if (from_branch === 'Other') {
-          if (req.query.from_branch_custom && req.query.from_branch_custom.trim()) {
-            params.push(`%${req.query.from_branch_custom.trim()}%`);
-            query += ` AND t.from_branch ILIKE $${params.length}`;
-          } else {
-            query += ` AND t.from_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
-          }
-        } else {
-          params.push(from_branch);
+      // Admin / SuperUser filtering
+      const selectedBranch = branch || null;
+      if (selectedBranch && selectedBranch !== 'All') {
+        const direction = (branch_direction || 'all').toLowerCase();
+        if (direction === 'sent') {
+          params.push(selectedBranch);
           query += ` AND t.from_branch = $${params.length}`;
-        }
-      }
-      if (to_branch && to_branch !== 'All') {
-        if (to_branch === 'Other') {
-          if (req.query.to_branch_custom && req.query.to_branch_custom.trim()) {
-            params.push(`%${req.query.to_branch_custom.trim()}%`);
-            query += ` AND t.to_branch ILIKE $${params.length}`;
-          } else {
-            query += ` AND t.to_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
-          }
-        } else {
-          params.push(to_branch);
+        } else if (direction === 'received') {
+          params.push(selectedBranch);
           query += ` AND t.to_branch = $${params.length}`;
+        } else {
+          params.push(selectedBranch);
+          params.push(selectedBranch);
+          query += ` AND (t.from_branch = $${params.length - 1} OR t.to_branch = $${params.length})`;
+        }
+      } else {
+        if (from_branch && from_branch !== 'All') {
+          if (from_branch === 'Other') {
+            if (req.query.from_branch_custom && req.query.from_branch_custom.trim()) {
+              params.push(`%${req.query.from_branch_custom.trim()}%`);
+              query += ` AND t.from_branch ILIKE $${params.length}`;
+            } else {
+              query += ` AND t.from_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
+            }
+          } else {
+            params.push(from_branch);
+            query += ` AND t.from_branch = $${params.length}`;
+          }
+        }
+        if (to_branch && to_branch !== 'All') {
+          if (to_branch === 'Other') {
+            if (req.query.to_branch_custom && req.query.to_branch_custom.trim()) {
+              params.push(`%${req.query.to_branch_custom.trim()}%`);
+              query += ` AND t.to_branch ILIKE $${params.length}`;
+            } else {
+              query += ` AND t.to_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
+            }
+          } else {
+            params.push(to_branch);
+            query += ` AND t.to_branch = $${params.length}`;
+          }
         }
       }
     }
@@ -302,15 +372,13 @@ router.get('/transfers', authenticateToken, async (req, res) => {
 
     // Tab-specific status overrides
     if (tab === 'incoming' && (!status || status === 'All')) {
-      query += ` AND t.status IN ('Pending', 'In-Transit')`;
+      query += ` AND t.status IN ('Pending', 'In Progress', 'Ready for Dispatch', 'Dispatched', 'In-Transit')`;
     } else if (tab === 'pending_receivals' && (!status || status === 'All')) {
-      query += ` AND t.status = 'In-Transit'`;
+      query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')`;
     }
 
     // Date / Period filters
-    if (period === 'today') {
-      query += ` AND (t.request_date AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date`;
-    } else if (period === 'daily') {
+    if (period === 'today' || period === 'daily') {
       query += ` AND (t.request_date AT TIME ZONE 'Asia/Riyadh')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date`;
     } else if (period === 'weekly') {
       query += ` AND t.request_date >= CURRENT_TIMESTAMP - INTERVAL '7 days'`;
@@ -396,20 +464,29 @@ router.get('/transfers/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/internal-branch/transfers/:id/dispatch - Supplying branch marks as dispatched
-router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
+// GET /api/internal-branch/transfers/:id/activity-logs - Get activity logs for a transfer
+router.get('/transfers/:id/activity-logs', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const logsRes = await pool.query(`
+      SELECT * FROM internal_branch_activity_logs 
+      WHERE transfer_id = $1 
+      ORDER BY created_at DESC
+    `, [id]);
+    res.json(logsRes.rows);
+  } catch (err) {
+    console.error('Error fetching transfer activity logs:', err);
+    res.status(500).json({ error: 'Failed to fetch activity logs' });
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/start-processing - Receiving branch starts preparing
+router.put('/transfers/:id/start-processing', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { items } = req.body;
-
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Dispatched quantities are required.' });
-    }
-
     await client.query('BEGIN');
 
-    // Row-level lock to prevent concurrent double-click race conditions
     const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
     if (tRes.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -417,53 +494,399 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
     }
 
     const transfer = tRes.rows[0];
-    if (transfer.status !== 'Pending') {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Cannot dispatch transfer in status "${transfer.status}". Only "Pending" transfers can be dispatched.` });
-    }
-
     const superUser = isSuperUser(req.user);
     const userBranch = req.user.branch;
 
-    // Supplying branch check
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only supplying branch "${transfer.to_branch}" can start processing.` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET status = 'In Progress',
+          processing_started_at = CURRENT_TIMESTAMP,
+          processing_started_by_user_id = $1,
+          processing_started_by_name = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+    `, [req.user.id || null, userName, transfer.id]);
+
+    const updated = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'PROCESSING_STARTED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Kitchen started preparing dishes for request #${transfer.transfer_id}.`
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.from_branch,
+      message: `🍳 ${transfer.to_branch} has started preparing your request #${transfer.transfer_id}.`,
+      type: 'INTERNAL_TRANSFER_IN_PROGRESS'
+    });
+
+    await client.query('COMMIT');
+
+    if (req.io) {
+      req.io.emit('internal_transfer_processing_started', updated);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error starting transfer processing:', err);
+    res.status(500).json({ error: err.message || 'Failed to start processing' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/extend-delivery-time - Update/extend expected delivery time
+router.put('/transfers/:id/extend-delivery-time', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { additional_minutes, new_delivery_time, reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Reason for extending/updating delivery time is mandatory.' });
+    }
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Unauthorized. Only supplying branch can extend delivery time.' });
+    }
+
+    const origTime = transfer.original_delivery_at || transfer.expected_delivery_at;
+    let newExpected = null;
+
+    if (new_delivery_time) {
+      newExpected = new Date(new_delivery_time);
+    } else {
+      const addMins = parseInt(additional_minutes, 10) || 15;
+      const baseMs = transfer.expected_delivery_at ? new Date(transfer.expected_delivery_at).getTime() : Date.now();
+      newExpected = new Date(baseMs + addMins * 60 * 1000);
+    }
+
+    const userName = req.user.name || req.user.username || 'Staff';
+
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET original_delivery_at = COALESCE(original_delivery_at, expected_delivery_at),
+          expected_delivery_at = $1,
+          time_extended_at = CURRENT_TIMESTAMP,
+          time_extended_by_name = $2,
+          time_extend_reason = $3,
+          needed_by_time = $4,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+      RETURNING *
+    `, [
+      newExpected,
+      userName,
+      reason.trim(),
+      newExpected.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      transfer.id
+    ]);
+
+    const updated = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'DELIVERY_TIME_EXTENDED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Delivery time extended. Previous: ${origTime ? new Date(origTime).toLocaleTimeString() : 'N/A'}, New: ${newExpected.toLocaleTimeString()}. Reason: ${reason.trim()}`,
+      metadata: { originalDelivery: origTime, updatedDelivery: newExpected, reason: reason.trim() }
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.from_branch,
+      message: `⏰ Delivery time updated for Request #${transfer.transfer_id} by ${transfer.to_branch} to ${newExpected.toLocaleTimeString()}. Reason: ${reason.trim()}`,
+      type: 'INTERNAL_TRANSFER_TIME_EXTENDED'
+    });
+
+    await client.query('COMMIT');
+
+    if (req.io) {
+      req.io.emit('internal_transfer_time_extended', updated);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error extending delivery time:', err);
+    res.status(500).json({ error: err.message || 'Failed to extend delivery time' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/modify-quantities - Supplying branch modifies item quantities
+router.put('/transfers/:id/modify-quantities', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { items, general_reason } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Item quantities are required.' });
+    }
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Unauthorized. Only supplying branch can modify quantities.' });
+    }
+
+    const changes = [];
+    for (const item of items) {
+      const confQty = parseFloat(item.confirmed_qty !== undefined ? item.confirmed_qty : item.sent_qty);
+      if (isNaN(confQty) || confQty < 0) {
+        throw new Error(`Confirmed quantity for item #${item.id} must be a valid non-negative number.`);
+      }
+
+      const itemRes = await client.query(`
+        UPDATE internal_branch_transfer_items
+        SET confirmed_qty = $1,
+            sent_qty = $1,
+            quantity_change_reason = COALESCE($2, quantity_change_reason)
+        WHERE id = $3 AND transfer_id = $4
+        RETURNING *
+      `, [confQty, item.reason || general_reason || null, item.id, transfer.id]);
+
+      if (itemRes.rows[0]) {
+        changes.push(itemRes.rows[0]);
+      }
+    }
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'QUANTITY_MODIFIED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Item quantities modified by supplying branch. Reason: ${general_reason || 'Kitchen availability adjustments'}.`,
+      metadata: { modifiedItems: changes }
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.from_branch,
+      message: `📝 ${transfer.to_branch} updated item quantities for Request #${transfer.transfer_id}. Reason: ${general_reason || 'Stock availability adjustment'}.`,
+      type: 'INTERNAL_TRANSFER_QTY_CHANGED'
+    });
+
+    await client.query('COMMIT');
+
+    const updatedItems = await pool.query(`
+      SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC
+    `, [transfer.id]);
+
+    const payload = {
+      ...transfer,
+      items: updatedItems.rows
+    };
+
+    if (req.io) {
+      req.io.emit('internal_transfer_quantity_modified', payload);
+    }
+
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error modifying quantities:', err);
+    res.status(500).json({ error: err.message || 'Failed to modify quantities' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/mark-ready - Supplying branch marks as Ready for Dispatch
+router.put('/transfers/:id/mark-ready', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only staff from supplying branch "${transfer.to_branch}" can mark as ready.` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET status = 'Ready for Dispatch',
+          ready_for_dispatch_at = CURRENT_TIMESTAMP,
+          ready_by_name = $1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING *
+    `, [userName, transfer.id]);
+
+    const updated = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'READY_FOR_DISPATCH',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Items prepared and marked Ready for Dispatch by ${userName}.`
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.from_branch,
+      message: `📦 Request #${transfer.transfer_id} is packed & Ready for Dispatch at ${transfer.to_branch}!`,
+      type: 'INTERNAL_TRANSFER_READY'
+    });
+
+    await client.query('COMMIT');
+
+    const itemsRes = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [transfer.id]);
+    const payload = { ...updated, items: itemsRes.rows };
+
+    if (req.io) {
+      req.io.emit('internal_transfer_ready', payload);
+    }
+
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error marking ready for dispatch:', err);
+    res.status(500).json({ error: err.message || 'Failed to mark ready for dispatch' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/dispatch - Handover & Dispatch
+router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { handover_by_name, handover_to_name, items } = req.body;
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
     if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: `Unauthorized. Only staff from supplying branch "${transfer.to_branch}" can dispatch this transfer.` });
     }
 
-    for (const item of items) {
-      const sentQty = parseFloat(item.sent_qty);
-      if (isNaN(sentQty) || sentQty < 0) {
-        throw new Error(`Sent quantity for item #${item.id} must be a non-negative number.`);
+    // Update item sent quantities if provided
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        const sentQty = parseFloat(item.sent_qty !== undefined ? item.sent_qty : item.confirmed_qty);
+        if (!isNaN(sentQty) && sentQty >= 0) {
+          await client.query(`
+            UPDATE internal_branch_transfer_items
+            SET sent_qty = $1, remarks = COALESCE($2, remarks)
+            WHERE id = $3 AND transfer_id = $4
+          `, [sentQty, item.remarks || null, item.id, transfer.id]);
+        }
       }
-
+    } else {
+      // Default sent_qty to confirmed_qty || requested_qty
       await client.query(`
         UPDATE internal_branch_transfer_items
-        SET sent_qty = $1, remarks = COALESCE($2, remarks)
-        WHERE id = $3 AND transfer_id = $4
-      `, [sentQty, item.remarks || null, item.id, transfer.id]);
+        SET sent_qty = COALESCE(sent_qty, confirmed_qty, requested_qty)
+        WHERE transfer_id = $1
+      `, [transfer.id]);
     }
 
     const dispatcherName = req.user.name || req.user.username || 'Kitchen Dispatcher';
+    const hOverBy = handover_by_name?.trim() || dispatcherName;
+    const hOverTo = handover_to_name?.trim() || 'Driver / Delivery Staff';
 
     const updateRes = await client.query(`
       UPDATE internal_branch_transfers
-      SET status = 'In-Transit',
+      SET status = 'Dispatched',
           dispatched_at = CURRENT_TIMESTAMP,
           dispatched_by_user_id = $1,
           dispatched_by_name = $2,
+          handover_by_name = $3,
+          handover_to_name = $4,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
+      WHERE id = $5
       RETURNING *
-    `, [req.user.id || null, dispatcherName, transfer.id]);
+    `, [req.user.id || null, dispatcherName, hOverBy, hOverTo, transfer.id]);
 
     const updatedTransfer = updateRes.rows[0];
 
-    const updatedItems = await client.query(`
-      SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC
-    `, [transfer.id]);
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'PARCEL_DISPATCHED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Parcel handed over by "${hOverBy}" to "${hOverTo}" and dispatched.`,
+      metadata: { handoverBy: hOverBy, handoverTo: hOverTo }
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.from_branch,
+      message: `🚚 Request #${transfer.transfer_id} has been Dispatched by ${transfer.to_branch}! Handed over by ${hOverBy} to ${hOverTo}.`,
+      type: 'INTERNAL_TRANSFER_DISPATCHED'
+    });
 
     await client.query('COMMIT');
+
+    const updatedItems = await pool.query(`
+      SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC
+    `, [transfer.id]);
 
     const payload = {
       ...updatedTransfer,
@@ -484,20 +907,19 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/internal-branch/transfers/:id/receive - Requesting branch confirms receiving and closes transfer
+// PUT /api/internal-branch/transfers/:id/receive - Requesting branch confirms receiving & verifies quantities
 router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { items, notes } = req.body;
+    const { items, discrepancy_reason, notes } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Received quantities are required.' });
+      return res.status(400).json({ error: 'Received quantities are required for all items.' });
     }
 
     await client.query('BEGIN');
 
-    // Row-level lock to prevent concurrent double-click race conditions
     const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
     if (tRes.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -505,19 +927,22 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     }
 
     const transfer = tRes.rows[0];
-    if (transfer.status !== 'In-Transit') {
+    const validStatuses = ['Dispatched', 'In-Transit', 'Ready for Dispatch'];
+    if (!validStatuses.includes(transfer.status)) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Cannot receive transfer in status "${transfer.status}". Only "In-Transit" transfers can be received.` });
+      return res.status(409).json({ error: `Cannot receive transfer in status "${transfer.status}". Only dispatched transfers can be received.` });
     }
 
     const superUser = isSuperUser(req.user);
     const userBranch = req.user.branch;
 
-    // Receiving branch check
     if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.from_branch) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: `Unauthorized. Only staff from requesting branch "${transfer.from_branch}" can receive and close this transfer.` });
+      return res.status(403).json({ error: `Unauthorized. Only staff from requesting branch "${transfer.from_branch}" can receive and verify this transfer.` });
     }
+
+    let hasDiscrepancy = false;
+    const itemDiscrepancies = [];
 
     for (const item of items) {
       const recQty = parseFloat(item.received_qty);
@@ -525,11 +950,26 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
         throw new Error(`Received quantity for item #${item.id} must be a non-negative number.`);
       }
 
-      // Fetch sent qty to calculate exact variance
-      const itemRowRes = await client.query(`SELECT sent_qty, requested_qty FROM internal_branch_transfer_items WHERE id = $1`, [item.id]);
+      // Fetch base sent qty
+      const itemRowRes = await client.query(`
+        SELECT id, dish_name, uom, sent_qty, confirmed_qty, requested_qty 
+        FROM internal_branch_transfer_items WHERE id = $1
+      `, [item.id]);
+
       const currentItem = itemRowRes.rows[0] || {};
-      const baseSent = currentItem.sent_qty !== null ? parseFloat(currentItem.sent_qty) : parseFloat(currentItem.requested_qty || 0);
+      const baseSent = currentItem.sent_qty !== null ? parseFloat(currentItem.sent_qty) : (currentItem.confirmed_qty !== null ? parseFloat(currentItem.confirmed_qty) : parseFloat(currentItem.requested_qty || 0));
       const variance = recQty - baseSent;
+
+      if (Math.abs(variance) > 0.0001) {
+        hasDiscrepancy = true;
+        itemDiscrepancies.push({
+          dish_name: currentItem.dish_name,
+          uom: currentItem.uom,
+          dispatched_qty: baseSent,
+          received_qty: recQty,
+          variance_qty: variance
+        });
+      }
 
       await client.query(`
         UPDATE internal_branch_transfer_items
@@ -540,6 +980,12 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       `, [recQty, variance, item.remarks || null, item.id, transfer.id]);
     }
 
+    if (hasDiscrepancy && (!discrepancy_reason || !discrepancy_reason.trim())) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Discrepancy detected (shortage or excess). A reason for the variance is required.' });
+    }
+
+    const finalStatus = hasDiscrepancy ? 'Partially Received' : 'Fully Received';
     const receiverName = req.user.name || req.user.username || 'Staff Receiver';
     const combinedNotes = notes 
       ? (transfer.notes ? `${transfer.notes}\n[Receiving Notes]: ${notes.trim()}` : `[Receiving Notes]: ${notes.trim()}`)
@@ -547,23 +993,51 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
 
     const updateRes = await client.query(`
       UPDATE internal_branch_transfers
-      SET status = 'Completed',
+      SET status = $1,
           received_at = CURRENT_TIMESTAMP,
-          received_by_user_id = $1,
-          received_by_name = $2,
-          notes = $3,
+          received_by_user_id = $2,
+          received_by_name = $3,
+          discrepancy_reason = $4,
+          notes = $5,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $4
+      WHERE id = $6
       RETURNING *
-    `, [req.user.id || null, receiverName, combinedNotes, transfer.id]);
+    `, [
+      finalStatus,
+      req.user.id || null,
+      receiverName,
+      discrepancy_reason ? discrepancy_reason.trim() : null,
+      combinedNotes,
+      transfer.id
+    ]);
 
     const updatedTransfer = updateRes.rows[0];
 
-    const updatedItems = await client.query(`
-      SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC
-    `, [transfer.id]);
+    const discrepancySummary = hasDiscrepancy
+      ? itemDiscrepancies.map(d => `${d.dish_name}: sent ${d.dispatched_qty} ${d.uom}, received ${d.received_qty} ${d.uom} (${d.variance_qty < 0 ? 'Shortage ' + d.variance_qty : 'Excess +' + d.variance_qty})`).join('; ')
+      : 'All item quantities confirmed matching.';
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'PARCEL_RECEIVED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Received by ${receiverName}. Status: ${finalStatus}. ${discrepancySummary}`,
+      metadata: { status: finalStatus, discrepancies: itemDiscrepancies, reason: discrepancy_reason }
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.to_branch,
+      message: `✅ Request #${transfer.transfer_id} received by ${transfer.from_branch} (${finalStatus}). ${discrepancySummary}`,
+      type: 'INTERNAL_TRANSFER_RECEIVED'
+    });
 
     await client.query('COMMIT');
+
+    const updatedItems = await pool.query(`
+      SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC
+    `, [transfer.id]);
 
     const payload = {
       ...updatedTransfer,
@@ -579,6 +1053,54 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error receiving transfer:', err);
     res.status(500).json({ error: err.message || 'Failed to receive transfer' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/complete - Mark transfer as Completed
+router.put('/transfers/:id/complete', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET status = 'Completed', updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `, [transfer.id]);
+
+    const updated = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'TRANSFER_COMPLETED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Transfer marked as Completed.`
+    });
+
+    await client.query('COMMIT');
+
+    if (req.io) {
+      req.io.emit('internal_transfer_completed', updated);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error completing transfer:', err);
+    res.status(500).json({ error: 'Failed to complete transfer' });
   } finally {
     client.release();
   }
@@ -624,6 +1146,15 @@ router.put('/transfers/:id/cancel', authenticateToken, async (req, res) => {
       RETURNING *
     `, [cancelNote, transfer.id]);
 
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'TRANSFER_CANCELLED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      details: `Transfer cancelled. Reason: ${reason || 'N/A'}`
+    });
+
     await client.query('COMMIT');
 
     const payload = updateRes.rows[0];
@@ -658,35 +1189,39 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const countsRes = await pool.query(`
       SELECT 
         COUNT(*) FILTER (WHERE status = 'Pending') as pending_count,
-        COUNT(*) FILTER (WHERE status = 'In-Transit') as in_transit_count,
+        COUNT(*) FILTER (WHERE status = 'In Progress') as in_progress_count,
+        COUNT(*) FILTER (WHERE status = 'Ready for Dispatch') as ready_count,
+        COUNT(*) FILTER (WHERE status IN ('Dispatched', 'In-Transit')) as dispatched_count,
+        COUNT(*) FILTER (WHERE status = 'Partially Received') as partially_received_count,
+        COUNT(*) FILTER (WHERE status = 'Fully Received') as fully_received_count,
         COUNT(*) FILTER (WHERE status = 'Completed') as completed_count,
         COUNT(*) FILTER (WHERE status = 'Cancelled') as cancelled_count
       FROM internal_branch_transfers
       WHERE 1=1 ${branchClause}
     `, params);
 
-    // Incoming pending count for badge (pending where to_branch = userBranch)
+    // Incoming active count for badge (Pending + In Progress + Ready for Dispatch where to_branch = userBranch)
     let incomingPendingCount = 0;
     if (userBranch && userBranch !== 'All') {
       const incRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE to_branch = $1 AND status = 'Pending'
+        WHERE to_branch = $1 AND status IN ('Pending', 'In Progress', 'Ready for Dispatch')
       `, [userBranch]);
       incomingPendingCount = parseInt(incRes.rows[0]?.count || 0, 10);
     } else {
-      incomingPendingCount = parseInt(countsRes.rows[0]?.pending_count || 0, 10);
+      incomingPendingCount = parseInt(countsRes.rows[0]?.pending_count || 0, 10) + parseInt(countsRes.rows[0]?.in_progress_count || 0, 10);
     }
 
-    // Pending receivals count for badge (in-transit where from_branch = userBranch)
+    // Pending receivals count for badge (Dispatched where from_branch = userBranch)
     let pendingReceivalsCount = 0;
     if (userBranch && userBranch !== 'All') {
       const recRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE from_branch = $1 AND status = 'In-Transit'
+        WHERE from_branch = $1 AND status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')
       `, [userBranch]);
       pendingReceivalsCount = parseInt(recRes.rows[0]?.count || 0, 10);
     } else {
-      pendingReceivalsCount = parseInt(countsRes.rows[0]?.in_transit_count || 0, 10);
+      pendingReceivalsCount = parseInt(countsRes.rows[0]?.dispatched_count || 0, 10);
     }
 
     res.json({
@@ -698,7 +1233,11 @@ router.get('/stats', authenticateToken, async (req, res) => {
     console.error('Error fetching transfer stats:', err);
     res.json({
       pending_count: 0,
-      in_transit_count: 0,
+      in_progress_count: 0,
+      ready_count: 0,
+      dispatched_count: 0,
+      partially_received_count: 0,
+      fully_received_count: 0,
       completed_count: 0,
       cancelled_count: 0,
       incoming_pending_count: 0,
@@ -708,4 +1247,3 @@ router.get('/stats', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
-

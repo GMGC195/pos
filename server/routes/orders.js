@@ -592,33 +592,37 @@ router.get('/closings', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/orders/closings/:id - Edit Shift Closing (Developer Authorization Required)
+// PUT /api/orders/closings/:id - Edit Shift Closing (Admin & Developer Authorization)
 router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
     const { closing_cash, closing_card, reason } = req.body;
 
-    // Verify Developer authorization strictly on backend
-    let developerInfo = null;
+    // Verify Admin or Developer authorization strictly on backend
+    const userRole = (req.user?.role || '').trim().toLowerCase();
+    const isAdminUser = userRole === 'admin';
+    const isDevUser = userRole === 'developer';
+    
+    let authorizerInfo = null;
     const devToken = req.headers['x-developer-token'] || req.body.dev_token;
 
     if (devToken) {
       try {
         const decoded = jwt.verify(devToken, process.env.JWT_SECRET || 'fallback_secret');
-        if (decoded && (decoded.role || '').toLowerCase() === 'developer') {
-          developerInfo = decoded;
+        if (decoded && ((decoded.role || '').toLowerCase() === 'developer' || (decoded.role || '').toLowerCase() === 'admin')) {
+          authorizerInfo = decoded;
         }
-      } catch (tokenErr) {
-        return res.status(403).json({ error: 'Developer authorization token expired or invalid. Please re-authenticate as Developer.' });
-      }
-    } else if ((req.user.role || '').trim().toLowerCase() === 'developer') {
-      developerInfo = req.user;
+      } catch (tokenErr) {}
     }
 
-    if (!developerInfo) {
+    if (isAdminUser || isDevUser) {
+      authorizerInfo = req.user;
+    }
+
+    if (!authorizerInfo) {
       return res.status(403).json({ 
-        error: 'Developer authorization required. Only authorized Developers can edit closed shift records.' 
+        error: 'Admin or Developer authorization required. Only authorized Admins or Developers can edit closed shift records.' 
       });
     }
 
@@ -657,8 +661,9 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
 
     // Append edit note to difference_reason
     const editTimestamp = new Date().toISOString();
-    const devAuthorName = developerInfo.name || developerInfo.username || 'Developer';
-    const auditNote = `[Edited on ${editTimestamp} by Developer ${devAuthorName} (User ID: ${developerInfo.id || req.user.id})]: ${reason.trim()}`;
+    const authorName = authorizerInfo.name || authorizerInfo.username || (isAdminUser ? 'Admin' : 'Developer');
+    const authorRole = authorizerInfo.role || (isAdminUser ? 'Admin' : 'Developer');
+    const auditNote = `[Edited on ${editTimestamp} by ${authorRole} ${authorName} (User ID: ${authorizerInfo.id || req.user.id})]: ${reason.trim()}`;
     const updatedReason = prev.difference_reason 
       ? `${prev.difference_reason}\n${auditNote}` 
       : auditNote;
@@ -703,9 +708,9 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
       id,
       id,
       prev.branch,
-      developerInfo.id || req.user.id || null,
-      devAuthorName,
-      'developer',
+      authorizerInfo.id || req.user.id || null,
+      authorName,
+      authorRole,
       prevCash,
       newCash,
       prevCard,
@@ -720,9 +725,9 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
     // Record activity log
     try {
       recordActivityLog({
-        userId: developerInfo.id || req.user.id,
+        userId: authorizerInfo.id || req.user.id,
         action: 'EDIT_SHIFT_CLOSING',
-        details: `Developer ${devAuthorName} edited shift closing #${id} (${prev.branch}): Cash ${prevCash} -> ${newCash}, Card ${prevCard} -> ${newCard}. Reason: ${reason.trim()}`
+        details: `${authorRole} ${authorName} edited shift closing #${id} (${prev.branch}): Cash ${prevCash} -> ${newCash}, Card ${prevCard} -> ${newCard}. Reason: ${reason.trim()}`
       });
     } catch (_) {}
 
@@ -731,12 +736,12 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
       req.io.emit('shift_closing_updated', {
         id: updatedRecord.id,
         branch: updatedRecord.branch,
-        updated_by: devAuthorName
+        updated_by: authorName
       });
     }
 
     res.json({
-      message: 'Shift closing updated successfully by authorized Developer',
+      message: 'Shift closing updated successfully',
       closing: updatedRecord
     });
   } catch (err) {

@@ -14,8 +14,8 @@ export default function EditShiftClosingModal({
 }) {
   const { user } = useAuth();
   const role = user?.role?.trim().toLowerCase();
-  // Authorized if currently logged in user is developer, or verified devToken is provided
-  const isAuthorized = role === 'developer' || Boolean(devToken);
+  // Authorized if currently logged in user is admin or developer, or verified devToken is provided
+  const isAuthorized = role === 'admin' || role === 'developer' || Boolean(devToken);
 
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
@@ -139,7 +139,7 @@ export default function EditShiftClosingModal({
     }
   };
 
-  const devDisplayName = developer?.username || (role === 'developer' ? (user?.name || user?.username) : 'Authorized Developer');
+  const authorDisplayName = developer?.username || (user?.name || user?.username || (role === 'admin' ? 'Admin' : 'Developer'));
 
   return (
     <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) onClose(); }} style={{ zIndex: 9999 }}>
@@ -164,11 +164,11 @@ export default function EditShiftClosingModal({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 17, fontWeight: 700 }}>Edit Shift Closing Record</span>
               <span style={{ background: '#dc2626', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <ShieldCheck size={12} /> Developer Authorized
+                <ShieldCheck size={12} /> {role === 'admin' ? 'Admin Authorized' : 'Developer Authorized'}
               </span>
             </div>
             <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#94a3b8' }}>
-              {closing.branch || 'Branch'} · {closing.closing_type || 'Shift'} #{closing.id} · Cashier: {closing.cashier_name || 'N/A'} · Dev: {devDisplayName}
+              {closing.branch || 'Branch'} · {closing.closing_type || 'Shift'} #{closing.id} · Cashier: {closing.cashier_name || 'N/A'} · By: {authorDisplayName}
             </p>
           </div>
           <button 

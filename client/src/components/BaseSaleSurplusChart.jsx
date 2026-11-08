@@ -179,20 +179,13 @@ export default function BaseSaleSurplusChart({
     <div className="base-sale-surplus-card" style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', position: 'relative' }}>
       
       {/* Header */}
-      <div style={{ marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0', letterSpacing: '-0.01em' }}>
-            Base sale and surplus per shift
-          </h3>
-          <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-            Bar = system base (blue) + exceeded surplus (orange). Badge = surplus ÷ base.
-          </p>
-        </div>
-        {isAdminOrDev && (
-          <span style={{ fontSize: 11, background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Edit3 size={12} /> Admin Edit Enabled
-          </span>
-        )}
+      <div style={{ marginBottom: 18 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0', letterSpacing: '-0.01em' }}>
+          Base sale and surplus per shift
+        </h3>
+        <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+          Bar = system base (blue) + exceeded surplus (orange). Badge = surplus ÷ base.
+        </p>
       </div>
 
       {/* SVG Chart with horizontal scrolling wrapper for mobile safety */}

@@ -38,10 +38,41 @@ import {
   Check,
   X,
   Printer,
-  ArrowLeft
+  ArrowLeft,
+  Play,
+  Edit,
+  History,
+  Timer
 } from 'lucide-react';
 
 const STANDARD_BRANCH_NAMES = ['branch 1', 'branch 2', 'branch 3', 'central kitchen'];
+const INITIAL_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen', 'Other'];
+
+// Normalize legacy or user branch names
+function normalizeBranchName(name) {
+  if (!name) return 'Branch 1';
+  const lower = String(name).trim().toLowerCase();
+  if (lower === 'restaurant 1' || lower === 'r1') return 'Branch 1';
+  if (lower === 'restaurant 2' || lower === 'r2') return 'Branch 2';
+  if (lower === 'restaurant 3' || lower === 'r3') return 'Branch 3';
+  return String(name).trim();
+}
+
+// Sanitize branches list: remove Restaurant 1 & 3 duplicates, keep Other at end
+function sanitizeBranchList(rawList) {
+  if (!Array.isArray(rawList)) return INITIAL_BRANCHES;
+  const cleaned = rawList
+    .filter(b => typeof b === 'string' && b.trim())
+    .map(b => normalizeBranchName(b))
+    .filter(b => {
+      const lower = b.toLowerCase();
+      return !lower.includes('restaurant') && lower !== 'all';
+    });
+  const unique = Array.from(new Set(cleaned));
+  const withoutOther = unique.filter(b => b.toLowerCase() !== 'other');
+  return [...withoutOther, 'Other'];
+}
+
 function isExternalBranch(name) {
   if (!name) return false;
   return !STANDARD_BRANCH_NAMES.includes(name.trim().toLowerCase());
@@ -50,7 +81,7 @@ function isExternalBranch(name) {
 // Short format for branch names: Branch 1 -> B1, Branch 2 -> B2, Branch 3 -> B3, Central Kitchen -> CK
 function getShortBranchName(name) {
   if (!name) return '-';
-  const trimmed = name.trim();
+  const trimmed = normalizeBranchName(name);
   const lower = trimmed.toLowerCase();
   if (lower === 'branch 1') return 'B1';
   if (lower === 'branch 2') return 'B2';
@@ -59,24 +90,128 @@ function getShortBranchName(name) {
   return trimmed;
 }
 
-// Extract dynamic units from menu item's size_options
+// Top 3 standard units in exact required order: 1. KG, 2. Pieces, 3. Plate, followed by Lunch, Half KG, and dynamic units
+const STANDARD_TOP_UNITS = ['KG', 'Pieces', 'Plate', 'Lunch', 'Half KG'];
+
 function getItemUnits(dish) {
-  if (!dish) return ['Piece'];
+  const units = [...STANDARD_TOP_UNITS];
+  if (!dish) return units;
+
   const rawSizes = dish.size_options || [];
-  if (Array.isArray(rawSizes) && rawSizes.length > 0) {
-    const parsed = rawSizes.map(s => {
-      if (typeof s !== 'string') return String(s);
-      if (s.includes(':')) return s.split(':')[0].trim();
-      return s.trim();
-    }).filter(Boolean);
-    if (parsed.length > 0) {
-      return Array.from(new Set(parsed));
-    }
+  if (Array.isArray(rawSizes)) {
+    rawSizes.forEach(s => {
+      if (!s) return;
+      const clean = (typeof s === 'string' ? (s.includes(':') ? s.split(':')[0] : s) : String(s)).trim();
+      if (clean && !units.some(u => u.toLowerCase() === clean.toLowerCase())) {
+        units.push(clean);
+      }
+    });
   }
   if (dish.unit && typeof dish.unit === 'string' && dish.unit.trim()) {
-    return [dish.unit.trim()];
+    const cleanUnit = dish.unit.trim();
+    if (!units.some(u => u.toLowerCase() === cleanUnit.toLowerCase())) {
+      units.push(cleanUnit);
+    }
   }
-  return ['Piece'];
+  return units;
+}
+
+// Live Countdown Timer Badge based on server expected_delivery_at timestamp
+function DeliveryTimerBadge({ expectedDeliveryAt, status }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!['Pending', 'In Progress', 'Ready for Dispatch'].includes(status)) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [status]);
+
+  if (!expectedDeliveryAt) return null;
+
+  const target = new Date(expectedDeliveryAt).getTime();
+  const diffMs = target - now;
+  const isOverdue = diffMs <= 0;
+  const absSec = Math.floor(Math.abs(diffMs) / 1000);
+  const m = Math.floor(absSec / 60);
+  const s = absSec % 60;
+  const formatted = `${m}m ${s < 10 ? '0' : ''}${s}s`;
+
+  if (['Dispatched', 'In-Transit'].includes(status)) {
+    return (
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        background: '#eff6ff',
+        color: '#1d4ed8',
+        border: '1px solid #bfdbfe',
+        padding: '2px 8px',
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 700
+      }}>
+        <Truck size={12} /> Dispatched / In-Transit
+      </span>
+    );
+  }
+
+  if (['Partially Received', 'Fully Received', 'Completed'].includes(status)) {
+    return (
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        background: '#f0fdf4',
+        color: '#166534',
+        border: '1px solid #bbf7d0',
+        padding: '2px 8px',
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 700
+      }}>
+        <CheckCircle2 size={12} /> Received / Completed
+      </span>
+    );
+  }
+
+  if (['Cancelled'].includes(status)) return null;
+
+  if (isOverdue) {
+    return (
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        background: '#fef2f2',
+        color: '#b91c1c',
+        border: '1.5px solid #f87171',
+        padding: '2.5px 8px',
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 800
+      }}>
+        <AlertTriangle size={12} color="#dc2626" /> Overdue by {formatted}
+      </span>
+    );
+  }
+
+  const isWarning = m < 10;
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      background: isWarning ? '#fffbeb' : '#f0fdf4',
+      color: isWarning ? '#b45309' : '#15803d',
+      border: `1px solid ${isWarning ? '#fcd34d' : '#86efac'}`,
+      padding: '2.5px 8px',
+      borderRadius: 12,
+      fontSize: 11,
+      fontWeight: 700
+    }}>
+      <Clock size={12} /> {formatted} remaining
+    </span>
+  );
 }
 
 // Thermal / Standard Transfer Voucher Print Helper
@@ -389,17 +524,21 @@ export default function InternalBranch() {
   const isSuperUser = userRole === 'admin' || userRole === 'developer' || userRole === 'management' || userRole === 'general manager';
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState('requests'); // 'new' | 'incoming' | 'receivals' | 'logs'
+  const [activeTab, setActiveTab] = useState('new'); // 'new' | 'incoming' | 'receivals' | 'logs'
 
   // Branches & Menu Items
-  const [branches, setBranches] = useState(['Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen', 'Other']);
+  const [branches, setBranches] = useState(INITIAL_BRANCHES);
   const [dishes, setDishes] = useState([]);
   const [loadingDishes, setLoadingDishes] = useState(false);
 
   // Stats / Badges
   const [stats, setStats] = useState({
     pending_count: 0,
-    in_transit_count: 0,
+    in_progress_count: 0,
+    ready_count: 0,
+    dispatched_count: 0,
+    partially_received_count: 0,
+    fully_received_count: 0,
     completed_count: 0,
     incoming_pending_count: 0,
     pending_receivals_count: 0
@@ -408,6 +547,10 @@ export default function InternalBranch() {
   // Transfers List
   const [transfers, setTransfers] = useState([]);
   const [loadingTransfers, setLoadingTransfers] = useState(false);
+
+  // Admin Branch Switcher & Activity Filter
+  const [adminSelectedBranch, setAdminSelectedBranch] = useState('All');
+  const [adminDirection, setAdminDirection] = useState('all'); // 'all' | 'sent' | 'received'
 
   // Filters for Master Logs
   const [filterFromBranch, setFilterFromBranch] = useState('All');
@@ -422,18 +565,41 @@ export default function InternalBranch() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals / Actions
+  // 1. Extend Delivery Time
+  const [extendTimeTransfer, setExtendTimeTransfer] = useState(null);
+  const [extendMinutes, setExtendMinutes] = useState(15);
+  const [extendReason, setExtendReason] = useState('');
+  const [extendingTime, setExtendingTime] = useState(false);
+
+  // 2. Modify Quantities
+  const [modifyQtyTransfer, setModifyQtyTransfer] = useState(null);
+  const [modifiedItemQuantities, setModifiedItemQuantities] = useState({});
+  const [modifiedItemReasons, setModifiedItemReasons] = useState({});
+  const [modifyGeneralReason, setModifyGeneralReason] = useState('');
+  const [modifyingQty, setModifyingQty] = useState(false);
+
+  // 3. Dispatch & Handover
   const [dispatchModalTransfer, setDispatchModalTransfer] = useState(null);
   const [dispatchItemQuantities, setDispatchItemQuantities] = useState({});
   const [dispatchItemRemarks, setDispatchItemRemarks] = useState({});
+  const [handoverByName, setHandoverByName] = useState('');
+  const [handoverToName, setHandoverToName] = useState('');
+  const [dispatchNotes, setDispatchNotes] = useState('');
   const [dispatching, setDispatching] = useState(false);
 
+  // 4. Goods Receiving & Verification
   const [receiveModalTransfer, setReceiveModalTransfer] = useState(null);
   const [receiveItemQuantities, setReceiveItemQuantities] = useState({});
   const [receiveItemRemarks, setReceiveItemRemarks] = useState({});
   const [receiveNotes, setReceiveNotes] = useState('');
+  const [discrepancyReason, setDiscrepancyReason] = useState('');
   const [receiving, setReceiving] = useState(false);
 
+  // 5. Transfer Detail with Activity Timeline
   const [detailModalTransfer, setDetailModalTransfer] = useState(null);
+  const [detailModalTab, setDetailModalTab] = useState('summary'); // 'summary' | 'activity'
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [loadingActivityLogs, setLoadingActivityLogs] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
 
   // Double-click protection refs & socket event deduplication
@@ -444,15 +610,17 @@ export default function InternalBranch() {
   const localActionTransferIdsRef = useRef(new Map());
 
   // New Request Form State
-  const defaultFromBranch = user?.branch && user.branch !== 'All' ? user.branch : 'Branch 1';
+  const defaultFromBranch = normalizeBranchName(user?.branch && user.branch !== 'All' ? user.branch : 'Branch 1');
   const [newFromBranch, setNewFromBranch] = useState(defaultFromBranch);
   const [newToBranch, setNewToBranch] = useState('');
   const [customFromBranch, setCustomFromBranch] = useState('');
   const [customToBranch, setCustomToBranch] = useState('');
+  const [newDeliveryMinutes, setNewDeliveryMinutes] = useState(30);
+  const [customDeliveryMinutes, setCustomDeliveryMinutes] = useState('');
   const [newNeededByTime, setNewNeededByTime] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newDishRows, setNewDishRows] = useState([
-    { id: 1, dish_name: '', item_id: null, uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'] }
+    { id: 1, dish_name: '', item_id: null, uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }
   ]);
   const [submittingRequest, setSubmittingRequest] = useState(false);
 
@@ -575,9 +743,7 @@ export default function InternalBranch() {
     axios.get('/api/internal-branch/branches')
       .then(res => {
         if (Array.isArray(res.data) && res.data.length > 0) {
-          // Remove any Restaurant 1, Restaurant 2, Restaurant 3
-          const cleaned = res.data.filter(b => typeof b === 'string' && !b.trim().toLowerCase().includes('restaurant'));
-          if (!cleaned.includes('Other')) cleaned.push('Other');
+          const cleaned = sanitizeBranchList(res.data);
           setBranches(cleaned);
           // Set default target branch
           const otherBranches = cleaned.filter(b => b !== defaultFromBranch && b !== 'Other');
@@ -586,7 +752,10 @@ export default function InternalBranch() {
           }
         }
       })
-      .catch(err => console.error('Failed to load branches:', err));
+      .catch(err => {
+        console.error('Failed to load branches:', err);
+        setBranches(INITIAL_BRANCHES);
+      });
 
     // Dishes from centralized items
     setLoadingDishes(true);
@@ -623,6 +792,12 @@ export default function InternalBranch() {
     setLoadingTransfers(true);
     const params = {};
 
+    // Admin branch & direction filtering
+    if (isSuperUser && adminSelectedBranch !== 'All') {
+      params.branch = adminSelectedBranch;
+      params.branch_direction = adminDirection;
+    }
+
     if (activeTab === 'incoming') {
       params.tab = 'incoming';
     } else if (activeTab === 'receivals') {
@@ -655,6 +830,9 @@ export default function InternalBranch() {
       .finally(() => setLoadingTransfers(false));
   }, [
     activeTab, 
+    adminSelectedBranch,
+    adminDirection,
+    isSuperUser,
     filterFromBranch, 
     filterToBranch, 
     customFilterFromBranch,
@@ -873,10 +1051,17 @@ export default function InternalBranch() {
       isSubmittingRef.current = true;
       setSubmittingRequest(true);
       const isExternal = newToBranch === 'Other' || newFromBranch === 'Other';
+      const mins = newDeliveryMinutes === 'custom'
+        ? (parseInt(customDeliveryMinutes, 10) || 30)
+        : (parseInt(newDeliveryMinutes, 10) || 30);
+      const targetDate = new Date(Date.now() + mins * 60 * 1000);
+      const formattedNeededBy = newNeededByTime || `${mins} mins (~${targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+
       const res = await axios.post('/api/internal-branch/transfers', {
         from_branch: effectiveFrom,
         to_branch: effectiveTo,
-        needed_by_time: newNeededByTime,
+        needed_by_time: formattedNeededBy,
+        delivery_minutes: mins,
         notes: newNotes,
         is_external: isExternal,
         items: newDishRows.map(r => ({
@@ -901,11 +1086,13 @@ export default function InternalBranch() {
       toast.success(`Transfer request ${res.data.transfer_id} created successfully! Destination branch notified.`);
       
       // Reset form
-      setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'] }]);
+      setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
       setCustomFromBranch('');
       setCustomToBranch('');
       setNewNeededByTime('');
       setNewNotes('');
+      setNewDeliveryMinutes(30);
+      setCustomDeliveryMinutes('');
       fetchStats();
       
       // Switch to master logs
@@ -920,25 +1107,147 @@ export default function InternalBranch() {
     }
   };
 
-  // Open Dispatch Modal
+  // 1. Start Processing Action (Pending -> In Progress)
+  const handleStartProcessing = async (transferId, trfCode) => {
+    try {
+      await axios.put(`/api/internal-branch/transfers/${transferId}/start-processing`);
+      toast.success(`Transfer ${trfCode} marked as In Progress! Kitchen order preparation started.`);
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error starting processing:', err);
+      toast.error(err.response?.data?.error || 'Failed to start processing');
+    }
+  };
+
+  // 2. Extend Delivery Time Action
+  const handleOpenExtendTimeModal = (t) => {
+    setExtendTimeTransfer(t);
+    setExtendMinutes(15);
+    setExtendReason('');
+  };
+
+  const handleConfirmExtendTime = async () => {
+    if (!extendTimeTransfer || extendingTime) return;
+    if (!extendReason.trim()) {
+      return toast.error('Mandatory reason is required to extend delivery time.');
+    }
+    const mins = parseInt(extendMinutes, 10);
+    if (isNaN(mins) || mins <= 0) {
+      return toast.error('Please enter a valid number of extension minutes.');
+    }
+
+    try {
+      setExtendingTime(true);
+      await axios.put(`/api/internal-branch/transfers/${extendTimeTransfer.id}/extend-delivery-time`, {
+        additional_minutes: mins,
+        reason: extendReason.trim()
+      });
+      toast.success(`Delivery time extended by +${mins}m for ${extendTimeTransfer.transfer_id}`);
+      setExtendTimeTransfer(null);
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error extending delivery time:', err);
+      toast.error(err.response?.data?.error || 'Failed to extend delivery time');
+    } finally {
+      setExtendingTime(false);
+    }
+  };
+
+  // 3. Modify Quantities Action (Supplying Branch)
+  const handleOpenModifyQtyModal = (t) => {
+    setModifyQtyTransfer(t);
+    const initQtys = {};
+    const initReasons = {};
+    (t.items || []).forEach(it => {
+      initQtys[it.id] = it.confirmed_qty !== null && it.confirmed_qty !== undefined ? it.confirmed_qty : it.requested_qty;
+      initReasons[it.id] = it.quantity_change_reason || '';
+    });
+    setModifiedItemQuantities(initQtys);
+    setModifiedItemReasons(initReasons);
+    setModifyGeneralReason('');
+  };
+
+  const handleConfirmModifyQty = async () => {
+    if (!modifyQtyTransfer || modifyingQty) return;
+
+    // Validate reasons for items with altered quantities
+    for (const it of (modifyQtyTransfer.items || [])) {
+      const orig = parseFloat(it.requested_qty);
+      const updated = parseFloat(modifiedItemQuantities[it.id] ?? orig);
+      if (Math.abs(orig - updated) > 0.001) {
+        const rsn = (modifiedItemReasons[it.id] || modifyGeneralReason).trim();
+        if (!rsn) {
+          return toast.error(`Please provide a reason for altering quantity of "${it.dish_name}".`);
+        }
+      }
+    }
+
+    try {
+      setModifyingQty(true);
+      const itemsPayload = (modifyQtyTransfer.items || []).map(it => ({
+        id: it.id,
+        confirmed_qty: parseFloat(modifiedItemQuantities[it.id] ?? it.requested_qty),
+        reason: (modifiedItemReasons[it.id] || modifyGeneralReason).trim()
+      }));
+
+      await axios.put(`/api/internal-branch/transfers/${modifyQtyTransfer.id}/modify-quantities`, {
+        items: itemsPayload,
+        general_reason: modifyGeneralReason.trim()
+      });
+
+      toast.success(`Quantities confirmed & modified for ${modifyQtyTransfer.transfer_id}. Requesting branch notified.`);
+      setModifyQtyTransfer(null);
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error modifying quantities:', err);
+      toast.error(err.response?.data?.error || 'Failed to modify quantities');
+    } finally {
+      setModifyingQty(false);
+    }
+  };
+
+  // 4. Mark Ready for Dispatch (In Progress -> Ready for Dispatch)
+  const handleMarkReady = async (transferId, trfCode) => {
+    try {
+      await axios.put(`/api/internal-branch/transfers/${transferId}/mark-ready`);
+      toast.success(`Transfer ${trfCode} marked as Ready for Dispatch!`);
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error marking ready:', err);
+      toast.error(err.response?.data?.error || 'Failed to mark ready');
+    }
+  };
+
+  // 5. Open Dispatch & Handover Modal
   const openDispatchModal = (t) => {
     if (dispatching || isDispatchingRef.current) return;
     setDispatchModalTransfer(t);
+    setHandoverByName(user?.name || user?.username || 'Kitchen Staff');
+    setHandoverToName('');
+    setDispatchNotes('');
     const initQtys = {};
     const initRemarks = {};
     (t.items || []).forEach(item => {
       initQtys[item.id] = item.sent_qty !== null && item.sent_qty !== undefined 
         ? item.sent_qty 
-        : item.requested_qty;
+        : (item.confirmed_qty !== null && item.confirmed_qty !== undefined ? item.confirmed_qty : item.requested_qty);
       initRemarks[item.id] = item.remarks || '';
     });
     setDispatchItemQuantities(initQtys);
     setDispatchItemRemarks(initRemarks);
   };
 
-  // Submit Dispatch
+  // Submit Dispatch & Handover
   const handleConfirmDispatch = async () => {
     if (!dispatchModalTransfer || dispatching || isDispatchingRef.current) return;
+    if (!handoverToName.trim()) {
+      return toast.error('Please specify Handover To (Driver / Branch Representative Name).');
+    }
+
     try {
       isDispatchingRef.current = true;
       setDispatching(true);
@@ -949,6 +1258,9 @@ export default function InternalBranch() {
       }));
 
       await axios.put(`/api/internal-branch/transfers/${dispatchModalTransfer.id}/dispatch`, {
+        handover_by_name: handoverByName.trim(),
+        handover_to_name: handoverToName.trim(),
+        notes: dispatchNotes.trim(),
         items: itemsPayload
       });
 
@@ -956,7 +1268,7 @@ export default function InternalBranch() {
       localActionTransferIdsRef.current.set(`dispatched_${dispatchModalTransfer.transfer_id}`, Date.now());
       localActionTransferIdsRef.current.set(`dispatched_${dispatchModalTransfer.id}`, Date.now());
 
-      toast.success(`Transfer ${dispatchModalTransfer.transfer_id} marked as Dispatched / In-Transit!`);
+      toast.success(`Transfer ${dispatchModalTransfer.transfer_id} handed over & marked as Dispatched!`);
       setDispatchModalTransfer(null);
       fetchStats();
       fetchTransfers();
@@ -970,26 +1282,42 @@ export default function InternalBranch() {
     }
   };
 
-  // Open Receive Modal
+  // 6. Open Receive Modal
   const openReceiveModal = (t) => {
     if (receiving || isReceivingRef.current) return;
     setReceiveModalTransfer(t);
+    setDiscrepancyReason('');
+    setReceiveNotes('');
     const initQtys = {};
     const initRemarks = {};
     (t.items || []).forEach(item => {
       initQtys[item.id] = item.received_qty !== null && item.received_qty !== undefined
         ? item.received_qty
-        : (item.sent_qty !== null ? item.sent_qty : item.requested_qty);
+        : (item.sent_qty !== null && item.sent_qty !== undefined ? item.sent_qty : (item.confirmed_qty ?? item.requested_qty));
       initRemarks[item.id] = item.remarks || '';
     });
     setReceiveItemQuantities(initQtys);
     setReceiveItemRemarks(initRemarks);
-    setReceiveNotes('');
   };
 
-  // Submit Receiving & Verification
+  // Submit Receiving & Quantity Verification
   const handleConfirmReceive = async () => {
     if (!receiveModalTransfer || receiving || isReceivingRef.current) return;
+
+    // Check if any discrepancy exists between sent and received
+    let hasVariance = false;
+    (receiveModalTransfer.items || []).forEach(it => {
+      const sentQ = parseFloat(it.sent_qty !== null ? it.sent_qty : (it.confirmed_qty ?? it.requested_qty));
+      const recQ = parseFloat(receiveItemQuantities[it.id] ?? sentQ);
+      if (Math.abs(recQ - sentQ) > 0.001) {
+        hasVariance = true;
+      }
+    });
+
+    if (hasVariance && !discrepancyReason.trim()) {
+      return toast.error('Discrepancy detected between Sent and Received quantities. A Discrepancy Reason is mandatory!');
+    }
+
     try {
       isReceivingRef.current = true;
       setReceiving(true);
@@ -999,16 +1327,18 @@ export default function InternalBranch() {
         remarks: receiveItemRemarks[item.id] || ''
       }));
 
-      await axios.put(`/api/internal-branch/transfers/${receiveModalTransfer.id}/receive`, {
+      const res = await axios.put(`/api/internal-branch/transfers/${receiveModalTransfer.id}/receive`, {
         items: itemsPayload,
-        notes: receiveNotes
+        notes: receiveNotes,
+        discrepancy_reason: discrepancyReason.trim()
       });
 
       // Record local action to avoid duplicate socket toast
       localActionTransferIdsRef.current.set(`received_${receiveModalTransfer.transfer_id}`, Date.now());
       localActionTransferIdsRef.current.set(`received_${receiveModalTransfer.id}`, Date.now());
 
-      toast.success(`Transfer ${receiveModalTransfer.transfer_id} verified & marked as Completed!`);
+      const statusRes = res.data?.status || (hasVariance ? 'Partially Received' : 'Fully Received');
+      toast.success(`Transfer ${receiveModalTransfer.transfer_id} verified: Status is ${statusRes}!`);
       setReceiveModalTransfer(null);
       fetchStats();
       fetchTransfers();
@@ -1019,6 +1349,35 @@ export default function InternalBranch() {
     } finally {
       setReceiving(false);
       isReceivingRef.current = false;
+    }
+  };
+
+  // 7. Mark as Completed Action
+  const handleMarkCompleted = async (transferId, trfCode) => {
+    try {
+      await axios.put(`/api/internal-branch/transfers/${transferId}/complete`);
+      toast.success(`Transfer ${trfCode} marked as Completed!`);
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error completing transfer:', err);
+      toast.error(err.response?.data?.error || 'Failed to complete transfer');
+    }
+  };
+
+  // 8. Open Detail Modal with Activity Logs
+  const handleOpenDetailModal = async (t) => {
+    setDetailModalTransfer(t);
+    setDetailModalTab('summary');
+    setActivityLogs([]);
+    try {
+      setLoadingActivityLogs(true);
+      const res = await axios.get(`/api/internal-branch/transfers/${t.id}/activity-logs`);
+      setActivityLogs(res.data || []);
+    } catch (err) {
+      console.error('Failed to load activity logs:', err);
+    } finally {
+      setLoadingActivityLogs(false);
     }
   };
 
@@ -1304,6 +1663,83 @@ export default function InternalBranch() {
         </div>
       </div>
 
+      {/* Admin Branch Switcher & Monitoring Bar */}
+      {isSuperUser && (
+        <div style={{
+          background: '#f8fafc',
+          border: '1.5px solid #cbd5e1',
+          borderRadius: 10,
+          padding: '12px 16px',
+          marginBottom: 20,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Store size={18} color="#2563eb" />
+              <strong style={{ fontSize: 13, color: '#0f172a' }}>Admin Branch Switcher & Monitoring:</strong>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {['All', 'Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen', 'Other'].map(b => (
+                <button
+                  key={`adm-b-${b}`}
+                  type="button"
+                  onClick={() => {
+                    setAdminSelectedBranch(b);
+                    if (b === 'All') setAdminDirection('all');
+                  }}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: adminSelectedBranch === b ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                    background: adminSelectedBranch === b ? '#2563eb' : '#fff',
+                    color: adminSelectedBranch === b ? '#fff' : '#475569',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {b === 'All' ? '🌐 All Branches' : b}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {adminSelectedBranch !== 'All' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, borderTop: '1px dashed #cbd5e1', paddingTop: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#475569' }}>Activity Flow for {adminSelectedBranch}:</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[
+                  { id: 'all', label: 'All Activity' },
+                  { id: 'sent', label: `📤 Sent by ${getShortBranchName(adminSelectedBranch)}` },
+                  { id: 'received', label: `📥 Received by ${getShortBranchName(adminSelectedBranch)}` }
+                ].map(d => (
+                  <button
+                    key={`dir-${d.id}`}
+                    type="button"
+                    onClick={() => setAdminDirection(d.id)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 4,
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: adminDirection === d.id ? '1.5px solid #0f172a' : '1px solid #e2e8f0',
+                      background: adminDirection === d.id ? '#0f172a' : '#fff',
+                      color: adminDirection === d.id ? '#fff' : '#64748b'
+                    }}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Navigation Tabs with Badges */}
       <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid #e2e8f0', marginBottom: 24, overflowX: 'auto', paddingBottom: 2 }}>
         
@@ -1557,20 +1993,94 @@ export default function InternalBranch() {
                 </span>
               </div>
 
-              {/* Needed-By Time */}
+              {/* Delivery Window & Needed-By Time */}
               <div>
                 <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
-                  Needed-By Time <span style={{ color: '#dc2626' }}>*</span>
+                  Delivery Window & Needed-By <span style={{ color: '#dc2626' }}>*</span>
                 </label>
-                <input
-                  type="time"
-                  required
-                  value={newNeededByTime}
-                  onChange={e => setNewNeededByTime(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 14, fontWeight: 600 }}
-                />
+                <div style={{ display: 'flex', gap: 5, marginBottom: 8, flexWrap: 'wrap' }}>
+                  {[15, 30, 45, 60].map(m => (
+                    <button
+                      key={`preset-${m}`}
+                      type="button"
+                      onClick={() => {
+                        setNewDeliveryMinutes(m);
+                        const d = new Date(Date.now() + m * 60 * 1000);
+                        const hh = String(d.getHours()).padStart(2, '0');
+                        const mm = String(d.getMinutes()).padStart(2, '0');
+                        setNewNeededByTime(`${hh}:${mm}`);
+                      }}
+                      style={{
+                        padding: '4px 9px',
+                        borderRadius: 6,
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: newDeliveryMinutes === m ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                        background: newDeliveryMinutes === m ? '#eff6ff' : '#fff',
+                        color: newDeliveryMinutes === m ? '#1d4ed8' : '#475569'
+                      }}
+                    >
+                      {m}m
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setNewDeliveryMinutes('custom')}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: 6,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: newDeliveryMinutes === 'custom' ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                      background: newDeliveryMinutes === 'custom' ? '#eff6ff' : '#fff',
+                      color: newDeliveryMinutes === 'custom' ? '#1d4ed8' : '#475569'
+                    }}
+                  >
+                    Custom
+                  </button>
+                </div>
+
+                {newDeliveryMinutes === 'custom' ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      min="1"
+                      max="720"
+                      required
+                      placeholder="Mins..."
+                      value={customDeliveryMinutes}
+                      onChange={e => {
+                        setCustomDeliveryMinutes(e.target.value);
+                        const m = parseInt(e.target.value, 10);
+                        if (!isNaN(m) && m > 0) {
+                          const d = new Date(Date.now() + m * 60 * 1000);
+                          const hh = String(d.getHours()).padStart(2, '0');
+                          const mm = String(d.getMinutes()).padStart(2, '0');
+                          setNewNeededByTime(`${hh}:${mm}`);
+                        }
+                      }}
+                      style={{ width: 85, padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
+                    />
+                    <input
+                      type="time"
+                      value={newNeededByTime}
+                      onChange={e => setNewNeededByTime(e.target.value)}
+                      style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13 }}
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="time"
+                    required
+                    value={newNeededByTime}
+                    onChange={e => setNewNeededByTime(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 14, fontWeight: 600 }}
+                  />
+                )}
                 <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  Expected delivery deadline
+                  {newDeliveryMinutes !== 'custom' ? `Countdown timer set for ~${newDeliveryMinutes} mins` : 'Delivery deadline'}
                 </span>
               </div>
 
@@ -1764,7 +2274,7 @@ export default function InternalBranch() {
                 className="btn btn-secondary"
                 disabled={submittingRequest}
                 onClick={() => {
-                  setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, uom: 'Plate (P)', requested_qty: '', remarks: '' }]);
+                  setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
                   setNewNeededByTime('');
                   setNewNotes('');
                 }}
@@ -1850,23 +2360,26 @@ export default function InternalBranch() {
                   >
                     <div>
                       {/* Header */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                         <div>
                           <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{t.transfer_id}</span>
                           <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>
                             {new Date(t.request_date).toLocaleString()}
                           </span>
                         </div>
-                        <span style={{
-                          padding: '3px 9px',
-                          borderRadius: 12,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          background: isPending ? '#fef3c7' : '#dbeafe',
-                          color: isPending ? '#92400e' : '#1e40af'
-                        }}>
-                          {t.status}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                          <span style={{
+                            padding: '3px 9px',
+                            borderRadius: 12,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'In Progress' ? '#dbeafe' : (t.status === 'Ready for Dispatch' ? '#f3e8ff' : '#dcfce7')),
+                            color: t.status === 'Pending' ? '#92400e' : (t.status === 'In Progress' ? '#1e40af' : (t.status === 'Ready for Dispatch' ? '#6b21a8' : '#166534'))
+                          }}>
+                            {t.status}
+                          </span>
+                          <DeliveryTimerBadge expectedDeliveryAt={t.expected_delivery_at} status={t.status} />
+                        </div>
                       </div>
 
                       {/* Route */}
@@ -1903,7 +2416,12 @@ export default function InternalBranch() {
                                 </div>
                                 <span>{it.dish_name}</span>
                               </div>
-                              <strong>{it.requested_qty} {it.uom}</strong>
+                              <strong>
+                                {it.confirmed_qty !== null && it.confirmed_qty !== undefined ? it.confirmed_qty : it.requested_qty} {it.uom}
+                                {it.confirmed_qty !== null && it.confirmed_qty !== undefined && it.confirmed_qty !== it.requested_qty && (
+                                  <span style={{ fontSize: 10, color: '#ea580c', marginLeft: 4 }}>(Orig: {it.requested_qty})</span>
+                                )}
+                              </strong>
                             </div>
                           ))}
                           {(t.items || []).length > 3 && (
@@ -1915,14 +2433,144 @@ export default function InternalBranch() {
                       </div>
                     </div>
 
-                    {/* Action */}
-                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12, display: 'flex', gap: 8 }}>
-                      {isPending ? (
+                    {/* Step-by-Step Action Workflow */}
+                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {t.status === 'Pending' && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleStartProcessing(t.id, t.transfer_id)}
+                            style={{
+                              padding: '8px 10px',
+                              background: '#2563eb',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <Play size={13} /> Start Processing
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenExtendTimeModal(t)}
+                            style={{
+                              padding: '8px 10px',
+                              background: '#fff',
+                              color: '#d97706',
+                              border: '1.5px solid #fcd34d',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <Timer size={13} /> Extend
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenModifyQtyModal(t)}
+                            style={{
+                              padding: '8px 10px',
+                              background: '#fff',
+                              color: '#475569',
+                              border: '1.5px solid #cbd5e1',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <Edit size={13} /> Modify
+                          </button>
+                        </div>
+                      )}
+
+                      {t.status === 'In Progress' && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkReady(t.id, t.transfer_id)}
+                            style={{
+                              padding: '8px 10px',
+                              background: '#7c3aed',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <CheckCircle2 size={13} /> Mark Ready
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenExtendTimeModal(t)}
+                            style={{
+                              padding: '8px 10px',
+                              background: '#fff',
+                              color: '#d97706',
+                              border: '1.5px solid #fcd34d',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <Timer size={13} /> Extend
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenModifyQtyModal(t)}
+                            style={{
+                              padding: '8px 10px',
+                              background: '#fff',
+                              color: '#475569',
+                              border: '1.5px solid #cbd5e1',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <Edit size={13} /> Modify
+                          </button>
+                        </div>
+                      )}
+
+                      {t.status === 'Ready for Dispatch' && (
                         <button
                           type="button"
                           onClick={() => openDispatchModal(t)}
                           style={{
-                            flex: 1,
+                            width: '100%',
                             padding: '9px 14px',
                             background: '#f59e0b',
                             color: '#fff',
@@ -1937,18 +2585,28 @@ export default function InternalBranch() {
                             gap: 6
                           }}
                         >
-                          <Truck size={16} /> Open & Mark Dispatched
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setDetailModalTransfer(t)}
-                          className="btn btn-secondary"
-                          style={{ flex: 1, padding: '8px 12px', fontSize: 12.5 }}
-                        >
-                          View Details ({t.status})
+                          <Truck size={16} /> Handover & Dispatch
                         </button>
                       )}
+
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDetailModal(t)}
+                          className="btn btn-secondary"
+                          style={{ flex: 1, padding: '7px 10px', fontSize: 12 }}
+                        >
+                          Details & History
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => printTransferSlip(t)}
+                          style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}
+                          title="Print Transfer Voucher"
+                        >
+                          <Printer size={14} />
+                        </button>
+                      </div>
                     </div>
 
                   </div>
@@ -2240,7 +2898,11 @@ export default function InternalBranch() {
               >
                 <option value="All">All Statuses</option>
                 <option value="Pending">Pending</option>
-                <option value="In-Transit">In-Transit</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Ready for Dispatch">Ready for Dispatch</option>
+                <option value="Dispatched">Dispatched / In-Transit</option>
+                <option value="Partially Received">Partially Received</option>
+                <option value="Fully Received">Fully Received</option>
                 <option value="Completed">Completed</option>
                 <option value="Cancelled">Cancelled</option>
               </select>
@@ -2292,7 +2954,7 @@ export default function InternalBranch() {
                     <th style={{ padding: '10px 12px' }}>Date</th>
                     <th style={{ padding: '10px 12px' }}>From → To</th>
                     <th style={{ padding: '10px 12px' }}>Dishes & Quantities</th>
-                    <th style={{ padding: '10px 12px' }}>Needed By</th>
+                    <th style={{ padding: '10px 12px' }}>Needed By & Timer</th>
                     <th style={{ padding: '10px 12px' }}>Dispatched</th>
                     <th style={{ padding: '10px 12px' }}>Received</th>
                     <th style={{ padding: '10px 12px' }}>Delay</th>
@@ -2305,14 +2967,18 @@ export default function InternalBranch() {
                   {transfers.map(t => {
                     const delay = calculateDelay(t.needed_by_time, t.received_at, t.request_date);
                     const totalReq = (t.items || []).reduce((sum, it) => sum + parseFloat(it.requested_qty || 0), 0);
-                    const totalSent = (t.items || []).reduce((sum, it) => sum + parseFloat(it.sent_qty !== null ? it.sent_qty : it.requested_qty), 0);
+                    const totalSent = (t.items || []).reduce((sum, it) => sum + parseFloat(it.sent_qty !== null ? it.sent_qty : (it.confirmed_qty ?? it.requested_qty)), 0);
                     const totalRec = (t.items || []).reduce((sum, it) => sum + (it.received_qty !== null ? parseFloat(it.received_qty) : 0), 0);
-                    const varianceVal = t.status === 'Completed' ? (totalRec - totalSent) : 0;
+                    const varianceVal = ['Partially Received', 'Fully Received', 'Completed'].includes(t.status) ? (totalRec - totalSent) : 0;
 
                     let statusBg = '#f1f5f9';
                     let statusColor = '#475569';
                     if (t.status === 'Pending') { statusBg = '#fef3c7'; statusColor = '#92400e'; }
-                    else if (t.status === 'In-Transit') { statusBg = '#dbeafe'; statusColor = '#1e40af'; }
+                    else if (t.status === 'In Progress') { statusBg = '#dbeafe'; statusColor = '#1e40af'; }
+                    else if (t.status === 'Ready for Dispatch') { statusBg = '#f3e8ff'; statusColor = '#6b21a8'; }
+                    else if (['Dispatched', 'In-Transit'].includes(t.status)) { statusBg = '#e0f2fe'; statusColor = '#0369a1'; }
+                    else if (t.status === 'Partially Received') { statusBg = '#ffedd5'; statusColor = '#c2410c'; }
+                    else if (t.status === 'Fully Received') { statusBg = '#ecfdf5'; statusColor = '#047857'; }
                     else if (t.status === 'Completed') { statusBg = '#dcfce7'; statusColor = '#166534'; }
                     else if (t.status === 'Cancelled') { statusBg = '#fee2e2'; statusColor = '#991b1b'; }
 
@@ -2362,16 +3028,27 @@ export default function InternalBranch() {
                                 )}
                               </div>
                               <span style={{ fontWeight: 600 }}>{it.dish_name}</span>: {it.requested_qty} {it.uom}
+                              {it.confirmed_qty !== null && it.confirmed_qty !== undefined && it.confirmed_qty !== it.requested_qty && (
+                                <span style={{ color: '#d97706', marginLeft: 3, fontSize: 11 }}>(Conf: {it.confirmed_qty})</span>
+                              )}
                               {it.sent_qty !== null && <span style={{ color: '#2563eb', marginLeft: 4 }}>(Sent: {it.sent_qty})</span>}
                               {it.received_qty !== null && <span style={{ color: '#16a34a', marginLeft: 4 }}>(Rec: {it.received_qty})</span>}
                             </div>
                           ))}
                         </td>
-                        <td style={{ padding: '10px 12px', fontWeight: 700, color: '#dc2626', whiteSpace: 'nowrap', minWidth: 100 }}>
-                          {t.needed_by_time || 'ASAP'}
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', minWidth: 120 }}>
+                          <span style={{ fontWeight: 700, color: '#dc2626', display: 'block' }}>
+                            {t.needed_by_time || 'ASAP'}
+                          </span>
+                          <div style={{ marginTop: 2 }}>
+                            <DeliveryTimerBadge expectedDeliveryAt={t.expected_delivery_at} status={t.status} />
+                          </div>
                         </td>
                         <td style={{ padding: '10px 12px', color: '#475569', whiteSpace: 'nowrap' }}>
                           {t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
+                          {t.handover_to_name && (
+                            <span style={{ fontSize: 10, color: '#64748b', display: 'block' }}>To: {t.handover_to_name}</span>
+                          )}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#475569', whiteSpace: 'nowrap' }}>
                           {t.received_at ? new Date(t.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
@@ -2380,7 +3057,7 @@ export default function InternalBranch() {
                           {delay}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: 700, color: varianceVal < 0 ? '#dc2626' : (varianceVal > 0 ? '#2563eb' : '#64748b'), whiteSpace: 'nowrap' }}>
-                          {t.status === 'Completed' ? (
+                          {['Partially Received', 'Fully Received', 'Completed'].includes(t.status) ? (
                             varianceVal === 0 ? '0 (Exact)' : `${varianceVal > 0 ? '+' : ''}${varianceVal.toFixed(2)}`
                           ) : '-'}
                         </td>
@@ -2392,7 +3069,7 @@ export default function InternalBranch() {
                         <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                           <button
                             type="button"
-                            onClick={() => setDetailModalTransfer(t)}
+                            onClick={() => handleOpenDetailModal(t)}
                             style={{
                               background: '#f1f5f9',
                               border: 'none',
@@ -2431,6 +3108,106 @@ export default function InternalBranch() {
                           {t.status === 'Pending' && (
                             <button
                               type="button"
+                              onClick={() => handleStartProcessing(t.id, t.transfer_id)}
+                              style={{
+                                background: '#2563eb',
+                                border: 'none',
+                                color: '#fff',
+                                padding: '4px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                marginLeft: 4
+                              }}
+                            >
+                              Start
+                            </button>
+                          )}
+
+                          {t.status === 'In Progress' && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkReady(t.id, t.transfer_id)}
+                              style={{
+                                background: '#7c3aed',
+                                border: 'none',
+                                color: '#fff',
+                                padding: '4px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                marginLeft: 4
+                              }}
+                            >
+                              Ready
+                            </button>
+                          )}
+
+                          {t.status === 'Ready for Dispatch' && (
+                            <button
+                              type="button"
+                              onClick={() => openDispatchModal(t)}
+                              style={{
+                                background: '#f59e0b',
+                                border: 'none',
+                                color: '#fff',
+                                padding: '4px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                marginLeft: 4
+                              }}
+                            >
+                              Handover
+                            </button>
+                          )}
+
+                          {['Dispatched', 'In-Transit'].includes(t.status) && (
+                            <button
+                              type="button"
+                              onClick={() => openReceiveModal(t)}
+                              style={{
+                                background: '#16a34a',
+                                border: 'none',
+                                color: '#fff',
+                                padding: '4px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                marginLeft: 4
+                              }}
+                            >
+                              Receive
+                            </button>
+                          )}
+
+                          {['Partially Received', 'Fully Received'].includes(t.status) && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkCompleted(t.id, t.transfer_id)}
+                              style={{
+                                background: '#047857',
+                                border: 'none',
+                                color: '#fff',
+                                padding: '4px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                marginLeft: 4
+                              }}
+                            >
+                              Complete
+                            </button>
+                          )}
+
+                          {t.status === 'Pending' && (
+                            <button
+                              type="button"
                               onClick={() => handleCancelTransfer(t.id, t.transfer_id)}
                               disabled={cancellingId === t.id}
                               style={{
@@ -2461,20 +3238,20 @@ export default function InternalBranch() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          DISPATCH MODAL (SUPPLYING BRANCH)
+          1. DISPATCH & HANDOVER MODAL (SUPPLYING BRANCH)
       ───────────────────────────────────────────────────────────── */}
       {dispatchModalTransfer && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setDispatchModalTransfer(null); }} style={{ zIndex: 9999 }}>
-          <div className="modal" style={{ maxWidth: 660, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal" style={{ maxWidth: 680, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             
             {/* Header (Fixed) */}
             <div style={{ flexShrink: 0, background: '#f59e0b', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>
-                  Dispatch Request — {dispatchModalTransfer.transfer_id}
+                  🚚 Handover & Dispatch — {dispatchModalTransfer.transfer_id}
                 </h3>
                 <span style={{ fontSize: 12, opacity: 0.9, display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                  <span>Request from:</span> <BranchBadge branch={dispatchModalTransfer.from_branch} /> · <span>Needed By: {dispatchModalTransfer.needed_by_time || 'ASAP'}</span>
+                  <span>To:</span> <BranchBadge branch={dispatchModalTransfer.from_branch} /> · <span>Needed By: {dispatchModalTransfer.needed_by_time || 'ASAP'}</span>
                 </span>
               </div>
               <button onClick={() => setDispatchModalTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>✕</button>
@@ -2482,12 +3259,47 @@ export default function InternalBranch() {
 
             {/* Scrollable Body */}
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 20 }}>
-              <p style={{ margin: '0 0 14px', fontSize: 13, color: '#64748b' }}>
-                Please review requested items and specify the <strong>actual dispatched quantity</strong> for each item:
+              
+              {/* Handover Information Block */}
+              <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: 13, color: '#92400e', fontWeight: 800 }}>
+                  Custody Handover Details
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#78350f', marginBottom: 4 }}>
+                      Handover By (Kitchen Staff)
+                    </label>
+                    <input
+                      type="text"
+                      value={handoverByName}
+                      onChange={e => setHandoverByName(e.target.value)}
+                      placeholder="e.g. Chef Tariq"
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #fcd34d', fontSize: 12.5, fontWeight: 600 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#78350f', marginBottom: 4 }}>
+                      Handover To (Driver / Branch Rep) <span style={{ color: '#dc2626' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={handoverToName}
+                      onChange={e => setHandoverToName(e.target.value)}
+                      placeholder="Driver / Staff name (e.g. Imran Khan)"
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5, fontWeight: 700 }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <p style={{ margin: '0 0 12px', fontSize: 13, color: '#64748b' }}>
+                Review requested items and confirm the <strong>actual dispatched quantity</strong>:
               </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {(dispatchModalTransfer.items || []).map((it, idx) => (
+                {(dispatchModalTransfer.items || []).map((it) => (
                   <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, alignItems: 'center', background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
@@ -2500,7 +3312,10 @@ export default function InternalBranch() {
                       <div>
                         <strong style={{ fontSize: 13.5, color: '#0f172a', display: 'block' }}>{it.dish_name}</strong>
                         <span style={{ fontSize: 11.5, color: '#64748b' }}>
-                          Requested: <strong>{it.requested_qty} {it.uom}</strong>
+                          Req: <strong>{it.requested_qty} {it.uom}</strong>
+                          {it.confirmed_qty !== null && it.confirmed_qty !== undefined && it.confirmed_qty !== it.requested_qty && (
+                            <span style={{ color: '#d97706', marginLeft: 4 }}>(Conf: {it.confirmed_qty})</span>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -2511,17 +3326,17 @@ export default function InternalBranch() {
                         type="number"
                         step="0.01"
                         min="0"
-                        value={dispatchItemQuantities[it.id] ?? it.requested_qty}
+                        value={dispatchItemQuantities[it.id] ?? (it.confirmed_qty ?? it.requested_qty)}
                         onChange={e => setDispatchItemQuantities({ ...dispatchItemQuantities, [it.id]: e.target.value })}
                         style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
                       />
                     </div>
 
                     <div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Remarks</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
                       <input
                         type="text"
-                        placeholder="e.g. 0.95 Kg"
+                        placeholder="e.g. 2 thermal crates"
                         value={dispatchItemRemarks[it.id] ?? ''}
                         onChange={e => setDispatchItemRemarks({ ...dispatchItemRemarks, [it.id]: e.target.value })}
                         style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
@@ -2530,9 +3345,24 @@ export default function InternalBranch() {
                   </div>
                 ))}
               </div>
+
+              {/* General Dispatch Notes */}
+              <div style={{ marginTop: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
+                  Dispatch Notes / Instructions
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Vehicle plate 4921, fragile dessert boxes placed on top"
+                  value={dispatchNotes}
+                  onChange={e => setDispatchNotes(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+                />
+              </div>
+
             </div>
 
-            {/* Sticky Footer (Buttons ALWAYS visible) */}
+            {/* Sticky Footer */}
             <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button
                 type="button"
@@ -2586,11 +3416,11 @@ export default function InternalBranch() {
                 >
                   {dispatching ? (
                     <>
-                      <RefreshCw size={16} className="animate-spin" /> Dispatching Transfer...
+                      <RefreshCw size={16} className="animate-spin" /> Dispatching...
                     </>
                   ) : (
                     <>
-                      <Truck size={16} /> Mark Dispatched / Sent
+                      <Truck size={16} /> Confirm Handover & Dispatch
                     </>
                   )}
                 </button>
@@ -2602,20 +3432,197 @@ export default function InternalBranch() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          RECEIVING & VERIFICATION MODAL (REQUESTING BRANCH)
+          2. EXTEND DELIVERY TIME MODAL
+      ───────────────────────────────────────────────────────────── */}
+      {extendTimeTransfer && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setExtendTimeTransfer(null); }} style={{ zIndex: 9999 }}>
+          <div className="modal" style={{ maxWidth: 480, width: '95%', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: '#d97706', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>⏱ Extend Delivery Time</h3>
+                <span style={{ fontSize: 12, opacity: 0.9 }}>Transfer: {extendTimeTransfer.transfer_id}</span>
+              </div>
+              <button onClick={() => setExtendTimeTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18 }}>✕</button>
+            </div>
+
+            <div style={{ padding: 20 }}>
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 8 }}>
+                Select Extension Minutes:
+              </label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {[10, 15, 30, 60].map(m => (
+                  <button
+                    key={`ext-${m}`}
+                    type="button"
+                    onClick={() => setExtendMinutes(m)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: extendMinutes === m ? '1.5px solid #d97706' : '1px solid #cbd5e1',
+                      background: extendMinutes === m ? '#fef3c7' : '#fff',
+                      color: extendMinutes === m ? '#92400e' : '#475569'
+                    }}
+                  >
+                    +{m}m
+                  </button>
+                ))}
+              </div>
+
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
+                Mandatory Reason for Extension <span style={{ color: '#dc2626' }}>*</span>
+              </label>
+              <textarea
+                rows={3}
+                required
+                value={extendReason}
+                onChange={e => setExtendReason(e.target.value)}
+                placeholder="e.g. Sudden high dine-in rush in central kitchen, fresh batch marination needed"
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+                The requesting branch will receive an immediate real-time update and the timer will reset.
+              </span>
+            </div>
+
+            <div style={{ borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setExtendTimeTransfer(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExtendTime}
+                disabled={extendingTime}
+                style={{
+                  padding: '9px 18px',
+                  background: '#d97706',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: extendingTime ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {extendingTime ? 'Extending...' : 'Confirm Extension'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          3. MODIFY QUANTITIES MODAL
+      ───────────────────────────────────────────────────────────── */}
+      {modifyQtyTransfer && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setModifyQtyTransfer(null); }} style={{ zIndex: 9999 }}>
+          <div className="modal" style={{ maxWidth: 660, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: '#2563eb', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>✏ Confirm / Modify Fulfillable Quantities</h3>
+                <span style={{ fontSize: 12, opacity: 0.9 }}>Transfer: {modifyQtyTransfer.transfer_id}</span>
+              </div>
+              <button onClick={() => setModifyQtyTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18 }}>✕</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 20 }}>
+              <p style={{ margin: '0 0 14px', fontSize: 13, color: '#64748b' }}>
+                Adjust quantities that kitchen can supply. Original requested quantity is preserved for record.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {(modifyQtyTransfer.items || []).map((it) => (
+                  <div key={it.id} style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{it.dish_name}</strong>
+                      <span style={{ fontSize: 12, color: '#64748b' }}>Requested: <strong>{it.requested_qty} {it.uom}</strong></span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 10 }}>
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Confirmed Qty</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={modifiedItemQuantities[it.id] ?? (it.confirmed_qty ?? it.requested_qty)}
+                          onChange={e => setModifiedItemQuantities({ ...modifiedItemQuantities, [it.id]: e.target.value })}
+                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
+                        />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Reason (if modified)</span>
+                        <input
+                          type="text"
+                          placeholder="e.g. Limited stock available"
+                          value={modifiedItemReasons[it.id] ?? ''}
+                          onChange={e => setModifiedItemReasons({ ...modifiedItemReasons, [it.id]: e.target.value })}
+                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
+                  General Reason / Kitchen Note (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Evening prep batch still in oven, partial batch dispatched"
+                  value={modifyGeneralReason}
+                  onChange={e => setModifyGeneralReason(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+                />
+              </div>
+            </div>
+
+            <div style={{ borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setModifyQtyTransfer(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmModifyQty}
+                disabled={modifyingQty}
+                style={{
+                  padding: '9px 18px',
+                  background: '#2563eb',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: modifyingQty ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {modifyingQty ? 'Updating...' : 'Save & Confirm Quantities'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          4. RECEIVING & VERIFICATION MODAL (REQUESTING BRANCH)
       ───────────────────────────────────────────────────────────── */}
       {receiveModalTransfer && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setReceiveModalTransfer(null); }} style={{ zIndex: 9999 }}>
-          <div className="modal" style={{ maxWidth: 720, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal" style={{ maxWidth: 740, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             
             {/* Header (Fixed) */}
             <div style={{ flexShrink: 0, background: '#16a34a', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>
-                  Goods Verification & Receiving — {receiveModalTransfer.transfer_id}
+                  📦 Goods Verification & Receiving — {receiveModalTransfer.transfer_id}
                 </h3>
                 <span style={{ fontSize: 12, opacity: 0.9, display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                  <span>Supplied by:</span> <BranchBadge branch={receiveModalTransfer.to_branch} isExternal={receiveModalTransfer.is_external} /> · <span>Dispatched at: {receiveModalTransfer.dispatched_at ? new Date(receiveModalTransfer.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
+                  <span>Supplied by:</span> <BranchBadge branch={receiveModalTransfer.to_branch} isExternal={receiveModalTransfer.is_external} /> · <span>Dispatched: {receiveModalTransfer.dispatched_at ? new Date(receiveModalTransfer.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}</span>
                 </span>
               </div>
               <button onClick={() => setReceiveModalTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>✕</button>
@@ -2624,17 +3631,23 @@ export default function InternalBranch() {
             {/* Scrollable Body */}
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 20 }}>
               <p style={{ margin: '0 0 14px', fontSize: 13, color: '#64748b' }}>
-                Verify incoming dishes. The system automatically calculates <strong>Sent vs Received</strong> variances:
+                Verify received items. The system automatically computes <strong>Sent vs Received</strong> variances:
               </p>
 
+              {receiveModalTransfer.handover_to_name && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '8px 12px', borderRadius: 6, marginBottom: 14, fontSize: 12 }}>
+                  <strong>Handover Representative:</strong> {receiveModalTransfer.handover_to_name} (Dispatched by: {receiveModalTransfer.handover_by_name || receiveModalTransfer.dispatched_by_name || 'Kitchen'})
+                </div>
+              )}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
-                {(receiveModalTransfer.items || []).map((it, idx) => {
-                  const sentQ = it.sent_qty !== null ? parseFloat(it.sent_qty) : parseFloat(it.requested_qty);
+                {(receiveModalTransfer.items || []).map((it) => {
+                  const sentQ = it.sent_qty !== null ? parseFloat(it.sent_qty) : parseFloat(it.confirmed_qty ?? it.requested_qty);
                   const recQ = parseFloat(receiveItemQuantities[it.id] !== undefined ? receiveItemQuantities[it.id] : sentQ) || 0;
                   const variance = recQ - sentQ;
 
                   return (
-                    <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', gap: 10, alignItems: 'center', background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr 1.2fr', gap: 10, alignItems: 'center', background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
                           {it.image_url ? (
@@ -2666,7 +3679,19 @@ export default function InternalBranch() {
                       <div>
                         <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Variance</span>
                         <div style={{ fontSize: 12.5, fontWeight: 800, color: variance < 0 ? '#dc2626' : (variance > 0 ? '#2563eb' : '#16a34a') }}>
-                          {variance === 0 ? '0.00 (Match)' : `${variance > 0 ? '+' : ''}${variance.toFixed(2)} ${it.uom}`}
+                          {variance === 0 ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#16a34a' }}>
+                              <CheckCircle2 size={13} /> Matched
+                            </span>
+                          ) : variance < 0 ? (
+                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: 4 }}>
+                              Short: {variance.toFixed(2)} {it.uom}
+                            </span>
+                          ) : (
+                            <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: 4 }}>
+                              Excess: +{variance.toFixed(2)} {it.uom}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -2674,7 +3699,7 @@ export default function InternalBranch() {
                         <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
                         <input
                           type="text"
-                          placeholder="e.g. short 1 pack, damaged"
+                          placeholder="Condition / damage"
                           value={receiveItemRemarks[it.id] ?? ''}
                           onChange={e => setReceiveItemRemarks({ ...receiveItemRemarks, [it.id]: e.target.value })}
                           style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
@@ -2685,14 +3710,44 @@ export default function InternalBranch() {
                 })}
               </div>
 
+              {/* Mandatory Discrepancy Reason if variance detected */}
+              {(() => {
+                const anyVar = (receiveModalTransfer.items || []).some(it => {
+                  const sentQ = parseFloat(it.sent_qty !== null ? it.sent_qty : (it.confirmed_qty ?? it.requested_qty));
+                  const recQ = parseFloat(receiveItemQuantities[it.id] ?? sentQ);
+                  return Math.abs(recQ - sentQ) > 0.001;
+                });
+
+                if (!anyVar) return null;
+
+                return (
+                  <div style={{ background: '#fef2f2', border: '1.5px solid #f87171', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+                    <label style={{ display: 'block', fontSize: 12.5, fontWeight: 800, color: '#991b1b', marginBottom: 6 }}>
+                      ⚠️ Discrepancy Reason (Mandatory) <span style={{ color: '#dc2626' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. 2 boxes damaged during transit, missing 1 plate"
+                      value={discrepancyReason}
+                      onChange={e => setDiscrepancyReason(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #dc2626', fontSize: 13, fontWeight: 600 }}
+                    />
+                    <span style={{ fontSize: 11, color: '#b91c1c', marginTop: 4, display: 'block' }}>
+                      Status will be marked as <strong>Partially Received</strong> and supplying branch will be notified.
+                    </span>
+                  </div>
+                );
+              })()}
+
               {/* Overall Receiving Remarks */}
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
-                  Overall Delivery Remarks (Optional)
+                  Overall Delivery Notes (Optional)
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Driver delayed by 15 mins due to rain, packaging intact."
+                  placeholder="e.g. Delivered on time, driver handed over receipt"
                   value={receiveNotes}
                   onChange={e => setReceiveNotes(e.target.value)}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13 }}
@@ -2700,7 +3755,7 @@ export default function InternalBranch() {
               </div>
             </div>
 
-            {/* Sticky Footer (Buttons ALWAYS visible) */}
+            {/* Sticky Footer */}
             <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button
                 type="button"
@@ -2754,11 +3809,11 @@ export default function InternalBranch() {
                 >
                   {receiving ? (
                     <>
-                      <RefreshCw size={16} className="animate-spin" /> Confirming & Closing...
+                      <RefreshCw size={16} className="animate-spin" /> Verifying...
                     </>
                   ) : (
                     <>
-                      <PackageCheck size={16} /> Confirm & Close Request
+                      <PackageCheck size={16} /> Confirm & Verify Receiving
                     </>
                   )}
                 </button>
@@ -2770,54 +3825,144 @@ export default function InternalBranch() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          DETAIL / SUMMARY MODAL
+          5. DETAIL & AUDIT ACTIVITY HISTORY MODAL
       ───────────────────────────────────────────────────────────── */}
       {detailModalTransfer && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setDetailModalTransfer(null); }} style={{ zIndex: 9999 }}>
-          <div className="modal" style={{ maxWidth: 640, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal" style={{ maxWidth: 700, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            
+            {/* Header */}
             <div style={{ flexShrink: 0, background: '#0f172a', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Transfer Summary — {detailModalTransfer.transfer_id}</h3>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Transfer {detailModalTransfer.transfer_id}</h3>
                 <span style={{ fontSize: 12, color: '#94a3b8' }}>Status: {detailModalTransfer.status}</span>
               </div>
               <button onClick={() => setDetailModalTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>✕</button>
             </div>
 
+            {/* Modal Tabs: Summary vs Activity Log */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', padding: '0 16px' }}>
+              <button
+                type="button"
+                onClick={() => setDetailModalTab('summary')}
+                style={{
+                  padding: '10px 16px',
+                  border: 'none',
+                  background: 'transparent',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  color: detailModalTab === 'summary' ? '#2563eb' : '#64748b',
+                  borderBottom: detailModalTab === 'summary' ? '2.5px solid #2563eb' : '2.5px solid transparent'
+                }}
+              >
+                Transfer Overview
+              </button>
+              <button
+                type="button"
+                onClick={() => setDetailModalTab('activity')}
+                style={{
+                  padding: '10px 16px',
+                  border: 'none',
+                  background: 'transparent',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: detailModalTab === 'activity' ? '#2563eb' : '#64748b',
+                  borderBottom: detailModalTab === 'activity' ? '2.5px solid #2563eb' : '2.5px solid transparent'
+                }}
+              >
+                <History size={14} /> Audit & Activity History
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 20 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16, background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 12.5 }}>
-                <div><span style={{ color: '#64748b' }}>From Branch:</span> <BranchBadge branch={detailModalTransfer.from_branch} /></div>
-                <div><span style={{ color: '#64748b' }}>To Branch:</span> <BranchBadge branch={detailModalTransfer.to_branch} isExternal={detailModalTransfer.is_external} /></div>
-                <div><span style={{ color: '#64748b' }}>Requested Time:</span> {new Date(detailModalTransfer.request_date).toLocaleString()}</div>
-                <div><span style={{ color: '#64748b' }}>Needed-By Time:</span> <strong style={{ color: '#dc2626' }}>{detailModalTransfer.needed_by_time || 'ASAP'}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Dispatched At:</span> {detailModalTransfer.dispatched_at ? new Date(detailModalTransfer.dispatched_at).toLocaleString() : 'Pending'}</div>
-                <div><span style={{ color: '#64748b' }}>Received At:</span> {detailModalTransfer.received_at ? new Date(detailModalTransfer.received_at).toLocaleString() : 'Pending'}</div>
-              </div>
-
-              <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>Transferred Dishes:</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-                {(detailModalTransfer.items || []).map((it, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#f1f5f9', borderRadius: 6, fontSize: 12.5 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 26, height: 26, borderRadius: 4, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                        {it.image_url ? (
-                          <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
-                        ) : (
-                          <Utensils size={13} color="#94a3b8" />
-                        )}
+              {detailModalTab === 'summary' ? (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16, background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 12.5 }}>
+                    <div><span style={{ color: '#64748b' }}>From Branch:</span> <BranchBadge branch={detailModalTransfer.from_branch} /></div>
+                    <div><span style={{ color: '#64748b' }}>To Branch:</span> <BranchBadge branch={detailModalTransfer.to_branch} isExternal={detailModalTransfer.is_external} /></div>
+                    <div><span style={{ color: '#64748b' }}>Requested Time:</span> {new Date(detailModalTransfer.request_date).toLocaleString()}</div>
+                    <div><span style={{ color: '#64748b' }}>Needed-By Time:</span> <strong style={{ color: '#dc2626' }}>{detailModalTransfer.needed_by_time || 'ASAP'}</strong></div>
+                    <div><span style={{ color: '#64748b' }}>Dispatched At:</span> {detailModalTransfer.dispatched_at ? new Date(detailModalTransfer.dispatched_at).toLocaleString() : 'Pending'}</div>
+                    <div><span style={{ color: '#64748b' }}>Received At:</span> {detailModalTransfer.received_at ? new Date(detailModalTransfer.received_at).toLocaleString() : 'Pending'}</div>
+                    {detailModalTransfer.handover_to_name && (
+                      <div><span style={{ color: '#64748b' }}>Handover To:</span> <strong>{detailModalTransfer.handover_to_name}</strong></div>
+                    )}
+                    {detailModalTransfer.discrepancy_reason && (
+                      <div style={{ gridColumn: 'span 2' }}>
+                        <span style={{ color: '#b91c1c', fontWeight: 700 }}>Discrepancy Reason:</span> {detailModalTransfer.discrepancy_reason}
                       </div>
-                      <span><strong>{it.dish_name}</strong> ({it.uom})</span>
-                    </div>
-                    <span>
-                      Req: {it.requested_qty} | Sent: {it.sent_qty !== null ? it.sent_qty : '-'} | Rec: {it.received_qty !== null ? it.received_qty : '-'}
-                      {it.variance_qty !== null && <strong style={{ marginLeft: 6, color: it.variance_qty < 0 ? '#dc2626' : '#16a34a' }}>(Var: {it.variance_qty})</strong>}
-                    </span>
+                    )}
                   </div>
-                ))}
-              </div>
 
-              {detailModalTransfer.notes && (
-                <div style={{ background: '#fef3c7', padding: 10, borderRadius: 6, fontSize: 12, color: '#92400e' }}>
-                  <strong>Notes:</strong> {detailModalTransfer.notes}
+                  <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>Transferred Dishes:</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+                    {(detailModalTransfer.items || []).map((it, idx) => (
+                      <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#f1f5f9', borderRadius: 6, fontSize: 12.5 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 26, height: 26, borderRadius: 4, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                            {it.image_url ? (
+                              <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                            ) : (
+                              <Utensils size={13} color="#94a3b8" />
+                            )}
+                          </div>
+                          <span><strong>{it.dish_name}</strong> ({it.uom})</span>
+                        </div>
+                        <span>
+                          Req: {it.requested_qty}
+                          {it.confirmed_qty !== null && it.confirmed_qty !== undefined && <span style={{ color: '#d97706', marginLeft: 4 }}>(Conf: {it.confirmed_qty})</span>}
+                          | Sent: {it.sent_qty !== null ? it.sent_qty : '-'} | Rec: {it.received_qty !== null ? it.received_qty : '-'}
+                          {it.variance_qty !== null && <strong style={{ marginLeft: 6, color: it.variance_qty < 0 ? '#dc2626' : '#16a34a' }}>(Var: {it.variance_qty})</strong>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {detailModalTransfer.notes && (
+                    <div style={{ background: '#fef3c7', padding: 10, borderRadius: 6, fontSize: 12, color: '#92400e' }}>
+                      <strong>Notes:</strong> {detailModalTransfer.notes}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Activity History Timeline */
+                <div>
+                  {loadingActivityLogs ? (
+                    <div style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Loading activity logs...</div>
+                  ) : activityLogs.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>No activity history recorded yet.</div>
+                  ) : (
+                    <div style={{ position: 'relative', paddingLeft: 20, borderLeft: '2px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {activityLogs.map((log) => (
+                        <div key={log.id} style={{ position: 'relative' }}>
+                          <div style={{
+                            position: 'absolute',
+                            left: -27,
+                            top: 2,
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            background: '#2563eb',
+                            border: '2px solid #fff'
+                          }} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                            <strong style={{ fontSize: 13, color: '#0f172a' }}>{log.action_type.replace(/_/g, ' ')}</strong>
+                            <span style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(log.created_at).toLocaleString()}</span>
+                          </div>
+                          <p style={{ margin: '0 0 4px', fontSize: 12.5, color: '#475569' }}>{log.description}</p>
+                          <span style={{ fontSize: 11, color: '#64748b' }}>
+                            By: <strong>{log.user_name || 'Staff'}</strong> ({log.user_role || 'user'})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

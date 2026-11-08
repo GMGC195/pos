@@ -338,7 +338,8 @@ const DiscountRuleBuilder = ({ rules = [], setRules, categories = [], items = []
 export default function Credit() {
   const { user } = useAuth();
   // Ensure Developer role has full permissions identical to Admin
-  const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || user?.role?.trim().toLowerCase() === 'developer';
+  const isDeveloper = user?.role?.trim().toLowerCase() === 'developer';
+  const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || isDeveloper;
   const isManagement = user?.role?.trim().toLowerCase() === 'management';
   
   const [customers, setCustomers] = useState([]);
