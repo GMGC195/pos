@@ -380,7 +380,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
   }, [safeDishes, searchTerm]);
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', zIndex: isOpen ? 9999 : 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Selected Thumbnail preview */}
         <div
@@ -453,14 +453,14 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
           style={{
             position: 'absolute',
             top: 'calc(100% + 4px)',
-            left: 46,
+            left: 0,
             right: 0,
-            maxHeight: 240,
+            maxHeight: 260,
             overflowY: 'auto',
             background: '#ffffff',
             borderRadius: 8,
-            border: '1.5px solid #cbd5e1',
-            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.18), 0 8px 10px -6px rgba(0,0,0,0.1)',
+            border: '1.5px solid #2563eb',
+            boxShadow: '0 14px 30px -4px rgba(0,0,0,0.22), 0 8px 16px -4px rgba(0,0,0,0.12)',
             zIndex: 99999
           }}
         >
@@ -2194,8 +2194,8 @@ export default function InternalBranch() {
                 </div>
               </div>
 
-              {/* Scrollable Dish Rows List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 480, overflowY: 'auto', paddingRight: 4 }}>
+              {/* Dish Rows List - visible overflow so dropdown floats cleanly in front of everything */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflow: 'visible', position: 'relative' }}>
                 {newDishRows.map((row, idx) => {
                   const rowUnits = row.available_units && row.available_units.length > 0 
                     ? row.available_units 
@@ -2212,7 +2212,9 @@ export default function InternalBranch() {
                         background: '#f8fafc',
                         padding: '12px 14px',
                         borderRadius: 8,
-                        border: '1px solid #e2e8f0'
+                        border: '1px solid #e2e8f0',
+                        position: 'relative',
+                        zIndex: 100 - idx
                       }}
                     >
                       {/* Dish Name Search / Dropdown with thumbnail (Clean, no inside button) */}
@@ -2299,7 +2301,7 @@ export default function InternalBranch() {
               </div>
 
               {/* "+ Add Another Item" Button positioned immediately below all dish rows */}
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 12, position: 'relative', zIndex: 1 }}>
                 <button
                   type="button"
                   onClick={handleAddDishRow}
@@ -2328,7 +2330,7 @@ export default function InternalBranch() {
             </div>
 
             {/* Optional Transfer Notes */}
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 24, position: 'relative', zIndex: 1 }}>
               <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
                 General Request Remarks / Instructions (Optional)
               </label>
