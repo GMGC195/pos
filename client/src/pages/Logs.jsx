@@ -23,6 +23,7 @@ import {
   ShoppingBag,
   Layers,
   ArrowRight,
+  ArrowLeftRight,
   Filter,
   Check
 } from 'lucide-react';
@@ -77,8 +78,15 @@ export default function Logs() {
         params.month = selectedMonth;
       }
       if (activeTab !== 'all') {
-        // 'salary' -> 'Salary', 'khata' -> 'Khata', 'orders' -> 'Orders'
-        params.category = activeTab === 'salary' ? 'Salary' : (activeTab === 'khata' ? 'Khata' : 'Orders');
+        if (activeTab === 'internal_branch') {
+          params.category = 'Internal Branch';
+        } else if (activeTab === 'salary') {
+          params.category = 'Salary';
+        } else if (activeTab === 'khata') {
+          params.category = 'Khata';
+        } else {
+          params.category = 'Orders';
+        }
       }
       if (actionFilter !== 'All') {
         params.action = actionFilter;
@@ -181,6 +189,7 @@ export default function Logs() {
     if (m === 'salary') return { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' };
     if (m === 'khata') return { bg: '#fef2f2', color: '#b91c1c', border: '#fecaca' };
     if (m === 'orders') return { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' };
+    if (m === 'internal branch') return { bg: '#fff7ed', color: '#c2410c', border: '#ffedd5' };
     return { bg: 'var(--surface-2)', color: 'var(--text)', border: 'var(--surface-3)' };
   };
 
@@ -476,10 +485,11 @@ export default function Logs() {
         </div>
       </div>
 
-      {/* Main 4 Category Tabs */}
+      {/* Main Category Tabs */}
       <div style={{ display: 'flex', gap: 6, borderBottom: '2px solid var(--surface-3)', marginBottom: 18, overflowX: 'auto' }}>
         {[
           { key: 'all', label: 'All Logs', icon: <Layers size={16} /> },
+          { key: 'internal_branch', label: 'Internal Branch', icon: <ArrowLeftRight size={16} /> },
           { key: 'salary', label: 'Salary Logs', icon: <CreditCard size={16} /> },
           { key: 'khata', label: 'Khata Logs', icon: <User size={16} /> },
           { key: 'orders', label: 'Order Logs', icon: <ShoppingBag size={16} /> }

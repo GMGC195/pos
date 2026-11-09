@@ -13,15 +13,29 @@ function isSuperUser(user) {
 }
 
 // Activity logging helper
-async function logTransferActivity(client, { transferId, action, fromBranch, toBranch, user, details, metadata = {} }) {
+async function logTransferActivity(client, { transferId, action, fromBranch, toBranch, user, details, userRole, previousValue, newValue, reason, metadata = {} }) {
   try {
     const performedById = user?.id || null;
     const performedByName = user?.name || user?.username || 'System';
+    const role = userRole || user?.role || 'Staff';
     await client.query(`
       INSERT INTO internal_branch_activity_logs (
-        transfer_id, action, from_branch, to_branch, performed_by_id, performed_by_name, details, metadata, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
-    `, [transferId, action, fromBranch, toBranch, performedById, performedByName, details, JSON.stringify(metadata)]);
+        transfer_id, action, from_branch, to_branch, performed_by_id, performed_by_name, user_role, previous_value, new_value, reason, details, metadata, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
+    `, [
+      transferId,
+      action,
+      fromBranch,
+      toBranch,
+      performedById,
+      performedByName,
+      role,
+      previousValue !== undefined && previousValue !== null ? String(previousValue) : null,
+      newValue !== undefined && newValue !== null ? String(newValue) : null,
+      reason ? String(reason) : null,
+      details,
+      JSON.stringify(metadata)
+    ]);
   } catch (err) {
     console.warn('Failed to log transfer activity:', err.message);
   }
@@ -192,8 +206,9 @@ router.post('/transfers', authenticateToken, async (req, res) => {
     const insertTransferRes = await client.query(`
       INSERT INTO internal_branch_transfers (
         transfer_id, from_branch, to_branch, requested_by_user_id, requested_by_name,
-        request_date, needed_by_time, delivery_minutes, expected_delivery_at, status, notes, is_external
-      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, 'Pending', $9, $10)
+        request_date, needed_by_time, delivery_minutes, expected_delivery_at, status, notes, is_external,
+        original_delivery_minutes, original_needed_by_time, total_extended_minutes, extension_status
+      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, 'Pending', $9, $10, $7, $6, 0, 'None')
       RETURNING *
     `, [
       transferId,
@@ -238,6 +253,10 @@ router.post('/transfers', authenticateToken, async (req, res) => {
       fromBranch: from_branch,
       toBranch: to_branch,
       user: req.user,
+      userRole: req.user.role,
+      previousValue: null,
+      newValue: `${mins} mins`,
+      reason: notes || null,
       details: `Request created with ${items.length} item(s). Expected delivery in ${mins} minutes.`,
       metadata: { itemsCount: items.length, deliveryMinutes: mins, neededBy: needed_by_time }
     });
@@ -472,7 +491,25 @@ router.get('/transfers/:id/activity-logs', authenticateToken, async (req, res) =
   try {
     const { id } = req.params;
     const logsRes = await pool.query(`
-      SELECT * FROM internal_branch_activity_logs 
+      SELECT 
+        id,
+        transfer_id,
+        action,
+        action AS action_type,
+        details,
+        details AS description,
+        from_branch,
+        to_branch,
+        performed_by_id,
+        performed_by_name,
+        performed_by_name AS user_name,
+        COALESCE(user_role, 'Staff') AS user_role,
+        previous_value,
+        new_value,
+        reason,
+        metadata,
+        created_at
+      FROM internal_branch_activity_logs 
       WHERE transfer_id = $1 
       ORDER BY created_at DESC
     `, [id]);
@@ -526,6 +563,9 @@ router.put('/transfers/:id/start-processing', authenticateToken, async (req, res
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
+      userRole: req.user.role,
+      previousValue: 'Pending',
+      newValue: 'In Progress',
       details: `Kitchen started preparing dishes for request #${transfer.transfer_id}.`
     });
 
@@ -551,15 +591,20 @@ router.put('/transfers/:id/start-processing', authenticateToken, async (req, res
   }
 });
 
-// PUT /api/internal-branch/transfers/:id/extend-delivery-time - Update/extend expected delivery time
+// PUT /api/internal-branch/transfers/:id/extend-delivery-time - Request extension of delivery time (sent for approval)
 router.put('/transfers/:id/extend-delivery-time', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { additional_minutes, new_delivery_time, reason } = req.body;
+    const { additional_minutes, reason } = req.body;
 
     if (!reason || !reason.trim()) {
-      return res.status(400).json({ error: 'Reason for extending/updating delivery time is mandatory.' });
+      return res.status(400).json({ error: 'Reason for requesting delivery time extension is mandatory.' });
+    }
+
+    const addMins = parseInt(additional_minutes, 10);
+    if (isNaN(addMins) || addMins <= 0) {
+      return res.status(400).json({ error: 'Valid extension minutes (greater than 0) are required.' });
     }
 
     await client.query('BEGIN');
@@ -576,38 +621,35 @@ router.put('/transfers/:id/extend-delivery-time', authenticateToken, async (req,
 
     if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Unauthorized. Only supplying branch can extend delivery time.' });
+      return res.status(403).json({ error: 'Unauthorized. Only supplying branch can request delivery time extension.' });
     }
 
-    const origTime = transfer.original_delivery_at || transfer.expected_delivery_at;
-    let newExpected = null;
-
-    if (new_delivery_time) {
-      newExpected = new Date(new_delivery_time);
-    } else {
-      const addMins = parseInt(additional_minutes, 10) || 15;
-      const baseMs = transfer.expected_delivery_at ? new Date(transfer.expected_delivery_at).getTime() : Date.now();
-      newExpected = new Date(baseMs + addMins * 60 * 1000);
+    if (transfer.extension_status === 'Pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'An extension request is already pending review for this transfer.' });
     }
 
-    const userName = req.user.name || req.user.username || 'Staff';
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
 
     const updateRes = await client.query(`
       UPDATE internal_branch_transfers
-      SET original_delivery_at = COALESCE(original_delivery_at, expected_delivery_at),
-          expected_delivery_at = $1,
+      SET extension_status = 'Pending',
+          pending_extension_minutes = $1,
+          pending_extension_reason = $2,
+          pending_extension_requested_by = $3,
+          pending_extension_requested_by_name = $4,
+          pending_extension_requested_at = CURRENT_TIMESTAMP,
           time_extended_at = CURRENT_TIMESTAMP,
-          time_extended_by_name = $2,
-          time_extend_reason = $3,
-          needed_by_time = $4,
+          time_extended_by_name = $4,
+          time_extend_reason = $2,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $5
       RETURNING *
     `, [
-      newExpected,
-      userName,
+      addMins,
       reason.trim(),
-      newExpected.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      req.user.id || null,
+      userName,
       transfer.id
     ]);
 
@@ -615,31 +657,318 @@ router.put('/transfers/:id/extend-delivery-time', authenticateToken, async (req,
 
     await logTransferActivity(client, {
       transferId: transfer.id,
-      action: 'DELIVERY_TIME_EXTENDED',
+      action: 'EXTENSION_REQUESTED',
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
-      details: `Delivery time extended. Previous: ${origTime ? new Date(origTime).toLocaleTimeString() : 'N/A'}, New: ${newExpected.toLocaleTimeString()}. Reason: ${reason.trim()}`,
-      metadata: { originalDelivery: origTime, updatedDelivery: newExpected, reason: reason.trim() }
+      userRole: req.user.role,
+      previousValue: `${transfer.delivery_minutes || 30} mins`,
+      newValue: `+${addMins} mins (Pending Approval)`,
+      reason: reason.trim(),
+      details: `Extension of +${addMins}m requested by ${userName} (${transfer.to_branch}). Reason: ${reason.trim()}`,
+      metadata: { requestedMinutes: addMins, reason: reason.trim() }
     });
 
     await createBranchNotification(client, {
       targetBranch: transfer.from_branch,
-      message: `⏰ Delivery time updated for Request #${transfer.transfer_id} by ${transfer.to_branch} to ${newExpected.toLocaleTimeString()}. Reason: ${reason.trim()}`,
-      type: 'INTERNAL_TRANSFER_TIME_EXTENDED'
+      message: `⏳ Extension Requested for Transfer #${transfer.transfer_id} by ${transfer.to_branch}: +${addMins}m. Reason: ${reason.trim()}`,
+      type: 'INTERNAL_TRANSFER_EXTENSION_REQUESTED'
     });
 
     await client.query('COMMIT');
 
     if (req.io) {
-      req.io.emit('internal_transfer_time_extended', updated);
+      req.io.emit('internal_transfer_extension_requested', updated);
+      req.io.emit('internal_transfer_updated', updated);
     }
 
     res.json(updated);
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error extending delivery time:', err);
-    res.status(500).json({ error: err.message || 'Failed to extend delivery time' });
+    console.error('Error requesting delivery time extension:', err);
+    res.status(500).json({ error: err.message || 'Failed to request delivery time extension' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/extension-accept - Requester accepts the pending extension
+router.put('/transfers/:id/extension-accept', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+    const isRequester = req.user.id && transfer.requested_by_user_id && Number(req.user.id) === Number(transfer.requested_by_user_id);
+    const isFromBranch = userBranch && userBranch.toLowerCase() === (transfer.from_branch || '').toLowerCase();
+
+    if (!superUser && !isRequester && !isFromBranch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Unauthorized. Only requesting branch or original requester can accept time extensions.' });
+    }
+
+    if (transfer.extension_status !== 'Pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No pending extension request found to accept.' });
+    }
+
+    const addMins = parseInt(transfer.pending_extension_minutes, 10) || 15;
+    const currentMins = parseInt(transfer.delivery_minutes, 10) || 30;
+    const newMins = currentMins + addMins;
+
+    const baseMs = transfer.expected_delivery_at ? new Date(transfer.expected_delivery_at).getTime() : Date.now();
+    const newExpected = new Date(Math.max(Date.now(), baseMs) + addMins * 60 * 1000);
+    const userName = req.user.name || req.user.username || 'Requester Staff';
+    const newNeededBy = newExpected.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET delivery_minutes = $1,
+          expected_delivery_at = $2,
+          needed_by_time = $3,
+          extension_status = 'Accepted',
+          total_extended_minutes = COALESCE(total_extended_minutes, 0) + $4,
+          extension_reviewed_by_name = $5,
+          extension_reviewed_at = CURRENT_TIMESTAMP,
+          pending_extension_minutes = NULL,
+          pending_extension_reason = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $6
+      RETURNING *
+    `, [newMins, newExpected, newNeededBy, addMins, userName, transfer.id]);
+
+    const updated = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'EXTENSION_ACCEPTED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: `${currentMins} mins`,
+      newValue: `${newMins} mins`,
+      reason: transfer.pending_extension_reason || 'Extension accepted by requesting branch',
+      details: `Extension of +${addMins}m accepted by ${userName}. Total delivery time: ${newMins}m. New expected delivery: ${newNeededBy}.`,
+      metadata: { addedMinutes: addMins, totalMinutes: newMins, expectedDeliveryAt: newExpected }
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.to_branch,
+      message: `✅ Extension Approved for Transfer #${transfer.transfer_id}: +${addMins}m accepted by ${transfer.from_branch}.`,
+      type: 'INTERNAL_TRANSFER_EXTENSION_ACCEPTED'
+    });
+
+    await client.query('COMMIT');
+
+    if (req.io) {
+      req.io.emit('internal_transfer_extension_accepted', updated);
+      req.io.emit('internal_transfer_updated', updated);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error accepting extension:', err);
+    res.status(500).json({ error: err.message || 'Failed to accept extension' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/extension-reject - Requester rejects the pending extension
+router.put('/transfers/:id/extension-reject', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { rejection_reason } = req.body;
+
+    if (!rejection_reason || !rejection_reason.trim()) {
+      return res.status(400).json({ error: 'Rejection reason is mandatory.' });
+    }
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+    const isRequester = req.user.id && transfer.requested_by_user_id && Number(req.user.id) === Number(transfer.requested_by_user_id);
+    const isFromBranch = userBranch && userBranch.toLowerCase() === (transfer.from_branch || '').toLowerCase();
+
+    if (!superUser && !isRequester && !isFromBranch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Unauthorized. Only requesting branch or original requester can reject time extensions.' });
+    }
+
+    if (transfer.extension_status !== 'Pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No pending extension request found to reject.' });
+    }
+
+    const pendingMins = transfer.pending_extension_minutes || 0;
+    const userName = req.user.name || req.user.username || 'Requester Staff';
+
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET extension_status = 'Rejected',
+          extension_rejection_reason = $1,
+          extension_reviewed_by_name = $2,
+          extension_reviewed_at = CURRENT_TIMESTAMP,
+          pending_extension_minutes = NULL,
+          pending_extension_reason = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+    `, [rejection_reason.trim(), userName, transfer.id]);
+
+    const updated = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'EXTENSION_REJECTED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: `Requested +${pendingMins} mins`,
+      newValue: `Rejected (${transfer.delivery_minutes || 30} mins kept)`,
+      reason: rejection_reason.trim(),
+      details: `Extension of +${pendingMins}m rejected by ${userName}. Reason: ${rejection_reason.trim()}`,
+      metadata: { requestedMinutes: pendingMins, rejectionReason: rejection_reason.trim() }
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.to_branch,
+      message: `❌ Extension Rejected for Transfer #${transfer.transfer_id} by ${transfer.from_branch}. Reason: ${rejection_reason.trim()}`,
+      type: 'INTERNAL_TRANSFER_EXTENSION_REJECTED'
+    });
+
+    await client.query('COMMIT');
+
+    if (req.io) {
+      req.io.emit('internal_transfer_extension_rejected', updated);
+      req.io.emit('internal_transfer_updated', updated);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error rejecting extension:', err);
+    res.status(500).json({ error: err.message || 'Failed to reject extension' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/extension-modify - Requester modifies and approves the extension
+router.put('/transfers/:id/extension-modify', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { modified_minutes, reason } = req.body;
+    const modMins = parseInt(modified_minutes, 10);
+
+    if (isNaN(modMins) || modMins <= 0) {
+      return res.status(400).json({ error: 'Modified extension minutes must be greater than 0.' });
+    }
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+    const isRequester = req.user.id && transfer.requested_by_user_id && Number(req.user.id) === Number(transfer.requested_by_user_id);
+    const isFromBranch = userBranch && userBranch.toLowerCase() === (transfer.from_branch || '').toLowerCase();
+
+    if (!superUser && !isRequester && !isFromBranch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Unauthorized. Only requesting branch or original requester can modify time extensions.' });
+    }
+
+    if (transfer.extension_status !== 'Pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No pending extension request found to modify.' });
+    }
+
+    const currentMins = parseInt(transfer.delivery_minutes, 10) || 30;
+    const newMins = currentMins + modMins;
+    const baseMs = transfer.expected_delivery_at ? new Date(transfer.expected_delivery_at).getTime() : Date.now();
+    const newExpected = new Date(Math.max(Date.now(), baseMs) + modMins * 60 * 1000);
+    const userName = req.user.name || req.user.username || 'Requester Staff';
+    const newNeededBy = newExpected.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const originalRequested = transfer.pending_extension_minutes || 0;
+
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET delivery_minutes = $1,
+          expected_delivery_at = $2,
+          needed_by_time = $3,
+          extension_status = 'Modified & Approved',
+          total_extended_minutes = COALESCE(total_extended_minutes, 0) + $4,
+          extension_reviewed_by_name = $5,
+          extension_reviewed_at = CURRENT_TIMESTAMP,
+          pending_extension_minutes = NULL,
+          pending_extension_reason = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $6
+      RETURNING *
+    `, [newMins, newExpected, newNeededBy, modMins, userName, transfer.id]);
+
+    const updated = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'EXTENSION_MODIFIED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: `Requested +${originalRequested} mins`,
+      newValue: `Approved +${modMins} mins (Total: ${newMins}m)`,
+      reason: reason?.trim() || transfer.pending_extension_reason || 'Extension duration adjusted',
+      details: `Extension modified from requested +${originalRequested}m to +${modMins}m and approved by ${userName}. Reason: ${reason?.trim() || 'N/A'}`,
+      metadata: { originalRequested, approvedMinutes: modMins, totalMinutes: newMins }
+    });
+
+    await createBranchNotification(client, {
+      targetBranch: transfer.to_branch,
+      message: `✏️ Extension Modified & Approved for Transfer #${transfer.transfer_id}: +${modMins}m granted (requested +${originalRequested}m).`,
+      type: 'INTERNAL_TRANSFER_EXTENSION_MODIFIED'
+    });
+
+    await client.query('COMMIT');
+
+    if (req.io) {
+      req.io.emit('internal_transfer_extension_modified', updated);
+      req.io.emit('internal_transfer_updated', updated);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error modifying extension:', err);
+    res.status(500).json({ error: err.message || 'Failed to modify extension' });
   } finally {
     client.release();
   }
@@ -700,6 +1029,8 @@ router.put('/transfers/:id/modify-quantities', authenticateToken, async (req, re
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
+      userRole: req.user.role,
+      reason: general_reason || 'Kitchen availability adjustments',
       details: `Item quantities modified by supplying branch. Reason: ${general_reason || 'Kitchen availability adjustments'}.`,
       metadata: { modifiedItems: changes }
     });
@@ -777,6 +1108,9 @@ router.put('/transfers/:id/mark-ready', authenticateToken, async (req, res) => {
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: 'Ready for Dispatch',
       details: `Items prepared and marked Ready for Dispatch by ${userName}.`
     });
 
@@ -875,6 +1209,9 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: 'Dispatched',
       details: `Parcel handed over by "${hOverBy}" to "${hOverTo}" and dispatched.`,
       metadata: { handoverBy: hOverBy, handoverTo: hOverTo }
     });
@@ -1026,6 +1363,10 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: finalStatus,
+      reason: discrepancy_reason || null,
       details: `Received by ${receiverName}. Status: ${finalStatus}. ${discrepancySummary}`,
       metadata: { status: finalStatus, discrepancies: itemDiscrepancies, reason: discrepancy_reason }
     });
@@ -1090,6 +1431,9 @@ router.put('/transfers/:id/complete', authenticateToken, async (req, res) => {
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: 'Completed',
       details: `Transfer marked as Completed.`
     });
 
@@ -1155,6 +1499,10 @@ router.put('/transfers/:id/cancel', authenticateToken, async (req, res) => {
       fromBranch: transfer.from_branch,
       toBranch: transfer.to_branch,
       user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: 'Cancelled',
+      reason: reason || 'N/A',
       details: `Transfer cancelled. Reason: ${reason || 'N/A'}`
     });
 

@@ -174,6 +174,26 @@ router.get('/', authenticateToken, async (req, res) => {
       WHERE o.status IN ('Cancelled', 'Returned')
     `);
 
+    // Part 6: internal_branch_activity_logs (Internal Branch)
+    unionParts.push(`
+      SELECT 
+        'ibt_' || ibl.id::text AS log_id,
+        'Internal Branch' AS module,
+        COALESCE(ibl.action, 'TRANSFER_ACTIVITY') AS action,
+        COALESCE(ibt.transfer_id, ibl.transfer_id::text) AS entity_id,
+        COALESCE(ibt.transfer_id, 'Transfer #' || ibl.transfer_id) || ' (' || COALESCE(ibl.from_branch, ibt.from_branch, 'Branch') || ' -> ' || COALESCE(ibl.to_branch, ibt.to_branch, 'Branch') || ')' AS entity_name,
+        COALESCE(ibl.details, ibl.action) AS description,
+        COALESCE(ibl.reason, '-') AS reason,
+        CASE WHEN ibl.previous_value IS NOT NULL THEN jsonb_build_object('value', ibl.previous_value) ELSE NULL END AS old_data,
+        CASE WHEN ibl.new_value IS NOT NULL THEN jsonb_build_object('value', ibl.new_value) ELSE NULL END AS new_data,
+        COALESCE(ibl.performed_by_name, 'Staff') AS performed_by,
+        COALESCE(ibl.from_branch, ibt.from_branch, 'All') AS branch,
+        TO_CHAR(ibl.created_at, 'YYYY-MM') AS month,
+        ibl.created_at
+      FROM internal_branch_activity_logs ibl
+      LEFT JOIN internal_branch_transfers ibt ON ibl.transfer_id = ibt.id
+    `);
+
     const fullUnion = unionParts.join(' UNION ALL ');
 
     let query = `

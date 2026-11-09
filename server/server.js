@@ -900,6 +900,18 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_extended_by_name VARCHAR(150);
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_extend_reason TEXT;
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS discrepancy_reason TEXT;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_status VARCHAR(30) DEFAULT 'None';
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_minutes INTEGER;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_reason TEXT;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_requested_by INTEGER;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_requested_by_name VARCHAR(150);
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_requested_at TIMESTAMPTZ;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS total_extended_minutes INTEGER DEFAULT 0;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_delivery_minutes INTEGER DEFAULT 30;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_needed_by_time VARCHAR(50);
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_reviewed_by_name VARCHAR(150);
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_reviewed_at TIMESTAMPTZ;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_rejection_reason TEXT;
 
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS confirmed_qty NUMERIC(12,3);
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_change_reason TEXT;
@@ -919,6 +931,11 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
           created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_ibal_transfer_id ON internal_branch_activity_logs(transfer_id);
+
+        ALTER TABLE internal_branch_activity_logs ADD COLUMN IF NOT EXISTS user_role VARCHAR(50);
+        ALTER TABLE internal_branch_activity_logs ADD COLUMN IF NOT EXISTS previous_value TEXT;
+        ALTER TABLE internal_branch_activity_logs ADD COLUMN IF NOT EXISTS new_value TEXT;
+        ALTER TABLE internal_branch_activity_logs ADD COLUMN IF NOT EXISTS reason TEXT;
 
         CREATE TABLE IF NOT EXISTS shift_closing_audit_logs (
           id SERIAL PRIMARY KEY,

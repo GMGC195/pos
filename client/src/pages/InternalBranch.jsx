@@ -587,11 +587,21 @@ export default function InternalBranch() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals / Actions
-  // 1. Extend Delivery Time
+  // 1. Extend Delivery Time (Request from supplying branch)
   const [extendTimeTransfer, setExtendTimeTransfer] = useState(null);
   const [extendMinutes, setExtendMinutes] = useState(15);
+  const [isCustomMinutes, setIsCustomMinutes] = useState(false);
+  const [customMinutesInput, setCustomMinutesInput] = useState('');
   const [extendReason, setExtendReason] = useState('');
   const [extendingTime, setExtendingTime] = useState(false);
+
+  // 1b. Review & Approve/Modify/Reject Extension (Requester Action)
+  const [reviewExtensionTransfer, setReviewExtensionTransfer] = useState(null);
+  const [reviewAction, setReviewAction] = useState('accept'); // 'accept' | 'modify' | 'reject'
+  const [modifiedExtensionMinutes, setModifiedExtensionMinutes] = useState(15);
+  const [modificationReason, setModificationReason] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [reviewingExtension, setReviewingExtension] = useState(false);
 
   // 2. Modify Quantities
   const [modifyQtyTransfer, setModifyQtyTransfer] = useState(null);
@@ -1018,16 +1028,83 @@ export default function InternalBranch() {
       toast.error(`Transfer ${data.transfer_id || ''} has been cancelled.`);
     };
 
+    const handleExtensionRequested = (data) => {
+      fetchStats();
+      fetchTransfers();
+      if (!isNewEvent('ext_req', `${data.id}_${data.updated_at}`)) return;
+
+      const userBranch = user?.branch;
+      const isRequester = isSuperUser || (userBranch && [data.from_branch].map(b => (b||'').toLowerCase()).includes(userBranch.toLowerCase())) || (user?.id && Number(user.id) === Number(data.requested_by_user_id));
+
+      if (isRequester) {
+        if (audioEnabled) {
+          playIncomingTransferAlert();
+        }
+        toast.custom(() => (
+          <div style={{
+            background: '#78350f',
+            color: '#fff',
+            padding: '12px 18px',
+            borderRadius: 10,
+            boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            borderLeft: '4px solid #f59e0b'
+          }}>
+            <Volume2 size={24} color="#f59e0b" />
+            <div>
+              <strong style={{ fontSize: 13.5, display: 'block' }}>⏳ Extension Requested! (+{data.pending_extension_minutes}m)</strong>
+              <span style={{ fontSize: 12, color: '#fef3c7' }}>
+                Transfer #{data.transfer_id} from {data.to_branch}: "{data.pending_extension_reason}"
+              </span>
+            </div>
+          </div>
+        ), { duration: 7000 });
+      }
+    };
+
+    const handleExtensionAccepted = (data) => {
+      fetchStats();
+      fetchTransfers();
+      if (!isNewEvent('ext_acc', `${data.id}_${data.updated_at}`)) return;
+      toast.success(`✅ Extension accepted for Transfer #${data.transfer_id}! Total allowed time updated.`);
+    };
+
+    const handleExtensionRejected = (data) => {
+      fetchStats();
+      fetchTransfers();
+      if (!isNewEvent('ext_rej', `${data.id}_${data.updated_at}`)) return;
+      toast.error(`❌ Extension request rejected for Transfer #${data.transfer_id}.`);
+    };
+
+    const handleExtensionModified = (data) => {
+      fetchStats();
+      fetchTransfers();
+      if (!isNewEvent('ext_mod', `${data.id}_${data.updated_at}`)) return;
+      toast.info(`✏️ Extension modified & approved for Transfer #${data.transfer_id}!`);
+    };
+
     socket.on('internal_transfer_created', handleTransferCreated);
     socket.on('internal_transfer_dispatched', handleTransferDispatched);
     socket.on('internal_transfer_received', handleTransferReceived);
     socket.on('internal_transfer_cancelled', handleTransferCancelled);
+    socket.on('internal_transfer_extension_requested', handleExtensionRequested);
+    socket.on('internal_transfer_extension_accepted', handleExtensionAccepted);
+    socket.on('internal_transfer_extension_rejected', handleExtensionRejected);
+    socket.on('internal_transfer_extension_modified', handleExtensionModified);
+    socket.on('internal_transfer_updated', fetchTransfers);
 
     return () => {
       socket.off('internal_transfer_created', handleTransferCreated);
       socket.off('internal_transfer_dispatched', handleTransferDispatched);
       socket.off('internal_transfer_received', handleTransferReceived);
       socket.off('internal_transfer_cancelled', handleTransferCancelled);
+      socket.off('internal_transfer_extension_requested', handleExtensionRequested);
+      socket.off('internal_transfer_extension_accepted', handleExtensionAccepted);
+      socket.off('internal_transfer_extension_rejected', handleExtensionRejected);
+      socket.off('internal_transfer_extension_modified', handleExtensionModified);
+      socket.off('internal_transfer_updated', fetchTransfers);
     };
   }, [user, isSuperUser, audioEnabled, fetchStats, fetchTransfers]);
 
@@ -1191,21 +1268,42 @@ export default function InternalBranch() {
     }
   };
 
-  // 2. Extend Delivery Time Action
+  // 2. Extend Delivery Time Action (Supplying branch requests extension)
+  const canReviewExtension = useCallback((t) => {
+    if (!t || t.extension_status !== 'Pending') return false;
+    if (isSuperUser) return true;
+    const userBranch = user?.branch;
+    if (userBranch && userBranch.toLowerCase() === (t.from_branch || '').toLowerCase()) return true;
+    if (user?.id && t.requested_by_user_id && Number(user.id) === Number(t.requested_by_user_id)) return true;
+    return false;
+  }, [user, isSuperUser]);
+
+  const canRequestExtension = useCallback((t) => {
+    if (!t) return false;
+    if (t.extension_status === 'Pending') return false;
+    if (['Completed', 'Fully Received', 'Partially Received', 'Cancelled'].includes(t.status)) return false;
+    if (isSuperUser) return true;
+    const userBranch = user?.branch;
+    if (userBranch && userBranch.toLowerCase() === (t.to_branch || '').toLowerCase()) return true;
+    return false;
+  }, [user, isSuperUser]);
+
   const handleOpenExtendTimeModal = (t) => {
     setExtendTimeTransfer(t);
     setExtendMinutes(15);
+    setIsCustomMinutes(false);
+    setCustomMinutesInput('');
     setExtendReason('');
   };
 
   const handleConfirmExtendTime = async () => {
     if (!extendTimeTransfer || extendingTime) return;
     if (!extendReason.trim()) {
-      return toast.error('Mandatory reason is required to extend delivery time.');
+      return toast.error('Mandatory reason is required to request delivery time extension.');
     }
-    const mins = parseInt(extendMinutes, 10);
+    const mins = isCustomMinutes ? parseInt(customMinutesInput, 10) : parseInt(extendMinutes, 10);
     if (isNaN(mins) || mins <= 0) {
-      return toast.error('Please enter a valid number of extension minutes.');
+      return toast.error('Please enter a valid positive number for extension minutes.');
     }
 
     try {
@@ -1214,15 +1312,97 @@ export default function InternalBranch() {
         additional_minutes: mins,
         reason: extendReason.trim()
       });
-      toast.success(`Delivery time extended by +${mins}m for ${extendTimeTransfer.transfer_id}`);
+      toast.success(`Extension request of +${mins}m submitted to requesting branch for approval.`);
       setExtendTimeTransfer(null);
       fetchStats();
       fetchTransfers();
     } catch (err) {
-      console.error('Error extending delivery time:', err);
-      toast.error(err.response?.data?.error || 'Failed to extend delivery time');
+      console.error('Error requesting delivery time extension:', err);
+      toast.error(err.response?.data?.error || 'Failed to request delivery time extension');
     } finally {
       setExtendingTime(false);
+    }
+  };
+
+  // 2b. Extension Review Actions (Requesting Branch / SuperUser)
+  const handleOpenReviewExtensionModal = (t) => {
+    setReviewExtensionTransfer(t);
+    setReviewAction('accept');
+    setModifiedExtensionMinutes(t.pending_extension_minutes || 15);
+    setModificationReason('');
+    setRejectionReason('');
+  };
+
+  const handleAcceptExtension = async (t) => {
+    const target = t || reviewExtensionTransfer;
+    if (!target || reviewingExtension) return;
+    try {
+      setReviewingExtension(true);
+      await axios.put(`/api/internal-branch/transfers/${target.id}/extension-accept`);
+      toast.success(`Extension of +${target.pending_extension_minutes}m approved for Transfer #${target.transfer_id}`);
+      setReviewExtensionTransfer(null);
+      fetchStats();
+      fetchTransfers();
+      if (detailModalTransfer?.id === target.id) {
+        handleOpenDetailModal(target);
+      }
+    } catch (err) {
+      console.error('Error accepting extension:', err);
+      toast.error(err.response?.data?.error || 'Failed to accept extension');
+    } finally {
+      setReviewingExtension(false);
+    }
+  };
+
+  const handleModifyExtension = async () => {
+    if (!reviewExtensionTransfer || reviewingExtension) return;
+    const mins = parseInt(modifiedExtensionMinutes, 10);
+    if (isNaN(mins) || mins <= 0) {
+      return toast.error('Please enter a valid positive number for modified minutes.');
+    }
+    try {
+      setReviewingExtension(true);
+      await axios.put(`/api/internal-branch/transfers/${reviewExtensionTransfer.id}/extension-modify`, {
+        modified_minutes: mins,
+        reason: modificationReason.trim()
+      });
+      toast.success(`Extension modified to +${mins}m and approved for Transfer #${reviewExtensionTransfer.transfer_id}`);
+      setReviewExtensionTransfer(null);
+      fetchStats();
+      fetchTransfers();
+      if (detailModalTransfer?.id === reviewExtensionTransfer.id) {
+        handleOpenDetailModal(reviewExtensionTransfer);
+      }
+    } catch (err) {
+      console.error('Error modifying extension:', err);
+      toast.error(err.response?.data?.error || 'Failed to modify extension');
+    } finally {
+      setReviewingExtension(false);
+    }
+  };
+
+  const handleRejectExtension = async () => {
+    if (!reviewExtensionTransfer || reviewingExtension) return;
+    if (!rejectionReason.trim()) {
+      return toast.error('Mandatory rejection reason is required.');
+    }
+    try {
+      setReviewingExtension(true);
+      await axios.put(`/api/internal-branch/transfers/${reviewExtensionTransfer.id}/extension-reject`, {
+        rejection_reason: rejectionReason.trim()
+      });
+      toast.info(`Extension request rejected for Transfer #${reviewExtensionTransfer.transfer_id}`);
+      setReviewExtensionTransfer(null);
+      fetchStats();
+      fetchTransfers();
+      if (detailModalTransfer?.id === reviewExtensionTransfer.id) {
+        handleOpenDetailModal(reviewExtensionTransfer);
+      }
+    } catch (err) {
+      console.error('Error rejecting extension:', err);
+      toast.error(err.response?.data?.error || 'Failed to reject extension');
+    } finally {
+      setReviewingExtension(false);
     }
   };
 
@@ -2466,7 +2646,14 @@ export default function InternalBranch() {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                           <span style={{ color: '#64748b' }}>Needed-By Time:</span>
-                          <strong style={{ color: '#dc2626' }}>{t.needed_by_time || 'ASAP'}</strong>
+                          <div>
+                            <strong style={{ color: '#dc2626' }}>{t.needed_by_time || 'ASAP'}</strong>
+                            {(t.total_extended_minutes || 0) > 0 && (
+                              <span style={{ marginLeft: 6, fontSize: 10.5, color: '#d97706', background: '#fef3c7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                +{t.total_extended_minutes}m extended
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: '#64748b' }}>Requested By:</span>
@@ -2509,6 +2696,58 @@ export default function InternalBranch() {
                       </div>
                     </div>
 
+                    {/* Pending Extension Request Banner */}
+                    {t.extension_status === 'Pending' && (
+                      <div style={{
+                        background: '#fffbeb',
+                        border: '1.5px solid #fcd34d',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        marginBottom: 12,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 12.5, color: '#92400e' }}>
+                            <Timer size={14} color="#d97706" /> Extension Requested: +{t.pending_extension_minutes}m
+                          </div>
+                          <span style={{ fontSize: 11, background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: 4, fontWeight: 700, border: '1px solid #fde68a' }}>
+                            Awaiting Approval
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: '#78350f' }}>
+                          <strong>Reason:</strong> "{t.pending_extension_reason || 'Kitchen preparation delay'}"
+                          {t.pending_extension_requested_by_name && (
+                            <span style={{ color: '#92400e', marginLeft: 6 }}>— By {t.pending_extension_requested_by_name}</span>
+                          )}
+                        </div>
+                        {canReviewExtension(t) && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReviewExtensionModal(t)}
+                            style={{
+                              marginTop: 4,
+                              padding: '6px 12px',
+                              background: '#d97706',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6
+                            }}
+                          >
+                            <CheckCircle2 size={13} /> Review Extension Request
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* Step-by-Step Action Workflow */}
                     <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {t.status === 'Pending' && (
@@ -2533,26 +2772,51 @@ export default function InternalBranch() {
                           >
                             <Play size={13} /> Start Processing
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenExtendTimeModal(t)}
-                            style={{
-                              padding: '8px 10px',
-                              background: '#fff',
-                              color: '#d97706',
-                              border: '1.5px solid #fcd34d',
-                              borderRadius: 6,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: 4
-                            }}
-                          >
-                            <Timer size={13} /> Extend
-                          </button>
+                          {t.extension_status === 'Pending' ? (
+                            <button
+                              type="button"
+                              disabled
+                              title={`Extension of +${t.pending_extension_minutes}m is currently pending review by requesting branch`}
+                              style={{
+                                padding: '8px 10px',
+                                background: '#fef3c7',
+                                color: '#b45309',
+                                border: '1.5px solid #fcd34d',
+                                borderRadius: 6,
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                cursor: 'not-allowed',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 4,
+                                opacity: 0.8
+                              }}
+                            >
+                              <Timer size={13} /> Ext Pending
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenExtendTimeModal(t)}
+                              style={{
+                                padding: '8px 10px',
+                                background: '#fff',
+                                color: '#d97706',
+                                border: '1.5px solid #fcd34d',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 4
+                              }}
+                            >
+                              <Timer size={13} /> Extend
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleOpenModifyQtyModal(t)}
@@ -2598,26 +2862,51 @@ export default function InternalBranch() {
                           >
                             <CheckCircle2 size={13} /> Mark Ready
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenExtendTimeModal(t)}
-                            style={{
-                              padding: '8px 10px',
-                              background: '#fff',
-                              color: '#d97706',
-                              border: '1.5px solid #fcd34d',
-                              borderRadius: 6,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: 4
-                            }}
-                          >
-                            <Timer size={13} /> Extend
-                          </button>
+                          {t.extension_status === 'Pending' ? (
+                            <button
+                              type="button"
+                              disabled
+                              title={`Extension of +${t.pending_extension_minutes}m is currently pending review by requesting branch`}
+                              style={{
+                                padding: '8px 10px',
+                                background: '#fef3c7',
+                                color: '#b45309',
+                                border: '1.5px solid #fcd34d',
+                                borderRadius: 6,
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                cursor: 'not-allowed',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 4,
+                                opacity: 0.8
+                              }}
+                            >
+                              <Timer size={13} /> Ext Pending
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenExtendTimeModal(t)}
+                              style={{
+                                padding: '8px 10px',
+                                background: '#fff',
+                                color: '#d97706',
+                                border: '1.5px solid #fcd34d',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 4
+                              }}
+                            >
+                              <Timer size={13} /> Extend
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleOpenModifyQtyModal(t)}
@@ -2670,9 +2959,22 @@ export default function InternalBranch() {
                           type="button"
                           onClick={() => handleOpenDetailModal(t)}
                           className="btn btn-secondary"
-                          style={{ flex: 1, padding: '7px 10px', fontSize: 12 }}
+                          style={{ flex: 1, padding: '7px 10px', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                         >
-                          Details & History
+                          <span>Details & History</span>
+                          {t.extension_status === 'Pending' && (
+                            <span style={{
+                              padding: '1px 6px',
+                              borderRadius: 10,
+                              background: '#fef3c7',
+                              color: '#b45309',
+                              border: '1px solid #fcd34d',
+                              fontSize: 10,
+                              fontWeight: 800
+                            }}>
+                              ⚠️ Ext Pending
+                            </span>
+                          )}
                         </button>
                         <button
                           type="button"
@@ -3116,6 +3418,11 @@ export default function InternalBranch() {
                           <span style={{ fontWeight: 700, color: '#dc2626', display: 'block' }}>
                             {t.needed_by_time || 'ASAP'}
                           </span>
+                          {(t.total_extended_minutes || 0) > 0 && (
+                            <span style={{ fontSize: 10, color: '#d97706', display: 'block', fontWeight: 700 }}>
+                              +{t.total_extended_minutes}m extended
+                            </span>
+                          )}
                           <div style={{ marginTop: 2 }}>
                             <DeliveryTimerBadge expectedDeliveryAt={t.expected_delivery_at} status={t.status} />
                           </div>
@@ -3147,17 +3454,17 @@ export default function InternalBranch() {
                             type="button"
                             onClick={() => handleOpenDetailModal(t)}
                             style={{
-                              background: '#f1f5f9',
-                              border: 'none',
+                              background: t.extension_status === 'Pending' ? '#fffbeb' : '#f1f5f9',
+                              border: t.extension_status === 'Pending' ? '1px solid #fcd34d' : 'none',
                               padding: '5px 9px',
                               borderRadius: 4,
                               fontSize: 11.5,
-                              fontWeight: 600,
+                              fontWeight: 700,
                               cursor: 'pointer',
-                              color: '#334155'
+                              color: t.extension_status === 'Pending' ? '#b45309' : '#334155'
                             }}
                           >
-                            Details
+                            Details {t.extension_status === 'Pending' ? '⚠️ Ext' : ''}
                           </button>
 
                           <button
@@ -3508,29 +3815,89 @@ export default function InternalBranch() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          2. EXTEND DELIVERY TIME MODAL
+          2. EXTEND DELIVERY TIME MODAL (REQUEST APPROVAL WORKFLOW)
       ───────────────────────────────────────────────────────────── */}
       {extendTimeTransfer && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setExtendTimeTransfer(null); }} style={{ zIndex: 9999 }}>
-          <div className="modal" style={{ maxWidth: 480, width: '95%', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal" style={{ maxWidth: 520, width: '95%', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ background: '#d97706', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>⏱ Extend Delivery Time</h3>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>⏱ Request Delivery Time Extension</h3>
                 <span style={{ fontSize: 12, opacity: 0.9 }}>Transfer: {extendTimeTransfer.transfer_id}</span>
               </div>
               <button onClick={() => setExtendTimeTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
 
             <div style={{ padding: 20 }}>
+              {/* Detailed Time Statistics */}
+              {(() => {
+                const origMins = extendTimeTransfer.original_delivery_minutes || extendTimeTransfer.delivery_minutes || 30;
+                const prevExtMins = extendTimeTransfer.total_extended_minutes || 0;
+                const currAllowed = extendTimeTransfer.delivery_minutes || 30;
+                const requestedAdd = isCustomMinutes ? (parseInt(customMinutesInput, 10) || 0) : (parseInt(extendMinutes, 10) || 15);
+                const updatedTotal = currAllowed + requestedAdd;
+                const targetMs = extendTimeTransfer.expected_delivery_at ? new Date(extendTimeTransfer.expected_delivery_at).getTime() : 0;
+                const diffMs = targetMs ? (targetMs - Date.now()) : 0;
+                const isOverdue = diffMs <= 0;
+                const absMin = Math.floor(Math.abs(diffMs) / 60000);
+                const remainingText = targetMs ? (isOverdue ? `Expired (${absMin}m ago)` : `${absMin}m left`) : 'N/A';
+
+                return (
+                  <div style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: '12px 14px',
+                    marginBottom: 16,
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 10,
+                    fontSize: 12
+                  }}>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Original Allocated Time:</span>
+                      <strong style={{ color: '#0f172a', fontSize: 13 }}>{origMins} mins</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Previously Extended:</span>
+                      <strong style={{ color: prevExtMins > 0 ? '#d97706' : '#64748b', fontSize: 13 }}>
+                        {prevExtMins > 0 ? `+${prevExtMins} mins` : 'None (0m)'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Newly Requested:</span>
+                      <strong style={{ color: '#2563eb', fontSize: 13 }}>
+                        {requestedAdd > 0 ? `+${requestedAdd} mins` : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Updated Total Allowed:</span>
+                      <strong style={{ color: '#16a34a', fontSize: 13 }}>
+                        {updatedTotal} mins (If Approved)
+                      </strong>
+                    </div>
+                    <div style={{ gridColumn: 'span 2', borderTop: '1px dashed #cbd5e1', paddingTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: '#64748b' }}>Current Timer:</span>
+                      <strong style={{ color: isOverdue ? '#dc2626' : '#059669', fontSize: 12.5 }}>
+                        {remainingText}
+                      </strong>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 8 }}>
                 Select Extension Minutes:
               </label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 {[10, 15, 30, 60].map(m => (
                   <button
                     key={`ext-${m}`}
                     type="button"
-                    onClick={() => setExtendMinutes(m)}
+                    onClick={() => {
+                      setIsCustomMinutes(false);
+                      setExtendMinutes(m);
+                    }}
                     style={{
                       flex: 1,
                       padding: '8px 10px',
@@ -3538,15 +3905,70 @@ export default function InternalBranch() {
                       fontSize: 13,
                       fontWeight: 700,
                       cursor: 'pointer',
-                      border: extendMinutes === m ? '1.5px solid #d97706' : '1px solid #cbd5e1',
-                      background: extendMinutes === m ? '#fef3c7' : '#fff',
-                      color: extendMinutes === m ? '#92400e' : '#475569'
+                      border: (!isCustomMinutes && extendMinutes === m) ? '2px solid #d97706' : '1px solid #cbd5e1',
+                      background: (!isCustomMinutes && extendMinutes === m) ? '#fef3c7' : '#fff',
+                      color: (!isCustomMinutes && extendMinutes === m) ? '#92400e' : '#475569'
                     }}
                   >
                     +{m}m
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCustomMinutes(true);
+                    if (!customMinutesInput) setCustomMinutesInput('20');
+                  }}
+                  style={{
+                    flex: 1.2,
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: isCustomMinutes ? '2px solid #d97706' : '1px solid #cbd5e1',
+                    background: isCustomMinutes ? '#fef3c7' : '#fff',
+                    color: isCustomMinutes ? '#92400e' : '#475569'
+                  }}
+                >
+                  Custom
+                </button>
               </div>
+
+              {isCustomMinutes && (
+                <div style={{ marginBottom: 14, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 10 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 4 }}>
+                    Enter Custom Extension Minutes:
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={360}
+                      value={customMinutesInput}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setCustomMinutesInput(val);
+                        const parsed = parseInt(val, 10);
+                        if (!isNaN(parsed) && parsed > 0) {
+                          setExtendMinutes(parsed);
+                        }
+                      }}
+                      placeholder="e.g. 25"
+                      style={{
+                        flex: 1,
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        border: '1.5px solid #d97706',
+                        fontSize: 13,
+                        fontWeight: 700
+                      }}
+                      autoFocus
+                    />
+                    <span style={{ fontSize: 13, color: '#92400e', fontWeight: 700 }}>minutes</span>
+                  </div>
+                </div>
+              )}
 
               <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
                 Mandatory Reason for Extension <span style={{ color: '#dc2626' }}>*</span>
@@ -3560,7 +3982,7 @@ export default function InternalBranch() {
                 style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13 }}
               />
               <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                The requesting branch will receive an immediate real-time update and the timer will reset.
+                ℹ️ The extension will NOT be applied automatically. A pending request will be sent to the requesting branch ({extendTimeTransfer.from_branch}) for authorization.
               </span>
             </div>
 
@@ -3580,11 +4002,190 @@ export default function InternalBranch() {
                   borderRadius: 6,
                   fontSize: 13,
                   fontWeight: 700,
-                  cursor: extendingTime ? 'not-allowed' : 'pointer'
+                  cursor: extendingTime ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
                 }}
               >
-                {extendingTime ? 'Extending...' : 'Confirm Extension'}
+                {extendingTime ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                {extendingTime ? 'Sending Request...' : 'Send Extension Request for Approval'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          2b. REVIEW & APPROVE/MODIFY/REJECT EXTENSION MODAL
+      ───────────────────────────────────────────────────────────── */}
+      {reviewExtensionTransfer && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setReviewExtensionTransfer(null); }} style={{ zIndex: 9999 }}>
+          <div className="modal" style={{ maxWidth: 540, width: '95%', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: '#d97706', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>⏳ Review Delivery Extension Request</h3>
+                <span style={{ fontSize: 12, opacity: 0.9 }}>Transfer: {reviewExtensionTransfer.transfer_id}</span>
+              </div>
+              <button onClick={() => setReviewExtensionTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18 }}>✕</button>
+            </div>
+
+            <div style={{ padding: 20 }}>
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '12px 14px', marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: '#92400e' }}>Supplying Branch:</span>
+                  <strong style={{ fontSize: 12.5, color: '#78350f' }}>{reviewExtensionTransfer.to_branch}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: '#92400e' }}>Requested Additional Time:</span>
+                  <strong style={{ fontSize: 14, color: '#b45309' }}>+{reviewExtensionTransfer.pending_extension_minutes} mins</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: '#92400e' }}>Requested By:</span>
+                  <strong style={{ fontSize: 12.5, color: '#78350f' }}>{reviewExtensionTransfer.pending_extension_requested_by_name || 'Kitchen Staff'}</strong>
+                </div>
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #fcd34d' }}>
+                  <span style={{ fontSize: 11, color: '#92400e', fontWeight: 700, display: 'block', marginBottom: 2 }}>Reason Provided:</span>
+                  <p style={{ margin: 0, fontSize: 12.5, color: '#78350f', fontStyle: 'italic' }}>
+                    "{reviewExtensionTransfer.pending_extension_reason || 'Operational delay'}"
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Selector: Accept vs Modify vs Reject */}
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 8 }}>
+                Select Review Action:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => setReviewAction('accept')}
+                  style={{
+                    padding: '10px 8px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: reviewAction === 'accept' ? '2px solid #16a34a' : '1px solid #cbd5e1',
+                    background: reviewAction === 'accept' ? '#f0fdf4' : '#fff',
+                    color: reviewAction === 'accept' ? '#166534' : '#475569'
+                  }}
+                >
+                  ✓ Accept (+{reviewExtensionTransfer.pending_extension_minutes}m)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReviewAction('modify')}
+                  style={{
+                    padding: '10px 8px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: reviewAction === 'modify' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
+                    background: reviewAction === 'modify' ? '#f5f3ff' : '#fff',
+                    color: reviewAction === 'modify' ? '#6d28d9' : '#475569'
+                  }}
+                >
+                  ✏️ Modify Duration
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReviewAction('reject')}
+                  style={{
+                    padding: '10px 8px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: reviewAction === 'reject' ? '2px solid #dc2626' : '1px solid #cbd5e1',
+                    background: reviewAction === 'reject' ? '#fef2f2' : '#fff',
+                    color: reviewAction === 'reject' ? '#991b1b' : '#475569'
+                  }}
+                >
+                  ✕ Reject
+                </button>
+              </div>
+
+              {/* Modify Panel */}
+              {reviewAction === 'modify' && (
+                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Approve with Modified Duration (Minutes) <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={360}
+                    value={modifiedExtensionMinutes}
+                    onChange={e => setModifiedExtensionMinutes(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #7c3aed', fontSize: 13, fontWeight: 700, marginBottom: 8 }}
+                  />
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Modification Reason / Note (Optional):
+                  </label>
+                  <input
+                    type="text"
+                    value={modificationReason}
+                    onChange={e => setModificationReason(e.target.value)}
+                    placeholder="e.g. Can only grant 15 extra minutes due to peak customer rush"
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+                  />
+                </div>
+              )}
+
+              {/* Reject Panel */}
+              {reviewAction === 'reject' && (
+                <div style={{ background: '#fef2f2', padding: 12, borderRadius: 8, border: '1px solid #fecaca', marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                    Mandatory Rejection Reason <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    required
+                    value={rejectionReason}
+                    onChange={e => setRejectionReason(e.target.value)}
+                    placeholder="e.g. Cannot extend; guests are already waiting at tables"
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1.5px solid #dc2626', fontSize: 12.5 }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setReviewExtensionTransfer(null)}>
+                Cancel
+              </button>
+              {reviewAction === 'accept' && (
+                <button
+                  type="button"
+                  onClick={() => handleAcceptExtension()}
+                  disabled={reviewingExtension}
+                  style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                >
+                  {reviewingExtension ? 'Accepting...' : `Confirm & Accept (+${reviewExtensionTransfer.pending_extension_minutes}m)`}
+                </button>
+              )}
+              {reviewAction === 'modify' && (
+                <button
+                  type="button"
+                  onClick={handleModifyExtension}
+                  disabled={reviewingExtension}
+                  style={{ padding: '8px 16px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                >
+                  {reviewingExtension ? 'Updating...' : `Approve Modified (+${modifiedExtensionMinutes}m)`}
+                </button>
+              )}
+              {reviewAction === 'reject' && (
+                <button
+                  type="button"
+                  onClick={handleRejectExtension}
+                  disabled={reviewingExtension}
+                  style={{ padding: '8px 16px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                >
+                  {reviewingExtension ? 'Rejecting...' : 'Reject Extension'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -3959,11 +4560,75 @@ export default function InternalBranch() {
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 20 }}>
               {detailModalTab === 'summary' ? (
                 <div>
+                  {/* Extension Alert Banner if Pending */}
+                  {detailModalTransfer.extension_status === 'Pending' && (
+                    <div style={{
+                      background: '#fffbeb',
+                      border: '1.5px solid #fcd34d',
+                      borderRadius: 8,
+                      padding: '12px 14px',
+                      marginBottom: 16,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: '#92400e' }}>
+                          <Timer size={16} color="#d97706" /> Delivery Time Extension Requested: +{detailModalTransfer.pending_extension_minutes}m
+                        </div>
+                        <span style={{ fontSize: 11, background: '#fef3c7', color: '#b45309', padding: '2px 8px', borderRadius: 4, fontWeight: 700, border: '1px solid #fde68a' }}>
+                          Awaiting Approval
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#78350f' }}>
+                        <strong>Reason:</strong> "{detailModalTransfer.pending_extension_reason || 'Kitchen preparation delay'}"
+                        {detailModalTransfer.pending_extension_requested_by_name && (
+                          <span style={{ color: '#92400e', marginLeft: 6 }}>— By {detailModalTransfer.pending_extension_requested_by_name}</span>
+                        )}
+                      </div>
+                      {canReviewExtension(detailModalTransfer) && (
+                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleAcceptExtension(detailModalTransfer)}
+                            disabled={reviewingExtension}
+                            style={{ padding: '6px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                          >
+                            ✓ Accept (+{detailModalTransfer.pending_extension_minutes}m)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReviewExtensionModal(detailModalTransfer)}
+                            style={{ padding: '6px 12px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                          >
+                            ✏️ Modify / Reject...
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16, background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 12.5 }}>
                     <div><span style={{ color: '#64748b' }}>From Branch:</span> <BranchBadge branch={detailModalTransfer.from_branch} /></div>
                     <div><span style={{ color: '#64748b' }}>To Branch:</span> <BranchBadge branch={detailModalTransfer.to_branch} isExternal={detailModalTransfer.is_external} /></div>
                     <div><span style={{ color: '#64748b' }}>Requested Time:</span> {new Date(detailModalTransfer.request_date).toLocaleString()}</div>
-                    <div><span style={{ color: '#64748b' }}>Needed-By Time:</span> <strong style={{ color: '#dc2626' }}>{detailModalTransfer.needed_by_time || 'ASAP'}</strong></div>
+                    <div>
+                      <span style={{ color: '#64748b' }}>Needed-By Time:</span>{' '}
+                      <strong style={{ color: '#dc2626' }}>{detailModalTransfer.needed_by_time || 'ASAP'}</strong>
+                      {(detailModalTransfer.total_extended_minutes || 0) > 0 && (
+                        <span style={{ marginLeft: 6, fontSize: 11, color: '#d97706', background: '#fef3c7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          +{detailModalTransfer.total_extended_minutes}m extended
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b' }}>Original Time Allocated:</span>{' '}
+                      <strong>{detailModalTransfer.original_delivery_minutes || detailModalTransfer.delivery_minutes || 30} mins</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b' }}>Total Delivery Minutes:</span>{' '}
+                      <strong style={{ color: '#2563eb' }}>{detailModalTransfer.delivery_minutes || 30} mins</strong>
+                    </div>
                     <div><span style={{ color: '#64748b' }}>Dispatched At:</span> {detailModalTransfer.dispatched_at ? new Date(detailModalTransfer.dispatched_at).toLocaleString() : 'Pending'}</div>
                     <div><span style={{ color: '#64748b' }}>Received At:</span> {detailModalTransfer.received_at ? new Date(detailModalTransfer.received_at).toLocaleString() : 'Pending'}</div>
                     {detailModalTransfer.handover_to_name && (
@@ -4009,34 +4674,136 @@ export default function InternalBranch() {
               ) : (
                 /* Activity History Timeline */
                 <div>
+                  {/* Delivery & Extension Statistics Header */}
+                  {detailModalTransfer && (
+                    <div style={{
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 8,
+                      padding: '12px 14px',
+                      marginBottom: 16,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gap: 8,
+                      fontSize: 12
+                    }}>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>Original Time:</span>
+                        <strong style={{ color: '#0f172a' }}>{detailModalTransfer.original_delivery_minutes || detailModalTransfer.delivery_minutes || 30}m</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>Extended Time:</span>
+                        <strong style={{ color: (detailModalTransfer.total_extended_minutes || 0) > 0 ? '#d97706' : '#64748b' }}>
+                          +{(detailModalTransfer.total_extended_minutes || 0)}m
+                        </strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>Total Allowed:</span>
+                        <strong style={{ color: '#2563eb' }}>{detailModalTransfer.delivery_minutes || 30}m</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>Extension Status:</span>
+                        <span style={{
+                          fontWeight: 700,
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          background: detailModalTransfer.extension_status === 'Pending' ? '#fef3c7' : (detailModalTransfer.extension_status === 'Accepted' || detailModalTransfer.extension_status === 'Modified & Approved' ? '#dcfce7' : '#f1f5f9'),
+                          color: detailModalTransfer.extension_status === 'Pending' ? '#b45309' : (detailModalTransfer.extension_status === 'Accepted' || detailModalTransfer.extension_status === 'Modified & Approved' ? '#15803d' : '#64748b')
+                        }}>
+                          {detailModalTransfer.extension_status || 'None'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {loadingActivityLogs ? (
                     <div style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Loading activity logs...</div>
                   ) : activityLogs.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>No activity history recorded yet.</div>
                   ) : (
                     <div style={{ position: 'relative', paddingLeft: 20, borderLeft: '2px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                      {activityLogs.map((log) => (
-                        <div key={log.id} style={{ position: 'relative' }}>
-                          <div style={{
-                            position: 'absolute',
-                            left: -27,
-                            top: 2,
-                            width: 12,
-                            height: 12,
-                            borderRadius: '50%',
-                            background: '#2563eb',
-                            border: '2px solid #fff'
-                          }} />
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                            <strong style={{ fontSize: 13, color: '#0f172a' }}>{log.action_type.replace(/_/g, ' ')}</strong>
-                            <span style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(log.created_at).toLocaleString()}</span>
+                      {activityLogs.map((log) => {
+                        const actionRaw = log.action || log.action_type || 'ACTIVITY';
+                        const actionFormatted = String(actionRaw).replace(/_/g, ' ');
+                        const desc = log.details || log.description || '';
+                        const actor = log.performed_by_name || log.user_name || 'Staff';
+                        const role = log.user_role || 'Staff';
+
+                        let badgeBg = '#f1f5f9';
+                        let badgeColor = '#475569';
+                        let dotColor = '#94a3b8';
+                        if (actionRaw.includes('REQUEST_CREATED')) { badgeBg = '#eff6ff'; badgeColor = '#1d4ed8'; dotColor = '#2563eb'; }
+                        else if (actionRaw.includes('EXTENSION_REQUESTED')) { badgeBg = '#fffbeb'; badgeColor = '#b45309'; dotColor = '#d97706'; }
+                        else if (actionRaw.includes('EXTENSION_ACCEPTED') || actionRaw.includes('EXTENSION_MODIFIED')) { badgeBg = '#f0fdf4'; badgeColor = '#166534'; dotColor = '#16a34a'; }
+                        else if (actionRaw.includes('EXTENSION_REJECTED')) { badgeBg = '#fef2f2'; badgeColor = '#991b1b'; dotColor = '#dc2626'; }
+                        else if (actionRaw.includes('PROCESSING_STARTED')) { badgeBg = '#f5f3ff'; badgeColor = '#6d28d9'; dotColor = '#7c3aed'; }
+                        else if (actionRaw.includes('QUANTITY_MODIFIED')) { badgeBg = '#fff7ed'; badgeColor = '#c2410c'; dotColor = '#ea580c'; }
+                        else if (actionRaw.includes('READY_FOR_DISPATCH')) { badgeBg = '#f0fdfa'; badgeColor = '#0f766e'; dotColor = '#14b8a6'; }
+                        else if (actionRaw.includes('DISPATCH')) { badgeBg = '#f0f9ff'; badgeColor = '#0369a1'; dotColor = '#0284c7'; }
+                        else if (actionRaw.includes('RECEIVE')) { badgeBg = '#ecfdf5'; badgeColor = '#047857'; dotColor = '#059669'; }
+                        else if (actionRaw.includes('COMPLETED')) { badgeBg = '#ecfdf5'; badgeColor = '#065f46'; dotColor = '#10b981'; }
+                        else if (actionRaw.includes('CANCEL')) { badgeBg = '#fff1f2'; badgeColor = '#be123c'; dotColor = '#e11d48'; }
+
+                        return (
+                          <div key={log.id} style={{ position: 'relative' }}>
+                            <div style={{
+                              position: 'absolute',
+                              left: -27,
+                              top: 4,
+                              width: 12,
+                              height: 12,
+                              borderRadius: '50%',
+                              background: dotColor,
+                              border: '2px solid #fff'
+                            }} />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                              <span style={{
+                                background: badgeBg,
+                                color: badgeColor,
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                fontSize: 11.5,
+                                fontWeight: 800,
+                                textTransform: 'uppercase'
+                              }}>
+                                {actionFormatted}
+                              </span>
+                              <span style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(log.created_at).toLocaleString()}</span>
+                            </div>
+
+                            <p style={{ margin: '4px 0', fontSize: 12.5, color: '#334155', lineHeight: 1.4 }}>{desc}</p>
+
+                            {(log.previous_value || log.new_value) && (
+                              <div style={{
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 6,
+                                padding: '4px 8px',
+                                fontSize: 11.5,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                margin: '4px 0'
+                              }}>
+                                {log.previous_value && <span style={{ color: '#64748b' }}>Prev: <strong style={{ color: '#dc2626' }}>{log.previous_value}</strong></span>}
+                                {log.previous_value && log.new_value && <span style={{ color: '#94a3b8' }}>➔</span>}
+                                {log.new_value && <span style={{ color: '#64748b' }}>New: <strong style={{ color: '#16a34a' }}>{log.new_value}</strong></span>}
+                              </div>
+                            )}
+
+                            {log.reason && (
+                              <div style={{ fontSize: 11.5, color: '#78350f', background: '#fffbeb', padding: '3px 8px', borderRadius: 4, margin: '2px 0 4px', borderLeft: '2px solid #f59e0b' }}>
+                                <strong>Reason:</strong> {log.reason}
+                              </div>
+                            )}
+
+                            <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
+                              By: <strong>{actor}</strong> ({role})
+                            </span>
                           </div>
-                          <p style={{ margin: '0 0 4px', fontSize: 12.5, color: '#475569' }}>{log.description}</p>
-                          <span style={{ fontSize: 11, color: '#64748b' }}>
-                            By: <strong>{log.user_name || 'Staff'}</strong> ({log.user_role || 'user'})
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
