@@ -580,11 +580,31 @@ export default function InternalBranch() {
   const [customFilterFromBranch, setCustomFilterFromBranch] = useState('');
   const [customFilterToBranch, setCustomFilterToBranch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
+  const [filterRequestType, setFilterRequestType] = useState('All'); // 'All' | 'Transfer Request' | 'New Request'
+  const [filterPriority, setFilterPriority] = useState('All'); // 'All' | 'Normal' | 'High' | 'Urgent'
   const [filterPeriod, setFilterPeriod] = useState('all'); // 'all' | 'today' | 'daily' | 'weekly' | 'monthly'
   const [filterFromDate, setFilterFromDate] = useState('');
   const [filterToDate, setFilterToDate] = useState('');
   const [filterDishName, setFilterDishName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Dedicated Transfer Request Form State
+  const defaultTrfFrom = normalizeBranchName(user?.branch && user.branch !== 'All' ? user.branch : 'Branch 1');
+  const [trfFromBranch, setTrfFromBranch] = useState(defaultTrfFrom);
+  const [trfToBranch, setTrfToBranch] = useState('');
+  const [trfCustomFromBranch, setTrfCustomFromBranch] = useState('');
+  const [trfCustomToBranch, setTrfCustomToBranch] = useState('');
+  const [trfPriority, setTrfPriority] = useState('Normal'); // 'Normal' | 'High' | 'Urgent'
+  const [trfPurpose, setTrfPurpose] = useState('Stock Replenishment');
+  const [trfCustomPurpose, setTrfCustomPurpose] = useState('');
+  const [trfDeliveryMinutes, setTrfDeliveryMinutes] = useState(30);
+  const [trfCustomDeliveryMinutes, setTrfCustomDeliveryMinutes] = useState('');
+  const [trfNeededByTime, setTrfNeededByTime] = useState('');
+  const [trfNotes, setTrfNotes] = useState('');
+  const [trfDishRows, setTrfDishRows] = useState([
+    { id: 1, dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }
+  ]);
+  const [submittingTrfRequest, setSubmittingTrfRequest] = useState(false);
 
   // Modals / Actions
   // 1. Extend Delivery Time (Request from supplying branch)
@@ -734,13 +754,20 @@ export default function InternalBranch() {
   const handleAddDishFromBrowser = (dish) => {
     const units = getItemUnits(dish);
     const defaultUom = units[0] || 'Piece';
+    const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
+    const dishBarcode = dish.barcode || '';
 
-    setNewDishRows(prev => {
+    const isTrf = activeTab === 'transfer_request';
+    const setRows = isTrf ? setTrfDishRows : setNewDishRows;
+
+    setRows(prev => {
       if (prev.length === 1 && (!prev[0].dish_name || !prev[0].dish_name.trim())) {
         return [{
           id: prev[0].id,
           dish_name: dish.name,
           item_id: dish.id,
+          sku: dishSku,
+          barcode: dishBarcode,
           uom: defaultUom,
           available_units: units,
           requested_qty: 1,
@@ -759,6 +786,8 @@ export default function InternalBranch() {
           id: Date.now() + Math.random(),
           dish_name: dish.name,
           item_id: dish.id,
+          sku: dishSku,
+          barcode: dishBarcode,
           uom: defaultUom,
           available_units: units,
           requested_qty: 1,
@@ -768,17 +797,20 @@ export default function InternalBranch() {
         }
       ];
     });
-    toast.success(`Added "${dish.name}" to transfer request`);
+    toast.success(`Added "${dish.name}" to request items`);
   };
 
   const handleUpdateQtyFromBrowser = (dish, delta) => {
-    setNewDishRows(prev => {
+    const isTrf = activeTab === 'transfer_request';
+    const setRows = isTrf ? setTrfDishRows : setNewDishRows;
+
+    setRows(prev => {
       const existing = prev.find(r => r.item_id === dish.id || (r.dish_name && r.dish_name.toLowerCase() === dish.name.toLowerCase()));
       if (!existing) return prev;
       const newQty = (parseFloat(existing.requested_qty) || 0) + delta;
       if (newQty <= 0) {
         if (prev.length === 1) {
-          return [{ id: Date.now(), dish_name: '', item_id: null, uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'] }];
+          return [{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'] }];
         }
         return prev.filter(r => r.id !== existing.id);
       }
@@ -862,11 +894,13 @@ export default function InternalBranch() {
     fetchStats();
   }, [defaultFromBranch, fetchDishes]);
 
-  const fetchStats = useCallback(() => {
-    axios.get('/api/internal-branch/stats')
+  const fetchStats = useCallback((branchToQuery) => {
+    const qBranch = branchToQuery || (isSuperUser && adminSelectedBranch !== 'All' ? adminSelectedBranch : undefined);
+    const params = qBranch ? { branch: qBranch } : {};
+    axios.get('/api/internal-branch/stats', { params })
       .then(res => setStats(res.data || {}))
       .catch(err => console.error('Failed to load transfer stats:', err));
-  }, []);
+  }, [isSuperUser, adminSelectedBranch]);
 
   // Fetch transfers based on active tab and filters
   const fetchTransfers = useCallback(() => {
@@ -874,17 +908,26 @@ export default function InternalBranch() {
     const params = {};
 
     // Admin branch & direction filtering
-    if (isSuperUser && adminSelectedBranch !== 'All') {
+    if (adminSelectedBranch !== 'All') {
       params.branch = adminSelectedBranch;
       params.branch_direction = adminDirection;
     }
 
     if (activeTab === 'incoming') {
       params.tab = 'incoming';
+      if (filterFromBranch !== 'All') params.sent_by = filterFromBranch;
+      if (filterRequestType !== 'All') params.request_type = filterRequestType;
+      if (filterPriority !== 'All') params.priority = filterPriority;
+      if (searchQuery) params.search = searchQuery;
     } else if (activeTab === 'receivals') {
       params.tab = 'pending_receivals';
+      if (filterToBranch !== 'All') params.received_by = filterToBranch;
+      if (filterRequestType !== 'All') params.request_type = filterRequestType;
+      if (filterPriority !== 'All') params.priority = filterPriority;
+      if (searchQuery) params.search = searchQuery;
     } else {
       // Master Logs & Reporting Tab
+      params.tab = 'logs';
       if (filterFromBranch !== 'All') {
         params.from_branch = filterFromBranch;
         if (filterFromBranch === 'Other' && customFilterFromBranch.trim()) {
@@ -898,6 +941,8 @@ export default function InternalBranch() {
         }
       }
       if (filterStatus !== 'All') params.status = filterStatus;
+      if (filterRequestType !== 'All') params.request_type = filterRequestType;
+      if (filterPriority !== 'All') params.priority = filterPriority;
       if (filterPeriod !== 'all') params.period = filterPeriod;
       if (filterFromDate) params.from_date = filterFromDate;
       if (filterToDate) params.to_date = filterToDate;
@@ -919,6 +964,8 @@ export default function InternalBranch() {
     customFilterFromBranch,
     customFilterToBranch,
     filterStatus, 
+    filterRequestType,
+    filterPriority,
     filterPeriod, 
     filterFromDate, 
     filterToDate, 
@@ -1126,12 +1173,16 @@ export default function InternalBranch() {
   const handleSelectDish = (rowId, dish) => {
     const units = getItemUnits(dish);
     const defaultUom = units[0] || 'Piece';
+    const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
+    const dishBarcode = dish.barcode || '';
     setNewDishRows(prev => prev.map(r => {
       if (r.id !== rowId) return r;
       return {
         ...r,
         dish_name: dish.name,
         item_id: dish.id || null,
+        sku: dishSku,
+        barcode: dishBarcode,
         image_url: dish.image_url || null,
         price: dish.price || null,
         uom: defaultUom,
@@ -1146,10 +1197,14 @@ export default function InternalBranch() {
       if (field === 'dish_name') {
         const foundItem = dishes.find(d => d.name.toLowerCase() === value.toLowerCase());
         const units = foundItem ? getItemUnits(foundItem) : ['Piece'];
+        const dishSku = foundItem ? (foundItem.short_code || foundItem.sku || `SKU-${foundItem.id}`) : r.sku;
+        const dishBarcode = foundItem ? (foundItem.barcode || '') : r.barcode;
         return { 
           ...r, 
           dish_name: value, 
           item_id: foundItem ? foundItem.id : r.item_id,
+          sku: dishSku,
+          barcode: dishBarcode,
           image_url: foundItem ? foundItem.image_url : r.image_url,
           price: foundItem ? foundItem.price : r.price,
           available_units: units,
@@ -1160,7 +1215,182 @@ export default function InternalBranch() {
     }));
   };
 
-  // Submit New Request
+  // Dedicated Transfer Request Handlers
+  const handleSelectDishTrf = (rowId, dish) => {
+    if (!dish) return;
+    const units = getItemUnits(dish);
+    const defaultUom = units[0] || 'KG';
+    const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
+    const dishBarcode = dish.barcode || '';
+    setTrfDishRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      return {
+        ...r,
+        dish_name: dish.name,
+        item_id: dish.id || null,
+        sku: dishSku,
+        barcode: dishBarcode,
+        image_url: dish.image_url || null,
+        price: dish.price || null,
+        available_units: units,
+        uom: defaultUom,
+        requested_qty: r.requested_qty || '1'
+      };
+    }));
+  };
+
+  const handleDishRowChangeTrf = (rowId, field, value) => {
+    setTrfDishRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      if (field === 'dish_name') {
+        const foundItem = dishes.find(d => d.name.toLowerCase() === value.toLowerCase());
+        const units = foundItem ? getItemUnits(foundItem) : ['KG'];
+        const dishSku = foundItem ? (foundItem.short_code || foundItem.sku || `SKU-${foundItem.id}`) : r.sku;
+        const dishBarcode = foundItem ? (foundItem.barcode || '') : r.barcode;
+        return {
+          ...r,
+          dish_name: value,
+          item_id: foundItem ? foundItem.id : r.item_id,
+          sku: dishSku,
+          barcode: dishBarcode,
+          image_url: foundItem ? foundItem.image_url : r.image_url,
+          price: foundItem ? foundItem.price : r.price,
+          available_units: units,
+          uom: r.uom || units[0] || 'KG'
+        };
+      }
+      return { ...r, [field]: value };
+    }));
+  };
+
+  const handleAddTrfDishRow = () => {
+    setTrfDishRows(prev => [
+      ...prev,
+      {
+        id: Date.now() + Math.random(),
+        dish_name: '',
+        item_id: null,
+        sku: '',
+        barcode: '',
+        uom: 'KG',
+        requested_qty: '',
+        remarks: '',
+        image_url: null,
+        price: null,
+        available_units: [...STANDARD_TOP_UNITS]
+      }
+    ]);
+  };
+
+  const handleRemoveTrfDishRow = (rowId) => {
+    setTrfDishRows(prev => {
+      if (prev.length <= 1) return prev;
+      return prev.filter(r => r.id !== rowId);
+    });
+  };
+
+  // Submit Dedicated Transfer Request (Branch to Branch Transfer)
+  const handleSubmitTrfRequest = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (submittingTrfRequest || isSubmittingRef.current) return;
+
+    const fromB = (trfFromBranch === 'Other' ? trfCustomFromBranch.trim() : trfFromBranch) || defaultTrfFrom;
+    const toB = trfToBranch === 'Other' ? trfCustomToBranch.trim() : trfToBranch;
+
+    if (!fromB) return toast.error('Origin (Sending) Branch is required.');
+    if (!toB) return toast.error('Destination (Receiving) Branch is required.');
+    if (fromB.toLowerCase() === toB.toLowerCase()) {
+      return toast.error('Sending and Receiving branches cannot be the same.');
+    }
+
+    // Filter valid rows
+    const validRows = trfDishRows.filter(r => r.dish_name && r.dish_name.trim());
+    if (validRows.length === 0) {
+      return toast.error('Please add at least one item to transfer.');
+    }
+
+    for (const [idx, r] of validRows.entries()) {
+      const q = parseFloat(r.requested_qty);
+      if (isNaN(q) || q <= 0) {
+        return toast.error(`Please enter a valid requested quantity for row #${idx + 1} ("${r.dish_name}").`);
+      }
+      if (!r.uom) {
+        return toast.error(`Please select a Unit (UOM) for row #${idx + 1} ("${r.dish_name}").`);
+      }
+    }
+
+    const mins = trfDeliveryMinutes === 'custom'
+      ? (parseInt(trfCustomDeliveryMinutes, 10) || 30)
+      : (parseInt(trfDeliveryMinutes, 10) || 30);
+    const targetDate = new Date(Date.now() + mins * 60 * 1000);
+    const formattedNeededBy = trfNeededByTime || `${mins} mins (~${targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+
+    const combinedNotes = [
+      trfPurpose ? `[Purpose: ${trfPurpose === 'Other' ? trfCustomPurpose : trfPurpose}]` : '',
+      trfNotes ? trfNotes.trim() : ''
+    ].filter(Boolean).join(' ');
+
+    const payload = {
+      request_type: 'Transfer Request',
+      priority: trfPriority,
+      from_branch: fromB,
+      to_branch: toB,
+      is_external: trfToBranch === 'Other' || trfFromBranch === 'Other',
+      delivery_minutes: mins,
+      needed_by_time: formattedNeededBy,
+      notes: combinedNotes,
+      items: validRows.map(r => ({
+        item_id: r.item_id || null,
+        dish_name: r.dish_name.trim(),
+        uom: r.uom.trim(),
+        requested_qty: parseFloat(r.requested_qty),
+        sku: r.sku || null,
+        barcode: r.barcode || null,
+        remarks: r.remarks ? r.remarks.trim() : null,
+        image_url: r.image_url || null,
+        price: r.price ? parseFloat(r.price) : null
+      }))
+    };
+
+    try {
+      isSubmittingRef.current = true;
+      setSubmittingTrfRequest(true);
+
+      const res = await axios.post('/api/internal-branch/transfers', payload);
+      if (res.data?.transfer_id) {
+        localActionTransferIdsRef.current.set(`created_${res.data.transfer_id}`, Date.now());
+      }
+      if (res.data?.id) {
+        localActionTransferIdsRef.current.set(`created_${res.data.id}`, Date.now());
+      }
+
+      toast.success(`Transfer Request ${res.data?.transfer_id || ''} created successfully! Destination branch (${toB}) notified.`);
+
+      // Reset form
+      setTrfDishRows([{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
+      setTrfCustomFromBranch('');
+      setTrfCustomToBranch('');
+      setTrfNotes('');
+      setTrfPriority('Normal');
+      setTrfPurpose('Stock Replenishment');
+      setTrfDeliveryMinutes(30);
+      setTrfCustomDeliveryMinutes('');
+      fetchStats();
+      fetchTransfers();
+
+      // Switch to master logs
+      setActiveTab('logs');
+    } catch (err) {
+      console.error('Error submitting transfer request:', err);
+      const msg = err.response?.data?.error || err.message || 'Failed to submit transfer request.';
+      toast.error(msg);
+    } finally {
+      setSubmittingTrfRequest(false);
+      isSubmittingRef.current = false;
+    }
+  };
+
+  // Submit New Request (Kitchen Food Requisition)
   const handleSubmitNewRequest = async (e) => {
     e.preventDefault();
     if (submittingRequest || isSubmittingRef.current) return;
@@ -1206,6 +1436,8 @@ export default function InternalBranch() {
       const formattedNeededBy = newNeededByTime || `${mins} mins (~${targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
 
       const res = await axios.post('/api/internal-branch/transfers', {
+        request_type: 'New Request',
+        priority: 'Normal',
         from_branch: effectiveFrom,
         to_branch: effectiveTo,
         needed_by_time: formattedNeededBy,
@@ -1215,6 +1447,8 @@ export default function InternalBranch() {
         items: newDishRows.map(r => ({
           item_id: r.item_id,
           dish_name: r.dish_name,
+          sku: r.sku || null,
+          barcode: r.barcode || null,
           uom: r.uom,
           requested_qty: parseFloat(r.requested_qty),
           remarks: r.remarks,
@@ -1234,7 +1468,7 @@ export default function InternalBranch() {
       toast.success(`Transfer request ${res.data.transfer_id} created successfully! Destination branch notified.`);
       
       // Reset form
-      setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
+      setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
       setCustomFromBranch('');
       setCustomToBranch('');
       setNewNeededByTime('');
@@ -1707,9 +1941,14 @@ export default function InternalBranch() {
 
             flatRows.push({
               'Transfer ID': t.transfer_id,
+              'Request Type': t.request_type || 'Transfer Request',
+              'Priority': t.priority || 'Normal',
               'Request Date': reqDateStr,
               'From Branch': t.from_branch,
               'To Branch': t.to_branch,
+              'Requested By': t.requested_by_name || 'N/A',
+              'Received By': t.received_by_name || 'N/A',
+              'SKU / Barcode': it.sku || it.barcode || '-',
               'Dish Name': it.dish_name,
               'UOM': it.uom,
               'Requested Qty': reqQ,
@@ -1728,9 +1967,14 @@ export default function InternalBranch() {
         } else {
           flatRows.push({
             'Transfer ID': t.transfer_id,
+            'Request Type': t.request_type || 'Transfer Request',
+            'Priority': t.priority || 'Normal',
             'Request Date': reqDateStr,
             'From Branch': t.from_branch,
             'To Branch': t.to_branch,
+            'Requested By': t.requested_by_name || 'N/A',
+            'Received By': t.received_by_name || 'N/A',
+            'SKU / Barcode': '-',
             'Dish Name': 'No items',
             'UOM': '-',
             'Requested Qty': 0,
@@ -1784,10 +2028,12 @@ export default function InternalBranch() {
       transfers.forEach(t => {
         const delayStr = calculateDelay(t.needed_by_time, t.received_at, t.request_date);
         const reqDateStr = new Date(t.request_date).toLocaleDateString();
-        const dishesSummary = (t.items || []).map(it => `${it.dish_name} (${it.requested_qty} ${it.uom})`).join(', ');
+        const dishesSummary = (t.items || []).map(it => `${it.dish_name}${it.sku ? ` [${it.sku}]` : ''} (${it.requested_qty} ${it.uom})`).join(', ');
 
         tableData.push([
           t.transfer_id,
+          t.request_type || 'Transfer',
+          t.priority || 'Normal',
           reqDateStr,
           t.from_branch,
           t.to_branch,
@@ -1796,23 +2042,22 @@ export default function InternalBranch() {
           t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
           t.received_at ? new Date(t.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
           delayStr,
-          t.status,
-          t.notes || ''
+          t.status
         ]);
       });
 
       doc.autoTable({
         startY: 26,
         head: [[
-          'Transfer ID', 'Req Date', 'From', 'To', 'Dishes (Qty / Unit)', 
-          'Needed By', 'Dispatched', 'Received', 'Delay', 'Status', 'Remarks'
+          'Transfer ID', 'Type', 'Priority', 'Req Date', 'From', 'To', 'Dishes (SKU / Qty)', 
+          'Needed By', 'Dispatched', 'Received', 'Delay', 'Status'
         ]],
         body: tableData,
         theme: 'striped',
-        headStyles: { fillColor: [227, 24, 55], textColor: 255, fontSize: 8.5, fontStyle: 'bold' },
-        styles: { fontSize: 7.5, cellPadding: 2.5 },
+        headStyles: { fillColor: [227, 24, 55], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+        styles: { fontSize: 7, cellPadding: 2 },
         columnStyles: {
-          4: { cellWidth: 55 }
+          6: { cellWidth: 50 }
         }
       });
 
@@ -1994,7 +2239,7 @@ export default function InternalBranch() {
       {/* Navigation Tabs with Badges */}
       <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid #e2e8f0', marginBottom: 24, overflowX: 'auto', paddingBottom: 2 }}>
         
-        {/* Tab 1: New Request */}
+        {/* Tab 1: New Request (Food Requisition) */}
         <button
           type="button"
           onClick={() => setActiveTab('new')}
@@ -2014,10 +2259,33 @@ export default function InternalBranch() {
           }}
         >
           <PlusCircle size={18} />
-          New Transfer Request
+          New Request
         </button>
 
-        {/* Tab 2: Incoming Requests (Supplying Branch) */}
+        {/* Tab 2: Transfer Request (Dedicated Branch Transfer) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('transfer_request')}
+          style={{
+            padding: '12px 18px',
+            fontSize: 14,
+            fontWeight: 700,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: activeTab === 'transfer_request' ? 'var(--primary)' : '#64748b',
+            borderBottom: activeTab === 'transfer_request' ? '3px solid var(--primary)' : '3px solid transparent',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <ArrowLeftRight size={18} />
+          Transfer Request
+        </button>
+
+        {/* Tab 3: Incoming Requests (Destination Branch Fulfills) */}
         <button
           type="button"
           onClick={() => setActiveTab('incoming')}
@@ -2052,7 +2320,7 @@ export default function InternalBranch() {
           )}
         </button>
 
-        {/* Tab 3: Goods Receiving & Verification (Requesting Branch) */}
+        {/* Tab 4: Pending Receive (Requesting Branch Verification) */}
         <button
           type="button"
           onClick={() => setActiveTab('receivals')}
@@ -2072,7 +2340,7 @@ export default function InternalBranch() {
           }}
         >
           <PackageCheck size={18} />
-          Pending Receivals
+          Pending Receive
           {stats.pending_receivals_count > 0 && (
             <span style={{
               background: '#2563eb',
@@ -2087,7 +2355,7 @@ export default function InternalBranch() {
           )}
         </button>
 
-        {/* Tab 4: Master Logs & Reporting */}
+        {/* Tab 5: Transfer Logs & Reports */}
         <button
           type="button"
           onClick={() => setActiveTab('logs')}
@@ -2107,7 +2375,7 @@ export default function InternalBranch() {
           }}
         >
           <ClipboardList size={18} />
-          Transfer Logs & Reporting
+          Transfer Logs & Reports
         </button>
 
       </div>
@@ -2568,6 +2836,469 @@ export default function InternalBranch() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
+          TAB 1B: DEDICATED BRANCH TRANSFER REQUEST
+      ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'transfer_request' && (
+        <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: 24, boxShadow: '0 4px 12px rgba(37,99,235,0.06)' }}>
+          <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 16, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ background: '#eff6ff', color: '#2563eb', padding: '6px 10px', borderRadius: 8, display: 'inline-flex', alignItems: 'center' }}>
+                  <ArrowLeftRight size={20} />
+                </span>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                  Create Inter-Branch Transfer Request
+                </h2>
+              </div>
+              <p style={{ margin: '6px 0 0', fontSize: 13, color: '#64748b' }}>
+                Submit a dedicated branch-to-branch inventory and items transfer request. Destination branch will receive and process it directly in their Incoming Requests.
+              </p>
+            </div>
+
+            {/* Priority Selector Pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', padding: '6px 10px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: '#475569' }}>Transfer Priority:</span>
+              {[
+                { id: 'Normal', label: 'Normal', bg: '#f1f5f9', activeBg: '#0f172a', activeColor: '#fff', border: '#cbd5e1' },
+                { id: 'High', label: 'High Priority', bg: '#fffbeb', activeBg: '#d97706', activeColor: '#fff', border: '#fcd34d' },
+                { id: 'Urgent', label: '🚨 Urgent Rush', bg: '#fef2f2', activeBg: '#dc2626', activeColor: '#fff', border: '#fca5a5' }
+              ].map(p => (
+                <button
+                  key={`prio-${p.id}`}
+                  type="button"
+                  onClick={() => setTrfPriority(p.id)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: trfPriority === p.id ? `1.5px solid ${p.activeBg}` : `1px solid ${p.border}`,
+                    background: trfPriority === p.id ? p.activeBg : p.bg,
+                    color: trfPriority === p.id ? p.activeColor : '#475569',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmitTrfRequest}>
+            
+            {/* Top Row: Origin, Destination, Purpose & Delivery Window */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 20 }}>
+              
+              {/* Origin Branch (From Branch) */}
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+                  Origin Branch (Request From) <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                {isSuperUser ? (
+                  <select
+                    value={trfFromBranch}
+                    onChange={e => setTrfFromBranch(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                  >
+                    {branches.map(b => (
+                      <option key={`trf-from-${b}`} value={b}>{b}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div style={{ padding: '9px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                    {defaultTrfFrom}
+                  </div>
+                )}
+                {trfFromBranch === 'Other' && (
+                  <input
+                    type="text"
+                    placeholder="Enter manual origin branch name..."
+                    value={trfCustomFromBranch}
+                    onChange={e => setTrfCustomFromBranch(e.target.value)}
+                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5 }}
+                  />
+                )}
+              </div>
+
+              {/* Destination Branch (To Branch) */}
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+                  Destination Branch (Transfer To) <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <select
+                  value={trfToBranch}
+                  onChange={e => setTrfToBranch(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                >
+                  <option value="">Select Destination Branch...</option>
+                  {branches.filter(b => b !== trfFromBranch).map(b => (
+                    <option key={`trf-to-${b}`} value={b}>{b}</option>
+                  ))}
+                </select>
+                {trfToBranch === 'Other' && (
+                  <div style={{ marginTop: 6 }}>
+                    <input
+                      type="text"
+                      placeholder="e.g. Al Madina Restaurant (External Partner)"
+                      value={trfCustomToBranch}
+                      onChange={e => setTrfCustomToBranch(e.target.value)}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', background: '#fffbeb', fontSize: 12.5, fontWeight: 600 }}
+                    />
+                    <span style={{ fontSize: 11, color: '#b45309', display: 'block', marginTop: 2 }}>
+                      ℹ️ Destination will be recorded as external partner for this transfer.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Transfer Purpose / Reason */}
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+                  Transfer Purpose / Reason
+                </label>
+                <select
+                  value={trfPurpose}
+                  onChange={e => setTrfPurpose(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                >
+                  <option value="Stock Replenishment">Stock Replenishment</option>
+                  <option value="Customer Rush Hour Buffer">Customer Rush Hour Buffer</option>
+                  <option value="Kitchen Stock Rebalancing">Kitchen Stock Rebalancing</option>
+                  <option value="Raw Materials / Packaging">Raw Materials / Packaging</option>
+                  <option value="Emergency Stockout">Emergency Stockout</option>
+                  <option value="Other">Other (Custom Purpose)</option>
+                </select>
+                {trfPurpose === 'Other' && (
+                  <input
+                    type="text"
+                    placeholder="Enter specific transfer purpose..."
+                    value={trfCustomPurpose}
+                    onChange={e => setTrfCustomPurpose(e.target.value)}
+                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 12.5 }}
+                  />
+                )}
+              </div>
+
+              {/* Delivery Window / Timing */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+                    Needed Delivery Window <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 700 }}>
+                    ~{new Date(Date.now() + (trfDeliveryMinutes === 'custom' ? (parseInt(trfCustomDeliveryMinutes, 10) || 30) : (parseInt(trfDeliveryMinutes, 10) || 30)) * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[15, 30, 45, 60].map(m => (
+                    <button
+                      key={`trf-m-${m}`}
+                      type="button"
+                      onClick={() => {
+                        setTrfDeliveryMinutes(m);
+                        setTrfCustomDeliveryMinutes('');
+                        setTrfNeededByTime(`${m} mins`);
+                      }}
+                      style={{
+                        flex: '1 1 auto',
+                        padding: '7px 10px',
+                        borderRadius: 6,
+                        border: trfDeliveryMinutes === m ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                        background: trfDeliveryMinutes === m ? '#eff6ff' : '#fff',
+                        color: trfDeliveryMinutes === m ? '#1d4ed8' : '#475569',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {m}m
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setTrfDeliveryMinutes('custom')}
+                    style={{
+                      flex: '1 1 auto',
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: trfDeliveryMinutes === 'custom' ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                      background: trfDeliveryMinutes === 'custom' ? '#eff6ff' : '#fff',
+                      color: trfDeliveryMinutes === 'custom' ? '#1d4ed8' : '#475569',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Custom
+                  </button>
+                </div>
+                {trfDeliveryMinutes === 'custom' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                    <input
+                      type="number"
+                      min="5"
+                      max="360"
+                      placeholder="Minutes (e.g. 90)"
+                      value={trfCustomDeliveryMinutes}
+                      onChange={e => {
+                        setTrfCustomDeliveryMinutes(e.target.value);
+                        setTrfNeededByTime(`${e.target.value || 30} mins`);
+                      }}
+                      style={{ flex: 1, padding: '6px 10px', borderRadius: 6, border: '1.5px solid #2563eb', fontSize: 12.5 }}
+                    />
+                    <span style={{ fontSize: 12, color: '#64748b' }}>minutes</span>
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            {/* Transfer Items Card */}
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 18, marginBottom: 20, background: '#fafbfc' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', margin: '0 0 2px' }}>
+                    Transfer Items Checklist
+                  </h3>
+                  <span style={{ fontSize: 12, color: '#64748b' }}>
+                    Select inventory dishes or items from catalog. Units and SKUs will be automatically linked.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMenuBrowser(true);
+                    if (!dishes || dishes.length === 0) fetchDishes();
+                  }}
+                  style={{
+                    background: '#eff6ff',
+                    border: '1.5px solid #3b82f6',
+                    borderRadius: 6,
+                    padding: '7px 14px',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: '#1d4ed8',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <BookOpen size={16} /> Open Menu Items
+                </button>
+              </div>
+
+              {/* Items List Rows */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflow: 'visible', position: 'relative' }}>
+                {trfDishRows.map((row, idx) => {
+                  const rowUnits = row.available_units && row.available_units.length > 0 
+                    ? row.available_units 
+                    : ['KG', 'Pieces', 'Plate', 'Lunch', 'Half KG'];
+
+                  return (
+                    <div
+                      key={row.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(330px, 3.2fr) minmax(130px, 1.2fr) minmax(110px, 1fr) minmax(140px, 1.4fr) 40px',
+                        gap: 12,
+                        alignItems: 'center',
+                        background: '#ffffff',
+                        padding: '12px 14px',
+                        borderRadius: 8,
+                        border: '1px solid #e2e8f0',
+                        position: 'relative',
+                        zIndex: 100 - idx
+                      }}
+                    >
+                      {/* Dish Search Dropdown with SKU indicator */}
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+                            Transfer Item #{idx + 1}
+                          </span>
+                          {(row.sku || row.barcode) && (
+                            <span style={{ fontSize: 10, background: '#f1f5f9', color: '#475569', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace' }}>
+                              SKU: {row.sku || row.barcode}
+                            </span>
+                          )}
+                        </div>
+                        <DishSearchDropdown
+                          value={row.dish_name}
+                          imageUrl={row.image_url}
+                          dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
+                          onSelect={(dish) => handleSelectDishTrf(row.id, dish)}
+                        />
+                      </div>
+
+                      {/* Unit (UOM) */}
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
+                          Unit (UOM)
+                        </span>
+                        <select
+                          value={row.uom || rowUnits[0]}
+                          onChange={e => handleDishRowChangeTrf(row.id, 'uom', e.target.value)}
+                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff' }}
+                        >
+                          {rowUnits.map((u, uIdx) => (
+                            <option key={`trf-uom-${row.id}-${uIdx}`} value={u}>{u}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Requested Qty */}
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
+                          Transfer Qty <span style={{ color: '#dc2626' }}>*</span>
+                        </span>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0.1"
+                          placeholder="Qty"
+                          value={row.requested_qty}
+                          onChange={e => handleDishRowChangeTrf(row.id, 'requested_qty', e.target.value)}
+                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 700, textAlign: 'center' }}
+                        />
+                      </div>
+
+                      {/* Item Remarks */}
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
+                          Item Remarks (Optional)
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="e.g. Frozen pack / crate"
+                          value={row.remarks || ''}
+                          onChange={e => handleDishRowChangeTrf(row.id, 'remarks', e.target.value)}
+                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                        />
+                      </div>
+
+                      {/* Delete Row Button */}
+                      <div style={{ paddingTop: 18 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTrfDishRow(row.id)}
+                          disabled={trfDishRows.length <= 1}
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 6,
+                            border: '1px solid #fee2e2',
+                            background: trfDishRows.length <= 1 ? '#f8fafc' : '#fef2f2',
+                            color: trfDishRows.length <= 1 ? '#cbd5e1' : '#dc2626',
+                            cursor: trfDishRows.length <= 1 ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          title="Remove this item row"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* + Add Another Item Button IMMEDIATELY BELOW ALL ROWS */}
+              <div style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  onClick={handleAddTrfDishRow}
+                  style={{
+                    width: '100%',
+                    padding: '10px 16px',
+                    borderRadius: 8,
+                    border: '1.5px dashed #2563eb',
+                    background: '#eff6ff',
+                    color: '#1d4ed8',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#dbeafe'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff'; }}
+                >
+                  <PlusCircle size={16} /> + Add Another Item
+                </button>
+              </div>
+
+            </div>
+
+            {/* General Request Remarks */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+                General Transfer Remarks / Dispatch Instructions (Optional)
+              </label>
+              <textarea
+                rows={2}
+                placeholder="e.g. Van driver arriving at 2:30 PM. Please package tightly in thermal crate."
+                value={trfNotes}
+                onChange={e => setTrfNotes(e.target.value)}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+              />
+            </div>
+
+            {/* Submit Action Bar */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setTrfDishRows([{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
+                  setTrfNotes('');
+                  setTrfPriority('Normal');
+                  setTrfCustomToBranch('');
+                }}
+                disabled={submittingTrfRequest}
+              >
+                Clear Form
+              </button>
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={submittingTrfRequest}
+                style={{
+                  padding: '11px 26px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  cursor: submittingTrfRequest ? 'not-allowed' : 'pointer',
+                  opacity: submittingTrfRequest ? 0.7 : 1
+                }}
+              >
+                {submittingTrfRequest ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin" /> Submitting Transfer Request...
+                  </>
+                ) : (
+                  <>
+                    <ArrowLeftRight size={16} /> Submit Transfer Request
+                  </>
+                )}
+              </button>
+            </div>
+
+          </form>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
           TAB 2: INCOMING BRANCH REQUESTS (SUPPLYING BRANCH DISPATCH)
       ───────────────────────────────────────────────────────────── */}
       {activeTab === 'incoming' && (
@@ -2618,8 +3349,34 @@ export default function InternalBranch() {
                       {/* Header */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                         <div>
-                          <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{t.transfer_id}</span>
-                          <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{t.transfer_id}</span>
+                            <span style={{
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              padding: '1.5px 6px',
+                              borderRadius: 4,
+                              background: t.request_type === 'New Request' ? '#f0fdf4' : '#eff6ff',
+                              color: t.request_type === 'New Request' ? '#15803d' : '#1d4ed8',
+                              border: t.request_type === 'New Request' ? '1px solid #bbf7d0' : '1px solid #bfdbfe'
+                            }}>
+                              {t.request_type || 'Transfer Request'}
+                            </span>
+                            {t.priority && t.priority !== 'Normal' && (
+                              <span style={{
+                                fontSize: 10.5,
+                                fontWeight: 800,
+                                padding: '1.5px 6px',
+                                borderRadius: 4,
+                                background: t.priority === 'Urgent' ? '#fef2f2' : '#fffbeb',
+                                color: t.priority === 'Urgent' ? '#dc2626' : '#d97706',
+                                border: t.priority === 'Urgent' ? '1px solid #fecaca' : '1px solid #fde68a'
+                              }}>
+                                {t.priority === 'Urgent' ? '🚨 URGENT' : '⚡ HIGH'}
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
                             {new Date(t.request_date).toLocaleString()}
                           </span>
                         </div>
@@ -3044,8 +3801,34 @@ export default function InternalBranch() {
                     {/* Header */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                       <div>
-                        <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{t.transfer_id}</span>
-                        <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{t.transfer_id}</span>
+                          <span style={{
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            padding: '1.5px 6px',
+                            borderRadius: 4,
+                            background: t.request_type === 'New Request' ? '#f0fdf4' : '#eff6ff',
+                            color: t.request_type === 'New Request' ? '#15803d' : '#1d4ed8',
+                            border: t.request_type === 'New Request' ? '1px solid #bbf7d0' : '1px solid #bfdbfe'
+                          }}>
+                            {t.request_type || 'Transfer Request'}
+                          </span>
+                          {t.priority && t.priority !== 'Normal' && (
+                            <span style={{
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              padding: '1.5px 6px',
+                              borderRadius: 4,
+                              background: t.priority === 'Urgent' ? '#fef2f2' : '#fffbeb',
+                              color: t.priority === 'Urgent' ? '#dc2626' : '#d97706',
+                              border: t.priority === 'Urgent' ? '1px solid #fecaca' : '1px solid #fde68a'
+                            }}>
+                              {t.priority === 'Urgent' ? '🚨 URGENT' : '⚡ HIGH'}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
                           Dispatched: {t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
                         </span>
                       </div>
@@ -3266,6 +4049,35 @@ export default function InternalBranch() {
               )}
             </div>
 
+            {/* Request Type */}
+            <div>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 4 }}>Request Type</label>
+              <select
+                value={filterRequestType}
+                onChange={e => setFilterRequestType(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+              >
+                <option value="All">All Types</option>
+                <option value="Transfer Request">Transfer Request</option>
+                <option value="New Request">New Request</option>
+              </select>
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 4 }}>Priority</label>
+              <select
+                value={filterPriority}
+                onChange={e => setFilterPriority(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+              >
+                <option value="All">All Priorities</option>
+                <option value="Normal">Normal</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+
             {/* Status */}
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 4 }}>Status</label>
@@ -3330,6 +4142,7 @@ export default function InternalBranch() {
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontWeight: 700 }}>
                     <th style={{ padding: '10px 12px' }}>Transfer ID</th>
                     <th style={{ padding: '10px 12px' }}>Date</th>
+                    <th style={{ padding: '10px 12px' }}>Type & Priority</th>
                     <th style={{ padding: '10px 12px' }}>From → To</th>
                     <th style={{ padding: '10px 12px' }}>Dishes & Quantities</th>
                     <th style={{ padding: '10px 12px' }}>Needed By & Timer</th>
@@ -3361,7 +4174,18 @@ export default function InternalBranch() {
                     else if (t.status === 'Cancelled') { statusBg = '#fee2e2'; statusColor = '#991b1b'; }
 
                     return (
-                      <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <tr
+                        key={t.id}
+                        onClick={() => handleOpenDetailModal(t)}
+                        title="Click to view complete details & history"
+                        style={{
+                          borderBottom: '1px solid #f1f5f9',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.15s ease'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                      >
                         <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f172a' }}>
                           {t.transfer_id}
                         </td>
@@ -3369,6 +4193,28 @@ export default function InternalBranch() {
                           {new Date(t.request_date).toLocaleDateString()}
                           <span style={{ fontSize: 10.5, display: 'block', color: '#94a3b8' }}>
                             {new Date(t.request_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            background: t.request_type === 'New Request' ? '#ede9fe' : '#e0f2fe',
+                            color: t.request_type === 'New Request' ? '#6d28d9' : '#0369a1',
+                            padding: '2px 7px',
+                            borderRadius: 10,
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            marginBottom: 3
+                          }}>
+                            {t.request_type || 'Transfer Request'}
+                          </span>
+                          <span style={{
+                            display: 'block',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: t.priority === 'Urgent' ? '#dc2626' : (t.priority === 'High' ? '#d97706' : '#64748b')
+                          }}>
+                            {t.priority === 'Urgent' ? '🔥 Urgent' : (t.priority === 'High' ? '⚡ High' : 'Normal')}
                           </span>
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: 600, minWidth: 130 }}>
@@ -3405,7 +4251,9 @@ export default function InternalBranch() {
                                   <Utensils size={10} color="#94a3b8" />
                                 )}
                               </div>
-                              <span style={{ fontWeight: 600 }}>{it.dish_name}</span>: {it.requested_qty} {it.uom}
+                              <span style={{ fontWeight: 600 }}>{it.dish_name}</span>
+                              {it.sku && <span style={{ fontSize: 10, color: '#64748b' }}>[{it.sku}]</span>}
+                              : {it.requested_qty} {it.uom}
                               {it.confirmed_qty !== null && it.confirmed_qty !== undefined && it.confirmed_qty !== it.requested_qty && (
                                 <span style={{ color: '#d97706', marginLeft: 3, fontSize: 11 }}>(Conf: {it.confirmed_qty})</span>
                               )}
@@ -3452,7 +4300,7 @@ export default function InternalBranch() {
                         <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                           <button
                             type="button"
-                            onClick={() => handleOpenDetailModal(t)}
+                            onClick={e => { e.stopPropagation(); handleOpenDetailModal(t); }}
                             style={{
                               background: t.extension_status === 'Pending' ? '#fffbeb' : '#f1f5f9',
                               border: t.extension_status === 'Pending' ? '1px solid #fcd34d' : 'none',
@@ -3469,7 +4317,7 @@ export default function InternalBranch() {
 
                           <button
                             type="button"
-                            onClick={() => printTransferSlip(t)}
+                            onClick={e => { e.stopPropagation(); printTransferSlip(t); }}
                             title="Print Transfer Slip"
                             style={{
                               background: '#f8fafc',
@@ -3491,7 +4339,7 @@ export default function InternalBranch() {
                           {t.status === 'Pending' && (
                             <button
                               type="button"
-                              onClick={() => handleStartProcessing(t.id, t.transfer_id)}
+                              onClick={e => { e.stopPropagation(); handleStartProcessing(t.id, t.transfer_id); }}
                               style={{
                                 background: '#2563eb',
                                 border: 'none',
@@ -3511,7 +4359,7 @@ export default function InternalBranch() {
                           {t.status === 'In Progress' && (
                             <button
                               type="button"
-                              onClick={() => handleMarkReady(t.id, t.transfer_id)}
+                              onClick={e => { e.stopPropagation(); handleMarkReady(t.id, t.transfer_id); }}
                               style={{
                                 background: '#7c3aed',
                                 border: 'none',
@@ -3531,7 +4379,7 @@ export default function InternalBranch() {
                           {t.status === 'Ready for Dispatch' && (
                             <button
                               type="button"
-                              onClick={() => openDispatchModal(t)}
+                              onClick={e => { e.stopPropagation(); openDispatchModal(t); }}
                               style={{
                                 background: '#f59e0b',
                                 border: 'none',
@@ -3551,7 +4399,7 @@ export default function InternalBranch() {
                           {['Dispatched', 'In-Transit'].includes(t.status) && (
                             <button
                               type="button"
-                              onClick={() => openReceiveModal(t)}
+                              onClick={e => { e.stopPropagation(); openReceiveModal(t); }}
                               style={{
                                 background: '#16a34a',
                                 border: 'none',
@@ -3571,7 +4419,7 @@ export default function InternalBranch() {
                           {['Partially Received', 'Fully Received'].includes(t.status) && (
                             <button
                               type="button"
-                              onClick={() => handleMarkCompleted(t.id, t.transfer_id)}
+                              onClick={e => { e.stopPropagation(); handleMarkCompleted(t.id, t.transfer_id); }}
                               style={{
                                 background: '#047857',
                                 border: 'none',
@@ -3591,7 +4439,7 @@ export default function InternalBranch() {
                           {t.status === 'Pending' && (
                             <button
                               type="button"
-                              onClick={() => handleCancelTransfer(t.id, t.transfer_id)}
+                              onClick={e => { e.stopPropagation(); handleCancelTransfer(t.id, t.transfer_id); }}
                               disabled={cancellingId === t.id}
                               style={{
                                 background: 'transparent',
@@ -4506,13 +5354,39 @@ export default function InternalBranch() {
       ───────────────────────────────────────────────────────────── */}
       {detailModalTransfer && (
         <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setDetailModalTransfer(null); }} style={{ zIndex: 9999 }}>
-          <div className="modal" style={{ maxWidth: 700, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal" style={{ maxWidth: 840, width: '95%', maxHeight: '90vh', background: '#fff', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             
             {/* Header */}
             <div style={{ flexShrink: 0, background: '#0f172a', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Transfer {detailModalTransfer.transfer_id}</h3>
-                <span style={{ fontSize: 12, color: '#94a3b8' }}>Status: {detailModalTransfer.status}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>Transfer Ref: {detailModalTransfer.transfer_id}</h3>
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    background: detailModalTransfer.request_type === 'New Request' ? '#166534' : '#1e40af',
+                    color: '#fff'
+                  }}>
+                    {detailModalTransfer.request_type || 'Transfer Request'}
+                  </span>
+                  {detailModalTransfer.priority && detailModalTransfer.priority !== 'Normal' && (
+                    <span style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background: detailModalTransfer.priority === 'Urgent' ? '#dc2626' : '#d97706',
+                      color: '#fff'
+                    }}>
+                      {detailModalTransfer.priority === 'Urgent' ? '🚨 URGENT' : '⚡ HIGH'}
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginTop: 3 }}>
+                  Recorded on {new Date(detailModalTransfer.request_date).toLocaleString()}
+                </span>
               </div>
               <button onClick={() => setDetailModalTransfer(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>✕</button>
             </div>
@@ -4533,7 +5407,7 @@ export default function InternalBranch() {
                   borderBottom: detailModalTab === 'summary' ? '2.5px solid #2563eb' : '2.5px solid transparent'
                 }}
               >
-                Transfer Overview
+                Transfer Record Details
               </button>
               <button
                 type="button"
@@ -4552,7 +5426,7 @@ export default function InternalBranch() {
                   borderBottom: detailModalTab === 'activity' ? '2.5px solid #2563eb' : '2.5px solid transparent'
                 }}
               >
-                <History size={14} /> Audit & Activity History
+                <History size={14} /> Audit & Chronological Activity ({activityLogs.length})
               </button>
             </div>
 
@@ -4608,66 +5482,205 @@ export default function InternalBranch() {
                     </div>
                   )}
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16, background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 12.5 }}>
-                    <div><span style={{ color: '#64748b' }}>From Branch:</span> <BranchBadge branch={detailModalTransfer.from_branch} /></div>
-                    <div><span style={{ color: '#64748b' }}>To Branch:</span> <BranchBadge branch={detailModalTransfer.to_branch} isExternal={detailModalTransfer.is_external} /></div>
-                    <div><span style={{ color: '#64748b' }}>Requested Time:</span> {new Date(detailModalTransfer.request_date).toLocaleString()}</div>
+                  {/* 16-Point Comprehensive Record Metadata Grid */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                    gap: 12,
+                    marginBottom: 18,
+                    background: '#f8fafc',
+                    padding: 14,
+                    borderRadius: 10,
+                    border: '1px solid #e2e8f0',
+                    fontSize: 12.5
+                  }}>
+                    {/* 1. Transfer ID / Ref */}
                     <div>
-                      <span style={{ color: '#64748b' }}>Needed-By Time:</span>{' '}
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>1. Reference Number:</span>
+                      <strong style={{ color: '#0f172a', fontSize: 13 }}>{detailModalTransfer.transfer_id}</strong>
+                    </div>
+
+                    {/* 2. Sending Branch */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>2. Sending Branch (Origin):</span>
+                      <BranchBadge branch={detailModalTransfer.from_branch} />
+                    </div>
+
+                    {/* 3. Receiving Branch */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>3. Receiving Branch (Destination):</span>
+                      <BranchBadge branch={detailModalTransfer.to_branch} isExternal={detailModalTransfer.is_external} />
+                    </div>
+
+                    {/* 4. Requested By */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>4. Requested By:</span>
+                      <strong style={{ color: '#334155' }}>{detailModalTransfer.requested_by_name || 'Staff'}</strong>
+                      {detailModalTransfer.requested_by_user_id && (
+                        <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>(User #{detailModalTransfer.requested_by_user_id})</span>
+                      )}
+                    </div>
+
+                    {/* 5. Received By */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>5. Received By:</span>
+                      <strong style={{ color: detailModalTransfer.received_by_name ? '#15803d' : '#94a3b8' }}>
+                        {detailModalTransfer.received_by_name || 'Pending Receiving Confirmation'}
+                      </strong>
+                      {detailModalTransfer.received_by_user_id && (
+                        <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>(User #{detailModalTransfer.received_by_user_id})</span>
+                      )}
+                    </div>
+
+                    {/* 6. Request Date & Time */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>6. Request Date & Time:</span>
+                      <strong>{new Date(detailModalTransfer.request_date).toLocaleString()}</strong>
+                    </div>
+
+                    {/* 7a. Dispatched Date & Time */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>7a. Dispatched Date & Time:</span>
+                      <strong style={{ color: detailModalTransfer.dispatched_at ? '#2563eb' : '#64748b' }}>
+                        {detailModalTransfer.dispatched_at ? new Date(detailModalTransfer.dispatched_at).toLocaleString() : 'Not dispatched yet'}
+                      </strong>
+                      {detailModalTransfer.dispatched_by_name && (
+                        <span style={{ fontSize: 11, color: '#64748b', display: 'block' }}>By {detailModalTransfer.dispatched_by_name} {detailModalTransfer.handover_to_name ? `→ ${detailModalTransfer.handover_to_name}` : ''}</span>
+                      )}
+                    </div>
+
+                    {/* 7b. Actual Received Date & Time */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>7b. Actual Received Date & Time:</span>
+                      <strong style={{ color: detailModalTransfer.received_at ? '#15803d' : '#64748b' }}>
+                        {detailModalTransfer.received_at ? new Date(detailModalTransfer.received_at).toLocaleString() : 'Not received yet'}
+                      </strong>
+                    </div>
+
+                    {/* 8. Transfer Status */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>8. Transfer Status:</span>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '3px 10px',
+                        borderRadius: 12,
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        background: detailModalTransfer.status === 'Pending' ? '#fef3c7' : (detailModalTransfer.status === 'In Progress' ? '#dbeafe' : (detailModalTransfer.status === 'Ready for Dispatch' ? '#f3e8ff' : (['Dispatched', 'In-Transit'].includes(detailModalTransfer.status) ? '#e0f2fe' : (detailModalTransfer.status === 'Partially Received' ? '#ffedd5' : (detailModalTransfer.status === 'Fully Received' || detailModalTransfer.status === 'Completed' ? '#ecfdf5' : '#fee2e2'))))),
+                        color: detailModalTransfer.status === 'Pending' ? '#92400e' : (detailModalTransfer.status === 'In Progress' ? '#1e40af' : (detailModalTransfer.status === 'Ready for Dispatch' ? '#6b21a8' : (['Dispatched', 'In-Transit'].includes(detailModalTransfer.status) ? '#0369a1' : (detailModalTransfer.status === 'Partially Received' ? '#c2410c' : (detailModalTransfer.status === 'Fully Received' || detailModalTransfer.status === 'Completed' ? '#047857' : '#991b1b')))))
+                      }}>
+                        {detailModalTransfer.status}
+                      </span>
+                    </div>
+
+                    {/* Needed By / Extension info */}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: 11 }}>Needed-By Time & Delivery Window:</span>
                       <strong style={{ color: '#dc2626' }}>{detailModalTransfer.needed_by_time || 'ASAP'}</strong>
                       {(detailModalTransfer.total_extended_minutes || 0) > 0 && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: '#d97706', background: '#fef3c7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                        <span style={{ marginLeft: 6, fontSize: 10.5, color: '#d97706', background: '#fef3c7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
                           +{detailModalTransfer.total_extended_minutes}m extended
                         </span>
                       )}
                     </div>
-                    <div>
-                      <span style={{ color: '#64748b' }}>Original Time Allocated:</span>{' '}
-                      <strong>{detailModalTransfer.original_delivery_minutes || detailModalTransfer.delivery_minutes || 30} mins</strong>
-                    </div>
-                    <div>
-                      <span style={{ color: '#64748b' }}>Total Delivery Minutes:</span>{' '}
-                      <strong style={{ color: '#2563eb' }}>{detailModalTransfer.delivery_minutes || 30} mins</strong>
-                    </div>
-                    <div><span style={{ color: '#64748b' }}>Dispatched At:</span> {detailModalTransfer.dispatched_at ? new Date(detailModalTransfer.dispatched_at).toLocaleString() : 'Pending'}</div>
-                    <div><span style={{ color: '#64748b' }}>Received At:</span> {detailModalTransfer.received_at ? new Date(detailModalTransfer.received_at).toLocaleString() : 'Pending'}</div>
-                    {detailModalTransfer.handover_to_name && (
-                      <div><span style={{ color: '#64748b' }}>Handover To:</span> <strong>{detailModalTransfer.handover_to_name}</strong></div>
-                    )}
+
+                    {/* Discrepancy Reason if any */}
                     {detailModalTransfer.discrepancy_reason && (
-                      <div style={{ gridColumn: 'span 2' }}>
-                        <span style={{ color: '#b91c1c', fontWeight: 700 }}>Discrepancy Reason:</span> {detailModalTransfer.discrepancy_reason}
+                      <div style={{ gridColumn: 'span 2', background: '#fef2f2', border: '1px solid #fecaca', padding: '8px 10px', borderRadius: 6 }}>
+                        <span style={{ color: '#dc2626', fontWeight: 800, display: 'block', fontSize: 11 }}>15. Discrepancy Reason:</span>
+                        <span style={{ color: '#991b1b', fontWeight: 600 }}>{detailModalTransfer.discrepancy_reason}</span>
                       </div>
                     )}
                   </div>
 
-                  <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>Transferred Dishes:</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-                    {(detailModalTransfer.items || []).map((it, idx) => (
-                      <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#f1f5f9', borderRadius: 6, fontSize: 12.5 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ width: 26, height: 26, borderRadius: 4, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                            {it.image_url ? (
-                              <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
-                            ) : (
-                              <Utensils size={13} color="#94a3b8" />
-                            )}
-                          </div>
-                          <span><strong>{it.dish_name}</strong> ({it.uom})</span>
-                        </div>
-                        <span>
-                          Req: {it.requested_qty}
-                          {it.confirmed_qty !== null && it.confirmed_qty !== undefined && <span style={{ color: '#d97706', marginLeft: 4 }}>(Conf: {it.confirmed_qty})</span>}
-                          | Sent: {it.sent_qty !== null ? it.sent_qty : '-'} | Rec: {it.received_qty !== null ? it.received_qty : '-'}
-                          {it.variance_qty !== null && <strong style={{ marginLeft: 6, color: it.variance_qty < 0 ? '#dc2626' : '#16a34a' }}>(Var: {it.variance_qty})</strong>}
-                        </span>
-                      </div>
-                    ))}
+                  {/* Formatted Transferred Items Table (Points 9, 10, 11, 12, 13, 14, 15) */}
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
+                        9-14. Transferred Items & Quantity Breakdown:
+                      </h4>
+                      <span style={{ fontSize: 11.5, color: '#64748b' }}>
+                        {(detailModalTransfer.items || []).length} item row(s)
+                      </span>
+                    </div>
+
+                    <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                        <thead style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontWeight: 700 }}>
+                          <tr>
+                            <th style={{ padding: '9px 10px', width: 35 }}>#</th>
+                            <th style={{ padding: '9px 10px' }}>Product / Dish Name</th>
+                            <th style={{ padding: '9px 10px' }}>SKU / Barcode</th>
+                            <th style={{ padding: '9px 10px' }}>Unit</th>
+                            <th style={{ padding: '9px 10px', textAlign: 'center' }}>Requested</th>
+                            <th style={{ padding: '9px 10px', textAlign: 'center' }}>Confirmed</th>
+                            <th style={{ padding: '9px 10px', textAlign: 'center' }}>Dispatched</th>
+                            <th style={{ padding: '9px 10px', textAlign: 'center' }}>Received</th>
+                            <th style={{ padding: '9px 10px', textAlign: 'center' }}>Pending / Var</th>
+                            <th style={{ padding: '9px 10px' }}>Item Remarks</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(detailModalTransfer.items || []).map((it, idx) => {
+                            const reqQ = parseFloat(it.requested_qty || 0);
+                            const confQ = it.confirmed_qty !== null && it.confirmed_qty !== undefined ? parseFloat(it.confirmed_qty) : reqQ;
+                            const sentQ = it.sent_qty !== null && it.sent_qty !== undefined ? parseFloat(it.sent_qty) : null;
+                            const recQ = it.received_qty !== null && it.received_qty !== undefined ? parseFloat(it.received_qty) : null;
+                            const varQ = it.variance_qty !== null && it.variance_qty !== undefined 
+                              ? parseFloat(it.variance_qty) 
+                              : (recQ !== null && sentQ !== null ? (recQ - sentQ) : null);
+                            const pendingQ = sentQ !== null ? Math.max(0, sentQ - (recQ || 0)) : (confQ - (recQ || 0));
+
+                            return (
+                              <tr key={it.id || idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{idx + 1}</td>
+                                <td style={{ padding: '8px 10px', fontWeight: 600, color: '#0f172a' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ width: 24, height: 24, borderRadius: 4, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                                      {it.image_url ? (
+                                        <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                                      ) : (
+                                        <Utensils size={12} color="#94a3b8" />
+                                      )}
+                                    </div>
+                                    <span>{it.dish_name}</span>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '8px 10px', color: '#64748b', fontSize: 11 }}>
+                                  <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace' }}>
+                                    {it.sku || it.barcode || it.short_code || '-'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px 10px', color: '#475569', fontWeight: 600 }}>{it.uom}</td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700 }}>{reqQ}</td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center', color: confQ !== reqQ ? '#d97706' : '#475569', fontWeight: confQ !== reqQ ? 700 : 400 }}>
+                                  {confQ}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center', color: '#2563eb', fontWeight: 700 }}>
+                                  {sentQ !== null ? sentQ : '-'}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center', color: '#16a34a', fontWeight: 700 }}>
+                                  {recQ !== null ? recQ : '-'}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: varQ !== null && varQ < 0 ? '#dc2626' : (varQ !== null && varQ > 0 ? '#2563eb' : '#64748b') }}>
+                                  {varQ !== null ? (varQ === 0 ? '0 (Exact)' : `${varQ > 0 ? '+' : ''}${varQ}`) : (pendingQ > 0 ? `${pendingQ} Pending` : '-')}
+                                </td>
+                                <td style={{ padding: '8px 10px', color: '#64748b', fontSize: 11.5 }}>
+                                  {it.remarks || it.quantity_change_reason || '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
 
+                  {/* 15. General Notes / Instructions */}
                   {detailModalTransfer.notes && (
-                    <div style={{ background: '#fef3c7', padding: 10, borderRadius: 6, fontSize: 12, color: '#92400e' }}>
-                      <strong>Notes:</strong> {detailModalTransfer.notes}
+                    <div style={{ marginTop: 14, background: '#fef3c7', padding: '10px 12px', borderRadius: 8, fontSize: 12, color: '#92400e', border: '1px solid #fde68a' }}>
+                      <strong style={{ display: 'block', marginBottom: 2 }}>General Notes & Dispatch Instructions:</strong>
+                      {detailModalTransfer.notes}
                     </div>
                   )}
                 </div>
