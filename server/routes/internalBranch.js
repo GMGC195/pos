@@ -136,14 +136,8 @@ async function generateTransferId(client) {
 router.post('/transfers', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { 
-      to_branch, needed_by_time, delivery_minutes, notes, items, is_external,
-      request_type, priority 
-    } = req.body;
+    const { to_branch, needed_by_time, delivery_minutes, notes, items, is_external } = req.body;
     let from_branch = req.body.from_branch;
-
-    const finalRequestType = (request_type && request_type.trim()) ? request_type.trim() : 'Transfer Request';
-    const finalPriority = (priority && priority.trim()) ? priority.trim() : 'Normal';
 
     // Detect user branch
     const userBranch = req.user.branch;
@@ -213,9 +207,8 @@ router.post('/transfers', authenticateToken, async (req, res) => {
       INSERT INTO internal_branch_transfers (
         transfer_id, from_branch, to_branch, requested_by_user_id, requested_by_name,
         request_date, needed_by_time, delivery_minutes, expected_delivery_at, status, notes, is_external,
-        original_delivery_minutes, original_needed_by_time, total_extended_minutes, extension_status,
-        request_type, priority
-      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, 'Pending', $9, $10, $7, $6, 0, 'None', $11, $12)
+        original_delivery_minutes, original_needed_by_time, total_extended_minutes, extension_status
+      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, 'Pending', $9, $10, $7, $6, 0, 'None')
       RETURNING *
     `, [
       transferId,
@@ -227,22 +220,17 @@ router.post('/transfers', authenticateToken, async (req, res) => {
       mins,
       expectedDeliveryAt,
       notes || null,
-      isExternalBranch,
-      finalRequestType,
-      finalPriority
+      isExternalBranch
     ]);
 
     const createdTransfer = insertTransferRes.rows[0];
 
     const insertedItems = [];
     for (const item of items) {
-      const itemSku = (item.sku && String(item.sku).trim()) || (item.short_code && String(item.short_code).trim()) || (item.item_id ? `SKU-${item.item_id}` : null);
-      const itemBarcode = (item.barcode && String(item.barcode).trim()) || null;
-
       const itemRes = await client.query(`
         INSERT INTO internal_branch_transfer_items (
-          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
       `, [
         createdTransfer.id,
@@ -253,9 +241,7 @@ router.post('/transfers', authenticateToken, async (req, res) => {
         parseFloat(item.requested_qty), // Default confirmed_qty equals requested_qty
         item.remarks ? item.remarks.trim() : null,
         item.image_url || null,
-        item.price ? parseFloat(item.price) : null,
-        itemSku,
-        itemBarcode
+        item.price ? parseFloat(item.price) : null
       ]);
       insertedItems.push(itemRes.rows[0]);
     }
@@ -308,7 +294,6 @@ router.get('/transfers', authenticateToken, async (req, res) => {
   try {
     const { 
       status, from_branch, to_branch, branch, branch_direction,
-      sent_by, received_by, sent_by_user, received_by_user, request_type, priority,
       period, from_date, to_date, dish_name, search, tab 
     } = req.query;
 
@@ -330,9 +315,6 @@ router.get('/transfers', authenticateToken, async (req, res) => {
             'variance_qty', ti.variance_qty,
             'remarks', ti.remarks,
             'quantity_change_reason', ti.quantity_change_reason,
-            'sku', COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)),
-            'barcode', COALESCE(ti.barcode, ''),
-            'short_code', COALESCE(i.short_code, ''),
             'image_url', COALESCE(ti.image_url, i.image_url),
             'price', COALESCE(ti.price, i.price)
           ) ORDER BY ti.id ASC
@@ -345,76 +327,21 @@ router.get('/transfers', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    // Active target branch for tab routing
-    const targetBranch = (branch && branch !== 'All') 
-      ? branch 
-      : (!superUser && userBranch && userBranch !== 'All' ? userBranch : null);
-
-    // Tab-specific branch & status routing
-    if (tab === 'incoming') {
-      // Incoming Requests: Only requests destined for the active branch and NOT sent by the active branch itself
-      if (targetBranch) {
-        params.push(targetBranch);
-        query += ` AND t.to_branch = $${params.length}`;
-        params.push(targetBranch);
-        query += ` AND t.from_branch != $${params.length}`;
-      } else if (!superUser && userBranch && userBranch !== 'All') {
+    // Role-based branch isolation
+    if (!superUser && userBranch && userBranch !== 'All') {
+      if (tab === 'incoming') {
         params.push(userBranch);
         query += ` AND t.to_branch = $${params.length}`;
-        params.push(userBranch);
-        query += ` AND t.from_branch != $${params.length}`;
-      }
-
-      // Origin filter (Sent By)
-      const originBranch = sent_by || from_branch;
-      if (originBranch && originBranch !== 'All') {
-        if (originBranch === 'Other') {
-          if (req.query.sent_by_custom && req.query.sent_by_custom.trim()) {
-            params.push(`%${req.query.sent_by_custom.trim()}%`);
-            query += ` AND t.from_branch ILIKE $${params.length}`;
-          } else {
-            query += ` AND t.from_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
-          }
-        } else {
-          params.push(originBranch);
-          query += ` AND t.from_branch = $${params.length}`;
-        }
-      }
-
-      // Destination branch processes active requests only
-      if (!status || status === 'All') {
-        query += ` AND t.status IN ('Pending', 'In Progress', 'Ready for Dispatch')`;
-      }
-    } else if (tab === 'pending_receivals' || tab === 'receivals') {
-      // Pending Receivals: Dedicated section for the requesting branch awaiting dispatched goods
-      if (targetBranch) {
-        params.push(targetBranch);
-        query += ` AND t.from_branch = $${params.length}`;
-      } else if (!superUser && userBranch && userBranch !== 'All') {
+      } else if (tab === 'outgoing' || tab === 'pending_receivals') {
         params.push(userBranch);
         query += ` AND t.from_branch = $${params.length}`;
-      }
-
-      // Supplying branch filter
-      const supplyingBranch = received_by || to_branch;
-      if (supplyingBranch && supplyingBranch !== 'All') {
-        params.push(supplyingBranch);
-        query += ` AND t.to_branch = $${params.length}`;
-      }
-
-      // Only in-transit / dispatched awaiting receival confirmation
-      if (!status || status === 'All') {
-        query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')`;
-      }
-    } else {
-      // Master Logs & General Tab: Role isolation
-      if (!superUser && userBranch && userBranch !== 'All') {
+      } else {
         params.push(userBranch);
         params.push(userBranch);
         query += ` AND (t.from_branch = $${params.length - 1} OR t.to_branch = $${params.length})`;
       }
-
-      // Branch Switcher + Direction filter
+    } else {
+      // Admin / SuperUser filtering
       const selectedBranch = branch || null;
       if (selectedBranch && selectedBranch !== 'All') {
         const direction = (branch_direction || 'all').toLowerCase();
@@ -429,37 +356,32 @@ router.get('/transfers', authenticateToken, async (req, res) => {
           params.push(selectedBranch);
           query += ` AND (t.from_branch = $${params.length - 1} OR t.to_branch = $${params.length})`;
         }
-      }
-
-      // Sent By (Origin Branch) filter
-      const effSentBy = sent_by || from_branch;
-      if (effSentBy && effSentBy !== 'All') {
-        if (effSentBy === 'Other') {
-          if (req.query.sent_by_custom && req.query.sent_by_custom.trim()) {
-            params.push(`%${req.query.sent_by_custom.trim()}%`);
-            query += ` AND t.from_branch ILIKE $${params.length}`;
+      } else {
+        if (from_branch && from_branch !== 'All') {
+          if (from_branch === 'Other') {
+            if (req.query.from_branch_custom && req.query.from_branch_custom.trim()) {
+              params.push(`%${req.query.from_branch_custom.trim()}%`);
+              query += ` AND t.from_branch ILIKE $${params.length}`;
+            } else {
+              query += ` AND t.from_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
+            }
           } else {
-            query += ` AND t.from_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
+            params.push(from_branch);
+            query += ` AND t.from_branch = $${params.length}`;
           }
-        } else {
-          params.push(effSentBy);
-          query += ` AND t.from_branch = $${params.length}`;
         }
-      }
-
-      // Received By (Destination Branch) filter
-      const effRecBy = received_by || to_branch;
-      if (effRecBy && effRecBy !== 'All') {
-        if (effRecBy === 'Other') {
-          if (req.query.received_by_custom && req.query.received_by_custom.trim()) {
-            params.push(`%${req.query.received_by_custom.trim()}%`);
-            query += ` AND t.to_branch ILIKE $${params.length}`;
+        if (to_branch && to_branch !== 'All') {
+          if (to_branch === 'Other') {
+            if (req.query.to_branch_custom && req.query.to_branch_custom.trim()) {
+              params.push(`%${req.query.to_branch_custom.trim()}%`);
+              query += ` AND t.to_branch ILIKE $${params.length}`;
+            } else {
+              query += ` AND t.to_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
+            }
           } else {
-            query += ` AND t.to_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
+            params.push(to_branch);
+            query += ` AND t.to_branch = $${params.length}`;
           }
-        } else {
-          params.push(effRecBy);
-          query += ` AND t.to_branch = $${params.length}`;
         }
       }
     }
@@ -470,28 +392,11 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       query += ` AND t.status = $${params.length}`;
     }
 
-    // Request Type filter (All, Transfer Request, New Request)
-    if (request_type && request_type !== 'All') {
-      params.push(request_type);
-      query += ` AND t.request_type = $${params.length}`;
-    }
-
-    // Priority filter (All, Normal, High, Urgent)
-    if (priority && priority !== 'All') {
-      params.push(priority);
-      query += ` AND t.priority = $${params.length}`;
-    }
-
-    // Sent By User (Requester name or user ID)
-    if (sent_by_user && sent_by_user.trim()) {
-      params.push(`%${sent_by_user.trim()}%`);
-      query += ` AND (t.requested_by_name ILIKE $${params.length} OR CAST(t.requested_by_user_id AS TEXT) = $${params.length})`;
-    }
-
-    // Received By User (Receiver name or user ID)
-    if (received_by_user && received_by_user.trim()) {
-      params.push(`%${received_by_user.trim()}%`);
-      query += ` AND (t.received_by_name ILIKE $${params.length} OR CAST(t.received_by_user_id AS TEXT) = $${params.length})`;
+    // Tab-specific status overrides
+    if (tab === 'incoming' && (!status || status === 'All')) {
+      query += ` AND t.status IN ('Pending', 'In Progress', 'Ready for Dispatch', 'Dispatched', 'In-Transit')`;
+    } else if (tab === 'pending_receivals' && (!status || status === 'All')) {
+      query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')`;
     }
 
     // Date / Period filters
@@ -564,12 +469,7 @@ router.get('/transfers/:id', authenticateToken, async (req, res) => {
 
     const transfer = tRes.rows[0];
     const itemsRes = await pool.query(`
-      SELECT ti.*, 
-        COALESCE(ti.image_url, i.image_url) as image_url, 
-        COALESCE(ti.price, i.price) as price,
-        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
-        COALESCE(ti.barcode, '') as barcode,
-        COALESCE(i.short_code, '') as short_code
+      SELECT ti.*, COALESCE(ti.image_url, i.image_url) as image_url, COALESCE(ti.price, i.price) as price
       FROM internal_branch_transfer_items ti 
       LEFT JOIN items i ON ti.item_id = i.id
       WHERE ti.transfer_id = $1 
@@ -1628,16 +1528,13 @@ router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const superUser = isSuperUser(req.user);
     const userBranch = req.user.branch;
-    const filterBranch = (req.query.branch && req.query.branch !== 'All') ? req.query.branch : null;
-    const targetBranch = filterBranch || (!superUser && userBranch && userBranch !== 'All' ? userBranch : null);
 
     let branchClause = '';
     const params = [];
 
-    if (targetBranch) {
-      params.push(targetBranch);
-      params.push(targetBranch);
-      branchClause = ` AND (from_branch = $1 OR to_branch = $2)`;
+    if (!superUser && userBranch && userBranch !== 'All') {
+      params.push(userBranch);
+      branchClause = ` AND (from_branch = $1 OR to_branch = $1)`;
     }
 
     const countsRes = await pool.query(`
@@ -1654,25 +1551,25 @@ router.get('/stats', authenticateToken, async (req, res) => {
       WHERE 1=1 ${branchClause}
     `, params);
 
-    // Incoming active count for badge (Pending + In Progress + Ready for Dispatch where to_branch = targetBranch and from_branch != targetBranch)
+    // Incoming active count for badge (Pending + In Progress + Ready for Dispatch where to_branch = userBranch)
     let incomingPendingCount = 0;
-    if (targetBranch) {
+    if (userBranch && userBranch !== 'All') {
       const incRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE to_branch = $1 AND from_branch != $1 AND status IN ('Pending', 'In Progress', 'Ready for Dispatch')
-      `, [targetBranch]);
+        WHERE to_branch = $1 AND status IN ('Pending', 'In Progress', 'Ready for Dispatch')
+      `, [userBranch]);
       incomingPendingCount = parseInt(incRes.rows[0]?.count || 0, 10);
     } else {
       incomingPendingCount = parseInt(countsRes.rows[0]?.pending_count || 0, 10) + parseInt(countsRes.rows[0]?.in_progress_count || 0, 10);
     }
 
-    // Pending receivals count for badge (Dispatched where from_branch = targetBranch)
+    // Pending receivals count for badge (Dispatched where from_branch = userBranch)
     let pendingReceivalsCount = 0;
-    if (targetBranch) {
+    if (userBranch && userBranch !== 'All') {
       const recRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
         WHERE from_branch = $1 AND status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')
-      `, [targetBranch]);
+      `, [userBranch]);
       pendingReceivalsCount = parseInt(recRes.rows[0]?.count || 0, 10);
     } else {
       pendingReceivalsCount = parseInt(countsRes.rows[0]?.dispatched_count || 0, 10);
