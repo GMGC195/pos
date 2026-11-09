@@ -38,11 +38,32 @@ try {
   console.error('❌ Failed to initialize Pusher:', err);
 }
 async function checkBranchAccess(req, orderId) {
-  const role = req.user.role?.trim().toLowerCase();
-  const isAdmin = role === 'admin' || role === 'developer';
-  if (!isAdmin && req.user.branch) {
-    const check = await pool.query('SELECT branch FROM "orders" WHERE id = $1', [orderId]);
-    if (check.rows.length > 0 && check.rows[0].branch !== req.user.branch) {
+  const role = req.user?.role?.trim().toLowerCase();
+  const isAdmin = role === 'admin' || role === 'developer' || role === 'management';
+  if (isAdmin) return true;
+
+  // Allow authenticated staff to view order details on GET (e.g. Khata, Customer Ledger, Order Details Modal)
+  if (req.method === 'GET') {
+    return true;
+  }
+
+  const userBranch = req.user?.branch?.trim();
+  if (!userBranch || userBranch.toLowerCase() === 'all') return true;
+
+  const normalize = (b) => {
+    if (!b) return '';
+    const s = b.trim().toLowerCase();
+    if (s === 'restaurant 1') return 'branch 1';
+    if (s === 'restaurant 2') return 'branch 2';
+    if (s === 'restaurant 3') return 'branch 3';
+    return s;
+  };
+
+  const check = await pool.query('SELECT branch FROM "orders" WHERE id = $1', [orderId]);
+  if (check.rows.length > 0 && check.rows[0].branch) {
+    const orderBranch = normalize(check.rows[0].branch);
+    const userNorm = normalize(userBranch);
+    if (orderBranch && userNorm && orderBranch !== userNorm) {
       return false;
     }
   }

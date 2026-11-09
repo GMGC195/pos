@@ -982,6 +982,10 @@ const server = http.createServer(app);
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:3000',
+  // Production Hostinger & domain deployments
+  'https://alrawaq.zivoxtech.com',
+  'https://alrawaqrestaurant.zivoxtech.com',
+  /https:\/\/.*\.zivoxtech\.com$/,
   // Vercel deployments
   'https://ddnjj.vercel.app',
   'https://1-mu-pink.vercel.app',
@@ -997,8 +1001,8 @@ app.use(cors({
     // Allow requests with no origin (e.g. mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
     const allowed = ALLOWED_ORIGINS.some(o =>
-      typeof o === 'string' ? o === origin : o.test(origin)
-    );
+      typeof o === 'string' ? o === origin : (o instanceof RegExp ? o.test(origin) : false)
+    ) || origin.includes('zivoxtech.com') || origin.includes('vercel.app') || origin.includes('localhost');
     if (allowed) return callback(null, true);
     callback(new Error(`CORS blocked: ${origin}`));
   },
@@ -1029,14 +1033,16 @@ const io = new Server(server, {
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       const allowed = ALLOWED_ORIGINS.some(o =>
-        typeof o === 'string' ? o === origin : o.test(origin)
-      );
+        typeof o === 'string' ? o === origin : (o instanceof RegExp ? o.test(origin) : false)
+      ) || origin.includes('zivoxtech.com') || origin.includes('vercel.app') || origin.includes('localhost');
       if (allowed) return callback(null, true);
       callback(new Error(`Socket.io CORS blocked: ${origin}`));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
-  }
+  },
+  transports: ['polling', 'websocket'],
+  allowEIO3: true
 });
 
 io.on('connection', (socket) => {
