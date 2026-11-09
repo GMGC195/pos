@@ -563,7 +563,8 @@ export default function InternalBranch() {
     fully_received_count: 0,
     completed_count: 0,
     incoming_pending_count: 0,
-    pending_receivals_count: 0
+    pending_receivals_count: 0,
+    sent_active_count: 0
   });
 
   // Transfers List
@@ -653,6 +654,17 @@ export default function InternalBranch() {
   const [activityLogs, setActivityLogs] = useState([]);
   const [loadingActivityLogs, setLoadingActivityLogs] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
+
+  // 6. Modify Transfer Request Modal (Requesting branch edits items/quantities before dispatch)
+  const [editTransferModal, setEditTransferModal] = useState(null);
+  const [editDishRows, setEditDishRows] = useState([]);
+  const [editPriority, setEditPriority] = useState('Normal');
+  const [editDeliveryMinutes, setEditDeliveryMinutes] = useState(30);
+  const [editCustomDeliveryMinutes, setEditCustomDeliveryMinutes] = useState('');
+  const [editNeededByTime, setEditNeededByTime] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [savingEditRequest, setSavingEditRequest] = useState(false);
 
   // Double-click protection refs & socket event deduplication
   const isSubmittingRef = useRef(false);
@@ -757,8 +769,9 @@ export default function InternalBranch() {
     const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
     const dishBarcode = dish.barcode || '';
 
+    const isEdit = Boolean(editTransferModal);
     const isTrf = activeTab === 'transfer_request';
-    const setRows = isTrf ? setTrfDishRows : setNewDishRows;
+    const setRows = isEdit ? setEditDishRows : (isTrf ? setTrfDishRows : setNewDishRows);
 
     setRows(prev => {
       if (prev.length === 1 && (!prev[0].dish_name || !prev[0].dish_name.trim())) {
@@ -801,8 +814,9 @@ export default function InternalBranch() {
   };
 
   const handleUpdateQtyFromBrowser = (dish, delta) => {
+    const isEdit = Boolean(editTransferModal);
     const isTrf = activeTab === 'transfer_request';
-    const setRows = isTrf ? setTrfDishRows : setNewDishRows;
+    const setRows = isEdit ? setEditDishRows : (isTrf ? setTrfDishRows : setNewDishRows);
 
     setRows(prev => {
       const existing = prev.find(r => r.item_id === dish.id || (r.dish_name && r.dish_name.toLowerCase() === dish.name.toLowerCase()));
@@ -923,6 +937,12 @@ export default function InternalBranch() {
       params.tab = 'pending_receivals';
       if (filterToBranch !== 'All') params.received_by = filterToBranch;
       if (filterRequestType !== 'All') params.request_type = filterRequestType;
+      if (filterPriority !== 'All') params.priority = filterPriority;
+      if (searchQuery) params.search = searchQuery;
+    } else if (activeTab === 'transfer_request') {
+      // Sent Requests: Orders requested by this branch until completed
+      params.tab = 'sent_requests';
+      if (filterToBranch !== 'All') params.to_branch = filterToBranch;
       if (filterPriority !== 'All') params.priority = filterPriority;
       if (searchQuery) params.search = searchQuery;
     } else {
@@ -1132,6 +1152,16 @@ export default function InternalBranch() {
       toast.info(`✏️ Extension modified & approved for Transfer #${data.transfer_id}!`);
     };
 
+    const handleRequestModified = (data) => {
+      fetchStats();
+      fetchTransfers();
+      if (!isNewEvent('req_mod', `${data.id}_${data.updated_at}`)) return;
+      const userBranch = user?.branch;
+      if (isSuperUser || (userBranch && userBranch.toLowerCase() === (data.to_branch || '').toLowerCase())) {
+        toast.info(`✏️ Transfer Request #${data.transfer_id} items updated by ${data.from_branch}.`);
+      }
+    };
+
     socket.on('internal_transfer_created', handleTransferCreated);
     socket.on('internal_transfer_dispatched', handleTransferDispatched);
     socket.on('internal_transfer_received', handleTransferReceived);
@@ -1140,6 +1170,7 @@ export default function InternalBranch() {
     socket.on('internal_transfer_extension_accepted', handleExtensionAccepted);
     socket.on('internal_transfer_extension_rejected', handleExtensionRejected);
     socket.on('internal_transfer_extension_modified', handleExtensionModified);
+    socket.on('internal_transfer_request_modified', handleRequestModified);
     socket.on('internal_transfer_updated', fetchTransfers);
 
     return () => {
@@ -1151,6 +1182,7 @@ export default function InternalBranch() {
       socket.off('internal_transfer_extension_accepted', handleExtensionAccepted);
       socket.off('internal_transfer_extension_rejected', handleExtensionRejected);
       socket.off('internal_transfer_extension_modified', handleExtensionModified);
+      socket.off('internal_transfer_request_modified', handleRequestModified);
       socket.off('internal_transfer_updated', fetchTransfers);
     };
   }, [user, isSuperUser, audioEnabled, fetchStats, fetchTransfers]);
@@ -1377,9 +1409,7 @@ export default function InternalBranch() {
       setTrfCustomDeliveryMinutes('');
       fetchStats();
       fetchTransfers();
-
-      // Switch to master logs
-      setActiveTab('logs');
+      // Keep on transfer_request tab so the user immediately sees the sent order in active sent list!
     } catch (err) {
       console.error('Error submitting transfer request:', err);
       const msg = err.response?.data?.error || err.message || 'Failed to submit transfer request.';
@@ -1893,6 +1923,144 @@ export default function InternalBranch() {
     }
   };
 
+  // Modify Request Handlers (Requesting branch modifies request before dispatch)
+  const handleOpenEditRequestModal = (transfer) => {
+    setEditTransferModal(transfer);
+    setEditPriority(transfer.priority || 'Normal');
+    setEditDeliveryMinutes(transfer.delivery_minutes || 30);
+    setEditCustomDeliveryMinutes('');
+    setEditNeededByTime(transfer.needed_by_time || '');
+    setEditNotes(transfer.notes || '');
+    setEditReason('');
+
+    // Pre-populate dish rows from transfer.items
+    if (transfer.items && Array.isArray(transfer.items) && transfer.items.length > 0) {
+      const rows = transfer.items.map((it, idx) => {
+        const matchedDish = (dishes || []).find(d => d.id === it.item_id || (d.name && d.name.toLowerCase() === it.dish_name?.toLowerCase()));
+        const units = matchedDish ? getItemUnits(matchedDish) : (it.uom ? [it.uom] : ['Piece']);
+        return {
+          id: it.id || (Date.now() + idx),
+          dish_name: it.dish_name || '',
+          item_id: it.item_id || null,
+          sku: it.sku || (matchedDish ? (matchedDish.short_code || matchedDish.sku) : ''),
+          barcode: it.barcode || (matchedDish ? matchedDish.barcode : ''),
+          uom: it.uom || (units[0] || 'Piece'),
+          available_units: units,
+          requested_qty: it.requested_qty || 1,
+          remarks: it.remarks || '',
+          image_url: it.image_url || matchedDish?.image_url || null,
+          price: it.price || matchedDish?.price || null
+        };
+      });
+      setEditDishRows(rows);
+    } else {
+      setEditDishRows([
+        { id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'] }
+      ]);
+    }
+  };
+
+  const handleEditDishRowChange = (id, field, value) => {
+    setEditDishRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  const handleSelectDishEdit = (rowId, dish) => {
+    const units = getItemUnits(dish);
+    const defaultUom = units[0] || 'Piece';
+    const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
+    const dishBarcode = dish.barcode || '';
+
+    setEditDishRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      return {
+        ...r,
+        dish_name: dish.name,
+        item_id: dish.id,
+        sku: dishSku,
+        barcode: dishBarcode,
+        uom: defaultUom,
+        available_units: units,
+        image_url: dish.image_url || null,
+        price: dish.price || null
+      };
+    }));
+  };
+
+  const handleAddEditDishRow = () => {
+    setEditDishRows(prev => [
+      ...prev,
+      { id: Date.now() + Math.random(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'] }
+    ]);
+  };
+
+  const handleRemoveEditDishRow = (rowId) => {
+    if (editDishRows.length <= 1) {
+      toast.error('At least one item is required in the request.');
+      return;
+    }
+    setEditDishRows(prev => prev.filter(r => r.id !== rowId));
+  };
+
+  const handleSaveEditRequest = async (e) => {
+    e.preventDefault();
+    if (!editTransferModal) return;
+
+    const validItems = editDishRows.filter(r => r.dish_name && r.dish_name.trim());
+    if (validItems.length === 0) {
+      toast.error('Please add at least one valid item with dish name.');
+      return;
+    }
+
+    for (const [idx, item] of validItems.entries()) {
+      const q = parseFloat(item.requested_qty);
+      if (isNaN(q) || q <= 0) {
+        toast.error(`Please enter a valid positive quantity for item #${idx + 1} (${item.dish_name}).`);
+        return;
+      }
+      if (!item.uom) {
+        toast.error(`Please select a unit of measurement for item #${idx + 1} (${item.dish_name}).`);
+        return;
+      }
+    }
+
+    if (!editReason || !editReason.trim()) {
+      toast.error('Please enter a brief reason for modifying the request (required for audit log).');
+      return;
+    }
+
+    setSavingEditRequest(true);
+    try {
+      const finalMins = editDeliveryMinutes === 'custom'
+        ? (parseInt(editCustomDeliveryMinutes, 10) || 30)
+        : parseInt(editDeliveryMinutes, 10);
+
+      const res = await axios.put(`/api/internal-branch/transfers/${editTransferModal.id}/edit-request`, {
+        items: validItems,
+        priority: editPriority,
+        delivery_minutes: finalMins,
+        needed_by_time: editNeededByTime || `${finalMins} mins`,
+        notes: editNotes,
+        reason: editReason.trim()
+      });
+
+      // Record local action to avoid duplicate socket toast
+      localActionTransferIdsRef.current.set(`req_mod_${editTransferModal.id}`, Date.now());
+
+      toast.success(`Transfer Request #${editTransferModal.transfer_id} updated successfully!`);
+      setEditTransferModal(null);
+      fetchTransfers();
+      fetchStats();
+      if (detailModalTransfer && detailModalTransfer.id === editTransferModal.id) {
+        setDetailModalTransfer(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to update transfer request:', err);
+      toast.error(err.response?.data?.error || 'Failed to update transfer request');
+    } finally {
+      setSavingEditRequest(false);
+    }
+  };
+
   // Calculate delivery delay helper
   const calculateDelay = (neededTimeStr, receivedAtStr, requestDateStr) => {
     if (!receivedAtStr || !neededTimeStr) return 'N/A';
@@ -2283,6 +2451,18 @@ export default function InternalBranch() {
         >
           <ArrowLeftRight size={18} />
           Transfer Request
+          {stats.sent_active_count > 0 && (
+            <span style={{
+              background: '#2563eb',
+              color: '#fff',
+              fontSize: 11,
+              fontWeight: 800,
+              padding: '2px 7px',
+              borderRadius: 12
+            }}>
+              {stats.sent_active_count}
+            </span>
+          )}
         </button>
 
         {/* Tab 3: Incoming Requests (Destination Branch Fulfills) */}
@@ -2839,7 +3019,8 @@ export default function InternalBranch() {
           TAB 1B: DEDICATED BRANCH TRANSFER REQUEST
       ───────────────────────────────────────────────────────────── */}
       {activeTab === 'transfer_request' && (
-        <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: 24, boxShadow: '0 4px 12px rgba(37,99,235,0.06)' }}>
+        <div>
+          <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: 24, boxShadow: '0 4px 12px rgba(37,99,235,0.06)', marginBottom: 28 }}>
           <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 16, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -3296,7 +3477,378 @@ export default function InternalBranch() {
 
           </form>
         </div>
-      )}
+
+        {/* Active Outgoing / Sent Transfer Requests Section */}
+        <div>
+          <div style={{ marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                  Active Sent Transfer Requests
+                </h2>
+                <span style={{
+                  fontSize: 11.5,
+                  fontWeight: 800,
+                  padding: '3px 9px',
+                  borderRadius: 12,
+                  background: '#dbeafe',
+                  color: '#1d4ed8',
+                  border: '1px solid #bfdbfe'
+                }}>
+                  {transfers.length} In Progress
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
+                Orders requested by <strong>{adminSelectedBranch !== 'All' ? adminSelectedBranch : (user?.branch || 'your branch')}</strong> that are currently active until completed or cancelled.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => fetchTransfers()}
+              style={{
+                padding: '7px 14px',
+                borderRadius: 6,
+                border: '1px solid #cbd5e1',
+                background: '#fff',
+                color: '#475569',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              <RefreshCw size={14} className={loadingTransfers ? 'animate-spin' : ''} /> Refresh Sent Requests
+            </button>
+          </div>
+
+          {loadingTransfers ? (
+            <div style={{ textAlign: 'center', padding: 50, color: '#64748b', background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+              <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 8px', display: 'block', color: '#2563eb' }} />
+              Loading sent transfer requests...
+            </div>
+          ) : transfers.length === 0 ? (
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px dashed #cbd5e1', padding: 44, textAlign: 'center', color: '#64748b' }}>
+              <CheckCircle2 size={40} color="#10b981" style={{ margin: '0 auto 10px' }} />
+              <h3 style={{ margin: '0 0 6px', fontSize: 16, color: '#0f172a' }}>No Active Sent Requests</h3>
+              <p style={{ margin: 0, fontSize: 13 }}>
+                All your previously submitted transfer requests have been completed or cancelled. Submit a new transfer request using the form above.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
+              {transfers.map(t => {
+                const canModify = ['Pending', 'In Progress'].includes(t.status);
+                return (
+                  <div
+                    key={`sent-trf-${t.id}`}
+                    style={{
+                      background: '#fff',
+                      borderRadius: 12,
+                      border: canModify ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+                      padding: 18,
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div>
+                      {/* Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{t.transfer_id}</span>
+                            <span style={{
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              padding: '1.5px 6px',
+                              borderRadius: 4,
+                              background: '#eff6ff',
+                              color: '#1d4ed8',
+                              border: '1px solid #bfdbfe'
+                            }}>
+                              {t.request_type || 'Transfer Request'}
+                            </span>
+                            {t.priority && t.priority !== 'Normal' && (
+                              <span style={{
+                                fontSize: 10.5,
+                                fontWeight: 800,
+                                padding: '1.5px 6px',
+                                borderRadius: 4,
+                                background: t.priority === 'Urgent' ? '#fef2f2' : '#fffbeb',
+                                color: t.priority === 'Urgent' ? '#dc2626' : '#d97706',
+                                border: t.priority === 'Urgent' ? '1px solid #fecaca' : '1px solid #fde68a'
+                              }}>
+                                {t.priority === 'Urgent' ? '🚨 URGENT' : '⚡ HIGH'}
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
+                            {new Date(t.request_date).toLocaleString()}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                          <span style={{
+                            padding: '3px 9px',
+                            borderRadius: 12,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'In Progress' ? '#dbeafe' : (t.status === 'Ready for Dispatch' ? '#f3e8ff' : '#dcfce7')),
+                            color: t.status === 'Pending' ? '#92400e' : (t.status === 'In Progress' ? '#1e40af' : (t.status === 'Ready for Dispatch' ? '#6b21a8' : '#166534'))
+                          }}>
+                            {t.status}
+                          </span>
+                          <DeliveryTimerBadge expectedDeliveryAt={t.expected_delivery_at} status={t.status} />
+                        </div>
+                      </div>
+
+                      {/* Route Summary */}
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 8, marginBottom: 14, fontSize: 12.5 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'center' }}>
+                          <span style={{ color: '#64748b' }}>Origin (You):</span>
+                          <BranchBadge branch={t.from_branch} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'center' }}>
+                          <span style={{ color: '#64748b' }}>Destination (Supplying):</span>
+                          <BranchBadge branch={t.to_branch} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ color: '#64748b' }}>Needed-By Time:</span>
+                          <div>
+                            <strong style={{ color: '#dc2626' }}>{t.needed_by_time || 'ASAP'}</strong>
+                            {(t.total_extended_minutes || 0) > 0 && (
+                              <span style={{ marginLeft: 6, fontSize: 10.5, color: '#d97706', background: '#fef3c7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                +{t.total_extended_minutes}m extended
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {t.purpose && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#64748b' }}>Purpose:</span>
+                            <span style={{ fontWeight: 600 }}>{t.purpose}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Items Preview */}
+                      <div style={{ marginBottom: 14 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 6 }}>
+                          Requested Items ({(t.items || []).length}):
+                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {(t.items || []).slice(0, 3).map(it => (
+                            <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5, padding: '4px 8px', background: '#f1f5f9', borderRadius: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <div style={{ width: 22, height: 22, borderRadius: 3, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                                  {it.image_url ? (
+                                    <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                                  ) : (
+                                    <Utensils size={12} color="#94a3b8" />
+                                  )}
+                                </div>
+                                <span>{it.dish_name}</span>
+                              </div>
+                              <strong>
+                                {it.requested_qty} {it.uom}
+                                {it.confirmed_qty !== null && it.confirmed_qty !== undefined && it.confirmed_qty !== it.requested_qty && (
+                                  <span style={{ fontSize: 10, color: '#ea580c', marginLeft: 4 }}>(Prep: {it.confirmed_qty})</span>
+                                )}
+                              </strong>
+                            </div>
+                          ))}
+                          {(t.items || []).length > 3 && (
+                            <span style={{ fontSize: 11, color: '#64748b', textAlign: 'center', display: 'block' }}>
+                              + {(t.items || []).length - 3} more dishes...
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Extension Request Banner (If Supplying Branch Requested More Time) */}
+                      {t.extension_status === 'Pending' && (
+                        <div style={{
+                          background: '#fffbeb',
+                          border: '1.5px solid #fcd34d',
+                          borderRadius: 8,
+                          padding: '10px 12px',
+                          marginBottom: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 12.5, color: '#92400e' }}>
+                              <Timer size={14} color="#d97706" /> Time Extension Requested: +{t.pending_extension_minutes}m
+                            </div>
+                            <span style={{ fontSize: 11, background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: 4, fontWeight: 700, border: '1px solid #fde68a' }}>
+                              Needs Your Approval
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: '#78350f' }}>
+                            <strong>Reason:</strong> "{t.pending_extension_reason || 'Kitchen preparation delay'}"
+                          </div>
+                          {canReviewExtension(t) && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReviewExtensionModal(t)}
+                              style={{
+                                marginTop: 4,
+                                padding: '6px 12px',
+                                background: '#d97706',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6
+                              }}
+                            >
+                              Review & Decide Extension
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {t.notes && (
+                        <div style={{ fontSize: 11.5, color: '#475569', background: '#f1f5f9', padding: '6px 8px', borderRadius: 4, marginBottom: 12 }}>
+                          <strong>Instructions:</strong> {t.notes}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {canModify ? (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditRequestModal(t)}
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            background: '#2563eb',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: 6,
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 5
+                          }}
+                          title="Modify requested dishes, quantities, or needed-by time"
+                        >
+                          <Edit size={14} /> Modify Request
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            background: '#f1f5f9',
+                            color: '#94a3b8',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 6,
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            cursor: 'not-allowed',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 5
+                          }}
+                          title="Cannot modify after order is dispatched"
+                        >
+                          <Edit size={14} /> Dispatched
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDetailModal(t)}
+                        style={{
+                          padding: '8px 12px',
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: '#334155',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                        title="View complete 16-point transfer details & timeline"
+                      >
+                        <ClipboardList size={14} /> Details
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => printTransferSlip(t)}
+                        style={{
+                          padding: '8px 10px',
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: '#475569',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        title="Print 80mm Transfer Voucher"
+                      >
+                        <Printer size={14} />
+                      </button>
+
+                      {canModify && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelTransfer(t.id, t.transfer_id)}
+                          style={{
+                            padding: '8px 10px',
+                            background: '#fef2f2',
+                            border: '1px solid #fecaca',
+                            borderRadius: 6,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: '#dc2626',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          title="Cancel Transfer Request"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    )}
 
       {/* ─────────────────────────────────────────────────────────────
           TAB 2: INCOMING BRANCH REQUESTS (SUPPLYING BRANCH DISPATCH)
@@ -5846,10 +6398,441 @@ export default function InternalBranch() {
                 <Printer size={15} /> Print Slip
               </button>
 
-              <button type="button" className="btn btn-secondary" onClick={() => setDetailModalTransfer(null)}>
-                Close
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {['Pending', 'In Progress'].includes(detailModalTransfer.status) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const t = detailModalTransfer;
+                      setDetailModalTransfer(null);
+                      handleOpenEditRequestModal(t);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 16px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: '#2563eb',
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      color: '#fff'
+                    }}
+                  >
+                    <Edit size={14} /> Modify Request
+                  </button>
+                )}
+                <button type="button" className="btn btn-secondary" onClick={() => setDetailModalTransfer(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL: MODIFY TRANSFER REQUEST (Before Dispatch)
+      ───────────────────────────────────────────────────────────── */}
+      {editTransferModal && (
+        <div
+          className="modal-overlay"
+          onClick={e => { if (e.target.classList.contains('modal-overlay')) setEditTransferModal(null); }}
+          style={{ zIndex: 9999 }}
+        >
+          <div
+            className="modal"
+            style={{
+              maxWidth: 780,
+              width: '95%',
+              maxHeight: '92vh',
+              background: '#fff',
+              borderRadius: 12,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ flexShrink: 0, background: '#1e40af', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Edit size={18} />
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>
+                    Modify Transfer Request #{editTransferModal.transfer_id}
+                  </h3>
+                </div>
+                <span style={{ fontSize: 12, opacity: 0.9, marginTop: 2, display: 'block' }}>
+                  Origin: <strong>{editTransferModal.from_branch}</strong> ➔ Destination: <strong>{editTransferModal.to_branch}</strong> | Status: <strong>{editTransferModal.status}</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditTransferModal(null)}
+                style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 20 }}
+              >
+                ✕
               </button>
             </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSaveEditRequest} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+                
+                {/* Notice Banner */}
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px', marginBottom: 18, fontSize: 12.5, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertTriangle size={16} color="#2563eb" style={{ flexShrink: 0 }} />
+                  <span>
+                    You can modify dishes, quantities, delivery window, and remarks before the destination branch dispatches this order. An audit log entry will be recorded and destination branch notified.
+                  </span>
+                </div>
+
+                {/* Priority & Delivery Window Row */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 18 }}>
+                  {/* Priority */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
+                      Transfer Priority
+                    </label>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {[
+                        { id: 'Normal', label: 'Normal', bg: '#f1f5f9', activeBg: '#0f172a' },
+                        { id: 'High', label: 'High', bg: '#fffbeb', activeBg: '#d97706' },
+                        { id: 'Urgent', label: '🚨 Urgent', bg: '#fef2f2', activeBg: '#dc2626' }
+                      ].map(p => (
+                        <button
+                          key={`edit-prio-${p.id}`}
+                          type="button"
+                          onClick={() => setEditPriority(p.id)}
+                          style={{
+                            flex: 1,
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            border: editPriority === p.id ? `1.5px solid ${p.activeBg}` : '1px solid #cbd5e1',
+                            background: editPriority === p.id ? p.activeBg : p.bg,
+                            color: editPriority === p.id ? '#fff' : '#475569'
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Delivery Window */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
+                      Delivery Window / Needed-By
+                    </label>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {[15, 30, 45, 60].map(m => (
+                        <button
+                          key={`edit-min-${m}`}
+                          type="button"
+                          onClick={() => {
+                            setEditDeliveryMinutes(m);
+                            const d = new Date(Date.now() + m * 60 * 1000);
+                            const hh = String(d.getHours()).padStart(2, '0');
+                            const mm = String(d.getMinutes()).padStart(2, '0');
+                            setEditNeededByTime(`${hh}:${mm}`);
+                          }}
+                          style={{
+                            padding: '5px 10px',
+                            borderRadius: 6,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            border: editDeliveryMinutes === m ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                            background: editDeliveryMinutes === m ? '#2563eb' : '#fff',
+                            color: editDeliveryMinutes === m ? '#fff' : '#475569'
+                          }}
+                        >
+                          {m}m
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setEditDeliveryMinutes('custom')}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: 6,
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          border: editDeliveryMinutes === 'custom' ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                          background: editDeliveryMinutes === 'custom' ? '#2563eb' : '#fff',
+                          color: editDeliveryMinutes === 'custom' ? '#fff' : '#475569'
+                        }}
+                      >
+                        Custom
+                      </button>
+                    </div>
+                    {editDeliveryMinutes === 'custom' && (
+                      <input
+                        type="number"
+                        min="5"
+                        max="720"
+                        placeholder="Minutes (e.g. 90)"
+                        value={editCustomDeliveryMinutes}
+                        onChange={e => {
+                          setEditCustomDeliveryMinutes(e.target.value);
+                          const m = parseInt(e.target.value, 10);
+                          if (!isNaN(m) && m > 0) {
+                            const d = new Date(Date.now() + m * 60 * 1000);
+                            const hh = String(d.getHours()).padStart(2, '0');
+                            const mm = String(d.getMinutes()).padStart(2, '0');
+                            setEditNeededByTime(`${hh}:${mm}`);
+                          }
+                        }}
+                        style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Items Section Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                      Requested Dishes & Items ({editDishRows.length})
+                    </h4>
+                    <span style={{ fontSize: 11.5, color: '#64748b' }}>
+                      Adjust dishes, quantities or UOM.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMenuBrowser(true);
+                      if (!dishes || dishes.length === 0) fetchDishes();
+                    }}
+                    style={{
+                      background: '#eff6ff',
+                      border: '1px solid #3b82f6',
+                      borderRadius: 6,
+                      padding: '5px 12px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: '#1d4ed8',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <BookOpen size={14} /> Open Menu Items
+                  </button>
+                </div>
+
+                {/* Edit Dish Rows List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflow: 'visible', position: 'relative', marginBottom: 14 }}>
+                  {editDishRows.map((row, idx) => {
+                    const rowUnits = row.available_units && row.available_units.length > 0
+                      ? row.available_units
+                      : ['Piece', 'Half', 'Full', 'Regular', 'Large', 'Kg'];
+
+                    return (
+                      <div
+                        key={row.id}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(260px, 3.2fr) minmax(110px, 1.2fr) minmax(90px, 1fr) minmax(130px, 1.4fr) 36px',
+                          gap: 10,
+                          alignItems: 'center',
+                          background: '#f8fafc',
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
+                          position: 'relative',
+                          zIndex: 100 - idx
+                        }}
+                      >
+                        {/* Dish Search Dropdown */}
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
+                            Item #{idx + 1}
+                          </span>
+                          <DishSearchDropdown
+                            value={row.dish_name}
+                            imageUrl={row.image_url}
+                            dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
+                            onSelect={(dish) => handleSelectDishEdit(row.id, dish)}
+                          />
+                        </div>
+
+                        {/* Dynamic UOM */}
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
+                            Unit (UOM)
+                          </span>
+                          <select
+                            value={row.uom || rowUnits[0]}
+                            onChange={e => handleEditDishRowChange(row.id, 'uom', e.target.value)}
+                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff' }}
+                          >
+                            {rowUnits.map(u => (
+                              <option key={u} value={u}>{u}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Requested Qty */}
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
+                            Qty *
+                          </span>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.1"
+                            placeholder="Qty"
+                            value={row.requested_qty}
+                            onChange={e => handleEditDishRowChange(row.id, 'requested_qty', e.target.value)}
+                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 700, textAlign: 'center' }}
+                          />
+                        </div>
+
+                        {/* Remarks */}
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
+                            Remarks
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="e.g. Crate / fresh"
+                            value={row.remarks || ''}
+                            onChange={e => handleEditDishRowChange(row.id, 'remarks', e.target.value)}
+                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                          />
+                        </div>
+
+                        {/* Delete row */}
+                        <div style={{ paddingTop: 16 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEditDishRow(row.id)}
+                            disabled={editDishRows.length <= 1}
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 6,
+                              border: '1px solid #fee2e2',
+                              background: editDishRows.length <= 1 ? '#f8fafc' : '#fef2f2',
+                              color: editDishRows.length <= 1 ? '#cbd5e1' : '#dc2626',
+                              cursor: editDishRows.length <= 1 ? 'not-allowed' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                            title="Remove item"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* + Add Another Item button */}
+                <div style={{ marginBottom: 18 }}>
+                  <button
+                    type="button"
+                    onClick={handleAddEditDishRow}
+                    style={{
+                      width: '100%',
+                      padding: '9px 14px',
+                      borderRadius: 8,
+                      border: '1.5px dashed #2563eb',
+                      background: '#eff6ff',
+                      color: '#1d4ed8',
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <PlusCircle size={15} /> + Add Another Item
+                  </button>
+                </div>
+
+                {/* Transfer Notes */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    General Transfer Notes / Dispatch Instructions
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editNotes}
+                    onChange={e => setEditNotes(e.target.value)}
+                    placeholder="Updated dispatch instructions..."
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+                  />
+                </div>
+
+                {/* Mandatory Modification Reason */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
+                    Reason for Modifying Request <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Guest headcount increased, need extra 5 plates"
+                    value={editReason}
+                    onChange={e => setEditReason(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1.5px solid #2563eb', fontSize: 13, background: '#fff' }}
+                  />
+                  <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+                    Required for the audit log and destination branch notification.
+                  </span>
+                </div>
+
+              </div>
+
+              {/* Modal Footer */}
+              <div style={{ flexShrink: 0, borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setEditTransferModal(null)}
+                  disabled={savingEditRequest}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingEditRequest}
+                  style={{
+                    padding: '9px 20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 13,
+                    fontWeight: 700
+                  }}
+                >
+                  {savingEditRequest ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" /> Saving Changes...
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} /> Save & Update Request
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -5991,7 +6974,8 @@ export default function InternalBranch() {
                   gap: 14
                 }}>
                   {filteredBrowserDishes.map(d => {
-                    const existingRow = newDishRows.find(r => r.item_id === d.id || (r.dish_name && r.dish_name.toLowerCase() === d.name.toLowerCase()));
+                    const targetRows = editTransferModal ? editDishRows : (activeTab === 'transfer_request' ? trfDishRows : newDishRows);
+                    const existingRow = targetRows.find(r => r.item_id === d.id || (r.dish_name && r.dish_name.toLowerCase() === d.name.toLowerCase()));
                     const isAdded = Boolean(existingRow && existingRow.dish_name);
 
                     return (
@@ -6119,7 +7103,7 @@ export default function InternalBranch() {
             {/* Footer */}
             <div style={{ padding: '14px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', flexWrap: 'wrap', gap: 10 }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                <strong>{newDishRows.filter(r => r.dish_name.trim()).length}</strong> dishes currently in transfer request
+                <strong>{(editTransferModal ? editDishRows : (activeTab === 'transfer_request' ? trfDishRows : newDishRows)).filter(r => r.dish_name && r.dish_name.trim()).length}</strong> dishes currently in transfer request
               </span>
               <button
                 type="button"

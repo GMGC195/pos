@@ -406,6 +406,27 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       if (!status || status === 'All') {
         query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')`;
       }
+    } else if (tab === 'sent_requests' || tab === 'sent') {
+      // Sent Requests: Dedicated section for the requesting branch tracking its sent requests until completed
+      if (targetBranch) {
+        params.push(targetBranch);
+        query += ` AND t.from_branch = $${params.length}`;
+      } else if (!superUser && userBranch && userBranch !== 'All') {
+        params.push(userBranch);
+        query += ` AND t.from_branch = $${params.length}`;
+      }
+
+      // Supplying branch filter (To Branch)
+      const supplyingBranch = received_by || to_branch;
+      if (supplyingBranch && supplyingBranch !== 'All') {
+        params.push(supplyingBranch);
+        query += ` AND t.to_branch = $${params.length}`;
+      }
+
+      // Active / in-progress until completed:
+      if (!status || status === 'All') {
+        query += ` AND t.status NOT IN ('Completed', 'Cancelled')`;
+      }
     } else {
       // Master Logs & General Tab: Role isolation
       if (!superUser && userBranch && userBranch !== 'All') {
@@ -1623,6 +1644,154 @@ router.put('/transfers/:id/cancel', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/internal-branch/transfers/:id/edit-request - Requesting branch modifies items, quantities, or details before dispatch
+router.put('/transfers/:id/edit-request', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { items, priority, delivery_minutes, needed_by_time, notes, reason } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'At least one dish or item is required.' });
+    }
+
+    // Validate items
+    for (const [idx, item] of items.entries()) {
+      if (!item.dish_name || !item.dish_name.trim()) {
+        return res.status(400).json({ error: `Dish name is required for row #${idx + 1}.` });
+      }
+      const qty = parseFloat(item.requested_qty);
+      if (isNaN(qty) || qty <= 0) {
+        return res.status(400).json({ error: `Quantity for "${item.dish_name}" must be a positive number.` });
+      }
+      if (!item.uom) {
+        return res.status(400).json({ error: `Unit of Measurement is required for "${item.dish_name}".` });
+      }
+    }
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+
+    // Cannot modify if already dispatched, completed, or cancelled
+    if (['Dispatched', 'In-Transit', 'Partially Received', 'Fully Received', 'Completed', 'Cancelled'].includes(transfer.status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Cannot modify transfer in '${transfer.status}' status. Only Pending or In Progress requests can be modified.` });
+    }
+
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.from_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Unauthorized. Only the originating requesting branch can modify this request.' });
+    }
+
+    // Retrieve previous items for audit log
+    const prevItemsRes = await client.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [transfer.id]);
+    const prevItems = prevItemsRes.rows;
+
+    // Remove existing items and insert updated items
+    await client.query(`DELETE FROM internal_branch_transfer_items WHERE transfer_id = $1`, [transfer.id]);
+
+    const insertedItems = [];
+    for (const item of items) {
+      const itemSku = (item.sku && String(item.sku).trim()) || (item.short_code && String(item.short_code).trim()) || (item.item_id ? `SKU-${item.item_id}` : null);
+      const itemBarcode = (item.barcode && String(item.barcode).trim()) || null;
+      const reqQty = parseFloat(item.requested_qty);
+
+      const itemRes = await client.query(`
+        INSERT INTO internal_branch_transfer_items (
+          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING *
+      `, [
+        transfer.id,
+        item.item_id || null,
+        item.dish_name.trim(),
+        item.uom.trim(),
+        reqQty,
+        reqQty,
+        item.remarks ? item.remarks.trim() : null,
+        item.image_url || null,
+        item.price ? parseFloat(item.price) : null,
+        itemSku,
+        itemBarcode
+      ]);
+      insertedItems.push(itemRes.rows[0]);
+    }
+
+    // Update transfer metadata
+    const finalPriority = priority || transfer.priority || 'Normal';
+    const finalDeliveryMins = delivery_minutes !== undefined ? (parseInt(delivery_minutes, 10) || 30) : transfer.delivery_minutes;
+    const finalNeededBy = needed_by_time || (delivery_minutes ? `${finalDeliveryMins} mins` : transfer.needed_by_time);
+    const finalNotes = notes !== undefined ? notes : transfer.notes;
+
+    const updateTransferRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET priority = $1,
+          delivery_minutes = $2,
+          needed_by_time = $3,
+          notes = $4,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+      RETURNING *
+    `, [finalPriority, finalDeliveryMins, finalNeededBy, finalNotes, transfer.id]);
+
+    const updatedTransfer = updateTransferRes.rows[0];
+
+    // Audit log
+    const prevSummary = prevItems.map(p => `${p.dish_name} (${p.requested_qty} ${p.uom})`).join(', ');
+    const newSummary = insertedItems.map(n => `${n.dish_name} (${n.requested_qty} ${n.uom})`).join(', ');
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'REQUEST_MODIFIED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: prevSummary,
+      newValue: newSummary,
+      reason: reason || 'Items / quantities adjusted by requesting branch',
+      details: `Request items updated. Prev: [${prevSummary}] ➔ New: [${newSummary}]. Reason: ${reason || 'N/A'}`,
+      metadata: { previousItems: prevItems, updatedItems: insertedItems }
+    });
+
+    // Notify supplying branch
+    await createBranchNotification(client, {
+      targetBranch: transfer.to_branch,
+      message: `✏️ Transfer Request #${transfer.transfer_id} items were updated by ${transfer.from_branch}. Reason: ${reason || 'Quantity adjustment'}.`,
+      type: 'INTERNAL_TRANSFER_REQUEST_MODIFIED'
+    });
+
+    await client.query('COMMIT');
+
+    const responsePayload = {
+      ...updatedTransfer,
+      items: insertedItems
+    };
+
+    if (req.io) {
+      req.io.emit('internal_transfer_updated', responsePayload);
+      req.io.emit('internal_transfer_request_modified', responsePayload);
+    }
+
+    res.json(responsePayload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error modifying transfer request:', err);
+    res.status(500).json({ error: err.message || 'Failed to modify transfer request' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/internal-branch/stats - Summary counts for badges and overview
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
@@ -1678,10 +1847,27 @@ router.get('/stats', authenticateToken, async (req, res) => {
       pendingReceivalsCount = parseInt(countsRes.rows[0]?.dispatched_count || 0, 10);
     }
 
+    // Sent active count for badge (Orders sent by active branch that are active until completed)
+    let sentActiveCount = 0;
+    if (targetBranch) {
+      const sentRes = await pool.query(`
+        SELECT COUNT(*) as count FROM internal_branch_transfers
+        WHERE from_branch = $1 AND status NOT IN ('Completed', 'Cancelled')
+      `, [targetBranch]);
+      sentActiveCount = parseInt(sentRes.rows[0]?.count || 0, 10);
+    } else {
+      const sentRes = await pool.query(`
+        SELECT COUNT(*) as count FROM internal_branch_transfers
+        WHERE status NOT IN ('Completed', 'Cancelled')
+      `);
+      sentActiveCount = parseInt(sentRes.rows[0]?.count || 0, 10);
+    }
+
     res.json({
       ...countsRes.rows[0],
       incoming_pending_count: incomingPendingCount,
-      pending_receivals_count: pendingReceivalsCount
+      pending_receivals_count: pendingReceivalsCount,
+      sent_active_count: sentActiveCount
     });
   } catch (err) {
     console.error('Error fetching transfer stats:', err);
