@@ -79,31 +79,121 @@ router.get('/branches', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/internal-branch/dishes - Centralized menu dishes from items
+// GET /api/internal-branch/dishes - Centralized menu dishes with smart popularity ranking (fail-safe)
 router.get('/dishes', authenticateToken, async (req, res) => {
   try {
     const { search } = req.query;
-    let query = `
-      SELECT i.id, i.name, i.price, i.image_url, i.available_branches, i.size_options,
-        COALESCE(
-          (SELECT json_agg(c.name) FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = i.id),
-          '[]'::json
-        ) as category_names
-      FROM items i 
-      WHERE i.name IS NOT NULL AND TRIM(i.name) != ''
-    `;
-    const params = [];
-    if (search && search.trim()) {
-      params.push(`%${search.trim()}%`);
-      query += ` AND i.name ILIKE $${params.length}`;
-    }
-    query += ` ORDER BY i.name ASC LIMIT 500`;
 
-    const result = await pool.query(query, params);
-    res.json(result.rows);
+    // 1. Try popularity-enriched query
+    try {
+      let query = `
+        SELECT 
+          i.id, 
+          i.name, 
+          i.price, 
+          i.image_url, 
+          i.available_branches, 
+          i.size_options,
+          COALESCE(
+            (SELECT json_agg(c.name) FROM categories c JOIN item_categories ic ON c.id = ic.category_id WHERE ic.item_id = i.id),
+            (SELECT json_agg(c.name) FROM categories c WHERE c.id = i.category_id),
+            '[]'::json
+          ) as category_names,
+          COALESCE(pop.request_count, 0) as request_count,
+          COALESCE(pop.total_requested_qty, 0) as total_requested_qty
+        FROM items i 
+        LEFT JOIN (
+          SELECT 
+            COALESCE(ti.item_id, 0) as item_id,
+            LOWER(TRIM(ti.dish_name)) as dish_name_clean,
+            COUNT(*)::int as request_count,
+            SUM(COALESCE(ti.requested_qty, 1))::float as total_requested_qty
+          FROM internal_branch_transfer_items ti
+          WHERE ti.dish_name IS NOT NULL AND TRIM(ti.dish_name) != ''
+          GROUP BY ti.item_id, LOWER(TRIM(ti.dish_name))
+        ) pop ON (i.id = pop.item_id OR LOWER(TRIM(i.name)) = pop.dish_name_clean)
+        WHERE i.name IS NOT NULL AND TRIM(i.name) != ''
+      `;
+      const params = [];
+      if (search && search.trim()) {
+        params.push(`%${search.trim()}%`);
+        query += ` AND i.name ILIKE $${params.length}`;
+      }
+      query += ` ORDER BY COALESCE(pop.request_count, 0) DESC, COALESCE(pop.total_requested_qty, 0) DESC, i.name ASC LIMIT 500`;
+
+      const result = await pool.query(query, params);
+      return res.json(result.rows);
+    } catch (innerErr) {
+      console.warn('Popularity query fallback for dishes:', innerErr.message);
+      // 2. Safe fallback query without transfer items table or item_categories
+      let fallbackQuery = `
+        SELECT 
+          i.id, 
+          i.name, 
+          i.price, 
+          i.image_url, 
+          i.available_branches, 
+          i.size_options,
+          COALESCE(
+            (SELECT json_agg(c.name) FROM categories c WHERE c.id = i.category_id),
+            '[]'::json
+          ) as category_names,
+          0 as request_count,
+          0 as total_requested_qty
+        FROM items i
+        WHERE i.name IS NOT NULL AND TRIM(i.name) != ''
+      `;
+      const fallbackParams = [];
+      if (search && search.trim()) {
+        fallbackParams.push(`%${search.trim()}%`);
+        fallbackQuery += ` AND i.name ILIKE $${fallbackParams.length}`;
+      }
+      fallbackQuery += ` ORDER BY i.name ASC LIMIT 500`;
+
+      const fallbackResult = await pool.query(fallbackQuery, fallbackParams);
+      return res.json(fallbackResult.rows);
+    }
   } catch (err) {
     console.error('Error fetching dishes:', err);
     res.status(500).json({ error: 'Failed to fetch dishes' });
+  }
+});
+
+// GET /api/internal-branch/product-popularity - Fast lookup map of frequently requested dishes
+router.get('/product-popularity', authenticateToken, async (req, res) => {
+  try {
+    let popRes = { rows: [] };
+    try {
+      popRes = await pool.query(`
+        SELECT 
+          COALESCE(ti.item_id, 0) as item_id,
+          LOWER(TRIM(ti.dish_name)) as dish_name_clean,
+          COUNT(*)::int as request_count,
+          COALESCE(SUM(ti.requested_qty), 0)::float as total_requested_qty
+        FROM internal_branch_transfer_items ti
+        WHERE ti.dish_name IS NOT NULL AND TRIM(ti.dish_name) != ''
+        GROUP BY ti.item_id, LOWER(TRIM(ti.dish_name))
+        ORDER BY request_count DESC, total_requested_qty DESC
+      `);
+    } catch (tblErr) {
+      console.warn('internal_branch_transfer_items not ready for popularity, returning empty map:', tblErr.message);
+    }
+
+    const byId = {};
+    const byName = {};
+    for (const r of popRes.rows) {
+      const data = {
+        request_count: r.request_count,
+        total_requested_qty: r.total_requested_qty
+      };
+      if (r.item_id) byId[r.item_id] = data;
+      if (r.dish_name_clean) byName[r.dish_name_clean] = data;
+    }
+
+    res.json({ by_id: byId, by_name: byName });
+  } catch (err) {
+    console.error('Error fetching product popularity:', err);
+    res.json({ by_id: {}, by_name: {} });
   }
 });
 
@@ -559,7 +649,7 @@ router.get('/transfers', authenticateToken, async (req, res) => {
 
     query += `
       GROUP BY t.id
-      ORDER BY t.request_date DESC
+      ORDER BY COALESCE(t.created_at, t.request_date) DESC, t.id DESC
       LIMIT 300
     `;
 

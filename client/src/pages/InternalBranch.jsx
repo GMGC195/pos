@@ -347,11 +347,127 @@ function BranchBadge({ branch, isExternal = false }) {
   );
 }
 
-// Clean Searchable Dish Dropdown with Image Thumbnail
-function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
+// Clean, consistently aligned single-row Due By Badge with extension indicator
+function DueByBadge({ neededByTime, totalExtendedMinutes, compact = false }) {
+  const displayTime = neededByTime || 'ASAP';
+  const hasExtension = (totalExtendedMinutes || 0) > 0;
+
+  return (
+    <div style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      whiteSpace: 'nowrap',
+      flexWrap: 'nowrap',
+      maxWidth: '100%',
+      verticalAlign: 'middle'
+    }}>
+      <span style={{
+        fontSize: compact ? 11 : 12,
+        fontWeight: 700,
+        color: '#dc2626',
+        background: '#fef2f2',
+        border: '1px solid #fecaca',
+        padding: compact ? '1.5px 6px' : '2px 8px',
+        borderRadius: 6,
+        whiteSpace: 'nowrap',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4
+      }}>
+        <Clock size={compact ? 11 : 12} color="#dc2626" />
+        {displayTime}
+      </span>
+      {hasExtension && (
+        <span style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          color: '#b45309',
+          background: '#fef3c7',
+          border: '1px solid #fde68a',
+          padding: '1.5px 6px',
+          borderRadius: 4,
+          whiteSpace: 'nowrap'
+        }}>
+          +{totalExtendedMinutes}m
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Consistent Priority Badge Component across all views
+function PriorityBadge({ priority }) {
+  const p = priority || 'Normal';
+  if (p === 'Urgent') {
+    return (
+      <span style={{
+        fontSize: 11,
+        fontWeight: 800,
+        padding: '2px 7px',
+        borderRadius: 4,
+        background: '#fef2f2',
+        color: '#dc2626',
+        border: '1px solid #fca5a5',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        whiteSpace: 'nowrap'
+      }}>
+        🚨 Urgent Rush
+      </span>
+    );
+  }
+  if (p === 'High') {
+    return (
+      <span style={{
+        fontSize: 11,
+        fontWeight: 800,
+        padding: '2px 7px',
+        borderRadius: 4,
+        background: '#fffbeb',
+        color: '#d97706',
+        border: '1px solid #fde68a',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        whiteSpace: 'nowrap'
+      }}>
+        ⚡ High Priority
+      </span>
+    );
+  }
+  return (
+    <span style={{
+      fontSize: 11,
+      fontWeight: 700,
+      padding: '2px 7px',
+      borderRadius: 4,
+      background: '#f1f5f9',
+      color: '#475569',
+      border: '1px solid #cbd5e1',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      whiteSpace: 'nowrap'
+    }}>
+      Normal
+    </span>
+  );
+}
+
+// Clean Searchable Dish Dropdown with Smart Popularity Ranking, Image Thumbnail & Ultra-High Z-Index
+function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSelect, onOpenChange }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState(value || '');
   const containerRef = useRef(null);
+
+  const setOpenState = (open) => {
+    setIsOpen(open);
+    if (typeof onOpenChange === 'function') {
+      onOpenChange(open);
+    }
+  };
 
   useEffect(() => {
     setSearchTerm(value || '');
@@ -360,7 +476,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
   useEffect(() => {
     function handleClickOutside(event) {
       if (containerRef.current && !containerRef.current.contains(event.target)) {
-        setIsOpen(false);
+        setOpenState(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -371,16 +487,66 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
 
   const filteredDishes = useMemo(() => {
     const term = (searchTerm || '').trim().toLowerCase();
-    if (!term) return safeDishes.slice(0, 80);
-    return safeDishes.filter(d => {
-      if (!d) return false;
-      const name = String(d.name || d.dish_name || '').toLowerCase();
-      return name.includes(term);
+
+    // Attach popularity counts from dish or external map
+    const enriched = safeDishes.map(d => {
+      if (!d) return null;
+      const cleanName = String(d.name || d.dish_name || '').trim().toLowerCase();
+      const popData = (popularityMap?.by_id && d.id ? popularityMap.by_id[d.id] : null) ||
+                      (popularityMap?.by_name ? popularityMap.by_name[cleanName] : null);
+      const reqCount = d.request_count !== undefined ? d.request_count : (popData?.request_count || 0);
+      const reqQty = d.total_requested_qty !== undefined ? d.total_requested_qty : (popData?.total_requested_qty || 0);
+      return {
+        ...d,
+        request_count: reqCount,
+        total_requested_qty: reqQty
+      };
+    }).filter(Boolean);
+
+    // Filter by query
+    const matching = !term
+      ? enriched
+      : enriched.filter(d => {
+          const name = String(d.name || d.dish_name || '').toLowerCase();
+          const sku = String(d.sku || d.short_code || '').toLowerCase();
+          const barcode = String(d.barcode || '').toLowerCase();
+          return name.includes(term) || (sku && sku.includes(term)) || (barcode && barcode.includes(term));
+        });
+
+    // Intelligent sorting:
+    // 1. Exact name match
+    // 2. Starts with query
+    // 3. Historical popularity score: (request_count * 10 + total_requested_qty)
+    // 4. Alphabetical fallback
+    return matching.sort((a, b) => {
+      const nameA = String(a.name || a.dish_name || '').toLowerCase();
+      const nameB = String(b.name || b.dish_name || '').toLowerCase();
+
+      if (term) {
+        const exactA = nameA === term;
+        const exactB = nameB === term;
+        if (exactA && !exactB) return -1;
+        if (!exactA && exactB) return 1;
+
+        const startsA = nameA.startsWith(term);
+        const startsB = nameB.startsWith(term);
+        if (startsA && !startsB) return -1;
+        if (!startsA && startsB) return 1;
+      }
+
+      const scoreA = ((a.request_count || 0) * 10) + (a.total_requested_qty || 0);
+      const scoreB = ((b.request_count || 0) * 10) + (b.total_requested_qty || 0);
+
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA;
+      }
+
+      return nameA.localeCompare(nameB);
     }).slice(0, 80);
-  }, [safeDishes, searchTerm]);
+  }, [safeDishes, searchTerm, popularityMap]);
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', zIndex: isOpen ? 9999 : 'auto' }}>
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', zIndex: isOpen ? 999999 : 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Selected Thumbnail preview */}
         <div
@@ -415,14 +581,14 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
           <input
             type="text"
             required
-            placeholder="Search menu dish..."
+            placeholder="Search menu dish (popular items prioritized)..."
             value={searchTerm}
-            onFocus={() => setIsOpen(true)}
-            onClick={() => setIsOpen(true)}
+            onFocus={() => setOpenState(true)}
+            onClick={() => setOpenState(true)}
             onChange={(e) => {
               const val = e.target.value;
               setSearchTerm(val);
-              setIsOpen(true);
+              setOpenState(true);
               const found = safeDishes.find(d => {
                 const name = String(d?.name || d?.dish_name || '').toLowerCase();
                 return name === val.toLowerCase();
@@ -437,7 +603,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
               width: '100%',
               padding: '9px 12px',
               borderRadius: 6,
-              border: isOpen ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+              border: isOpen ? '2px solid #2563eb' : '1px solid #cbd5e1',
               fontSize: 13,
               fontWeight: 600,
               outline: 'none',
@@ -447,7 +613,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
         </div>
       </div>
 
-      {/* Clean Dropdown: Product Thumbnail + Dish Name only (No price or descriptions) */}
+      {/* Floating Dropdown with Ultra-High Z-Index & Elevation */}
       {isOpen && (
         <div
           style={{
@@ -455,13 +621,13 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
             top: 'calc(100% + 4px)',
             left: 0,
             right: 0,
-            maxHeight: 260,
+            maxHeight: 280,
             overflowY: 'auto',
             background: '#ffffff',
             borderRadius: 8,
-            border: '1.5px solid #2563eb',
-            boxShadow: '0 14px 30px -4px rgba(0,0,0,0.22), 0 8px 16px -4px rgba(0,0,0,0.12)',
-            zIndex: 99999
+            border: '2px solid #2563eb',
+            boxShadow: '0 20px 45px -4px rgba(0,0,0,0.35), 0 10px 20px -4px rgba(0,0,0,0.2)',
+            zIndex: 9999999
           }}
         >
           {filteredDishes.length === 0 ? (
@@ -471,17 +637,17 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
           ) : (
             filteredDishes.map((dish) => (
               <div
-                key={dish.id}
+                key={dish.id || dish.name}
                 onMouseDown={() => {
                   setSearchTerm(dish.name);
                   onSelect(dish);
-                  setIsOpen(false);
+                  setOpenState(false);
                 }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 10,
-                  padding: '7px 12px',
+                  padding: '8px 12px',
                   cursor: 'pointer',
                   borderBottom: '1px solid #f1f5f9',
                   transition: 'background 0.15s ease'
@@ -489,7 +655,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
                 onMouseEnter={(e) => { e.currentTarget.style.background = '#f0f9ff'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
-                {/* Small product thumbnail (optional) */}
+                {/* Product thumbnail */}
                 <div
                   style={{
                     width: 28,
@@ -516,10 +682,30 @@ function DishSearchDropdown({ value, imageUrl, dishes, onSelect }) {
                   )}
                 </div>
 
-                {/* Only Menu Item Name: NO price, NO description */}
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>
-                  {dish.name}
-                </span>
+                {/* Dish Name + Popularity Badge */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, minWidth: 0, gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {dish.name}
+                  </span>
+                  {dish.request_count > 0 && (
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#b45309',
+                      background: '#fffbeb',
+                      border: '1px solid #fef3c7',
+                      padding: '1.5px 6px',
+                      borderRadius: 10,
+                      whiteSpace: 'nowrap',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 3,
+                      flexShrink: 0
+                    }}>
+                      🔥 {dish.request_count}x requested
+                    </span>
+                  )}
+                </div>
               </div>
             ))
           )}
@@ -538,13 +724,15 @@ export default function InternalBranch() {
   // POS Menu System integration
   const { items: posItems, categories: posCategories, loadData: reloadPOSData } = usePOS();
 
-  // Active Tab
-  const [activeTab, setActiveTab] = useState('new'); // 'new' | 'incoming' | 'receivals' | 'logs'
+  // Active Tab - default to transfer_request so latest requests appear right away
+  const [activeTab, setActiveTab] = useState('transfer_request'); // 'transfer_request' | 'new' | 'incoming' | 'receivals' | 'logs'
+  const [openDropdownRowId, setOpenDropdownRowId] = useState(null);
 
   // Branches & Menu Items
   const [branches, setBranches] = useState(INITIAL_BRANCHES);
   const [dishes, setDishes] = useState(() => (Array.isArray(posItems) && posItems.length > 0 ? posItems : []));
   const [loadingDishes, setLoadingDishes] = useState(false);
+  const [popularityMap, setPopularityMap] = useState({ by_id: {}, by_name: {} });
 
   // Sync dishes whenever POSContext items update
   useEffect(() => {
@@ -552,6 +740,15 @@ export default function InternalBranch() {
       setDishes(posItems);
     }
   }, [posItems]);
+
+  // Load product popularity ranking from backend
+  useEffect(() => {
+    axios.get('/api/internal-branch/product-popularity')
+      .then(res => {
+        if (res.data) setPopularityMap(res.data);
+      })
+      .catch(err => console.warn('Could not load product popularity map:', err));
+  }, []);
 
   // Stats / Badges
   const [stats, setStats] = useState({
@@ -570,6 +767,45 @@ export default function InternalBranch() {
   // Transfers List
   const [transfers, setTransfers] = useState([]);
   const [loadingTransfers, setLoadingTransfers] = useState(false);
+
+  // Fast Filters for Sent Transfer Requests
+  const [sentSearchQuery, setSentSearchQuery] = useState('');
+  const [sentFilterBranch, setSentFilterBranch] = useState('All');
+  const [sentFilterPriority, setSentFilterPriority] = useState('All');
+
+  // Sorted and filtered active sent transfer requests (LATEST REQUESTS FIRST)
+  const filteredSentTransfers = useMemo(() => {
+    let list = [...transfers];
+
+    // Always sort latest requests first
+    list.sort((a, b) => {
+      const timeA = new Date(a.created_at || a.request_date).getTime();
+      const timeB = new Date(b.created_at || b.request_date).getTime();
+      if (timeB !== timeA) return timeB - timeA;
+      return (b.id || 0) - (a.id || 0);
+    });
+
+    if (sentFilterBranch !== 'All') {
+      list = list.filter(t => (t.to_branch || '').toLowerCase() === sentFilterBranch.toLowerCase());
+    }
+
+    if (sentFilterPriority !== 'All') {
+      list = list.filter(t => (t.priority || 'Normal').toLowerCase() === sentFilterPriority.toLowerCase());
+    }
+
+    if (sentSearchQuery && sentSearchQuery.trim()) {
+      const q = sentSearchQuery.trim().toLowerCase();
+      list = list.filter(t => {
+        const idMatch = String(t.transfer_id || t.id || '').toLowerCase().includes(q);
+        const toMatch = String(t.to_branch || '').toLowerCase().includes(q);
+        const notesMatch = String(t.notes || '').toLowerCase().includes(q);
+        const itemMatch = (t.items || []).some(it => String(it.dish_name || '').toLowerCase().includes(q));
+        return idMatch || toMatch || notesMatch || itemMatch;
+      });
+    }
+
+    return list;
+  }, [transfers, sentFilterBranch, sentFilterPriority, sentSearchQuery]);
 
   // Admin Branch Switcher & Activity Filter
   const [adminSelectedBranch, setAdminSelectedBranch] = useState('All');
@@ -749,10 +985,11 @@ export default function InternalBranch() {
   const filteredBrowserDishes = useMemo(() => {
     const list = Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : []);
     const searchLower = (menuBrowserSearch || '').trim().toLowerCase();
-    return list.filter(d => {
+    const matching = list.filter(d => {
       if (!d) return false;
       const name = String(d.name || d.dish_name || '').toLowerCase();
-      const matchSearch = !searchLower || name.includes(searchLower);
+      const sku = String(d.sku || d.short_code || '').toLowerCase();
+      const matchSearch = !searchLower || name.includes(searchLower) || sku.includes(searchLower);
       
       const itemCats = Array.isArray(d.category_names)
         ? d.category_names
@@ -761,7 +998,31 @@ export default function InternalBranch() {
       const matchCat = menuBrowserCategory === 'All' || itemCats.some(c => String(c).trim().toLowerCase() === menuBrowserCategory.trim().toLowerCase());
       return matchSearch && matchCat;
     });
-  }, [dishes, posItems, menuBrowserSearch, menuBrowserCategory]);
+
+    // Intelligent sorting: Frequently requested products appear first!
+    return matching.sort((a, b) => {
+      const cleanA = String(a.name || a.dish_name || '').trim().toLowerCase();
+      const cleanB = String(b.name || b.dish_name || '').trim().toLowerCase();
+
+      const popA = (popularityMap?.by_id && a.id ? popularityMap.by_id[a.id] : null) ||
+                   (popularityMap?.by_name ? popularityMap.by_name[cleanA] : null);
+      const popB = (popularityMap?.by_id && b.id ? popularityMap.by_id[b.id] : null) ||
+                   (popularityMap?.by_name ? popularityMap.by_name[cleanB] : null);
+
+      const countA = a.request_count !== undefined ? a.request_count : (popA?.request_count || 0);
+      const countB = b.request_count !== undefined ? b.request_count : (popB?.request_count || 0);
+      const qtyA = a.total_requested_qty !== undefined ? a.total_requested_qty : (popA?.total_requested_qty || 0);
+      const qtyB = b.total_requested_qty !== undefined ? b.total_requested_qty : (popB?.total_requested_qty || 0);
+
+      const scoreA = (countA * 10) + qtyA;
+      const scoreB = (countB * 10) + qtyB;
+
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA;
+      }
+      return cleanA.localeCompare(cleanB);
+    });
+  }, [dishes, posItems, menuBrowserSearch, menuBrowserCategory, popularityMap]);
 
   const handleAddDishFromBrowser = (dish) => {
     const units = getItemUnits(dish);
@@ -770,8 +1031,7 @@ export default function InternalBranch() {
     const dishBarcode = dish.barcode || '';
 
     const isEdit = Boolean(editTransferModal);
-    const isTrf = activeTab === 'transfer_request';
-    const setRows = isEdit ? setEditDishRows : (isTrf ? setTrfDishRows : setNewDishRows);
+    const setRows = isEdit ? setEditDishRows : setTrfDishRows;
 
     setRows(prev => {
       if (prev.length === 1 && (!prev[0].dish_name || !prev[0].dish_name.trim())) {
@@ -815,8 +1075,7 @@ export default function InternalBranch() {
 
   const handleUpdateQtyFromBrowser = (dish, delta) => {
     const isEdit = Boolean(editTransferModal);
-    const isTrf = activeTab === 'transfer_request';
-    const setRows = isEdit ? setEditDishRows : (isTrf ? setTrfDishRows : setNewDishRows);
+    const setRows = isEdit ? setEditDishRows : setTrfDishRows;
 
     setRows(prev => {
       const existing = prev.find(r => r.item_id === dish.id || (r.dish_name && r.dish_name.toLowerCase() === dish.name.toLowerCase()));
@@ -1397,6 +1656,7 @@ export default function InternalBranch() {
       }
 
       toast.success(`Transfer Request ${res.data?.transfer_id || ''} created successfully! Destination branch (${toB}) notified.`);
+      setActiveTab('transfer_request');
 
       // Reset form
       setTrfDishRows([{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
@@ -2407,7 +2667,42 @@ export default function InternalBranch() {
       {/* Navigation Tabs with Badges */}
       <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid #e2e8f0', marginBottom: 24, overflowX: 'auto', paddingBottom: 2 }}>
         
-        {/* Tab 1: New Request (Food Requisition) */}
+        {/* Tab 1: Transfer Request (Dedicated Branch Transfer - Latest First) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('transfer_request')}
+          style={{
+            padding: '12px 18px',
+            fontSize: 14,
+            fontWeight: 700,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: activeTab === 'transfer_request' ? 'var(--primary)' : '#64748b',
+            borderBottom: activeTab === 'transfer_request' ? '3px solid var(--primary)' : '3px solid transparent',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <ArrowLeftRight size={18} />
+          Transfer Requests
+          {stats.sent_active_count > 0 && (
+            <span style={{
+              background: '#2563eb',
+              color: '#fff',
+              fontSize: 11,
+              fontWeight: 800,
+              padding: '2px 7px',
+              borderRadius: 12
+            }}>
+              {stats.sent_active_count}
+            </span>
+          )}
+        </button>
+
+        {/* Tab 2: New Request (Dedicated Form Page) */}
         <button
           type="button"
           onClick={() => setActiveTab('new')}
@@ -2428,41 +2723,6 @@ export default function InternalBranch() {
         >
           <PlusCircle size={18} />
           New Request
-        </button>
-
-        {/* Tab 2: Transfer Request (Dedicated Branch Transfer) */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('transfer_request')}
-          style={{
-            padding: '12px 18px',
-            fontSize: 14,
-            fontWeight: 700,
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            color: activeTab === 'transfer_request' ? 'var(--primary)' : '#64748b',
-            borderBottom: activeTab === 'transfer_request' ? '3px solid var(--primary)' : '3px solid transparent',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            whiteSpace: 'nowrap'
-          }}
-        >
-          <ArrowLeftRight size={18} />
-          Transfer Request
-          {stats.sent_active_count > 0 && (
-            <span style={{
-              background: '#2563eb',
-              color: '#fff',
-              fontSize: 11,
-              fontWeight: 800,
-              padding: '2px 7px',
-              borderRadius: 12
-            }}>
-              {stats.sent_active_count}
-            </span>
-          )}
         </button>
 
         {/* Tab 3: Incoming Requests (Destination Branch Fulfills) */}
@@ -2561,472 +2821,32 @@ export default function InternalBranch() {
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          TAB 1: NEW TRANSFER REQUEST FORM
+          TAB 2: DEDICATED NEW TRANSFER REQUEST FORM PAGE
       ───────────────────────────────────────────────────────────── */}
       {activeTab === 'new' && (
-        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-          <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 16, marginBottom: 20 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>
-              Create Branch-to-Branch Food / Dish Request
-            </h2>
-            <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>
-              Submit a digitized request to another branch or Central Kitchen. Submissions are locked and dispatched electronically.
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmitNewRequest}>
-            
-            {/* Top Form Controls Row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
-              
-              {/* Request From */}
-              <div>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
-                  Request From (Your Branch)
-                </label>
-                {isSuperUser ? (
-                  <>
-                    <select
-                      value={newFromBranch}
-                      onChange={e => setNewFromBranch(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 14, fontWeight: 600 }}
-                    >
-                      {branches.map(b => (
-                        <option key={`from-${b}`} value={b}>{b}</option>
-                      ))}
-                    </select>
-                    {newFromBranch === 'Other' && (
-                      <div style={{ marginTop: 8 }}>
-                        <input
-                          type="text"
-                          required
-                          placeholder="Enter manual origin branch..."
-                          value={customFromBranch}
-                          onChange={e => setCustomFromBranch(e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '9px 12px',
-                            borderRadius: 8,
-                            border: '1.5px solid #f59e0b',
-                            fontSize: 13,
-                            fontWeight: 600,
-                            background: '#fffbeb'
-                          }}
-                        />
-                        <span style={{ fontSize: 11, color: '#b45309', marginTop: 3, display: 'block' }}>
-                          ✍️ Manual origin branch entered
-                        </span>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <input
-                    type="text"
-                    disabled
-                    value={newFromBranch}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#f8fafc', fontSize: 14, fontWeight: 600, color: '#475569' }}
-                  />
-                )}
-                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  Auto-detected from logged-in account
-                </span>
-              </div>
-
-              {/* Request To */}
-              <div>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
-                  Request To (Destination / Supplier) <span style={{ color: '#dc2626' }}>*</span>
-                </label>
-                <select
-                  required
-                  value={newToBranch}
-                  onChange={e => setNewToBranch(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 14, fontWeight: 600 }}
-                >
-                  <option value="">-- Select Supplying Branch --</option>
-                  {branches.filter(b => b !== newFromBranch).map(b => (
-                    <option key={`to-${b}`} value={b}>{b}</option>
-                  ))}
-                </select>
-                {newToBranch === 'Other' && (
-                  <div style={{ marginTop: 8 }}>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Enter destination / branch name manually..."
-                      value={customToBranch}
-                      onChange={e => setCustomToBranch(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '9px 12px',
-                        borderRadius: 8,
-                        border: '1.5px solid #f59e0b',
-                        fontSize: 13,
-                        fontWeight: 600,
-                        background: '#fffbeb'
-                      }}
-                    />
-                    <span style={{ fontSize: 11, color: '#b45309', marginTop: 3, display: 'block' }}>
-                      ✍️ Manual destination entered
-                    </span>
-                  </div>
-                )}
-                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  Supplying branch or Central Kitchen
-                </span>
-              </div>
-
-              {/* Request Date & Time (Server Time) */}
-              <div>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
-                  Request Date & Time
-                </label>
-                <input
-                  type="text"
-                  disabled
-                  value={`${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#f8fafc', fontSize: 14, fontWeight: 600, color: '#475569' }}
-                />
-                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  Server-generated timestamp
-                </span>
-              </div>
-
-              {/* Delivery Window & Needed-By Time */}
-              <div>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
-                  Delivery Window & Needed-By <span style={{ color: '#dc2626' }}>*</span>
-                </label>
-                <div style={{ display: 'flex', gap: 5, marginBottom: 8, flexWrap: 'wrap' }}>
-                  {[15, 30, 45, 60].map(m => (
-                    <button
-                      key={`preset-${m}`}
-                      type="button"
-                      onClick={() => {
-                        setNewDeliveryMinutes(m);
-                        const d = new Date(Date.now() + m * 60 * 1000);
-                        const hh = String(d.getHours()).padStart(2, '0');
-                        const mm = String(d.getMinutes()).padStart(2, '0');
-                        setNewNeededByTime(`${hh}:${mm}`);
-                      }}
-                      style={{
-                        padding: '4px 9px',
-                        borderRadius: 6,
-                        fontSize: 11.5,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        border: newDeliveryMinutes === m ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                        background: newDeliveryMinutes === m ? '#eff6ff' : '#fff',
-                        color: newDeliveryMinutes === m ? '#1d4ed8' : '#475569'
-                      }}
-                    >
-                      {m}m
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setNewDeliveryMinutes('custom')}
-                    style={{
-                      padding: '4px 9px',
-                      borderRadius: 6,
-                      fontSize: 11.5,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: newDeliveryMinutes === 'custom' ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                      background: newDeliveryMinutes === 'custom' ? '#eff6ff' : '#fff',
-                      color: newDeliveryMinutes === 'custom' ? '#1d4ed8' : '#475569'
-                    }}
-                  >
-                    Custom
-                  </button>
-                </div>
-
-                {newDeliveryMinutes === 'custom' ? (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="number"
-                      min="1"
-                      max="720"
-                      required
-                      placeholder="Mins..."
-                      value={customDeliveryMinutes}
-                      onChange={e => {
-                        setCustomDeliveryMinutes(e.target.value);
-                        const m = parseInt(e.target.value, 10);
-                        if (!isNaN(m) && m > 0) {
-                          const d = new Date(Date.now() + m * 60 * 1000);
-                          const hh = String(d.getHours()).padStart(2, '0');
-                          const mm = String(d.getMinutes()).padStart(2, '0');
-                          setNewNeededByTime(`${hh}:${mm}`);
-                        }
-                      }}
-                      style={{ width: 85, padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
-                    />
-                    <input
-                      type="time"
-                      value={newNeededByTime}
-                      onChange={e => setNewNeededByTime(e.target.value)}
-                      style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13 }}
-                    />
-                  </div>
-                ) : (
-                  <input
-                    type="time"
-                    required
-                    value={newNeededByTime}
-                    onChange={e => setNewNeededByTime(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 14, fontWeight: 600 }}
-                  />
-                )}
-                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  {newDeliveryMinutes !== 'custom' ? `Countdown timer set for ~${newDeliveryMinutes} mins` : 'Delivery deadline'}
-                </span>
-              </div>
-
-            </div>
-
-            {/* Multi-Dish Dynamic Item Builder */}
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-                <div>
-                  <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: '0 0 2px' }}>
-                    Requested Food & Dishes
-                  </h3>
-                  <span style={{ fontSize: 12, color: '#64748b' }}>
-                    Select from centralized restaurant menu or click <strong>"Open Menu Items"</strong> to browse visual cards
-                  </span>
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowMenuBrowser(true);
-                      if (!dishes || dishes.length === 0) fetchDishes();
-                    }}
-                    style={{
-                      background: '#eff6ff',
-                      border: '1.5px solid #3b82f6',
-                      borderRadius: 6,
-                      padding: '7px 16px',
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: '#1d4ed8',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6
-                    }}
-                  >
-                    <BookOpen size={16} /> Open Menu Items
-                  </button>
-                </div>
-              </div>
-
-              {/* Dish Rows List - visible overflow so dropdown floats cleanly in front of everything */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflow: 'visible', position: 'relative' }}>
-                {newDishRows.map((row, idx) => {
-                  const rowUnits = row.available_units && row.available_units.length > 0 
-                    ? row.available_units 
-                    : ['Piece', 'Half', 'Full', 'Regular', 'Large', 'Kg'];
-
-                  return (
-                    <div
-                      key={row.id}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'minmax(330px, 3.2fr) minmax(130px, 1.2fr) minmax(110px, 1fr) minmax(140px, 1.4fr) 40px',
-                        gap: 12,
-                        alignItems: 'center',
-                        background: '#f8fafc',
-                        padding: '12px 14px',
-                        borderRadius: 8,
-                        border: '1px solid #e2e8f0',
-                        position: 'relative',
-                        zIndex: 100 - idx
-                      }}
-                    >
-                      {/* Dish Name Search / Dropdown with thumbnail (Clean, no inside button) */}
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                          Dish Name #{idx + 1}
-                        </span>
-                        <DishSearchDropdown
-                          value={row.dish_name}
-                          imageUrl={row.image_url}
-                          dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
-                          onSelect={(dish) => handleSelectDish(row.id, dish)}
-                        />
-                      </div>
-
-                      {/* Dynamic Unit of Measurement (From Menu System) */}
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                          Unit (UOM)
-                        </span>
-                        <select
-                          value={row.uom || rowUnits[0]}
-                          onChange={e => handleDishRowChange(row.id, 'uom', e.target.value)}
-                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600, background: '#fff' }}
-                        >
-                          {rowUnits.map(u => (
-                            <option key={u} value={u}>{u}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Requested Quantity */}
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                          Requested Qty
-                        </span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          required
-                          placeholder="e.g. 2.5"
-                          value={row.requested_qty}
-                          onChange={e => handleDishRowChange(row.id, 'requested_qty', e.target.value)}
-                          style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
-                        />
-                      </div>
-
-                      {/* Remarks */}
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                          Remarks (Optional)
-                        </span>
-                        <input
-                          type="text"
-                          placeholder="e.g. Extra spicy, packaging"
-                          value={row.remarks}
-                          onChange={e => handleDishRowChange(row.id, 'remarks', e.target.value)}
-                          style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13 }}
-                        />
-                      </div>
-
-                      {/* Remove Action */}
-                      <div style={{ paddingTop: 18 }}>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveDishRow(row.id)}
-                          disabled={newDishRows.length <= 1}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: newDishRows.length > 1 ? '#dc2626' : '#cbd5e1',
-                            cursor: newDishRows.length > 1 ? 'pointer' : 'default',
-                            padding: 4
-                          }}
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* "+ Add Another Item" Button positioned immediately below all dish rows */}
-              <div style={{ marginTop: 12, position: 'relative', zIndex: 1 }}>
-                <button
-                  type="button"
-                  onClick={handleAddDishRow}
-                  style={{
-                    background: '#f8fafc',
-                    border: '1.5px dashed #3b82f6',
-                    borderRadius: 8,
-                    padding: '10px 18px',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: '#1d4ed8',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    width: '100%',
-                    justifyContent: 'center',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#eff6ff'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
-                >
-                  <PlusCircle size={16} /> + Add Another Item
-                </button>
-              </div>
-            </div>
-
-            {/* Optional Transfer Notes */}
-            <div style={{ marginBottom: 24, position: 'relative', zIndex: 1 }}>
-              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
-                General Request Remarks / Instructions (Optional)
-              </label>
-              <textarea
-                rows={2}
-                value={newNotes}
-                onChange={e => setNewNotes(e.target.value)}
-                placeholder="e.g. Driver arriving via van at 2:15 PM. Please pack in thermal crate."
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13 }}
-              />
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={submittingRequest}
-                onClick={() => {
-                  setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
-                  setNewNeededByTime('');
-                  setNewNotes('');
-                }}
-              >
-                Clear Form
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={submittingRequest}
-                style={{
-                  padding: '10px 24px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  cursor: submittingRequest ? 'not-allowed' : 'pointer',
-                  opacity: submittingRequest ? 0.7 : 1,
-                  pointerEvents: submittingRequest ? 'none' : 'auto'
-                }}
-              >
-                {submittingRequest ? (
-                  <>
-                    <RefreshCw size={16} className="animate-spin" /> Submitting Transfer Request...
-                  </>
-                ) : (
-                  <>
-                    <Send size={16} /> Submit Transfer Request
-                  </>
-                )}
-              </button>
-            </div>
-
-          </form>
-        </div>
-      )}
-
-      {/* ─────────────────────────────────────────────────────────────
-          TAB 1B: DEDICATED BRANCH TRANSFER REQUEST
-      ───────────────────────────────────────────────────────────── */}
-      {activeTab === 'transfer_request' && (
-        <div>
-          <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: 24, boxShadow: '0 4px 12px rgba(37,99,235,0.06)', marginBottom: 28 }}>
+        <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: 24, boxShadow: '0 4px 12px rgba(37,99,235,0.06)', marginBottom: 28 }}>
           <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 16, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ background: '#eff6ff', color: '#2563eb', padding: '6px 10px', borderRadius: 8, display: 'inline-flex', alignItems: 'center' }}>
-                  <ArrowLeftRight size={20} />
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('transfer_request')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    background: '#f8fafc',
+                    color: '#334155',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <ArrowLeft size={15} /> ← Back to Transfer Requests
+                </button>
                 <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
                   Create Inter-Branch Transfer Request
                 </h2>
@@ -3036,16 +2856,16 @@ export default function InternalBranch() {
               </p>
             </div>
 
-            {/* Priority Selector Pills */}
+            {/* Priority Selector Radio Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', padding: '6px 10px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: '#475569' }}>Transfer Priority:</span>
               {[
                 { id: 'Normal', label: 'Normal', bg: '#f1f5f9', activeBg: '#0f172a', activeColor: '#fff', border: '#cbd5e1' },
-                { id: 'High', label: 'High Priority', bg: '#fffbeb', activeBg: '#d97706', activeColor: '#fff', border: '#fcd34d' },
+                { id: 'High', label: '⚡ High Priority', bg: '#fffbeb', activeBg: '#d97706', activeColor: '#fff', border: '#fcd34d' },
                 { id: 'Urgent', label: '🚨 Urgent Rush', bg: '#fef2f2', activeBg: '#dc2626', activeColor: '#fff', border: '#fca5a5' }
               ].map(p => (
                 <button
-                  key={`prio-${p.id}`}
+                  key={`prio-new-${p.id}`}
                   type="button"
                   onClick={() => setTrfPriority(p.id)}
                   style={{
@@ -3080,26 +2900,33 @@ export default function InternalBranch() {
                   <select
                     value={trfFromBranch}
                     onChange={e => setTrfFromBranch(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600, background: '#fff' }}
                   >
                     {branches.map(b => (
                       <option key={`trf-from-${b}`} value={b}>{b}</option>
                     ))}
                   </select>
                 ) : (
-                  <div style={{ padding: '9px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                    {defaultTrfFrom}
-                  </div>
+                  <input
+                    type="text"
+                    disabled
+                    value={trfFromBranch}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, fontWeight: 600, color: '#475569' }}
+                  />
                 )}
                 {trfFromBranch === 'Other' && (
                   <input
                     type="text"
-                    placeholder="Enter manual origin branch name..."
+                    required
+                    placeholder="Enter manual origin branch..."
                     value={trfCustomFromBranch}
                     onChange={e => setTrfCustomFromBranch(e.target.value)}
-                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5 }}
+                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5, background: '#fffbeb' }}
                   />
                 )}
+                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+                  Auto-detected from logged-in account
+                </span>
               </div>
 
               {/* Destination Branch (To Branch) */}
@@ -3108,9 +2935,10 @@ export default function InternalBranch() {
                   Destination Branch (Transfer To) <span style={{ color: '#dc2626' }}>*</span>
                 </label>
                 <select
+                  required
                   value={trfToBranch}
                   onChange={e => setTrfToBranch(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600, background: '#fff' }}
                 >
                   <option value="">Select Destination Branch...</option>
                   {branches.filter(b => b !== trfFromBranch).map(b => (
@@ -3118,19 +2946,18 @@ export default function InternalBranch() {
                   ))}
                 </select>
                 {trfToBranch === 'Other' && (
-                  <div style={{ marginTop: 6 }}>
-                    <input
-                      type="text"
-                      placeholder="e.g. Al Madina Restaurant (External Partner)"
-                      value={trfCustomToBranch}
-                      onChange={e => setTrfCustomToBranch(e.target.value)}
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', background: '#fffbeb', fontSize: 12.5, fontWeight: 600 }}
-                    />
-                    <span style={{ fontSize: 11, color: '#b45309', display: 'block', marginTop: 2 }}>
-                      ℹ️ Destination will be recorded as external partner for this transfer.
-                    </span>
-                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Enter manual destination branch..."
+                    value={trfCustomToBranch}
+                    onChange={e => setTrfCustomToBranch(e.target.value)}
+                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5, background: '#fffbeb' }}
+                  />
                 )}
+                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+                  Branch that will receive and process this order
+                </span>
               </div>
 
               {/* Transfer Purpose / Reason */}
@@ -3141,56 +2968,57 @@ export default function InternalBranch() {
                 <select
                   value={trfPurpose}
                   onChange={e => setTrfPurpose(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 600, background: '#fff' }}
                 >
                   <option value="Stock Replenishment">Stock Replenishment</option>
-                  <option value="Customer Rush Hour Buffer">Customer Rush Hour Buffer</option>
-                  <option value="Kitchen Stock Rebalancing">Kitchen Stock Rebalancing</option>
-                  <option value="Raw Materials / Packaging">Raw Materials / Packaging</option>
-                  <option value="Emergency Stockout">Emergency Stockout</option>
-                  <option value="Other">Other (Custom Purpose)</option>
+                  <option value="Urgent Customer Demand">Urgent Customer Demand</option>
+                  <option value="Preparation Shortage">Preparation Shortage</option>
+                  <option value="Central Kitchen Stocking">Central Kitchen Stocking</option>
+                  <option value="Raw Materials / Ingredients">Raw Materials / Ingredients</option>
+                  <option value="Other">Other (Specify)</option>
                 </select>
                 {trfPurpose === 'Other' && (
                   <input
                     type="text"
-                    placeholder="Enter specific transfer purpose..."
+                    required
+                    placeholder="Specify purpose..."
                     value={trfCustomPurpose}
                     onChange={e => setTrfCustomPurpose(e.target.value)}
-                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 12.5 }}
+                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
                   />
                 )}
               </div>
 
-              {/* Delivery Window / Timing */}
+              {/* Needed Delivery Window */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <label style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
                     Needed Delivery Window <span style={{ color: '#dc2626' }}>*</span>
                   </label>
                   <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 700 }}>
-                    ~{new Date(Date.now() + (trfDeliveryMinutes === 'custom' ? (parseInt(trfCustomDeliveryMinutes, 10) || 30) : (parseInt(trfDeliveryMinutes, 10) || 30)) * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    ~{new Date(Date.now() + (trfDeliveryMinutes === 'custom' ? (parseInt(trfCustomDeliveryMinutes, 10) || 30) : trfDeliveryMinutes) * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
                   {[15, 30, 45, 60].map(m => (
                     <button
                       key={`trf-m-${m}`}
                       type="button"
                       onClick={() => {
                         setTrfDeliveryMinutes(m);
-                        setTrfCustomDeliveryMinutes('');
-                        setTrfNeededByTime(`${m} mins`);
+                        const d = new Date(Date.now() + m * 60000);
+                        setTrfNeededByTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
                       }}
                       style={{
-                        flex: '1 1 auto',
-                        padding: '7px 10px',
+                        flex: 1,
+                        padding: '6px 8px',
                         borderRadius: 6,
-                        border: trfDeliveryMinutes === m ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                        background: trfDeliveryMinutes === m ? '#eff6ff' : '#fff',
-                        color: trfDeliveryMinutes === m ? '#1d4ed8' : '#475569',
                         fontSize: 12,
                         fontWeight: 700,
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        border: trfDeliveryMinutes === m ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                        background: trfDeliveryMinutes === m ? '#eff6ff' : '#fff',
+                        color: trfDeliveryMinutes === m ? '#1d4ed8' : '#475569'
                       }}
                     >
                       {m}m
@@ -3200,33 +3028,38 @@ export default function InternalBranch() {
                     type="button"
                     onClick={() => setTrfDeliveryMinutes('custom')}
                     style={{
-                      flex: '1 1 auto',
-                      padding: '7px 10px',
+                      flex: 1,
+                      padding: '6px 8px',
                       borderRadius: 6,
-                      border: trfDeliveryMinutes === 'custom' ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                      background: trfDeliveryMinutes === 'custom' ? '#eff6ff' : '#fff',
-                      color: trfDeliveryMinutes === 'custom' ? '#1d4ed8' : '#475569',
                       fontSize: 12,
                       fontWeight: 700,
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      border: trfDeliveryMinutes === 'custom' ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                      background: trfDeliveryMinutes === 'custom' ? '#eff6ff' : '#fff',
+                      color: trfDeliveryMinutes === 'custom' ? '#1d4ed8' : '#475569'
                     }}
                   >
                     Custom
                   </button>
                 </div>
                 {trfDeliveryMinutes === 'custom' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input
                       type="number"
                       min="5"
-                      max="360"
-                      placeholder="Minutes (e.g. 90)"
+                      max="720"
+                      required
+                      placeholder="Mins..."
                       value={trfCustomDeliveryMinutes}
                       onChange={e => {
                         setTrfCustomDeliveryMinutes(e.target.value);
-                        setTrfNeededByTime(`${e.target.value || 30} mins`);
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val) && val > 0) {
+                          const d = new Date(Date.now() + val * 60000);
+                          setTrfNeededByTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+                        }
                       }}
-                      style={{ flex: 1, padding: '6px 10px', borderRadius: 6, border: '1.5px solid #2563eb', fontSize: 12.5 }}
+                      style={{ width: 85, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
                     />
                     <span style={{ fontSize: 12, color: '#64748b' }}>minutes</span>
                   </div>
@@ -3235,8 +3068,8 @@ export default function InternalBranch() {
 
             </div>
 
-            {/* Transfer Items Card */}
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 18, marginBottom: 20, background: '#fafbfc' }}>
+            {/* Transfer Items Checklist Card */}
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 18, marginBottom: 20, background: '#fafbfc', overflow: 'visible' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                 <div>
                   <h3 style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', margin: '0 0 2px' }}>
@@ -3270,8 +3103,8 @@ export default function InternalBranch() {
                 </button>
               </div>
 
-              {/* Items List Rows */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflow: 'visible', position: 'relative' }}>
+              {/* Items List Rows - Ultra-high z-index on active open row to float above all subsequent elements */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflow: 'visible', position: 'relative', zIndex: 10 }}>
                 {trfDishRows.map((row, idx) => {
                   const rowUnits = row.available_units && row.available_units.length > 0 
                     ? row.available_units 
@@ -3290,7 +3123,8 @@ export default function InternalBranch() {
                         borderRadius: 8,
                         border: '1px solid #e2e8f0',
                         position: 'relative',
-                        zIndex: 100 - idx
+                        zIndex: openDropdownRowId === row.id ? 999999 : (100 - idx),
+                        overflow: 'visible'
                       }}
                     >
                       {/* Dish Search Dropdown with SKU indicator */}
@@ -3309,7 +3143,9 @@ export default function InternalBranch() {
                           value={row.dish_name}
                           imageUrl={row.image_url}
                           dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
+                          popularityMap={popularityMap}
                           onSelect={(dish) => handleSelectDishTrf(row.id, dish)}
+                          onOpenChange={(open) => setOpenDropdownRowId(open ? row.id : null)}
                         />
                       </div>
 
@@ -3352,10 +3188,10 @@ export default function InternalBranch() {
                         </span>
                         <input
                           type="text"
-                          placeholder="e.g. Frozen pack / crate"
-                          value={row.remarks || ''}
+                          placeholder="e.g. Marinated, Fresh batch"
+                          value={row.remarks}
                           onChange={e => handleDishRowChangeTrf(row.id, 'remarks', e.target.value)}
-                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
+                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
                         />
                       </div>
 
@@ -3363,23 +3199,17 @@ export default function InternalBranch() {
                       <div style={{ paddingTop: 18 }}>
                         <button
                           type="button"
-                          onClick={() => handleRemoveTrfDishRow(row.id)}
+                          onClick={() => handleRemoveDishRowTrf(row.id)}
                           disabled={trfDishRows.length <= 1}
                           style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 6,
-                            border: '1px solid #fee2e2',
-                            background: trfDishRows.length <= 1 ? '#f8fafc' : '#fef2f2',
-                            color: trfDishRows.length <= 1 ? '#cbd5e1' : '#dc2626',
-                            cursor: trfDishRows.length <= 1 ? 'not-allowed' : 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
+                            background: 'transparent',
+                            border: 'none',
+                            color: trfDishRows.length > 1 ? '#dc2626' : '#cbd5e1',
+                            cursor: trfDishRows.length > 1 ? 'pointer' : 'default',
+                            padding: 4
                           }}
-                          title="Remove this item row"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={18} />
                         </button>
                       </div>
 
@@ -3388,14 +3218,14 @@ export default function InternalBranch() {
                 })}
               </div>
 
-              {/* + Add Another Item Button IMMEDIATELY BELOW ALL ROWS */}
-              <div style={{ marginTop: 14 }}>
+              {/* Add item button */}
+              <div style={{ marginTop: 12, position: 'relative', zIndex: 0 }}>
                 <button
                   type="button"
-                  onClick={handleAddTrfDishRow}
+                  onClick={handleAddDishRowTrf}
                   style={{
                     width: '100%',
-                    padding: '10px 16px',
+                    padding: '10px 14px',
                     borderRadius: 8,
                     border: '1.5px dashed #2563eb',
                     background: '#eff6ff',
@@ -3477,69 +3307,209 @@ export default function InternalBranch() {
 
           </form>
         </div>
+      )}
 
-        {/* Active Outgoing / Sent Transfer Requests Section */}
+      {/* ─────────────────────────────────────────────────────────────
+          TAB 1: DEDICATED TRANSFER REQUESTS (SENT REQUESTS - LATEST FIRST)
+      ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'transfer_request' && (
         <div>
-          <div style={{ marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          {/* Header Bar with Title, Counter, New Request CTA and Refresh */}
+          <div style={{
+            background: '#fff',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            padding: '16px 20px',
+            marginBottom: 20,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 14,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{
+                  background: '#eff6ff',
+                  color: '#2563eb',
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  display: 'inline-flex',
+                  alignItems: 'center'
+                }}>
+                  <ArrowLeftRight size={20} />
+                </span>
                 <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-                  Active Sent Transfer Requests
+                  Transfer Requests
                 </h2>
                 <span style={{
-                  fontSize: 11.5,
+                  fontSize: 12,
                   fontWeight: 800,
-                  padding: '3px 9px',
+                  padding: '3px 10px',
                   borderRadius: 12,
                   background: '#dbeafe',
                   color: '#1d4ed8',
                   border: '1px solid #bfdbfe'
                 }}>
-                  {transfers.length} In Progress
+                  {filteredSentTransfers.length} Active in Progress
                 </span>
               </div>
-              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
-                Orders requested by <strong>{adminSelectedBranch !== 'All' ? adminSelectedBranch : (user?.branch || 'your branch')}</strong> that are currently active until completed or cancelled.
+              <p style={{ margin: '4px 0 0', fontSize: 12.5, color: '#64748b' }}>
+                Latest requests displayed first. Orders requested by <strong>{adminSelectedBranch !== 'All' ? adminSelectedBranch : (user?.branch || 'your branch')}</strong> until completed or cancelled.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => fetchTransfers()}
-              style={{
-                padding: '7px 14px',
-                borderRadius: 6,
-                border: '1px solid #cbd5e1',
-                background: '#fff',
-                color: '#475569',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6
-              }}
-            >
-              <RefreshCw size={14} className={loadingTransfers ? 'animate-spin' : ''} /> Refresh Sent Requests
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('new')}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#2563eb',
+                  color: '#fff',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  boxShadow: '0 2px 6px rgba(37,99,235,0.3)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <PlusCircle size={16} /> + New Request
+              </button>
+
+              <button
+                type="button"
+                onClick={() => fetchTransfers()}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#475569',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <RefreshCw size={14} className={loadingTransfers ? 'animate-spin' : ''} /> Refresh
+              </button>
+            </div>
           </div>
 
+          {/* Quick Filters / Search Bar for Transfer Requests */}
+          <div style={{
+            background: '#fff',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '12px 16px',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap'
+          }}>
+            <div style={{ flex: '1 1 240px', position: 'relative' }}>
+              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+              <input
+                type="text"
+                placeholder="Search transfer ID, dish, or purpose..."
+                value={sentSearchQuery}
+                onChange={e => setSentSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 10px 7px 32px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  fontSize: 12.5
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Destination:</span>
+              <select
+                value={sentFilterBranch}
+                onChange={e => setSentFilterBranch(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600 }}
+              >
+                <option value="All">All Branches</option>
+                {branches.map(b => (
+                  <option key={'filter-dest-' + b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Priority:</span>
+              <select
+                value={sentFilterPriority}
+                onChange={e => setSentFilterPriority(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600 }}
+              >
+                <option value="All">All Priorities</option>
+                <option value="Normal">Normal</option>
+                <option value="High">⚡ High Priority</option>
+                <option value="Urgent">🚨 Urgent Rush</option>
+              </select>
+            </div>
+
+            {(sentSearchQuery || sentFilterBranch !== 'All' || sentFilterPriority !== 'All') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSentSearchQuery('');
+                  setSentFilterBranch('All');
+                  setSentFilterPriority('All');
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#dc2626',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  padding: '4px 8px'
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+
+          {/* Transfer Requests List (Strictly Latest First) */}
           {loadingTransfers ? (
             <div style={{ textAlign: 'center', padding: 50, color: '#64748b', background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
               <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 8px', display: 'block', color: '#2563eb' }} />
               Loading sent transfer requests...
             </div>
-          ) : transfers.length === 0 ? (
+          ) : filteredSentTransfers.length === 0 ? (
             <div style={{ background: '#fff', borderRadius: 12, border: '1px dashed #cbd5e1', padding: 44, textAlign: 'center', color: '#64748b' }}>
               <CheckCircle2 size={40} color="#10b981" style={{ margin: '0 auto 10px' }} />
               <h3 style={{ margin: '0 0 6px', fontSize: 16, color: '#0f172a' }}>No Active Sent Requests</h3>
               <p style={{ margin: 0, fontSize: 13 }}>
-                All your previously submitted transfer requests have been completed or cancelled. Submit a new transfer request using the form above.
+                All your previously submitted transfer requests have been completed or cancelled.
               </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('new')}
+                className="btn btn-primary"
+                style={{ marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <PlusCircle size={16} /> Create New Transfer Request
+              </button>
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
-              {transfers.map(t => {
+              {filteredSentTransfers.map(t => {
                 const canModify = ['Pending', 'In Progress'].includes(t.status);
                 return (
                   <div
@@ -3572,19 +3542,7 @@ export default function InternalBranch() {
                             }}>
                               {t.request_type || 'Transfer Request'}
                             </span>
-                            {t.priority && t.priority !== 'Normal' && (
-                              <span style={{
-                                fontSize: 10.5,
-                                fontWeight: 800,
-                                padding: '1.5px 6px',
-                                borderRadius: 4,
-                                background: t.priority === 'Urgent' ? '#fef2f2' : '#fffbeb',
-                                color: t.priority === 'Urgent' ? '#dc2626' : '#d97706',
-                                border: t.priority === 'Urgent' ? '1px solid #fecaca' : '1px solid #fde68a'
-                              }}>
-                                {t.priority === 'Urgent' ? '🚨 URGENT' : '⚡ HIGH'}
-                              </span>
-                            )}
+                            <PriorityBadge priority={t.priority} />
                           </div>
                           <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
                             {new Date(t.request_date).toLocaleString()}
@@ -3616,16 +3574,9 @@ export default function InternalBranch() {
                           <span style={{ color: '#64748b' }}>Destination (Supplying):</span>
                           <BranchBadge branch={t.to_branch} />
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'center' }}>
                           <span style={{ color: '#64748b' }}>Needed-By Time:</span>
-                          <div>
-                            <strong style={{ color: '#dc2626' }}>{t.needed_by_time || 'ASAP'}</strong>
-                            {(t.total_extended_minutes || 0) > 0 && (
-                              <span style={{ marginLeft: 6, fontSize: 10.5, color: '#d97706', background: '#fef3c7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
-                                +{t.total_extended_minutes}m extended
-                              </span>
-                            )}
-                          </div>
+                          <DueByBadge neededByTime={t.needed_by_time} totalExtendedMinutes={t.total_extended_minutes} />
                         </div>
                         {t.purpose && (
                           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -3847,7 +3798,6 @@ export default function InternalBranch() {
             </div>
           )}
         </div>
-      </div>
     )}
 
       {/* ─────────────────────────────────────────────────────────────
@@ -3914,19 +3864,7 @@ export default function InternalBranch() {
                             }}>
                               {t.request_type || 'Transfer Request'}
                             </span>
-                            {t.priority && t.priority !== 'Normal' && (
-                              <span style={{
-                                fontSize: 10.5,
-                                fontWeight: 800,
-                                padding: '1.5px 6px',
-                                borderRadius: 4,
-                                background: t.priority === 'Urgent' ? '#fef2f2' : '#fffbeb',
-                                color: t.priority === 'Urgent' ? '#dc2626' : '#d97706',
-                                border: t.priority === 'Urgent' ? '1px solid #fecaca' : '1px solid #fde68a'
-                              }}>
-                                {t.priority === 'Urgent' ? '🚨 URGENT' : '⚡ HIGH'}
-                              </span>
-                            )}
+                            <PriorityBadge priority={t.priority} />
                           </div>
                           <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
                             {new Date(t.request_date).toLocaleString()}
@@ -4366,19 +4304,7 @@ export default function InternalBranch() {
                           }}>
                             {t.request_type || 'Transfer Request'}
                           </span>
-                          {t.priority && t.priority !== 'Normal' && (
-                            <span style={{
-                              fontSize: 10.5,
-                              fontWeight: 800,
-                              padding: '1.5px 6px',
-                              borderRadius: 4,
-                              background: t.priority === 'Urgent' ? '#fef2f2' : '#fffbeb',
-                              color: t.priority === 'Urgent' ? '#dc2626' : '#d97706',
-                              border: t.priority === 'Urgent' ? '1px solid #fecaca' : '1px solid #fde68a'
-                            }}>
-                              {t.priority === 'Urgent' ? '🚨 URGENT' : '⚡ HIGH'}
-                            </span>
-                          )}
+                          <PriorityBadge priority={t.priority} />
                         </div>
                         <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
                           Dispatched: {t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}

@@ -28,11 +28,19 @@ ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_needed_b
 ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_reviewed_by_name VARCHAR(150);
 ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_reviewed_at TIMESTAMPTZ;
 ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_rejection_reason TEXT;
+ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'Transfer Request';
+ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS priority VARCHAR(30) DEFAULT 'Normal';
+
+CREATE INDEX IF NOT EXISTS idx_ibt_priority ON internal_branch_transfers(priority);
+CREATE INDEX IF NOT EXISTS idx_ibt_request_type ON internal_branch_transfers(request_type);
+CREATE INDEX IF NOT EXISTS idx_ibt_created_at ON internal_branch_transfers(created_at DESC);
 
 ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS confirmed_qty NUMERIC(12,3);
 ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_change_reason TEXT;
 ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS price NUMERIC(10,2);
+ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sku VARCHAR(100);
+ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100);
 
 CREATE TABLE IF NOT EXISTS internal_branch_activity_logs (
   id SERIAL PRIMARY KEY,

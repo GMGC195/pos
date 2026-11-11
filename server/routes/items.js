@@ -57,7 +57,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     if (targetBranch) {
       params.push(`%"${targetBranch}"%`);
-      query += ` AND i.available_branches::text LIKE $${params.length}`;
+      query += ` AND (i.available_branches IS NULL OR i.available_branches::text = '[]' OR i.available_branches::text = 'null' OR i.available_branches::text LIKE $${params.length})`;
     }
 
     if (category && category !== 'All') {
