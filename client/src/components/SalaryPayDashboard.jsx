@@ -20,22 +20,14 @@ import {
   CreditCard
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { getSaudiPreviousMonthStr, formatMonthDisplay } from '../utils/timezone';
 
 const CURRENCY = 'SAR';
-
-// Helper for KSA current month (Asia/Riyadh UTC+3)
-const getKsaCurrentMonthStr = () => {
-  const now = new Date();
-  const ksaDate = new Date(now.getTime() + (3 * 60 + now.getTimezoneOffset()) * 60000);
-  const year = ksaDate.getFullYear();
-  const month = String(ksaDate.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
-};
 
 export default function SalaryPayDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [selectedMonth, setSelectedMonth] = useState(getKsaCurrentMonthStr());
+  const [selectedMonth, setSelectedMonth] = useState(() => getSaudiPreviousMonthStr());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [summary, setSummary] = useState({
@@ -57,7 +49,7 @@ export default function SalaryPayDashboard() {
   const [error, setError] = useState(null);
   const printSlipRef = useRef(null);
 
-  const assignedBranch = user?.branch || 'Branch 1';
+  const assignedBranch = user?.branch || 'All Branches';
 
   // Fetch 5 Core KPI Metrics
   const fetchSummary = useCallback(async (isManualRefresh = false) => {
@@ -67,7 +59,10 @@ export default function SalaryPayDashboard() {
 
     try {
       const res = await axios.get('/api/payroll/salary-pay-summary', {
-        params: { month: selectedMonth }
+        params: { 
+          month: selectedMonth,
+          branch: user?.branch || undefined
+        }
       });
       setSummary(res.data);
     } catch (err) {
@@ -77,14 +72,17 @@ export default function SalaryPayDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedMonth]);
+  }, [selectedMonth, user?.branch]);
 
   // Fetch 12-Column Payment History
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
       const res = await axios.get('/api/payroll/payment-history', {
-        params: { month: selectedMonth }
+        params: { 
+          month: selectedMonth,
+          branch: user?.branch || undefined
+        }
       });
       setHistory(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
@@ -92,7 +90,7 @@ export default function SalaryPayDashboard() {
     } finally {
       setHistoryLoading(false);
     }
-  }, [selectedMonth]);
+  }, [selectedMonth, user?.branch]);
 
   useEffect(() => {
     fetchSummary();
@@ -123,13 +121,7 @@ export default function SalaryPayDashboard() {
   };
 
   const formatMonthTitle = (monthStr) => {
-    try {
-      const [year, month] = monthStr.split('-');
-      const date = new Date(parseInt(year), parseInt(month) - 1, 1);
-      return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    } catch {
-      return monthStr;
-    }
+    return formatMonthDisplay(monthStr);
   };
 
   // Filtered payment history based on search query

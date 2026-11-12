@@ -87,11 +87,12 @@ const confirmAction = (message, onConfirm, confirmText = 'Confirm') => {
 
 export default function Payroll() {
   const { user } = useAuth()
-  const isDeveloper = user?.role?.trim().toLowerCase() === 'developer'
-  const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || isDeveloper
-  const isSalaryPayOperator = user?.role?.trim().toLowerCase() === 'salary pay operator'
+  const userRoleLower = (user?.role || '').toString().toLowerCase().trim().replace(/[-_]/g, ' ')
+  const isDeveloper = userRoleLower === 'developer'
+  const isAdmin = userRoleLower === 'admin' || isDeveloper
+  const isSalaryPayOperator = userRoleLower === 'salary pay operator' || userRoleLower === 'salary operator' || userRoleLower.includes('salary')
   const canProcessPayments = isAdmin || isSalaryPayOperator
-  const showActions = isAdmin
+  const showActions = isAdmin && !isSalaryPayOperator
 
   const formatMonth = (date) => {
     const d = new Date(date)
@@ -6686,8 +6687,8 @@ export default function Payroll() {
         targetScrollDate={attendanceModalDate}
         onClose={() => { setAttendanceModalEmp(null); setAttendanceModalDate(null); }}
         month={selectedMonth}
-        isAdmin={isAdmin}
-        onEdit={handleEditAttendanceFromModal}
+        isAdmin={isAdmin && !isSalaryPayOperator}
+        onEdit={isSalaryPayOperator ? undefined : handleEditAttendanceFromModal}
       />
 
       {/* Edit Attendance Modal (Add Session / Edit Sessions) */}

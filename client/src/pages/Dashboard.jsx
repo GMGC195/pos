@@ -113,7 +113,7 @@ function StatCard({ stat, value, loading }) {
   )
 }
 
-export default function Dashboard() {
+function MainDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const isDeveloper = user?.role?.toLowerCase() === 'developer'
@@ -1301,12 +1301,6 @@ export default function Dashboard() {
       x: { grid: { display: false }, ticks: { font: { size: 11 }, maxRotation: 45, minRotation: 45 } },
       y: { grid: { color: 'rgba(0,0,0,0.05)' }, beginAtZero: true }
     }
-  }
-
-    // --- SALARY PAY OPERATOR DEDICATED DASHBOARD VIEW ---
-  const isSalaryPayOp = user?.role?.trim().toLowerCase() === 'salary pay operator';
-  if (isSalaryPayOp) {
-    return <SalaryPayDashboard />;
   }
 
   // --- DEVELOPER & MANAGEMENT DASHBOARD VIEW ---
@@ -3805,4 +3799,16 @@ export default function Dashboard() {
       </div>
     </>
   )
+}
+
+export default function Dashboard() {
+  const { user } = useAuth();
+  const roleLower = (user?.role || '').toString().toLowerCase().trim().replace(/[-_]/g, ' ');
+  const isSalaryPayOp = roleLower === 'salary pay operator' || roleLower === 'salary operator' || roleLower.includes('salary');
+
+  if (isSalaryPayOp) {
+    return <SalaryPayDashboard />;
+  }
+
+  return <MainDashboard />;
 }

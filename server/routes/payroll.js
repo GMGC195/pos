@@ -1072,7 +1072,7 @@ router.get('/salary-pay-summary', authenticateToken, async (req, res) => {
     let branch = req.query.branch || null;
     const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
     if (isSalaryPayOp) {
-      branch = req.user.branch || 'Branch 1';
+      branch = req.user.branch || req.query.branch || null;
     }
 
     const [year, monthNum] = month.split('-').map(Number);
@@ -1178,7 +1178,7 @@ router.get('/payment-history', authenticateToken, async (req, res) => {
     const month = req.query.month || null;
     let branch = req.query.branch || null;
     if (isSalaryPayOp) {
-      branch = req.user.branch || 'Branch 1';
+      branch = req.user.branch || req.query.branch || null;
     }
 
     const normalizeB = (b) => (b || '').toString().toLowerCase().replace(/^restaurant\s*/i, 'b').replace(/^branch\s*/i, 'b').replace(/\s+/g, '');
@@ -1221,37 +1221,39 @@ router.get('/payment-history', authenticateToken, async (req, res) => {
       rows = rows.filter(r => matchB(r.employee_branch, branch));
     }
 
-    // 2. If no payment vouchers logged yet, fallback to employee_payroll_records where status = 'Paid' or paid_amount > 0
-    if (rows.length === 0) {
-      const fbQuery = `
-        SELECT 
-          r.id,
-          r.employee_id,
-          e.name as employee_name,
-          e.employee_id as employee_code,
-          e.branch as employee_branch,
-          r.month,
-          'Cash' as payment_method,
-          COALESCE(r.paid_amount, r.net_salary, 0) as salary_amount,
-          'Operator' as paid_by,
-          r.notes,
-          COALESCE(r.paid_date, r.created_at, NOW()) as created_at,
-          COALESCE(r.overtime_pay, 0) as overtime_amount,
-          (COALESCE(r.deductions, 0) + COALESCE(r.advance_deduction, 0) + COALESCE(r.khata_deduction, 0)) as deduction_amount,
-          COALESCE(r.carried_forward_to_next, 0) as carry_forward_amount,
-          COALESCE(r.status, 'Paid') as payment_status
-        FROM employee_payroll_records r
-        LEFT JOIN employees e ON e.id = r.employee_id
-        WHERE ($1::text IS NULL OR r.month = $1)
-          AND (r.status = 'Paid' OR COALESCE(r.paid_amount, 0) > 0)
-        ORDER BY r.id DESC
-      `;
-      const fbRes = await pool.query(fbQuery, [month]);
-      rows = fbRes.rows;
-      if (branch && branch !== 'All') {
-        rows = rows.filter(r => matchB(r.employee_branch, branch));
+    // 2. Also include any saved records from employee_payroll_records that don't have vouchers in employee_payroll_payments
+    const existingEmpIds = new Set(rows.map(r => r.employee_id));
+    const fbQuery = `
+      SELECT 
+        r.id,
+        r.employee_id,
+        e.name as employee_name,
+        e.employee_id as employee_code,
+        e.branch as employee_branch,
+        r.month,
+        'Cash' as payment_method,
+        COALESCE(r.paid_amount, r.net_salary, 0) as salary_amount,
+        'Operator' as paid_by,
+        r.notes,
+        COALESCE(r.paid_date, NOW()) as created_at,
+        COALESCE(r.overtime_pay, 0) as overtime_amount,
+        (COALESCE(r.deductions, 0) + COALESCE(r.advance_deduction, 0) + COALESCE(r.khata_deduction, 0)) as deduction_amount,
+        COALESCE(r.carried_forward_to_next, 0) as carry_forward_amount,
+        COALESCE(r.status, 'Paid') as payment_status
+      FROM employee_payroll_records r
+      LEFT JOIN employees e ON e.id = r.employee_id
+      WHERE ($1::text IS NULL OR r.month = $1)
+        AND (r.status = 'Paid' OR COALESCE(r.paid_amount, 0) > 0)
+      ORDER BY r.id DESC
+    `;
+    const fbRes = await pool.query(fbQuery, [month]);
+    fbRes.rows.forEach(r => {
+      if (!existingEmpIds.has(r.employee_id)) {
+        if (!branch || branch === 'All' || matchB(r.employee_branch, branch)) {
+          rows.push(r);
+        }
       }
-    }
+    });
 
     const history = rows.map(r => {
       const dt = new Date(r.created_at || Date.now());
