@@ -41,4 +41,21 @@ const isAdminOrCashier = (req, res, next) => {
   }
 };
 
-module.exports = { authenticateToken, isAdmin, isAdminOrManagement, isAdminOrCashier };
+const blockSalaryPayOperator = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token) {
+    try {
+      const decoded = jwt.decode(token);
+      if (decoded?.role?.trim().toLowerCase() === 'salary pay operator') {
+        return res.status(403).json({ error: 'Access denied: Salary Pay Operator cannot access this module' });
+      }
+    } catch (e) {}
+  }
+  if (req.user?.role?.trim().toLowerCase() === 'salary pay operator') {
+    return res.status(403).json({ error: 'Access denied: Salary Pay Operator cannot access this module' });
+  }
+  next();
+};
+
+module.exports = { authenticateToken, isAdmin, isAdminOrManagement, isAdminOrCashier, blockSalaryPayOperator };

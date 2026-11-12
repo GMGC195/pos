@@ -274,7 +274,7 @@ router.post('/overrides/:employee_id', authenticateToken, isAdmin, async (req, r
 });
 
 // POST log manual leave in employee_attendance table
-router.post('/leave', authenticateToken, async (req, res) => {
+router.post('/leave', authenticateToken, isAdmin, async (req, res) => {
   const { employee_id, date, is_paid } = req.body;
   if (!employee_id || !date) {
     return res.status(400).json({ error: 'Employee ID and date are required' });
@@ -300,7 +300,7 @@ router.post('/leave', authenticateToken, async (req, res) => {
 });
 
 // DELETE remove manual leave from employee_attendance table
-router.delete('/leave', authenticateToken, async (req, res) => {
+router.delete('/leave', authenticateToken, isAdmin, async (req, res) => {
   const { employee_id, date } = req.body;
   if (!employee_id || !date) {
     return res.status(400).json({ error: 'Employee ID and date are required' });
@@ -323,13 +323,27 @@ router.delete('/leave', authenticateToken, async (req, res) => {
 });
 
 // GET Calculate Monthly Payroll
-router.get('/calculate', authenticateToken, async (req, res) => {
-  const { month } = req.query; // format 'YYYY-MM'
-  if (!month) {
-    return res.status(400).json({ error: 'Month (YYYY-MM) is required' });
-  }
-
-  try {
+/**
+ * Reusable function to calculate full monthly payroll report for a given month ('YYYY-MM')
+ */
+async function computeMonthlyPayrollReport(month, branchFilter = null) {
+    const normalizeBranch = (b) => {
+      if (!b) return '';
+      return b.toString().trim().toLowerCase()
+        .replace(/^restaurant\s*/i, 'b')
+        .replace(/^branch\s*/i, 'b')
+        .replace(/\s+/g, '');
+    };
+    const matchBranch = (b1, b2) => {
+      if (!b1 || !b2) return false;
+      const n1 = normalizeBranch(b1);
+      const n2 = normalizeBranch(b2);
+      if (n1 === n2) return true;
+      if (n1 === 'all' || n2 === 'all') return true;
+      const b1Lower = b1.toString().toLowerCase();
+      const b2Lower = b2.toString().toLowerCase();
+      return b1Lower.includes(b2Lower) || b2Lower.includes(b1Lower);
+    };
     const [year, monthNum] = month.split('-').map(Number);
     const totalDaysInMonth = new Date(year, monthNum, 0).getDate();
     
@@ -345,7 +359,10 @@ router.get('/calculate', authenticateToken, async (req, res) => {
     const adjTypes = adjTypesRes.rows;
 
     // Get employees
-    const employeesRes = await pool.query("SELECT * FROM \"employees\" WHERE status = 'Active' ORDER BY id ASC");
+    let employeesRes = await pool.query("SELECT * FROM \"employees\" WHERE status = 'Active' ORDER BY id ASC");
+    if (branchFilter && branchFilter !== 'All') {
+      employeesRes.rows = employeesRes.rows.filter(e => matchBranch(e.branch, branchFilter));
+    }
     
     // Get overrides
     const overridesRes = await pool.query('SELECT * FROM "employee_payroll_settings"');
@@ -951,6 +968,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       return {
         id: emp.id,
         employee_id: emp.employee_id || `EMP-${String(emp.id).padStart(4, '0')}`,
+        branch: emp.branch || 'Main',
         name: emp.name,
         role: emp.role,
         position: emp.position || '',
@@ -1028,8 +1046,240 @@ router.get('/calculate', authenticateToken, async (req, res) => {
       };
     });
 
+  return payrollReport;
+}
+
+// GET Calculate Monthly Payroll
+router.get('/calculate', authenticateToken, async (req, res) => {
+  const { month } = req.query; // format 'YYYY-MM'
+  if (!month) {
+    return res.status(400).json({ error: 'Month (YYYY-MM) is required' });
+  }
+
+  try {
+    const payrollReport = await computeMonthlyPayrollReport(month);
     res.json(payrollReport);
   } catch (err) {
+    console.error('Error in /calculate:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET Salary Pay Summary for Salary Pay Operator Dashboard
+router.get('/salary-pay-summary', authenticateToken, async (req, res) => {
+  try {
+    const month = req.query.month || getKsaCurrentMonthStr();
+    let branch = req.query.branch || null;
+    const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+    if (isSalaryPayOp) {
+      branch = req.user.branch || 'Branch 1';
+    }
+
+    const [year, monthNum] = month.split('-').map(Number);
+    let prevYear = year;
+    let prevMonthNum = monthNum - 1;
+    if (prevMonthNum < 1) {
+      prevMonthNum = 12;
+      prevYear = year - 1;
+    }
+    const prevMonthStr = `${prevYear}-${String(prevMonthNum).padStart(2, '0')}`;
+
+    // 1. Get live computed payroll report for the month with branch filter applied
+    const payrollReport = await computeMonthlyPayrollReport(month, branch);
+
+    let totalSalaryPaid = 0;
+    let totalOvertimePaid = 0;
+    let totalOvertimeEarned = 0;
+    let totalDeductions = 0;
+    let carryForwardToNext = 0;
+    let previousMonthCarryForward = 0;
+
+    payrollReport.forEach(emp => {
+      const paid = parseFloat(emp.paid_amount || 0);
+      const net = parseFloat(emp.net_salary || 0);
+      const ot = parseFloat(emp.overtime_pay || 0);
+      const cfNext = parseFloat(emp.carried_forward_to_next || 0);
+      const prevBal = parseFloat(emp.last_month_balance || 0);
+      const ded = (parseFloat(emp.deductions || 0) + parseFloat(emp.advance_deduction || 0) + parseFloat(emp.khata_deduction || 0));
+
+      totalSalaryPaid += paid;
+      totalOvertimeEarned += ot;
+      totalDeductions += ded;
+      carryForwardToNext += cfNext;
+      previousMonthCarryForward += prevBal;
+
+      if (paid > 0 && ot > 0) {
+        if (paid >= net || emp.status === 'Paid') {
+          totalOvertimePaid += ot;
+        } else {
+          const prop = net > 0 ? (paid / net) : 1;
+          totalOvertimePaid += Math.min(ot, ot * prop);
+        }
+      }
+    });
+
+    // Query recorded payment vouchers from employee_payroll_payments table
+    let paymentsRows = [];
+    try {
+      const paymentsRes = await pool.query(
+        `SELECT p.id, p.employee_id, e.name as employee_name, e.employee_id as employee_code, e.branch as employee_branch,
+                p.month, p.payment_method, p.amount, p.paid_by, p.notes, p.created_at
+         FROM employee_payroll_payments p
+         LEFT JOIN employees e ON e.id = p.employee_id
+         WHERE p.month = $1
+         ORDER BY p.created_at DESC`,
+        [month]
+      );
+      paymentsRows = paymentsRes.rows;
+      if (branch && branch !== 'All') {
+        const normalizeB = (b) => (b || '').toString().toLowerCase().replace(/^restaurant\s*/i, 'b').replace(/^branch\s*/i, 'b').replace(/\s+/g, '');
+        const targetB = normalizeB(branch);
+        paymentsRows = paymentsRows.filter(p => normalizeB(p.employee_branch) === targetB);
+      }
+      const totalPaymentsLogged = paymentsRows.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+      if (totalPaymentsLogged > totalSalaryPaid) {
+        totalSalaryPaid = totalPaymentsLogged;
+      }
+    } catch (payErr) {
+      console.error('Error fetching payments for summary:', payErr.message);
+    }
+
+    const paidEmployeesCount = payrollReport.filter(e => e.status === 'Paid').length;
+    const totalEmployees = payrollReport.length;
+
+    res.json({
+      month,
+      prev_month: prevMonthStr,
+      branch: branch || 'All',
+      total_employees: totalEmployees,
+      salary_paid_employees_count: paidEmployeesCount,
+      total_salary_paid: parseFloat(totalSalaryPaid.toFixed(2)),
+      total_overtime_paid: parseFloat(totalOvertimePaid.toFixed(2)),
+      total_overtime_earned: parseFloat(totalOvertimeEarned.toFixed(2)),
+      total_deductions: parseFloat(totalDeductions.toFixed(2)),
+      carry_forward_to_next: parseFloat(carryForwardToNext.toFixed(2)),
+      previous_month_carry_forward: parseFloat(previousMonthCarryForward.toFixed(2)),
+      employee_count: totalEmployees,
+      paid_employees_count: paidEmployeesCount,
+      partial_employees_count: payrollReport.filter(e => e.status === 'Partial').length,
+      unpaid_employees_count: payrollReport.filter(e => e.status === 'Pending' || e.status === 'Unpaid' || !e.status).length,
+      recent_payments: paymentsRows.slice(0, 10)
+    });
+  } catch (err) {
+    console.error('Error generating salary pay summary:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/payroll/payment-history (12 columns for Salary Pay Operator dashboard & auditing)
+router.get('/payment-history', authenticateToken, async (req, res) => {
+  try {
+    const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+    const month = req.query.month || null;
+    let branch = req.query.branch || null;
+    if (isSalaryPayOp) {
+      branch = req.user.branch || 'Branch 1';
+    }
+
+    const normalizeB = (b) => (b || '').toString().toLowerCase().replace(/^restaurant\s*/i, 'b').replace(/^branch\s*/i, 'b').replace(/\s+/g, '');
+    const matchB = (b1, b2) => {
+      if (!b1 || !b2) return false;
+      const n1 = normalizeB(b1);
+      const n2 = normalizeB(b2);
+      if (n1 === n2 || n1 === 'all' || n2 === 'all') return true;
+      return b1.toLowerCase().includes(b2.toLowerCase()) || b2.toLowerCase().includes(b1.toLowerCase());
+    };
+
+    // 1. First get payments from employee_payroll_payments
+    let paymentsQuery = `
+      SELECT 
+        p.id,
+        p.employee_id,
+        e.name as employee_name,
+        e.employee_id as employee_code,
+        e.branch as employee_branch,
+        p.month,
+        p.payment_method,
+        p.amount as salary_amount,
+        p.paid_by,
+        p.notes,
+        p.created_at,
+        COALESCE(r.overtime_pay, 0) as overtime_amount,
+        (COALESCE(r.deductions, 0) + COALESCE(r.advance_deduction, 0) + COALESCE(r.khata_deduction, 0)) as deduction_amount,
+        COALESCE(r.carried_forward_to_next, 0) as carry_forward_amount,
+        COALESCE(r.status, 'Paid') as payment_status
+      FROM employee_payroll_payments p
+      LEFT JOIN employees e ON e.id = p.employee_id
+      LEFT JOIN employee_payroll_records r ON (r.employee_id = p.employee_id AND r.month = p.month)
+      WHERE ($1::text IS NULL OR p.month = $1)
+      ORDER BY p.created_at DESC
+    `;
+    const paymentsRes = await pool.query(paymentsQuery, [month]);
+    let rows = paymentsRes.rows;
+
+    if (branch && branch !== 'All') {
+      rows = rows.filter(r => matchB(r.employee_branch, branch));
+    }
+
+    // 2. If no payment vouchers logged yet, fallback to employee_payroll_records where status = 'Paid' or paid_amount > 0
+    if (rows.length === 0) {
+      const fbQuery = `
+        SELECT 
+          r.id,
+          r.employee_id,
+          e.name as employee_name,
+          e.employee_id as employee_code,
+          e.branch as employee_branch,
+          r.month,
+          'Cash' as payment_method,
+          COALESCE(r.paid_amount, r.net_salary, 0) as salary_amount,
+          'Operator' as paid_by,
+          r.notes,
+          COALESCE(r.paid_date, r.created_at, NOW()) as created_at,
+          COALESCE(r.overtime_pay, 0) as overtime_amount,
+          (COALESCE(r.deductions, 0) + COALESCE(r.advance_deduction, 0) + COALESCE(r.khata_deduction, 0)) as deduction_amount,
+          COALESCE(r.carried_forward_to_next, 0) as carry_forward_amount,
+          COALESCE(r.status, 'Paid') as payment_status
+        FROM employee_payroll_records r
+        LEFT JOIN employees e ON e.id = r.employee_id
+        WHERE ($1::text IS NULL OR r.month = $1)
+          AND (r.status = 'Paid' OR COALESCE(r.paid_amount, 0) > 0)
+        ORDER BY r.id DESC
+      `;
+      const fbRes = await pool.query(fbQuery, [month]);
+      rows = fbRes.rows;
+      if (branch && branch !== 'All') {
+        rows = rows.filter(r => matchB(r.employee_branch, branch));
+      }
+    }
+
+    const history = rows.map(r => {
+      const dt = new Date(r.created_at || Date.now());
+      const paymentDate = dt.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+      const paymentTime = dt.toLocaleTimeString('en-US', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit', hour12: true });
+
+      return {
+        id: r.id,
+        employee_id: r.employee_id,
+        employee_name: r.employee_name || 'N/A',
+        employee_code: r.employee_code || `EMP-${r.employee_id}`,
+        branch: r.employee_branch || 'Branch 1',
+        payment_date: paymentDate,
+        payment_time: paymentTime,
+        salary_amount: parseFloat(r.salary_amount || 0),
+        overtime_amount: parseFloat(r.overtime_amount || 0),
+        deduction_amount: parseFloat(r.deduction_amount || 0),
+        carry_forward_amount: parseFloat(r.carry_forward_amount || 0),
+        paid_by: r.paid_by || 'Salary Pay Operator',
+        payment_status: r.payment_status || 'Paid',
+        notes: r.notes || '',
+        month: r.month
+      };
+    });
+
+    res.json(history);
+  } catch (err) {
+    console.error('Error fetching payment history:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1794,6 +2044,10 @@ router.post('/payments', authenticateToken, async (req, res) => {
 
 // DELETE a payment log entry
 router.delete('/payments/:id', authenticateToken, async (req, res) => {
+  const userRole = (req.user?.role || '').trim().toLowerCase();
+  if (userRole === 'salary pay operator') {
+    return res.status(403).json({ error: 'Salary Pay Operator is not authorized to delete payment records.' });
+  }
   const { id } = req.params;
   const performedBy = req.user?.username || req.user?.name || req.user?.email || 'Admin';
   const client = await pool.connect();

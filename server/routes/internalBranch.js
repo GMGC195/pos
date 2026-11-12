@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, blockSalaryPayOperator } = require('../middleware/auth');
+
+// Security Guard: Salary Pay Operator is strictly blocked from Internal Branch
+router.use(blockSalaryPayOperator);
 
 // Default standard branches including Central Kitchen and Other
 const STANDARD_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen', 'Other'];
@@ -513,9 +516,9 @@ router.get('/transfers', authenticateToken, async (req, res) => {
         query += ` AND t.to_branch = $${params.length}`;
       }
 
-      // Active / in-progress until completed:
+      // Active / in-progress until receiving completed:
       if (!status || status === 'All') {
-        query += ` AND t.status NOT IN ('Completed', 'Cancelled')`;
+        query += ` AND t.status NOT IN ('Completed', 'Complete', 'Cancelled')`;
       }
     } else {
       // Master Logs & General Tab: Role isolation
@@ -581,10 +584,18 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       query += ` AND t.status = $${params.length}`;
     }
 
-    // Request Type filter (All, Transfer Request, New Request)
+    // Request Type filter (All Types, Kitchen Request, Other Request, Branch Transfer)
     if (request_type && request_type !== 'All') {
-      params.push(request_type);
-      query += ` AND t.request_type = $${params.length}`;
+      if (request_type === 'Branch Transfer' || request_type === 'Transfer Request') {
+        query += ` AND (t.request_type = 'Branch Transfer' OR t.request_type = 'Transfer Request')`;
+      } else if (request_type === 'Kitchen Request') {
+        query += ` AND (t.request_type = 'Kitchen Request' OR t.to_branch ILIKE '%Kitchen%' OR t.from_branch ILIKE '%Kitchen%')`;
+      } else if (request_type === 'Other Request') {
+        query += ` AND (t.request_type = 'Other Request' OR t.to_branch = 'Other' OR t.from_branch = 'Other' OR t.is_external = TRUE)`;
+      } else {
+        params.push(request_type);
+        query += ` AND t.request_type = $${params.length}`;
+      }
     }
 
     // Priority filter (All, Normal, High, Urgent)
@@ -728,6 +739,367 @@ router.get('/transfers/:id/activity-logs', authenticateToken, async (req, res) =
   } catch (err) {
     console.error('Error fetching transfer activity logs:', err);
     res.status(500).json({ error: 'Failed to fetch activity logs' });
+  }
+});
+
+// Helper to recalculate overall transfer status based on item statuses
+async function recalculateTransferStatus(client, transferId) {
+  const itemsRes = await client.query(`
+    SELECT id, dish_name, item_status, requested_qty, accepted_qty, rejected_qty, sent_qty, dispatched_qty, received_qty, pending_receive_qty, rejected_receive_qty
+    FROM internal_branch_transfer_items
+    WHERE transfer_id = $1
+  `, [transferId]);
+
+  const items = itemsRes.rows;
+  if (items.length === 0) return 'Pending';
+
+  const transferRes = await client.query(`SELECT status FROM internal_branch_transfers WHERE id = $1`, [transferId]);
+  const currentStatus = transferRes.rows[0]?.status || 'Pending';
+
+  // Check receiving status first if items were dispatched
+  const dispatchedItems = items.filter(it => (parseFloat(it.dispatched_qty || it.sent_qty || 0) > 0));
+  if (dispatchedItems.length > 0) {
+    const allDispatchedReceived = dispatchedItems.every(it => it.item_status === 'Fully Received' || it.item_status === 'Received');
+    const anyDispatchedReceived = dispatchedItems.some(it => parseFloat(it.received_qty || 0) > 0);
+    const anyPendingReceive = dispatchedItems.some(it => it.item_status === 'Pending Receive' || parseFloat(it.pending_receive_qty || 0) > 0);
+    const allDispatchedRejected = dispatchedItems.every(it => it.item_status === 'Rejected');
+
+    if (allDispatchedReceived && !anyPendingReceive) {
+      await client.query(`UPDATE internal_branch_transfers SET status = 'Received', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
+      return 'Received';
+    }
+    if (anyDispatchedReceived || anyPendingReceive) {
+      await client.query(`UPDATE internal_branch_transfers SET status = 'Partially Received', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
+      return 'Partially Received';
+    }
+    if (allDispatchedRejected) {
+      await client.query(`UPDATE internal_branch_transfers SET status = 'Rejected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
+      return 'Rejected';
+    }
+    const allAcceptedDispatched = items.filter(it => it.item_status === 'Accepted').length === 0;
+    const finalDispStatus = allAcceptedDispatched ? 'Dispatched' : 'Partially Dispatched';
+    await client.query(`UPDATE internal_branch_transfers SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [finalDispStatus, transferId]);
+    return finalDispStatus;
+  }
+
+  // Pre-dispatch stage: Acceptance / Rejection
+  const acceptedItems = items.filter(it => it.item_status === 'Accepted' || it.item_status === 'Preparing');
+  const rejectedItems = items.filter(it => it.item_status === 'Rejected');
+  const pendingItems = items.filter(it => !it.item_status || it.item_status === 'Pending');
+
+  let newStatus = 'Pending';
+  if (rejectedItems.length === items.length) {
+    newStatus = 'Rejected';
+  } else if (acceptedItems.length === items.length) {
+    newStatus = (currentStatus === 'In Progress' || currentStatus === 'Preparing') ? currentStatus : 'Accepted';
+  } else if (acceptedItems.length > 0) {
+    newStatus = 'Partially Accepted';
+  } else {
+    newStatus = 'Pending';
+  }
+
+  await client.query(`UPDATE internal_branch_transfers SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [newStatus, transferId]);
+  return newStatus;
+}
+
+// PUT /api/internal-branch/transfers/:id/items/:itemId/accept - Accept single item
+router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, itemId } = req.params;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only supplying branch "${transfer.to_branch}" can accept items.` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+
+    const itemRes = await client.query(`
+      SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE
+    `, [itemId, id]);
+
+    if (itemRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer item not found' });
+    }
+
+    const item = itemRes.rows[0];
+    const reqQty = parseFloat(item.requested_qty || 0);
+
+    const updateItemRes = await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET item_status = 'Accepted',
+          accepted_qty = $1,
+          rejected_qty = 0,
+          rejection_reason = NULL,
+          accepted_by_name = $2,
+          accepted_at = CURRENT_TIMESTAMP
+      WHERE id = $3 AND transfer_id = $4
+      RETURNING *
+    `, [reqQty, userName, itemId, id]);
+
+    const updatedItem = updateItemRes.rows[0];
+    const overallStatus = await recalculateTransferStatus(client, id);
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'ITEM_ACCEPTED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: item.item_status || 'Pending',
+      newValue: 'Accepted',
+      details: `Item "${item.dish_name}" accepted (${reqQty} ${item.uom}) by ${userName}. Request status is now "${overallStatus}".`
+    });
+
+    await client.query('COMMIT');
+
+    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
+
+    const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
+    if (req.io) {
+      req.io.emit('internal_transfer_item_accepted', { transferId: id, itemId, updatedItem, overallStatus, payload });
+      req.io.emit('internal_transfer_updated', payload);
+    }
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error accepting item:', err);
+    res.status(500).json({ error: err.message || 'Failed to accept item' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/items/:itemId/reject - Reject single item
+router.put('/transfers/:id/items/:itemId/reject', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, itemId } = req.params;
+    const { rejection_reason } = req.body;
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only supplying branch "${transfer.to_branch}" can reject items.` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+
+    const itemRes = await client.query(`
+      SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE
+    `, [itemId, id]);
+
+    if (itemRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer item not found' });
+    }
+
+    const item = itemRes.rows[0];
+    const reqQty = parseFloat(item.requested_qty || 0);
+    const reasonText = rejection_reason?.trim() || 'Item unavailable at supplying branch';
+
+    const updateItemRes = await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET item_status = 'Rejected',
+          rejected_qty = $1,
+          accepted_qty = 0,
+          rejection_reason = $2,
+          rejected_by_name = $3,
+          rejected_at = CURRENT_TIMESTAMP
+      WHERE id = $4 AND transfer_id = $5
+      RETURNING *
+    `, [reqQty, reasonText, userName, itemId, id]);
+
+    const updatedItem = updateItemRes.rows[0];
+    const overallStatus = await recalculateTransferStatus(client, id);
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'ITEM_REJECTED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: item.item_status || 'Pending',
+      newValue: 'Rejected',
+      reason: reasonText,
+      details: `Item "${item.dish_name}" rejected by ${userName}. Reason: "${reasonText}". Request status is now "${overallStatus}".`
+    });
+
+    await client.query('COMMIT');
+
+    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
+
+    const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
+    if (req.io) {
+      req.io.emit('internal_transfer_item_rejected', { transferId: id, itemId, updatedItem, overallStatus, payload });
+      req.io.emit('internal_transfer_updated', payload);
+    }
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error rejecting item:', err);
+    res.status(500).json({ error: err.message || 'Failed to reject item' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/accept-all - Accept all pending items
+router.put('/transfers/:id/accept-all', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only supplying branch "${transfer.to_branch}" can accept items.` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+
+    await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET item_status = 'Accepted',
+          accepted_qty = requested_qty,
+          rejected_qty = 0,
+          rejection_reason = NULL,
+          accepted_by_name = $1,
+          accepted_at = CURRENT_TIMESTAMP
+      WHERE transfer_id = $2 AND (item_status = 'Pending' OR item_status IS NULL)
+    `, [userName, id]);
+
+    const overallStatus = await recalculateTransferStatus(client, id);
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'ALL_ITEMS_ACCEPTED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: overallStatus,
+      details: `All pending items accepted by ${userName}.`
+    });
+
+    await client.query('COMMIT');
+
+    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
+
+    const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
+    if (req.io) req.io.emit('internal_transfer_updated', payload);
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error accepting all items:', err);
+    res.status(500).json({ error: err.message || 'Failed to accept all items' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/reject-all - Reject all pending items
+router.put('/transfers/:id/reject-all', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { rejection_reason } = req.body;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only supplying branch "${transfer.to_branch}" can reject items.` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+    const reasonText = rejection_reason?.trim() || 'Items unavailable at supplying branch';
+
+    await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET item_status = 'Rejected',
+          rejected_qty = requested_qty,
+          accepted_qty = 0,
+          rejection_reason = $1,
+          rejected_by_name = $2,
+          rejected_at = CURRENT_TIMESTAMP
+      WHERE transfer_id = $3 AND (item_status = 'Pending' OR item_status IS NULL)
+    `, [reasonText, userName, id]);
+
+    const overallStatus = await recalculateTransferStatus(client, id);
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'ALL_ITEMS_REJECTED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: overallStatus,
+      reason: reasonText,
+      details: `All pending items rejected by ${userName}. Reason: "${reasonText}".`
+    });
+
+    await client.query('COMMIT');
+
+    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
+
+    const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
+    if (req.io) req.io.emit('internal_transfer_updated', payload);
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error rejecting all items:', err);
+    res.status(500).json({ error: err.message || 'Failed to reject all items' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1350,12 +1722,12 @@ router.put('/transfers/:id/mark-ready', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/internal-branch/transfers/:id/dispatch - Handover & Dispatch
+// PUT /api/internal-branch/transfers/:id/dispatch - Handover & Item-Wise Dispatch
 router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { handover_by_name, handover_to_name, items } = req.body;
+    const { handover_by_name, handover_to_name, notes, items, additional_items } = req.body;
 
     await client.query('BEGIN');
 
@@ -1374,43 +1746,122 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `Unauthorized. Only staff from supplying branch "${transfer.to_branch}" can dispatch this transfer.` });
     }
 
-    // Update item sent quantities if provided
-    if (items && Array.isArray(items)) {
-      for (const item of items) {
-        const sentQty = parseFloat(item.sent_qty !== undefined ? item.sent_qty : item.confirmed_qty);
-        if (!isNaN(sentQty) && sentQty >= 0) {
-          await client.query(`
-            UPDATE internal_branch_transfer_items
-            SET sent_qty = $1, remarks = COALESCE($2, remarks)
-            WHERE id = $3 AND transfer_id = $4
-          `, [sentQty, item.remarks || null, item.id, transfer.id]);
-        }
-      }
-    } else {
-      // Default sent_qty to confirmed_qty || requested_qty
-      await client.query(`
-        UPDATE internal_branch_transfer_items
-        SET sent_qty = COALESCE(sent_qty, confirmed_qty, requested_qty)
-        WHERE transfer_id = $1
-      `, [transfer.id]);
-    }
-
     const dispatcherName = req.user.name || req.user.username || 'Kitchen Dispatcher';
     const hOverBy = handover_by_name?.trim() || dispatcherName;
     const hOverTo = handover_to_name?.trim() || 'Driver / Delivery Staff';
 
+    let totalDispatchedCount = 0;
+    let totalPendingDispatchCount = 0;
+
+    // 1. Process regular accepted items
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        const itemRowRes = await client.query(`
+          SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE
+        `, [item.id, transfer.id]);
+
+        if (itemRowRes.rows.length === 0) continue;
+        const currentItem = itemRowRes.rows[0];
+
+        // Do not dispatch rejected items
+        if (currentItem.item_status === 'Rejected') {
+          continue;
+        }
+
+        const acceptedQty = parseFloat(currentItem.accepted_qty !== null && currentItem.accepted_qty !== undefined ? currentItem.accepted_qty : (currentItem.confirmed_qty ?? currentItem.requested_qty ?? 0));
+        const dispatchQty = parseFloat(item.dispatch_qty !== undefined ? item.dispatch_qty : (item.sent_qty !== undefined ? item.sent_qty : acceptedQty));
+
+        if (item.mark_pending || isNaN(dispatchQty) || dispatchQty <= 0) {
+          // Item marked as Pending Dispatch / Not Available
+          totalPendingDispatchCount++;
+          await client.query(`
+            UPDATE internal_branch_transfer_items
+            SET item_status = 'Pending Dispatch',
+                dispatched_qty = 0,
+                sent_qty = 0,
+                pending_dispatch_qty = $1,
+                pending_receive_qty = 0,
+                remarks = COALESCE($2, remarks)
+            WHERE id = $3 AND transfer_id = $4
+          `, [acceptedQty, item.remarks || null, item.id, transfer.id]);
+        } else {
+          // Validate dispatch quantity cannot exceed accepted quantity
+          if (dispatchQty > acceptedQty && !superUser) {
+            throw new Error(`Dispatch quantity (${dispatchQty}) for "${currentItem.dish_name}" cannot exceed accepted quantity (${acceptedQty}).`);
+          }
+
+          const isPartial = dispatchQty < acceptedQty;
+          const status = isPartial ? 'Partially Dispatched' : 'Dispatched';
+          const pendingDisp = isPartial ? (acceptedQty - dispatchQty) : 0;
+          totalDispatchedCount++;
+          if (isPartial) totalPendingDispatchCount++;
+
+          await client.query(`
+            UPDATE internal_branch_transfer_items
+            SET item_status = $1,
+                dispatched_qty = $2,
+                sent_qty = $2,
+                pending_dispatch_qty = $3,
+                pending_receive_qty = $2,
+                remarks = COALESCE($4, remarks)
+            WHERE id = $5 AND transfer_id = $6
+          `, [status, dispatchQty, pendingDisp, item.remarks || null, item.id, transfer.id]);
+        }
+      }
+    }
+
+    // 2. Process Additional Items added during dispatch
+    if (additional_items && Array.isArray(additional_items)) {
+      for (const extra of additional_items) {
+        const extraQty = parseFloat(extra.dispatch_qty || extra.qty || 0);
+        if (extraQty > 0 && extra.dish_name) {
+          totalDispatchedCount++;
+          await client.query(`
+            INSERT INTO internal_branch_transfer_items (
+              transfer_id, item_id, dish_name, uom, requested_qty, accepted_qty, dispatched_qty, sent_qty, pending_receive_qty, item_status, is_additional, price, remarks, created_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $5, $5, $5, $5, 'Dispatched', TRUE, $6, $7, CURRENT_TIMESTAMP
+            )
+          `, [
+            transfer.id,
+            extra.item_id || null,
+            extra.dish_name.trim(),
+            extra.uom || 'Piece',
+            extraQty,
+            extra.price ? parseFloat(extra.price) : null,
+            extra.remarks || 'Additional item added during dispatch'
+          ]);
+        }
+      }
+    }
+
+    // 3. Determine Overall Transfer Status
+    let finalTransferStatus = 'Dispatched';
+    if (totalDispatchedCount === 0) {
+      finalTransferStatus = 'In Progress';
+    } else if (totalPendingDispatchCount > 0) {
+      finalTransferStatus = 'Partially Dispatched';
+    } else {
+      finalTransferStatus = 'Dispatched';
+    }
+
+    const combinedNotes = notes 
+      ? (transfer.notes ? `${transfer.notes}\n[Dispatch Notes]: ${notes.trim()}` : `[Dispatch Notes]: ${notes.trim()}`)
+      : transfer.notes;
+
     const updateRes = await client.query(`
       UPDATE internal_branch_transfers
-      SET status = 'Dispatched',
+      SET status = $1,
           dispatched_at = CURRENT_TIMESTAMP,
-          dispatched_by_user_id = $1,
-          dispatched_by_name = $2,
-          handover_by_name = $3,
-          handover_to_name = $4,
+          dispatched_by_user_id = $2,
+          dispatched_by_name = $3,
+          handover_by_name = $4,
+          handover_to_name = $5,
+          notes = $6,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $5
+      WHERE id = $7
       RETURNING *
-    `, [req.user.id || null, dispatcherName, hOverBy, hOverTo, transfer.id]);
+    `, [finalTransferStatus, req.user.id || null, dispatcherName, hOverBy, hOverTo, combinedNotes, transfer.id]);
 
     const updatedTransfer = updateRes.rows[0];
 
@@ -1422,14 +1873,14 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
       user: req.user,
       userRole: req.user.role,
       previousValue: transfer.status,
-      newValue: 'Dispatched',
-      details: `Parcel handed over by "${hOverBy}" to "${hOverTo}" and dispatched.`,
-      metadata: { handoverBy: hOverBy, handoverTo: hOverTo }
+      newValue: finalTransferStatus,
+      details: `Dispatched (${finalTransferStatus}) by "${hOverBy}" to "${hOverTo}". ${totalDispatchedCount} items dispatched, ${totalPendingDispatchCount} pending dispatch.`,
+      metadata: { handoverBy: hOverBy, handoverTo: hOverTo, status: finalTransferStatus }
     });
 
     await createBranchNotification(client, {
       targetBranch: transfer.from_branch,
-      message: `🚚 Request #${transfer.transfer_id} has been Dispatched by ${transfer.to_branch}! Handed over by ${hOverBy} to ${hOverTo}.`,
+      message: `🚚 Request #${transfer.transfer_id} has been ${finalTransferStatus} by ${transfer.to_branch}! Handed over to ${hOverTo}.`,
       type: 'INTERNAL_TRANSFER_DISPATCHED'
     });
 
@@ -1446,6 +1897,7 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
 
     if (req.io) {
       req.io.emit('internal_transfer_dispatched', payload);
+      req.io.emit('internal_transfer_updated', payload);
     }
 
     res.json(payload);
@@ -1458,7 +1910,7 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/internal-branch/transfers/:id/receive - Requesting branch confirms receiving & verifies quantities
+// PUT /api/internal-branch/transfers/:id/receive - Requesting branch confirms receiving & verifies quantities item-wise
 router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -1466,7 +1918,7 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     const { items, discrepancy_reason, notes } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Received quantities are required for all items.' });
+      return res.status(400).json({ error: 'Received items data is required.' });
     }
 
     await client.query('BEGIN');
@@ -1478,12 +1930,6 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     }
 
     const transfer = tRes.rows[0];
-    const validStatuses = ['Dispatched', 'In-Transit', 'Ready for Dispatch'];
-    if (!validStatuses.includes(transfer.status)) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Cannot receive transfer in status "${transfer.status}". Only dispatched transfers can be received.` });
-    }
-
     const superUser = isSuperUser(req.user);
     const userBranch = req.user.branch;
 
@@ -1492,52 +1938,139 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `Unauthorized. Only staff from requesting branch "${transfer.from_branch}" can receive and verify this transfer.` });
     }
 
+    const receiverName = req.user.name || req.user.username || 'Staff Receiver';
     let hasDiscrepancy = false;
+    let anyReceived = false;
+    let anyPending = false;
+    let allReceived = true;
+    let allRejected = true;
     const itemDiscrepancies = [];
 
     for (const item of items) {
-      const recQty = parseFloat(item.received_qty);
-      if (isNaN(recQty) || recQty < 0) {
-        throw new Error(`Received quantity for item #${item.id} must be a non-negative number.`);
+      const itemRowRes = await client.query(`
+        SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE
+      `, [item.id, transfer.id]);
+
+      if (itemRowRes.rows.length === 0) continue;
+      const currentItem = itemRowRes.rows[0];
+
+      // Dispatched quantity is base benchmark
+      const baseDispatched = parseFloat(currentItem.dispatched_qty !== null && currentItem.dispatched_qty !== undefined ? currentItem.dispatched_qty : (currentItem.sent_qty || 0));
+
+      if (baseDispatched <= 0) {
+        // Skip items that were never dispatched
+        continue;
       }
 
-      // Fetch base sent qty
-      const itemRowRes = await client.query(`
-        SELECT id, dish_name, uom, sent_qty, confirmed_qty, requested_qty 
-        FROM internal_branch_transfer_items WHERE id = $1
-      `, [item.id]);
-
-      const currentItem = itemRowRes.rows[0] || {};
-      const baseSent = currentItem.sent_qty !== null ? parseFloat(currentItem.sent_qty) : (currentItem.confirmed_qty !== null ? parseFloat(currentItem.confirmed_qty) : parseFloat(currentItem.requested_qty || 0));
-      const variance = recQty - baseSent;
-
-      if (Math.abs(variance) > 0.0001) {
+      if (item.is_rejected) {
+        // Item rejected by receiving branch
+        allReceived = false;
         hasDiscrepancy = true;
+        const rejQty = parseFloat(item.rejected_qty !== undefined ? item.rejected_qty : baseDispatched);
+        const reasonText = item.rejection_reason?.trim() || discrepancy_reason?.trim() || 'Damaged / rejected at receiving';
+
         itemDiscrepancies.push({
           dish_name: currentItem.dish_name,
           uom: currentItem.uom,
-          dispatched_qty: baseSent,
-          received_qty: recQty,
-          variance_qty: variance
+          dispatched_qty: baseDispatched,
+          received_qty: 0,
+          rejected_qty: rejQty,
+          status: 'Rejected',
+          reason: reasonText
         });
-      }
 
-      await client.query(`
-        UPDATE internal_branch_transfer_items
-        SET received_qty = $1,
-            variance_qty = $2,
-            remarks = COALESCE($3, remarks)
-        WHERE id = $4 AND transfer_id = $5
-      `, [recQty, variance, item.remarks || null, item.id, transfer.id]);
+        await client.query(`
+          UPDATE internal_branch_transfer_items
+          SET item_status = 'Rejected',
+              rejected_receive_qty = $1,
+              received_qty = 0,
+              pending_receive_qty = 0,
+              variance_qty = -$1,
+              receive_rejection_reason = $2,
+              receive_rejected_by_name = $3,
+              receive_rejected_at = CURRENT_TIMESTAMP,
+              remarks = COALESCE($4, remarks)
+          WHERE id = $5 AND transfer_id = $6
+        `, [rejQty, reasonText, receiverName, item.remarks || null, item.id, transfer.id]);
+
+      } else if (item.mark_pending) {
+        // Item explicitly marked as Pending Receive (not yet arrived)
+        allReceived = false;
+        allRejected = false;
+        anyPending = true;
+        const recQty = parseFloat(item.received_qty) || 0;
+        const pendingQty = Math.max(0, baseDispatched - recQty);
+
+        if (recQty > 0) anyReceived = true;
+
+        await client.query(`
+          UPDATE internal_branch_transfer_items
+          SET item_status = 'Pending Receive',
+              received_qty = $1,
+              pending_receive_qty = $2,
+              variance_qty = -$2,
+              remarks = COALESCE($3, remarks)
+          WHERE id = $4 AND transfer_id = $5
+        `, [recQty, pendingQty, item.remarks || null, item.id, transfer.id]);
+
+      } else {
+        // Normal receiving
+        const recQty = parseFloat(item.received_qty);
+        if (isNaN(recQty) || recQty < 0) {
+          throw new Error(`Received quantity for "${currentItem.dish_name}" must be a non-negative number.`);
+        }
+
+        allRejected = false;
+        if (recQty > 0) anyReceived = true;
+
+        const variance = recQty - baseDispatched;
+        if (Math.abs(variance) > 0.0001) {
+          hasDiscrepancy = true;
+          itemDiscrepancies.push({
+            dish_name: currentItem.dish_name,
+            uom: currentItem.uom,
+            dispatched_qty: baseDispatched,
+            received_qty: recQty,
+            variance_qty: variance
+          });
+        }
+
+        const isFullyRec = recQty >= baseDispatched;
+        if (!isFullyRec) {
+          allReceived = false;
+          anyPending = true;
+        }
+
+        const itemStatus = isFullyRec ? 'Fully Received' : (recQty > 0 ? 'Partially Received' : 'Pending Receive');
+        const pendingQty = Math.max(0, baseDispatched - recQty);
+
+        await client.query(`
+          UPDATE internal_branch_transfer_items
+          SET item_status = $1,
+              received_qty = $2,
+              variance_qty = $3,
+              pending_receive_qty = $4,
+              remarks = COALESCE($5, remarks)
+          WHERE id = $6 AND transfer_id = $7
+        `, [itemStatus, recQty, variance, pendingQty, item.remarks || null, item.id, transfer.id]);
+      }
     }
 
     if (hasDiscrepancy && (!discrepancy_reason || !discrepancy_reason.trim())) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Discrepancy detected (shortage or excess). A reason for the variance is required.' });
+      return res.status(400).json({ error: 'Discrepancy or rejection detected. A clear reason for the variance is mandatory.' });
     }
 
-    const finalStatus = hasDiscrepancy ? 'Partially Received' : 'Fully Received';
-    const receiverName = req.user.name || req.user.username || 'Staff Receiver';
+    // Determine final transfer status
+    let finalTransferStatus = 'Received';
+    if (allRejected) {
+      finalTransferStatus = 'Rejected';
+    } else if (anyPending || !allReceived || hasDiscrepancy) {
+      finalTransferStatus = 'Partially Received';
+    } else {
+      finalTransferStatus = 'Received';
+    }
+
     const combinedNotes = notes 
       ? (transfer.notes ? `${transfer.notes}\n[Receiving Notes]: ${notes.trim()}` : `[Receiving Notes]: ${notes.trim()}`)
       : transfer.notes;
@@ -1554,7 +2087,7 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       WHERE id = $6
       RETURNING *
     `, [
-      finalStatus,
+      finalTransferStatus,
       req.user.id || null,
       receiverName,
       discrepancy_reason ? discrepancy_reason.trim() : null,
@@ -1565,8 +2098,8 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     const updatedTransfer = updateRes.rows[0];
 
     const discrepancySummary = hasDiscrepancy
-      ? itemDiscrepancies.map(d => `${d.dish_name}: sent ${d.dispatched_qty} ${d.uom}, received ${d.received_qty} ${d.uom} (${d.variance_qty < 0 ? 'Shortage ' + d.variance_qty : 'Excess +' + d.variance_qty})`).join('; ')
-      : 'All item quantities confirmed matching.';
+      ? itemDiscrepancies.map(d => `${d.dish_name}: sent ${d.dispatched_qty} ${d.uom}, received ${d.received_qty} ${d.uom} (${d.status || (d.variance_qty < 0 ? 'Shortage ' + d.variance_qty : 'Excess +' + d.variance_qty)})`).join('; ')
+      : 'All dispatched item quantities verified matching.';
 
     await logTransferActivity(client, {
       transferId: transfer.id,
@@ -1576,15 +2109,15 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       user: req.user,
       userRole: req.user.role,
       previousValue: transfer.status,
-      newValue: finalStatus,
+      newValue: finalTransferStatus,
       reason: discrepancy_reason || null,
-      details: `Received by ${receiverName}. Status: ${finalStatus}. ${discrepancySummary}`,
-      metadata: { status: finalStatus, discrepancies: itemDiscrepancies, reason: discrepancy_reason }
+      details: `Received by ${receiverName}. Status: ${finalTransferStatus}. ${discrepancySummary}`,
+      metadata: { status: finalTransferStatus, discrepancies: itemDiscrepancies, reason: discrepancy_reason }
     });
 
     await createBranchNotification(client, {
       targetBranch: transfer.to_branch,
-      message: `✅ Request #${transfer.transfer_id} received by ${transfer.from_branch} (${finalStatus}). ${discrepancySummary}`,
+      message: `✅ Request #${transfer.transfer_id} received by ${transfer.from_branch} (${finalTransferStatus}). ${discrepancySummary}`,
       type: 'INTERNAL_TRANSFER_RECEIVED'
     });
 
@@ -1601,6 +2134,7 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
 
     if (req.io) {
       req.io.emit('internal_transfer_received', payload);
+      req.io.emit('internal_transfer_updated', payload);
     }
 
     res.json(payload);

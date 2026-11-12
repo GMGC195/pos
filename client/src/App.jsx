@@ -75,7 +75,7 @@ export default function App() {
                 }
               >
                 <Route path="/" element={
-                  <ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator']}>
+                  <ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator', 'Salary Pay Operator']}>
                     <Dashboard />
                   </ProtectedRoute>
                 } />
@@ -100,14 +100,14 @@ export default function App() {
                 <Route path="/attendance"         element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'Employee', 'HR Manager', 'Operator']}><AttendanceTracker /></ProtectedRoute>} />
                 <Route path="/today-attendance"   element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager', 'Operator']}><TodayAttendance /></ProtectedRoute>} />
                 <Route path="/attendance-reports" element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><AttendanceReports /></ProtectedRoute>} />
-                <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><Payroll /></ProtectedRoute>} />
+                <Route path="/payroll"            element={<ProtectedRoute allowedRoles={['Admin', 'Developer', 'Management', 'HR Manager', 'Salary Pay Operator']}><Payroll /></ProtectedRoute>} />
                 <Route path="/logs"               element={<ProtectedRoute allowedRoles={['Admin', 'Management', 'HR Manager']}><Logs /></ProtectedRoute>} />
                 <Route path="/salary-spreadsheet" element={<Navigate to="/logs" replace />} />
                 <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin', 'HR Manager', 'Operator']}><EditAttendanceLogs /></ProtectedRoute>} />
 
-                {/* Universal */}
-                <Route path="/settings"     element={<Settings />} />
-                <Route path="/help-support" element={<HelpSupport />} />
+                {/* Settings & Support (Protected) */}
+                <Route path="/settings"     element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management']}><Settings /></ProtectedRoute>} />
+                <Route path="/help-support" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator', 'Cashier', 'Order Taker']}><HelpSupport /></ProtectedRoute>} />
                 <Route path="*"             element={<Navigate to="/" replace />} />
               </Route>
             </Routes>

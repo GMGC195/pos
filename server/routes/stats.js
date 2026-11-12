@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, blockSalaryPayOperator } = require('../middleware/auth');
+
+router.use(blockSalaryPayOperator);
 
 // KSA Current Month Helper (Asia/Riyadh - UTC+3)
 const getKsaCurrentMonthStr = () => {
@@ -284,49 +286,197 @@ router.get('/top-items', authenticateToken, async (req, res) => {
 // GET /api/stats/shift-closing-analytics
 router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
   try {
-    const { date } = req.query;
-    const targetDateExpr = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
-      ? `'${date}'::date`
-      : `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date`;
+    const { period, date, start_date, end_date, branch } = req.query;
 
-    // Query shift closings for the target date or latest recent closings
-    const closingsRes = await pool.query(`
+    // 1. Resolve date range expressions in Asia/Riyadh timezone
+    let startDateExpr = "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date";
+    let endDateExpr = "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date";
+    const selectedPeriod = (period || (date ? 'single' : 'today')).toLowerCase();
+
+    if (selectedPeriod === 'yesterday') {
+      startDateExpr = "((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh') - INTERVAL '1 day')::date";
+      endDateExpr = "((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh') - INTERVAL '1 day')::date";
+    } else if (selectedPeriod === '7days') {
+      startDateExpr = "((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh') - INTERVAL '6 days')::date";
+      endDateExpr = "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date";
+    } else if (selectedPeriod === 'last_month') {
+      // Previous complete calendar month
+      startDateExpr = "date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh') - INTERVAL '1 month')::date";
+      endDateExpr = "(date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh') - INTERVAL '1 day')::date";
+    } else if (selectedPeriod === 'custom' && start_date && end_date) {
+      const validS = /^\d{4}-\d{2}-\d{2}$/.test(start_date) ? start_date : null;
+      const validE = /^\d{4}-\d{2}-\d{2}$/.test(end_date) ? end_date : null;
+      if (validS && validE && validS <= validE) {
+        startDateExpr = `'${validS}'::date`;
+        endDateExpr = `'${validE}'::date`;
+      }
+    } else if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      startDateExpr = `'${date}'::date`;
+      endDateExpr = `'${date}'::date`;
+    }
+
+    // Branch filter if provided
+    let branchCondition = '';
+    const queryParams = [];
+    if (branch && branch !== 'All') {
+      queryParams.push(branch);
+      branchCondition = ` AND branch = ${queryParams.length}`;
+    }
+
+    // 2. Query shift closings across the selected date range
+    const rangeQuery = `
       SELECT 
         id, branch, cashier_name, total_sales, cash_sales, card_sales, closing_cash, closing_card,
-        login_time, logout_time, closing_type, shifts_summary, created_at,
+        difference, difference_reason, closing_type, login_time, logout_time, created_at,
+        TO_CHAR((COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date, 'YYYY-MM-DD') as date_str,
+        TO_CHAR((COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date, 'DD Mon') as display_date,
         EXTRACT(HOUR FROM (COALESCE(login_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as login_hour,
         EXTRACT(HOUR FROM (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as logout_hour
       FROM shift_closings
-      WHERE (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr}
+      WHERE (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date >= ${startDateExpr}
+        AND (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date <= ${endDateExpr}
+        ${branchCondition}
+      ORDER BY (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date ASC, id ASC
+    `;
+
+    const rangeRes = await pool.query(rangeQuery, queryParams);
+
+    // 3. Aggregate daily timeline without double-counting (prioritize Daily record, else sum Shift records)
+    const dateMap = new Map();
+
+    for (const row of rangeRes.rows) {
+      const d = row.date_str;
+      if (!dateMap.has(d)) {
+        dateMap.set(d, {
+          date: d,
+          display_date: row.display_date,
+          shifts: [],
+          daily_record: null
+        });
+      }
+      const entry = dateMap.get(d);
+      if (row.closing_type === 'Daily') {
+        entry.daily_record = row;
+      } else {
+        entry.shifts.push(row);
+      }
+    }
+
+    const timeline = [];
+    let totalActual = 0;
+    let totalSystem = 0;
+    const allCashiersSet = new Set();
+
+    dateMap.forEach((entry, dStr) => {
+      let actual = 0;
+      let system = 0;
+      const cashiersOnDate = new Set();
+
+      if (entry.daily_record) {
+        // Use Daily record values
+        const dRec = entry.daily_record;
+        const cCash = parseFloat(dRec.closing_cash || 0);
+        const cCard = parseFloat(dRec.closing_card || 0);
+        actual = (cCash > 0 || cCard > 0) ? (cCash + cCard) : parseFloat(dRec.total_sales || 0);
+        system = parseFloat(dRec.total_sales || (parseFloat(dRec.cash_sales || 0) + parseFloat(dRec.card_sales || 0)));
+        if (dRec.cashier_name) {
+          cashiersOnDate.add(dRec.cashier_name);
+          allCashiersSet.add(dRec.cashier_name);
+        }
+      } else if (entry.shifts.length > 0) {
+        // Sum individual Shift records
+        for (const s of entry.shifts) {
+          const cCash = parseFloat(s.closing_cash || 0);
+          const cCard = parseFloat(s.closing_card || 0);
+          const sSys = parseFloat(s.total_sales || (parseFloat(s.cash_sales || 0) + parseFloat(s.card_sales || 0)));
+          const sAct = (s.closing_cash !== null && s.closing_cash !== undefined) ? (cCash + cCard) : sSys;
+          actual += sAct;
+          system += sSys;
+          if (s.cashier_name) {
+            cashiersOnDate.add(s.cashier_name);
+            allCashiersSet.add(s.cashier_name);
+          }
+        }
+      }
+
+      actual = Math.round(actual * 100) / 100;
+      system = Math.round(system * 100) / 100;
+      const diff = Math.round((actual - system) * 100) / 100;
+
+      totalActual += actual;
+      totalSystem += system;
+
+      timeline.push({
+        date: dStr,
+        display_date: entry.display_date,
+        actual_closing: actual,
+        system_closing: system,
+        difference: diff,
+        cashier_names: Array.from(cashiersOnDate).join(', ') || 'Staff',
+        shift_count: entry.shifts.length + (entry.daily_record ? 1 : 0),
+        daily_closing_id: entry.daily_record?.id || null,
+        daily_difference_reason: entry.daily_record?.difference_reason || null,
+        is_daily_edited: Boolean(entry.daily_record?.difference_reason && entry.daily_record.difference_reason.includes('[Edited')),
+        shifts: entry.shifts.map(s => ({
+          id: s.id,
+          shift_id: s.id,
+          branch: s.branch,
+          cashier_name: s.cashier_name,
+          actual: (s.closing_cash !== null && s.closing_cash !== undefined) ? (parseFloat(s.closing_cash || 0) + parseFloat(s.closing_card || 0)) : parseFloat(s.total_sales || 0),
+          closing_cash: s.closing_cash !== null && s.closing_cash !== undefined ? parseFloat(s.closing_cash) : null,
+          closing_card: s.closing_card !== null && s.closing_card !== undefined ? parseFloat(s.closing_card) : null,
+          system: parseFloat(s.total_sales || 0),
+          difference: parseFloat(s.difference || 0),
+          difference_reason: s.difference_reason || null,
+          is_edited: Boolean(s.difference_reason && s.difference_reason.includes('[Edited')),
+          closing_type: s.closing_type,
+          created_at: s.created_at
+        }))
+      });
+    });
+
+    totalActual = Math.round(totalActual * 100) / 100;
+    totalSystem = Math.round(totalSystem * 100) / 100;
+    const totalDifference = Math.round((totalActual - totalSystem) * 100) / 100;
+
+    // 4. Restaurant shift comparison for selected period
+    const closingsRes = await pool.query(`
+      SELECT 
+        id, branch, cashier_name, total_sales, cash_sales, card_sales, closing_cash, closing_card,
+        difference, difference_reason, login_time, logout_time, closing_type, shifts_summary, created_at,
+        EXTRACT(HOUR FROM (COALESCE(login_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as login_hour,
+        EXTRACT(HOUR FROM (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as logout_hour
+      FROM shift_closings
+      WHERE (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date >= ${startDateExpr}
+        AND (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')::date <= ${endDateExpr}
       ORDER BY id ASC
     `);
 
-    // Also get active cashier shifts for live info
     const liveShiftsRes = await pool.query(`
       SELECT cs.id, cs.cashier_name, cs.branch, cs.start_time, cs.status,
         EXTRACT(HOUR FROM (cs.start_time AT TIME ZONE 'Asia/Riyadh')) as start_hour
       FROM cashier_shifts cs
-      WHERE (cs.start_time AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr}
+      WHERE (cs.start_time AT TIME ZONE 'Asia/Riyadh')::date >= ${startDateExpr}
+        AND (cs.start_time AT TIME ZONE 'Asia/Riyadh')::date <= ${endDateExpr}
       ORDER BY cs.id ASC
     `).catch(() => ({ rows: [] }));
 
-    // Also get live unclosed order sales by branch and cashier for today
     const liveOrdersRes = await pool.query(`
       SELECT branch, completed_by, SUM(grand_total) as live_sales, COUNT(*) as live_orders
       FROM orders
-      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date = ${targetDateExpr}
+      WHERE (created_at AT TIME ZONE 'Asia/Riyadh')::date >= ${startDateExpr}
+        AND (created_at AT TIME ZONE 'Asia/Riyadh')::date <= ${endDateExpr}
         AND status = 'Completed'
         AND is_shift_closed = FALSE
       GROUP BY branch, completed_by
     `).catch(() => ({ rows: [] }));
 
-    // Fallback: If no closings on targetDate, fetch the latest closings overall to populate baseline analytics
     let fallbackClosings = [];
     if (closingsRes.rows.length === 0) {
       const fbRes = await pool.query(`
         SELECT 
           id, branch, cashier_name, total_sales, cash_sales, card_sales, closing_cash, closing_card,
-          login_time, logout_time, closing_type, shifts_summary, created_at,
+          difference, difference_reason, login_time, logout_time, closing_type, shifts_summary, created_at,
           EXTRACT(HOUR FROM (COALESCE(login_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as login_hour,
           EXTRACT(HOUR FROM (COALESCE(logout_time, created_at) AT TIME ZONE 'Asia/Riyadh')) as logout_hour
         FROM shift_closings
@@ -338,7 +488,6 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
 
     const allRows = closingsRes.rows.length > 0 ? closingsRes.rows : fallbackClosings;
 
-    // Branches definition
     const branchConfigs = [
       { id: 'R1', name: 'Restaurant 1', aliases: ['restaurant 1', 'branch 1', 'r1', 'b1'] },
       { id: 'R2', name: 'Restaurant 2', aliases: ['restaurant 2', 'branch 2', 'r2', 'b2'] },
@@ -356,7 +505,6 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
       const branchLiveOrders = liveOrdersRes.rows.filter(r => matchBranch(r.branch, bConfig));
       const branchLiveShifts = liveShiftsRes.rows.filter(r => matchBranch(r.branch, bConfig));
 
-      // Separate Day and Night shifts
       let dayShiftRecord = branchClosings.find(r => {
         const h = r.login_hour !== null ? r.login_hour : (r.logout_hour !== null ? r.logout_hour : 12);
         return h >= 6 && h < 18;
@@ -380,7 +528,6 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
       const nightLiveSales = (liveNight ? branchLiveOrders.filter(o => o.completed_by === liveNight.cashier_name) : [])
         .reduce((sum, o) => sum + parseFloat(o.live_sales || 0), 0);
 
-      // Day Shift Values
       const daySys = dayShiftRecord ? parseFloat(dayShiftRecord.total_sales || 0) : dayLiveSales;
       const dayAct = dayShiftRecord 
         ? ((dayShiftRecord.closing_cash !== null && dayShiftRecord.closing_cash !== undefined)
@@ -389,7 +536,6 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
         : dayLiveSales;
       const dayCashier = dayShiftRecord?.cashier_name || liveDay?.cashier_name || 'Day Cashier';
 
-      // Night Shift Values
       const nightSys = nightShiftRecord ? parseFloat(nightShiftRecord.total_sales || 0) : nightLiveSales;
       const nightAct = nightShiftRecord
         ? ((nightShiftRecord.closing_cash !== null && nightShiftRecord.closing_cash !== undefined)
@@ -423,6 +569,8 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
           closing_time: dayShiftRecord?.logout_time || dayShiftRecord?.created_at || (liveDay ? 'Active (In-Progress)' : null),
           difference_amount: dayDiff,
           difference_percentage: dayDiffPct,
+          difference_reason: dayShiftRecord?.difference_reason || null,
+          is_edited: Boolean(dayShiftRecord?.difference_reason && dayShiftRecord.difference_reason.includes('[Edited')),
           cashier_name: dayCashier,
           is_closed: !!dayShiftRecord,
           branch: bConfig.name
@@ -440,6 +588,8 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
           closing_time: nightShiftRecord?.logout_time || nightShiftRecord?.created_at || (liveNight ? 'Active (In-Progress)' : null),
           difference_amount: nightDiff,
           difference_percentage: nightDiffPct,
+          difference_reason: nightShiftRecord?.difference_reason || null,
+          is_edited: Boolean(nightShiftRecord?.difference_reason && nightShiftRecord.difference_reason.includes('[Edited')),
           cashier_name: nightCashier,
           is_closed: !!nightShiftRecord,
           branch: bConfig.name
@@ -450,6 +600,14 @@ router.get('/shift-closing-analytics', authenticateToken, async (req, res) => {
     });
 
     res.json({
+      period: selectedPeriod,
+      summary: {
+        total_actual: totalActual,
+        total_system: totalSystem,
+        total_difference: totalDifference,
+        cashiers: Array.from(allCashiersSet)
+      },
+      timeline: timeline,
       date: date || new Date().toISOString().slice(0, 10),
       restaurants: restaurantData
     });

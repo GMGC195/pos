@@ -38,7 +38,11 @@ export function POSProvider({ children }) {
 
     // Don't attempt API calls without an auth token — avoids 403 on login page
     const token = localStorage.getItem(STORAGE_TOKEN_KEY)
-    if (!token) return
+    const userRole = user?.role?.trim().toLowerCase()
+    if (!token || userRole === 'salary pay operator') {
+      setLoading(false)
+      return
+    }
     
     // Clear any existing retry timer to prevent overlaps
     if (retryTimerRef.current) {

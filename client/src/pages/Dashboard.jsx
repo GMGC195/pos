@@ -1,5 +1,7 @@
+import SalaryPayDashboard from '../components/SalaryPayDashboard'
 import { useEffect, useState, useRef } from 'react'
 import BaseSaleSurplusChart from '../components/BaseSaleSurplusChart'
+import DailyShiftClosingGraph from '../components/DailyShiftClosingGraph'
 import DeveloperAuthModal from '../components/DeveloperAuthModal'
 import EditShiftClosingModal from '../components/EditShiftClosingModal'
 import { useNavigate } from 'react-router-dom'
@@ -901,7 +903,12 @@ export default function Dashboard() {
   const loadStats = () => {
     setLoading(true)
 
-    if (user?.role?.toLowerCase() === 'employee') {
+    if (user?.role?.trim().toLowerCase() === 'salary pay operator') {
+      setLoading(false);
+      return;
+    }
+
+  if (user?.role?.toLowerCase() === 'employee') {
       axios.get('/api/attendance/personal-stats')
         .then(r => setPersonalStats(r.data))
         .catch(() => setPersonalStats(null))
@@ -1020,45 +1027,234 @@ export default function Dashboard() {
     XLSX.writeFile(wb, `Dashboard-Summary-${new Date().toISOString().split('T')[0]}.xlsx`)
   }
 
-  const exportPDF = () => {
-    if (!canViewPosAndReports) return
-    const printWindow = window.open('', '', 'width=800,height=600');
+    // ── PART 3: Professional A4 PDF Generation (jsPDF + autoTable) ──
+  const downloadTodaySummaryPDF = async () => {
+    if (!canViewPosAndReports) return;
+    try {
+      toast.loading('Generating Today Summary PDF...', { id: 'pdf-gen' });
+      const { jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const reportDate = salesSelectedDate || new Date().toISOString().slice(0, 10);
+      const branchName = salesSelectedBranch && salesSelectedBranch !== 'All' ? salesSelectedBranch : (user?.branch || 'All Branches');
+      const cashierName = shiftAnalytics?.summary?.cashiers?.length > 0 
+        ? shiftAnalytics.summary.cashiers.join(', ') 
+        : (user?.name || user?.username || 'Active Cashier');
+
+      // Header Banner
+      doc.setFillColor(37, 99, 235); // #2563eb
+      doc.rect(0, 0, 210, 22, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(15);
+      doc.text(`${BRAND_NAME || 'AL RAWAQ RESTAURANT'} — SHIFT & SALES SUMMARY`, 14, 12);
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Official Management Summary Report | Date: ${reportDate} | Generated: ${new Date().toLocaleString()}`, 14, 18);
+
+      // Meta information
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Report Date: ${reportDate}`, 14, 30);
+      doc.text(`Branch: ${branchName}`, 80, 30);
+      doc.text(`Cashier(s): ${cashierName}`, 140, 30);
+
+      const totalSys = shiftAnalytics?.summary?.total_system || stats?.totalSale || 0;
+      const totalAct = shiftAnalytics?.summary?.total_actual || ((stats?.cashSale || 0) + (stats?.cardSale || 0)) || totalSys;
+      const totalDiff = shiftAnalytics?.summary?.total_difference || (totalAct - totalSys);
+
+      // Summary Table
+      autoTable(doc, {
+        startY: 36,
+        head: [['Financial / Operational Metric', 'Closing Figures (PKR)', 'Audit & Reconciliation Notes']],
+        body: [
+          ['System Generated Sales', `${CURRENCY} ${totalSys.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'ERP recorded gross sales transactions for shift'],
+          ['Actual Closing Amount', `${CURRENCY} ${totalAct.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Actual physical currency & card settlement at shift close'],
+          ['Difference (Actual - System)', `${totalDiff >= 0 ? '+' : ''}${CURRENCY} ${totalDiff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, totalDiff >= 0 ? 'Balanced / Surplus (No shortage detected)' : 'Cash drawer shortage detected'],
+          ['Cash Sales Collected', `${CURRENCY} ${(stats?.cashSale || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Physical cash payments received'],
+          ['Card Sales Settled', `${CURRENCY} ${(stats?.cardSale || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Bank terminal POS card settlements'],
+          ['Total Orders Finalized', `${stats?.totalOrders || 0} orders`, 'Completed customer sales tickets'],
+          ['Total Production Cost', `${CURRENCY} ${(stats?.totalProductCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Inventory ingredient and recipe cost'],
+          ['Total Revenue Earned', `${CURRENCY} ${(stats?.dailyRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Gross profit margin earned'],
+          ['Target Revenue', `${CURRENCY} ${(targetRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, `Target achieved: ${stats && targetRevenue ? ((stats.dailyRevenue / targetRevenue) * 100).toFixed(1) : 0}%`]
+        ],
+        headStyles: {
+          fillColor: [15, 23, 42],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 9.5
+        },
+        styles: {
+          fontSize: 9,
+          cellPadding: 4.5,
+          textColor: [30, 41, 59]
+        },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 55 },
+          1: { fontStyle: 'bold', halign: 'right', cellWidth: 45 },
+          2: { cellWidth: 86 }
+        },
+        theme: 'grid'
+      });
+
+      // Page numbers footer
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Confidential Internal Financial Summary — Page ${i} of ${pageCount} — Printed via AL RAWAQ ERP`,
+          105,
+          287,
+          { align: 'center' }
+        );
+      }
+
+      doc.save(`Today-Shift-Summary-${reportDate}.pdf`);
+      toast.success('Today Summary PDF downloaded!', { id: 'pdf-gen' });
+    } catch (err) {
+      console.error('Error exporting PDF:', err);
+      toast.error('Failed to generate PDF.', { id: 'pdf-gen' });
+    }
+  };
+
+  // ── Clean A4 Browser Printing with Zero Oversized Waste ──
+  const printTodaySummary = () => {
+    if (!canViewPosAndReports) return;
+    const reportDate = salesSelectedDate || new Date().toISOString().slice(0, 10);
+    const branchName = salesSelectedBranch && salesSelectedBranch !== 'All' ? salesSelectedBranch : (user?.branch || 'All Branches');
+    const cashierName = shiftAnalytics?.summary?.cashiers?.length > 0 
+      ? shiftAnalytics.summary.cashiers.join(', ') 
+      : (user?.name || user?.username || 'Active Cashier');
+    const totalSys = shiftAnalytics?.summary?.total_system || stats?.totalSale || 0;
+    const totalAct = shiftAnalytics?.summary?.total_actual || ((stats?.cashSale || 0) + (stats?.cardSale || 0)) || totalSys;
+    const totalDiff = shiftAnalytics?.summary?.total_difference || (totalAct - totalSys);
+    const diffIsPositive = totalDiff >= 0;
+
+    const printWindow = window.open('', '', 'width=850,height=700');
     const html = `
+      <!DOCTYPE html>
       <html>
         <head>
-          <title>Dashboard Summary Report</title>
+          <title>Today-Shift-Summary-${reportDate}</title>
           <style>
-            body { font-family: sans-serif; padding: 40px; color: #333; }
-            h1 { color: ${BRAND_PRIMARY}; border-bottom: 3px solid ${BRAND_SECONDARY}; padding-bottom: 12px; margin-bottom: 4px; }
-            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px; }
-            .card { border: 1px solid #eee; padding: 20px; border-radius: 8px; background: #fdfdfd; }
-            .label { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
-            .value { font-size: 24px; font-weight: bold; }
-            .footer { margin-top: 50px; font-size: 12px; color: #999; text-align: center; }
+            @page { size: A4 portrait; margin: 12mm; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 12px; font-size: 13px; line-height: 1.4; }
+            .header { border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; }
+            .brand { font-size: 20px; font-weight: 800; color: #1e3a8a; margin: 0; }
+            .sub { font-size: 12px; color: #64748b; margin: 2px 0 0; }
+            .meta-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; display: flex; justify-content: space-between; font-size: 12px; }
+            .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+            .card { border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; background: #fff; }
+            .card-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; }
+            .card-val { font-size: 18px; font-weight: 800; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
+            th { background: #0f172a; color: #fff; padding: 8px 10px; text-align: left; font-weight: 700; }
+            td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+            tr:nth-child(even) td { background: #f8fafc; }
+            .text-right { text-align: right; }
+            .footer { margin-top: 24px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px dashed #cbd5e1; padding-top: 10px; }
           </style>
         </head>
         <body>
-          <h1>${BRAND_NAME} — Dashboard Summary</h1>
-          <p>Generated on ${new Date().toLocaleString()}</p>
-          <div class="grid">
-            <div class="card"><div class="label">Today Total Sale</div><div class="value">${CURRENCY}${stats?.totalSale?.toLocaleString()}</div>
-              <div style="font-size: 11px; margin-top: 6px; color: #555;">Cash: ${CURRENCY}${stats?.cashSale?.toLocaleString()} | Card: ${CURRENCY}${stats?.cardSale?.toLocaleString()}</div>
+          <div class="header">
+            <div>
+              <h1 class="brand">${BRAND_NAME || 'AL RAWAQ RESTAURANT'}</h1>
+              <p class="sub">Today Shift & Financial Closing Summary</p>
             </div>
-            <div class="card"><div class="label">Total Orders Complete</div><div class="value">${stats?.totalOrders}</div></div>
-            <div class="card"><div class="label">Total Production Cost</div><div class="value">${CURRENCY}${stats?.totalProductCost?.toLocaleString()}</div></div>
-            <div class="card"><div class="label">Total Revenue Earned</div><div class="value">${CURRENCY}${stats?.dailyRevenue?.toLocaleString()}</div></div>
-            <div class="card"><div class="label">Targeted Revenue</div><div class="value">${CURRENCY}${targetRevenue.toLocaleString()}</div></div>
-            <div class="card"><div class="label">Completion Revenue %</div><div class="value">${stats ? ((stats.dailyRevenue / targetRevenue) * 100).toFixed(1) : 0}%</div></div>
+            <div style="text-align: right; font-size: 11px; color: #64748b;">
+              <div>Printed: ${new Date().toLocaleString()}</div>
+              <div>Status: <strong>Finalized</strong></div>
+            </div>
           </div>
-          <div class="footer">Confidential Financial Report</div>
+
+          <div class="meta-box">
+            <div><strong>Report Date:</strong> ${reportDate}</div>
+            <div><strong>Branch:</strong> ${branchName}</div>
+            <div><strong>Cashier(s):</strong> ${cashierName}</div>
+          </div>
+
+          <div class="cards">
+            <div class="card" style="border-color: #2563eb;">
+              <div class="card-label" style="color: #2563eb;">System Generated Sales</div>
+              <div class="card-val" style="color: #1d4ed8;">${CURRENCY} ${totalSys.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div class="card" style="border-color: #10b981;">
+              <div class="card-label" style="color: #059669;">Actual Closing Amount</div>
+              <div class="card-val" style="color: #047857;">${CURRENCY} ${totalAct.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div class="card" style="border-color: ${diffIsPositive ? '#16a34a' : '#dc2626'};">
+              <div class="card-label" style="color: ${diffIsPositive ? '#16a34a' : '#dc2626'};">Difference (Actual - System)</div>
+              <div class="card-val" style="color: ${diffIsPositive ? '#15803d' : '#b91c1c'};">${diffIsPositive ? '+' : ''}${CURRENCY} ${totalDiff.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Performance / Financial Metric</th>
+                <th class="text-right">Amount / Count</th>
+                <th>Operational Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Cash Sales</strong></td>
+                <td class="text-right"><strong>${CURRENCY} ${(stats?.cashSale || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+                <td>Physical currency in cash drawer</td>
+              </tr>
+              <tr>
+                <td><strong>Card Sales</strong></td>
+                <td class="text-right"><strong>${CURRENCY} ${(stats?.cardSale || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+                <td>Electronic bank terminal settlements</td>
+              </tr>
+              <tr>
+                <td><strong>Total Completed Orders</strong></td>
+                <td class="text-right"><strong>${stats?.totalOrders || 0}</strong></td>
+                <td>Finalized guest check receipts</td>
+              </tr>
+              <tr>
+                <td><strong>Total Production Cost</strong></td>
+                <td class="text-right"><strong>${CURRENCY} ${(stats?.totalProductCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+                <td>Kitchen ingredient consumption</td>
+              </tr>
+              <tr>
+                <td><strong>Total Revenue Earned</strong></td>
+                <td class="text-right"><strong>${CURRENCY} ${(stats?.dailyRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+                <td>Operating gross profit margin</td>
+              </tr>
+              <tr>
+                <td><strong>Target Revenue</strong></td>
+                <td class="text-right"><strong>${CURRENCY} ${(targetRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+                <td>Daily branch target KPI</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="footer">
+            Confidential Restaurant Management Report — Generated by AL RAWAQ POS ERP — Page 1 of 1
+          </div>
         </body>
       </html>
     `;
     printWindow.document.write(html);
     printWindow.document.close();
     printWindow.focus();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
-  }
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 400);
+  };
+
+  const exportPDF = downloadTodaySummaryPDF;
 
   const lineData = {
     labels: stats?.last7Days?.map(d => d.label) ?? [],
@@ -1105,6 +1301,12 @@ export default function Dashboard() {
       x: { grid: { display: false }, ticks: { font: { size: 11 }, maxRotation: 45, minRotation: 45 } },
       y: { grid: { color: 'rgba(0,0,0,0.05)' }, beginAtZero: true }
     }
+  }
+
+    // --- SALARY PAY OPERATOR DEDICATED DASHBOARD VIEW ---
+  const isSalaryPayOp = user?.role?.trim().toLowerCase() === 'salary pay operator';
+  if (isSalaryPayOp) {
+    return <SalaryPayDashboard />;
   }
 
   // --- DEVELOPER & MANAGEMENT DASHBOARD VIEW ---
@@ -1256,99 +1458,15 @@ export default function Dashboard() {
 
         {/* Shift Closing Analytics Graph & Restaurant-Wise Comparison (Above 7 Days Sales Graph) */}
         {canViewPosAndReports && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '16px' }}>
-            
-            {/* Base Sale and Surplus Per Shift Chart (Replaces Shift Closing Analytics with Vertical Stacked Bars) */}
-            <BaseSaleSurplusChart
-              restaurants={shiftAnalytics?.restaurants}
-              currency={CURRENCY}
-              loading={loading}
-              onShiftUpdated={() => {
-                loadShiftAnalytics();
-                loadStats();
-              }}
-              style={{ gridColumn: 'span 2' }}
-            />
-
-            {/* Restaurant-Wise Sales Comparison Graph (R1 vs R2 vs R3) */}
-            <div className="chart-card">
-              <div style={{ marginBottom: 14 }}>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                  <TrendingUp size={20} color="var(--primary)" /> Restaurant Comparison
-                </h3>
-                <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  R1 vs R2 vs R3 total revenue & branch share
-                </span>
-              </div>
-
-              {(() => {
-                const restaurants = shiftAnalytics?.restaurants || [
-                  { restaurant_id: 'R1', restaurant_name: 'Restaurant 1', total_actual_sales: 0 },
-                  { restaurant_id: 'R2', restaurant_name: 'Restaurant 2', total_actual_sales: 0 },
-                  { restaurant_id: 'R3', restaurant_name: 'Restaurant 3', total_actual_sales: 0 }
-                ];
-
-                const grandTotal = restaurants.reduce((sum, r) => sum + (r.total_actual_sales || 0), 0) || 1;
-                const maxRestVal = Math.max(1, ...restaurants.map(r => r.total_actual_sales || 0));
-
-                const colors = [
-                  { primary: 'var(--primary)', light: '#fee2e2', text: '#b91c1c' },
-                  { primary: '#3b82f6', light: '#eff6ff', text: '#1d4ed8' },
-                  { primary: '#10b981', light: '#ecfdf5', text: '#047857' }
-                ];
-
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {restaurants.map((rest, idx) => {
-                      const c = colors[idx % colors.length];
-                      const pct = Math.round((rest.total_actual_sales / grandTotal) * 100);
-                      const barWidthPct = Math.min(100, Math.round((rest.total_actual_sales / maxRestVal) * 100));
-
-                      return (
-                        <div key={rest.restaurant_id} style={{ background: 'var(--surface-2)', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--surface-3)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{ background: c.primary, color: '#fff', fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 5 }}>
-                                {rest.restaurant_id}
-                              </span>
-                              <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{rest.restaurant_name}</strong>
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <span style={{ fontSize: 13, fontWeight: 900, color: 'var(--text-primary)' }}>
-                                {CURRENCY} {rest.total_actual_sales.toFixed(2)}
-                              </span>
-                              <span style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block' }}>
-                                {pct}% share
-                              </span>
-                            </div>
-                          </div>
-
-                          <div style={{ height: 10, background: 'var(--surface-3)', borderRadius: 5, overflow: 'hidden' }}>
-                            <div 
-                              style={{ 
-                                height: '100%', 
-                                width: `${barWidthPct}%`, 
-                                background: c.primary, 
-                                borderRadius: 5,
-                                transition: 'width 0.4s ease'
-                              }} 
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    <div style={{ marginTop: 8, padding: '10px 14px', background: 'var(--surface)', borderRadius: 8, border: '1px dashed var(--surface-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>Total Branch Sales:</span>
-                      <strong style={{ fontSize: 14, fontWeight: 900, color: 'var(--primary)' }}>
-                        {CURRENCY} {restaurants.reduce((s, r) => s + (r.total_actual_sales || 0), 0).toFixed(2)}
-                      </strong>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <DailyShiftClosingGraph
+            currency={CURRENCY}
+            branch={salesSelectedBranch || 'All'}
+            onDataLoaded={(data) => setShiftAnalytics(data)}
+            onShiftUpdated={() => {
+              loadShiftAnalytics();
+              loadStats();
+            }}
+          />
         )}
 
         {/* Charts Grid: 7 Days Sales Graph (Moved Below Shift Closing Analytics) */}
@@ -1463,10 +1581,13 @@ export default function Dashboard() {
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button className="btn btn-secondary btn-sm" onClick={exportPDF}>
-                <Printer size={14} /> Export PDF
+              <button className="btn btn-primary btn-sm" onClick={downloadTodaySummaryPDF} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Download size={14} /> Download PDF
               </button>
-              <button className="btn btn-secondary btn-sm" onClick={exportExcel}>
+              <button className="btn btn-secondary btn-sm" onClick={printTodaySummary} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Printer size={14} /> Print
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={exportExcel} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Download size={14} /> Export Excel
               </button>
             </div>

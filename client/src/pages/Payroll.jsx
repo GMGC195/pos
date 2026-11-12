@@ -89,6 +89,8 @@ export default function Payroll() {
   const { user } = useAuth()
   const isDeveloper = user?.role?.trim().toLowerCase() === 'developer'
   const isAdmin = user?.role?.trim().toLowerCase() === 'admin' || isDeveloper
+  const isSalaryPayOperator = user?.role?.trim().toLowerCase() === 'salary pay operator'
+  const canProcessPayments = isAdmin || isSalaryPayOperator
   const showActions = isAdmin
 
   const formatMonth = (date) => {
@@ -119,7 +121,16 @@ export default function Payroll() {
     return getSaudiCurrentMonthStr()
   })
   const [viewMode, setViewMode] = useState('detail') // 'detail' by default | 'sheet' as alternative
-  const [selectedBranchFilter, setSelectedBranchFilter] = useState('ALL') // 'ALL' | 'R1' | 'R2' | 'R3'
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState(() => {
+    const isSalOp = user?.role?.trim().toLowerCase() === 'salary pay operator';
+    if (isSalOp && user?.branch) {
+      const b = user.branch.toLowerCase();
+      if (b.includes('2')) return 'R2';
+      if (b.includes('3')) return 'R3';
+      return 'R1';
+    }
+    return 'ALL';
+  })
   const [selectedDetailEmpId, setSelectedDetailEmpId] = useState(() => {
     try {
       const saved = sessionStorage.getItem('payroll_selected_emp_id');
@@ -3215,7 +3226,7 @@ export default function Payroll() {
                                 <th style={{ padding: '5px 8px', fontWeight: 700 }}>Paid By</th>
                                 <th style={{ padding: '5px 8px', fontWeight: 700 }}>Method</th>
                                 <th style={{ padding: '5px 8px', fontWeight: 700, textAlign: 'right' }}>Amount</th>
-                                {!isRowLocked && <th style={{ padding: '5px 8px', textAlign: 'center', width: '30px' }}></th>}
+                                {!isRowLocked && !isSalaryPayOperator && <th style={{ padding: '5px 8px', textAlign: 'center', width: '30px' }}></th>}
                               </tr>
                             </thead>
                             <tbody>
@@ -3244,7 +3255,7 @@ export default function Payroll() {
                                   <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 800, color: '#059669', whiteSpace: 'nowrap' }}>
                                     {CURRENCY} {parseFloat(p.amount || 0).toFixed(2)}
                                   </td>
-                                  {!isRowLocked && (
+                                  {!isRowLocked && !isSalaryPayOperator && (
                                     <td style={{ padding: '5px 8px', textAlign: 'center' }}>
                                       <button
                                         type="button"
@@ -3348,7 +3359,7 @@ export default function Payroll() {
                       </div>
 
                       {/* Pay Now Button */}
-                      {!isRowLocked && showActions && (
+                      {!isRowLocked && canProcessPayments && (
                         <button 
                           type="button"
                           onClick={() => handlePayNow(targetEmpData.id)}
@@ -3421,7 +3432,7 @@ export default function Payroll() {
                           <ArrowRightCircle size={13} color="#ea580c" />
                           <span>➔ Fwd: {parseFloat(targetEmpData.carried_forward_to_next).toFixed(2)}</span>
                         </div>
-                      ) : showActions && (
+                      ) : canProcessPayments && (
                         <button
                           type="button"
                           disabled={savingCarryForwardId === targetEmpData.id}
@@ -3870,6 +3881,7 @@ export default function Payroll() {
                         {adj.notes && ` | ${adj.notes}`}
                       </div>
                     </div>
+                    {!isSalaryPayOperator && (
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button 
                         disabled={isRowLocked}
@@ -3904,6 +3916,7 @@ export default function Payroll() {
                         <Trash2 size={13} />
                       </button>
                     </div>
+                  )}
                   </div>
                 ))
               )}
@@ -4119,6 +4132,7 @@ export default function Payroll() {
                         {adj.notes && ` | ${adj.notes}`}
                       </div>
                     </div>
+                    {!isSalaryPayOperator && (
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button 
                         disabled={isRowLocked}
@@ -4153,6 +4167,7 @@ export default function Payroll() {
                         <Trash2 size={13} />
                       </button>
                     </div>
+                  )}
                   </div>
                 ))
               )}
@@ -4407,13 +4422,13 @@ export default function Payroll() {
 
         {/* 3. Branch / Restaurant Filter: ALL, R1, R2, R3 */}
         <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '2px', borderRadius: '6px', border: '1px solid var(--surface-2)', gap: '1px', flexShrink: 0 }}>
-          {['ALL', 'R1', 'R2', 'R3'].map(opt => {
+          {(isSalaryPayOperator ? [selectedBranchFilter] : ['ALL', 'R1', 'R2', 'R3']).map(opt => {
             const isActive = selectedBranchFilter === opt;
             return (
               <button
                 key={opt}
                 type="button"
-                onClick={() => setSelectedBranchFilter(opt)}
+                onClick={() => { if (!isSalaryPayOperator) setSelectedBranchFilter(opt); }}
                 style={{
                   padding: '4px 7px',
                   borderRadius: '5px',
@@ -4812,9 +4827,9 @@ export default function Payroll() {
                           {(item.status === 'Paid' && !unlockedRowIds.has(item.id)) ? (
                             <button 
                               type="button"
-                              onClick={() => setUnlockPromptEmp(item)}
-                              style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
-                              title="Click to unlock this record"
+                              onClick={() => { if (!isSalaryPayOperator) setUnlockPromptEmp(item); }}
+                              style={{ padding: '5px 12px', fontSize: '11px', fontWeight: 700, borderRadius: '6px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: isSalaryPayOperator ? 'not-allowed' : 'pointer', opacity: isSalaryPayOperator ? 0.75 : 1 }}
+                              title={isSalaryPayOperator ? "Record is marked as Paid and locked. Only Admin can unlock." : "Click to unlock this record"}
                             >
                               <Lock size={11} style={{ color: '#d97706' }} />
                               Locked
@@ -4877,7 +4892,7 @@ export default function Payroll() {
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#c2410c', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#ffedd5' }}>Remaining</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: '#c2410c', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', background: '#fff7ed' }}>Carry Forward</th>
                 <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
-                {showActions && <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>}
+                {(showActions || canProcessPayments) && <th style={{ padding: '10px 8px', borderBottom: '2px solid var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>}
               </tr>
             </thead>
             <tbody>
@@ -5009,7 +5024,7 @@ export default function Payroll() {
                         <input 
                           type="text" 
                           inputMode="decimal" 
-                          disabled={isRowLocked} 
+                          disabled={isRowLocked || isSalaryPayOperator} 
                           className="cell-input" 
                           style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
                           value={item.this_month_adv} 
@@ -5020,7 +5035,7 @@ export default function Payroll() {
                         <input 
                           type="text" 
                           inputMode="decimal" 
-                          disabled={isRowLocked} 
+                          disabled={isRowLocked || isSalaryPayOperator} 
                           className="cell-input" 
                           style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
                           value={item.bonus} 
@@ -5032,7 +5047,7 @@ export default function Payroll() {
                         <input 
                           type="text" 
                           inputMode="decimal" 
-                          disabled={isRowLocked} 
+                          disabled={isRowLocked || isSalaryPayOperator} 
                           className="cell-input" 
                           style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
                           value={item.internet} 
@@ -5043,7 +5058,7 @@ export default function Payroll() {
                         <input 
                           type="text" 
                           inputMode="decimal" 
-                          disabled={isRowLocked} 
+                          disabled={isRowLocked || isSalaryPayOperator} 
                           className="cell-input" 
                           style={{ opacity: isRowLocked ? 0.7 : 1, cursor: isRowLocked ? 'not-allowed' : 'text' }} 
                           value={item.kafalat} 
@@ -5176,7 +5191,7 @@ export default function Payroll() {
                           const bank = parseFloat(item.bank_paid || 0);
                           const totalPaid = Math.round((cash + bank) * 100) / 100;
                           const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
-                          if (rem > 0 && showActions && !isRowLocked) {
+                          if (rem > 0 && canProcessPayments && !isRowLocked) {
                             return (
                               <button
                                 type="button"
@@ -5230,7 +5245,7 @@ export default function Payroll() {
                         </div>
                       </td>
 
-                      {showActions && (
+                      {(showActions || canProcessPayments) && (
                         <td style={{ padding: '4px', textAlign: 'center' }}>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                             <button
@@ -5284,7 +5299,7 @@ export default function Payroll() {
                             {isRowLocked ? (
                               <button 
                                 type="button"
-                                onClick={() => setUnlockPromptEmp(item)}
+                                onClick={() => { if (!isSalaryPayOperator) setUnlockPromptEmp(item); }}
                                 style={{ 
                                   display: 'inline-flex', 
                                   alignItems: 'center', 
@@ -5296,9 +5311,10 @@ export default function Payroll() {
                                   background: '#fef3c7', 
                                   color: '#b45309', 
                                   border: '1px solid #fde68a', 
-                                  cursor: 'pointer' 
+                                  cursor: isSalaryPayOperator ? 'not-allowed' : 'pointer',
+                                  opacity: isSalaryPayOperator ? 0.75 : 1
                                 }}
-                                title="Record is marked as Paid and locked. Click to unlock."
+                                title={isSalaryPayOperator ? "Record is marked as Paid and locked. Only Admin can unlock." : "Record is marked as Paid and locked. Click to unlock."}
                               >
                                 <Lock size={11} style={{ color: '#d97706' }} />
                                 Locked
@@ -5315,15 +5331,17 @@ export default function Payroll() {
                                   {payingRowId === item.id ? <RefreshCw size={11} className="spin" /> : <CheckCircle size={11} />}
                                   Pay
                                 </button>
-                                <button 
-                                  onClick={() => handleSaveRow(item.id)}
-                                  disabled={savingRowId === item.id || payingRowId === item.id}
-                                  className="btn btn-primary"
-                                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: (savingRowId === item.id || payingRowId === item.id) ? 'not-allowed' : 'pointer' }}
-                                >
-                                  {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
-                                  Save
-                                </button>
+                                {!isSalaryPayOperator && (
+                                  <button 
+                                    onClick={() => handleSaveRow(item.id)}
+                                    disabled={savingRowId === item.id || payingRowId === item.id}
+                                    className="btn btn-primary"
+                                    style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: (savingRowId === item.id || payingRowId === item.id) ? 'not-allowed' : 'pointer' }}
+                                  >
+                                    {savingRowId === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
+                                    Save
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>

@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, blockSalaryPayOperator } = require('../middleware/auth');
+router.use(blockSalaryPayOperator);
 
 function normalizeBranch(b) {
   if (!b) return null;

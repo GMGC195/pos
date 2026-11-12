@@ -65,10 +65,13 @@ export default function Login() {
       login(data.user, data.token)
       setIsFlipped(true)
       setTimeout(() => {
-        if (data.user?.role?.trim().toLowerCase() === 'operator') {
-          navigate('/attendance', { replace: true })
+        const userRole = data.user?.role?.trim().toLowerCase();
+        if (userRole === 'salary pay operator') {
+          navigate('/payroll', { replace: true });
+        } else if (userRole === 'operator') {
+          navigate('/attendance', { replace: true });
         } else {
-          navigate('/pos', { replace: true })
+          navigate('/pos', { replace: true });
         }
       }, 750)
     } catch (err) { setError(err.message) }

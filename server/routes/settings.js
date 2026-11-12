@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { authenticateToken, isAdmin, blockSalaryPayOperator } = require('../middleware/auth');
+
+router.use(blockSalaryPayOperator);
 
 // GET /api/settings - Fetch the current POS settings
 router.get('/', authenticateToken, async (req, res) => {

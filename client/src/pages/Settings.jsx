@@ -1233,6 +1233,7 @@ export default function Settings() {
                           <option value="Order Taker">Order Taker</option>
                           <option value="Cashier">Cashier</option>
                           <option value="Operator">Operator</option>
+                          <option value="Salary Pay Operator">Salary Pay Operator</option>
                           <option value="HR Manager">HR Manager</option>
                           <option value="Management">Management</option>
                           <option value="Employee">Employee</option>
@@ -1649,7 +1650,7 @@ export default function Settings() {
                       background: 'var(--surface-1)',
                       overflowX: 'auto'
                     }}>
-                      {['Admin', 'Management', 'Operator', 'Cashier', 'Order Taker'].map(r => (
+                      {['Admin', 'Management', 'Operator', 'Salary Pay Operator', 'Cashier', 'Order Taker'].map(r => (
                         <button
                           key={r}
                           onClick={() => setUserRoleFilter(r)}

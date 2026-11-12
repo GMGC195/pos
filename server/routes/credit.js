@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, blockSalaryPayOperator } = require('../middleware/auth');
 const { recordActivityLog } = require('./activityLogs');
+
+router.use(blockSalaryPayOperator);
 // KSA (UTC+3) Current Month Helper
 const getKsaCurrentMonthStr = () => {
   const now = new Date();

@@ -78,6 +78,12 @@ const autoCreateUserForEmployee = async (employee) => {
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const userRole = req.user.role?.toLowerCase();
+    if (userRole === 'salary pay operator') {
+      const result = await pool.query(
+        "SELECT id, name, employee_id, role, branch, department, status, salary FROM employees ORDER BY id ASC"
+      );
+      return res.json(result.rows);
+    }
     let query = `
       SELECT e.*, ewh.start_time as shift_start_time, ewh.end_time as shift_end_time,
              ewh.is_split_shift, ewh.start_time_2, ewh.end_time_2
@@ -108,6 +114,17 @@ router.get('/', authenticateToken, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Security Guard: Salary Pay Operator is strictly blocked from modifying employee records or documents
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    const role = (req.user?.role || '').trim().toLowerCase();
+    if (role === 'salary pay operator') {
+      return res.status(403).json({ error: 'Access denied: Salary Pay Operator cannot modify employee records.' });
+    }
+  }
+  next();
 });
 
 // POST new employee

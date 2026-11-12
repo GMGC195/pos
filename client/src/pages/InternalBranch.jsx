@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from '../api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -725,7 +725,19 @@ export default function InternalBranch() {
   const { items: posItems, categories: posCategories, loadData: reloadPOSData } = usePOS();
 
   // Active Tab - default to transfer_request so latest requests appear right away
-  const [activeTab, setActiveTab] = useState('transfer_request'); // 'transfer_request' | 'new' | 'incoming' | 'receivals' | 'logs'
+  const location = useLocation();
+
+  // Navigation source tracking: Only show 'Back to Order Taking' if navigated from POS
+  const isFromOrderTaking = Boolean(
+    location.state?.from === 'order_taking' ||
+    location.state?.from === '/pos' ||
+    location.state?.from === 'pos' ||
+    new URLSearchParams(location.search).get('from') === 'pos' ||
+    new URLSearchParams(location.search).get('from') === 'order_taking'
+  );
+
+  // Active Tab - default to new request screen on opening
+  const [activeTab, setActiveTab] = useState('new'); // 'new' | 'transfer_request' | 'incoming' | 'receivals' | 'logs'
   const [openDropdownRowId, setOpenDropdownRowId] = useState(null);
 
   // Branches & Menu Items
@@ -834,7 +846,10 @@ export default function InternalBranch() {
   const [trfPriority, setTrfPriority] = useState('Normal'); // 'Normal' | 'High' | 'Urgent'
   const [trfPurpose, setTrfPurpose] = useState('Stock Replenishment');
   const [trfCustomPurpose, setTrfCustomPurpose] = useState('');
-  const [trfDeliveryMinutes, setTrfDeliveryMinutes] = useState(30);
+  const [trfDeliveryOption, setTrfDeliveryOption] = useState('1'); // '1' | '2' | '3' | '4' | '5' | 'custom'
+  const [trfCustomDate, setTrfCustomDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [trfCustomTime, setTrfCustomTime] = useState('');
+  const [trfDeliveryMinutes, setTrfDeliveryMinutes] = useState(60);
   const [trfCustomDeliveryMinutes, setTrfCustomDeliveryMinutes] = useState('');
   const [trfNeededByTime, setTrfNeededByTime] = useState('');
   const [trfNotes, setTrfNotes] = useState('');
@@ -1189,6 +1204,7 @@ export default function InternalBranch() {
     if (activeTab === 'incoming') {
       params.tab = 'incoming';
       if (filterFromBranch !== 'All') params.sent_by = filterFromBranch;
+      if (filterStatus !== 'All') params.status = filterStatus;
       if (filterRequestType !== 'All') params.request_type = filterRequestType;
       if (filterPriority !== 'All') params.priority = filterPriority;
       if (searchQuery) params.search = searchQuery;
@@ -1202,6 +1218,8 @@ export default function InternalBranch() {
       // Sent Requests: Orders requested by this branch until completed
       params.tab = 'sent_requests';
       if (filterToBranch !== 'All') params.to_branch = filterToBranch;
+      if (filterStatus !== 'All') params.status = filterStatus;
+      if (filterRequestType !== 'All') params.request_type = filterRequestType;
       if (filterPriority !== 'All') params.priority = filterPriority;
       if (searchQuery) params.search = searchQuery;
     } else {
@@ -1580,6 +1598,10 @@ export default function InternalBranch() {
     });
   };
 
+  // Aliases for handler name variations
+  const handleAddDishRowTrf = handleAddTrfDishRow;
+  const handleRemoveDishRowTrf = handleRemoveTrfDishRow;
+
   // Submit Dedicated Transfer Request (Branch to Branch Transfer)
   const handleSubmitTrfRequest = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -1610,11 +1632,31 @@ export default function InternalBranch() {
       }
     }
 
-    const mins = trfDeliveryMinutes === 'custom'
-      ? (parseInt(trfCustomDeliveryMinutes, 10) || 30)
-      : (parseInt(trfDeliveryMinutes, 10) || 30);
-    const targetDate = new Date(Date.now() + mins * 60 * 1000);
-    const formattedNeededBy = trfNeededByTime || `${mins} mins (~${targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+    let mins = 60;
+    let formattedNeededBy = '';
+
+    if (trfDeliveryOption === 'custom') {
+      if (!trfCustomDate) {
+        return toast.error('Please select a Delivery Date.');
+      }
+      if (!trfCustomTime) {
+        return toast.error('Please select a Delivery Time.');
+      }
+      const customDateTime = new Date(`${trfCustomDate}T${trfCustomTime}`);
+      if (isNaN(customDateTime.getTime())) {
+        return toast.error('Please enter a valid Delivery Date and Time.');
+      }
+      if (customDateTime.getTime() <= Date.now()) {
+        return toast.error('Delivery date and time must be in the future.');
+      }
+      mins = Math.max(15, Math.round((customDateTime.getTime() - Date.now()) / 60000));
+      formattedNeededBy = `${trfCustomDate} ${trfCustomTime}`;
+    } else {
+      const hours = parseInt(trfDeliveryOption, 10) || 1;
+      mins = hours * 60;
+      const targetDate = new Date(Date.now() + mins * 60 * 1000);
+      formattedNeededBy = `${hours} Hour${hours > 1 ? 's' : ''} (~${targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+    }
 
     const combinedNotes = [
       trfPurpose ? `[Purpose: ${trfPurpose === 'Other' ? trfCustomPurpose : trfPurpose}]` : '',
@@ -1665,8 +1707,9 @@ export default function InternalBranch() {
       setTrfNotes('');
       setTrfPriority('Normal');
       setTrfPurpose('Stock Replenishment');
-      setTrfDeliveryMinutes(30);
-      setTrfCustomDeliveryMinutes('');
+      setTrfDeliveryOption('1');
+      setTrfCustomDate(new Date().toISOString().slice(0, 10));
+      setTrfCustomTime('');
       fetchStats();
       fetchTransfers();
       // Keep on transfer_request tab so the user immediately sees the sent order in active sent list!
@@ -2498,43 +2541,135 @@ export default function InternalBranch() {
   };
 
   return (
-    <div className="internal-branch-page" style={{ padding: '24px 28px', maxWidth: 1400, margin: '0 auto' }}>
-      
-      {/* Top Banner / Title */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22, flexWrap: 'wrap', gap: 14 }}>
-        <div>
-          <h1 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <ArrowLeftRight size={28} color="var(--primary)" />
-            Internal Branch Transfer Management
-          </h1>
-          <p style={{ margin: 0, fontSize: 13.5, color: '#64748b' }}>
-            Inter-branch dish request, central kitchen dispatch, and goods receiving verification system.
-          </p>
+    <div className="internal-branch-page" style={{ padding: '8px 20px', maxWidth: 1400, margin: '0 auto' }}>
+
+      {/* Integrated Compact Filter Toolbar: Branch Pills (Left) + Request Type & Status Dropdowns + Audio Alerts & Refresh (Right) */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 16,
+        padding: '6px 12px',
+        background: '#f8fafc',
+        border: '1px solid #e2e8f0',
+        borderRadius: 8
+      }}>
+        {/* Branch Pills: All Branches, B1, B2, B3, Kitchen, Other */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Store size={14} /> Branch:
+          </span>
+          {[
+            { id: 'All', label: 'All' },
+            { id: 'Branch 1', label: 'B1' },
+            { id: 'Branch 2', label: 'B2' },
+            { id: 'Branch 3', label: 'B3' },
+          ].map(b => {
+            const isSelected = adminSelectedBranch === b.id;
+            return (
+              <button
+                key={`bar-branch-${b.id}`}
+                type="button"
+                onClick={() => {
+                  setAdminSelectedBranch(b.id);
+                  if (b.id === 'All') setAdminDirection('all');
+                }}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border: isSelected ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                  background: isSelected ? '#2563eb' : '#fff',
+                  color: isSelected ? '#fff' : '#475569',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {b.label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Audio Alert Toggle, Back to POS, & Refresh */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            type="button"
-            onClick={() => navigate('/pos')}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: '1.5px solid #2563eb',
-              background: '#eff6ff',
-              color: '#1d4ed8',
-              fontSize: 12.5,
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              transition: 'all 0.15s ease'
-            }}
-            title="Return to Order Taking page"
-          >
-            <ArrowLeft size={16} /> Back to Order Taking
-          </button>
+        {/* Request Type, Request Status, Audio Alerts, Refresh, and Optional Back */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {isFromOrderTaking && (
+            <button
+              type="button"
+              onClick={() => navigate('/pos')}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1.5px solid #2563eb',
+                background: '#eff6ff',
+                color: '#1d4ed8',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                transition: 'all 0.15s ease'
+              }}
+              title="Return to Order Taking page"
+            >
+              <ArrowLeft size={14} /> Back to Order Taking
+            </button>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b' }}>Type:</span>
+            <select
+              value={filterRequestType}
+              onChange={e => setFilterRequestType(e.target.value)}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: '1px solid #cbd5e1',
+                fontSize: 12,
+                fontWeight: 600,
+                background: '#fff',
+                color: '#334155',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="All">All Types</option>
+              <option value="Kitchen Request">Kitchen Request</option>
+              <option value="Other Request">Other Request</option>
+              <option value="Branch Transfer">Branch Transfer</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b' }}>Status:</span>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: '1px solid #cbd5e1',
+                fontSize: 12,
+                fontWeight: 600,
+                background: '#fff',
+                color: '#334155',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="All">All Statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Accepted">Accepted</option>
+              <option value="Preparing">Preparing</option>
+              <option value="Dispatched">Dispatched</option>
+              <option value="Partially Received">Partially Received</option>
+              <option value="Received">Received</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
 
           <button
             type="button"
@@ -2544,20 +2679,20 @@ export default function InternalBranch() {
               toast.success(audioEnabled ? 'Audio alerts muted' : 'Audio alerts activated');
             }}
             style={{
-              padding: '8px 14px',
-              borderRadius: 8,
+              padding: '4px 10px',
+              borderRadius: 6,
               border: '1px solid #cbd5e1',
-              background: audioEnabled ? '#f0fdf4' : '#f8fafc',
+              background: audioEnabled ? '#f0fdf4' : '#fff',
               color: audioEnabled ? '#16a34a' : '#64748b',
-              fontSize: 12.5,
+              fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 6
+              gap: 5
             }}
           >
-            <Volume2 size={16} />
+            <Volume2 size={14} />
             {audioEnabled ? 'Audio Alerts: ON' : 'Audio Alerts: OFF'}
           </button>
 
@@ -2569,111 +2704,58 @@ export default function InternalBranch() {
               toast.success('Transfers refreshed');
             }}
             style={{
-              padding: '8px 14px',
-              borderRadius: 8,
+              width: 28,
+              height: 28,
+              borderRadius: 6,
               border: '1px solid #cbd5e1',
               background: '#fff',
               color: '#334155',
-              fontSize: 12.5,
-              fontWeight: 600,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 6
+              justifyContent: 'center',
+              padding: 0
             }}
+            title="Refresh Data"
           >
-            <RefreshCw size={15} /> Refresh
+            <RefreshCw size={14} />
           </button>
         </div>
       </div>
 
-      {/* Admin Branch Switcher & Monitoring Bar */}
-      {isSuperUser && (
-        <div style={{
-          background: '#f8fafc',
-          border: '1.5px solid #cbd5e1',
-          borderRadius: 10,
-          padding: '12px 16px',
-          marginBottom: 20,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Store size={18} color="#2563eb" />
-              <strong style={{ fontSize: 13, color: '#0f172a' }}>Admin Branch Switcher & Monitoring:</strong>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {['All', 'Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen', 'Other'].map(b => (
-                <button
-                  key={`adm-b-${b}`}
-                  type="button"
-                  onClick={() => {
-                    setAdminSelectedBranch(b);
-                    if (b === 'All') setAdminDirection('all');
-                  }}
-                  style={{
-                    padding: '5px 12px',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: adminSelectedBranch === b ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                    background: adminSelectedBranch === b ? '#2563eb' : '#fff',
-                    color: adminSelectedBranch === b ? '#fff' : '#475569',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {b === 'All' ? '🌐 All Branches' : b}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {adminSelectedBranch !== 'All' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, borderTop: '1px dashed #cbd5e1', paddingTop: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#475569' }}>Activity Flow for {adminSelectedBranch}:</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {[
-                  { id: 'all', label: 'All Activity' },
-                  { id: 'sent', label: `📤 Sent by ${getShortBranchName(adminSelectedBranch)}` },
-                  { id: 'received', label: `📥 Received by ${getShortBranchName(adminSelectedBranch)}` }
-                ].map(d => (
-                  <button
-                    key={`dir-${d.id}`}
-                    type="button"
-                    onClick={() => setAdminDirection(d.id)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 4,
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      border: adminDirection === d.id ? '1.5px solid #0f172a' : '1px solid #e2e8f0',
-                      background: adminDirection === d.id ? '#0f172a' : '#fff',
-                      color: adminDirection === d.id ? '#fff' : '#64748b'
-                    }}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Navigation Tabs with Badges */}
-      <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid #e2e8f0', marginBottom: 24, overflowX: 'auto', paddingBottom: 2 }}>
+            {/* Navigation Tabs with Badges in exact order: 1. New Request, 2. Transfer Request, 3. Incoming Requests, 4. Pending Receive, 5. Transfer Logs */}
+      <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid #e2e8f0', marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
         
-        {/* Tab 1: Transfer Request (Dedicated Branch Transfer - Latest First) */}
+        {/* Tab 1: New Request */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('new')}
+          style={{
+            padding: '10px 16px',
+            fontSize: 13.5,
+            fontWeight: 700,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: activeTab === 'new' ? 'var(--primary)' : '#64748b',
+            borderBottom: activeTab === 'new' ? '3px solid var(--primary)' : '3px solid transparent',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <PlusCircle size={17} />
+          New Request
+        </button>
+
+        {/* Tab 2: Transfer Request */}
         <button
           type="button"
           onClick={() => setActiveTab('transfer_request')}
           style={{
-            padding: '12px 18px',
-            fontSize: 14,
+            padding: '10px 16px',
+            fontSize: 13.5,
             fontWeight: 700,
             border: 'none',
             background: 'transparent',
@@ -2686,8 +2768,8 @@ export default function InternalBranch() {
             whiteSpace: 'nowrap'
           }}
         >
-          <ArrowLeftRight size={18} />
-          Transfer Requests
+          <ArrowLeftRight size={17} />
+          Transfer Request
           {stats.sent_active_count > 0 && (
             <span style={{
               background: '#2563eb',
@@ -2702,36 +2784,13 @@ export default function InternalBranch() {
           )}
         </button>
 
-        {/* Tab 2: New Request (Dedicated Form Page) */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('new')}
-          style={{
-            padding: '12px 18px',
-            fontSize: 14,
-            fontWeight: 700,
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            color: activeTab === 'new' ? 'var(--primary)' : '#64748b',
-            borderBottom: activeTab === 'new' ? '3px solid var(--primary)' : '3px solid transparent',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            whiteSpace: 'nowrap'
-          }}
-        >
-          <PlusCircle size={18} />
-          New Request
-        </button>
-
-        {/* Tab 3: Incoming Requests (Destination Branch Fulfills) */}
+        {/* Tab 3: Incoming Requests */}
         <button
           type="button"
           onClick={() => setActiveTab('incoming')}
           style={{
-            padding: '12px 18px',
-            fontSize: 14,
+            padding: '10px 16px',
+            fontSize: 13.5,
             fontWeight: 700,
             border: 'none',
             background: 'transparent',
@@ -2744,7 +2803,7 @@ export default function InternalBranch() {
             whiteSpace: 'nowrap'
           }}
         >
-          <Truck size={18} />
+          <Truck size={17} />
           Incoming Requests
           {stats.incoming_pending_count > 0 && (
             <span style={{
@@ -2760,13 +2819,13 @@ export default function InternalBranch() {
           )}
         </button>
 
-        {/* Tab 4: Pending Receive (Requesting Branch Verification) */}
+        {/* Tab 4: Pending Receive */}
         <button
           type="button"
           onClick={() => setActiveTab('receivals')}
           style={{
-            padding: '12px 18px',
-            fontSize: 14,
+            padding: '10px 16px',
+            fontSize: 13.5,
             fontWeight: 700,
             border: 'none',
             background: 'transparent',
@@ -2779,7 +2838,7 @@ export default function InternalBranch() {
             whiteSpace: 'nowrap'
           }}
         >
-          <PackageCheck size={18} />
+          <PackageCheck size={17} />
           Pending Receive
           {stats.pending_receivals_count > 0 && (
             <span style={{
@@ -2795,13 +2854,13 @@ export default function InternalBranch() {
           )}
         </button>
 
-        {/* Tab 5: Transfer Logs & Reports */}
+        {/* Tab 5: Transfer Logs */}
         <button
           type="button"
           onClick={() => setActiveTab('logs')}
           style={{
-            padding: '12px 18px',
-            fontSize: 14,
+            padding: '10px 16px',
+            fontSize: 13.5,
             fontWeight: 700,
             border: 'none',
             background: 'transparent',
@@ -2814,93 +2873,50 @@ export default function InternalBranch() {
             whiteSpace: 'nowrap'
           }}
         >
-          <ClipboardList size={18} />
-          Transfer Logs & Reports
+          <ClipboardList size={17} />
+          Transfer Logs
         </button>
 
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          TAB 2: DEDICATED NEW TRANSFER REQUEST FORM PAGE
+          TAB 1: DEDICATED NEW TRANSFER REQUEST FORM PAGE
       ───────────────────────────────────────────────────────────── */}
       {activeTab === 'new' && (
-        <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: 24, boxShadow: '0 4px 12px rgba(37,99,235,0.06)', marginBottom: 28 }}>
-          <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 16, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('transfer_request')}
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: 6,
-                    border: '1px solid #cbd5e1',
-                    background: '#f8fafc',
-                    color: '#334155',
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}
-                >
-                  <ArrowLeft size={15} /> ← Back to Transfer Requests
-                </button>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-                  Create Inter-Branch Transfer Request
-                </h2>
-              </div>
-              <p style={{ margin: '6px 0 0', fontSize: 13, color: '#64748b' }}>
-                Submit a dedicated branch-to-branch inventory and items transfer request. Destination branch will receive and process it directly in their Incoming Requests.
-              </p>
-            </div>
-
-            {/* Priority Selector Radio Buttons */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', padding: '6px 10px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: '#475569' }}>Transfer Priority:</span>
-              {[
-                { id: 'Normal', label: 'Normal', bg: '#f1f5f9', activeBg: '#0f172a', activeColor: '#fff', border: '#cbd5e1' },
-                { id: 'High', label: '⚡ High Priority', bg: '#fffbeb', activeBg: '#d97706', activeColor: '#fff', border: '#fcd34d' },
-                { id: 'Urgent', label: '🚨 Urgent Rush', bg: '#fef2f2', activeBg: '#dc2626', activeColor: '#fff', border: '#fca5a5' }
-              ].map(p => (
-                <button
-                  key={`prio-new-${p.id}`}
-                  type="button"
-                  onClick={() => setTrfPriority(p.id)}
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    fontSize: 11.5,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: trfPriority === p.id ? `1.5px solid ${p.activeBg}` : `1px solid ${p.border}`,
-                    background: trfPriority === p.id ? p.activeBg : p.bg,
-                    color: trfPriority === p.id ? p.activeColor : '#475569',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+        <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: '16px 20px', boxShadow: '0 2px 8px rgba(37,99,235,0.06)', marginBottom: 16 }}>
+          
+          {/* Header Title (Priority removed from here and moved into main Row 1) */}
+          <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 10, marginBottom: 12 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <PlusCircle size={18} color="var(--primary)" />
+              Create Inter-Branch Transfer Request
+            </h2>
+            <p style={{ margin: '3px 0 0', fontSize: 12, color: '#64748b' }}>
+              Submit branch-to-branch transfer request. Destination branch processes it directly in Incoming Requests.
+            </p>
           </div>
 
           <form onSubmit={handleSubmitTrfRequest}>
             
-            {/* Top Row: Origin, Destination, Purpose & Delivery Window */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 20 }}>
+            {/* ── ROW 1: Request Information (Origin, Destination, Purpose, Delivery Window, Priority) ── */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+              gap: 12,
+              marginBottom: 12,
+              alignItems: 'start'
+            }}>
               
-              {/* Origin Branch (From Branch) */}
+              {/* 1. Origin Branch (Request From) - Compact */}
               <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
-                  Origin Branch (Request From) <span style={{ color: '#dc2626' }}>*</span>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
+                  Origin Branch (From) <span style={{ color: '#dc2626' }}>*</span>
                 </label>
                 {isSuperUser ? (
                   <select
                     value={trfFromBranch}
                     onChange={e => setTrfFromBranch(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600, background: '#fff' }}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1.5px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff', height: 38 }}
                   >
                     {branches.map(b => (
                       <option key={`trf-from-${b}`} value={b}>{b}</option>
@@ -2911,7 +2927,7 @@ export default function InternalBranch() {
                     type="text"
                     disabled
                     value={trfFromBranch}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, fontWeight: 600, color: '#475569' }}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 12.5, fontWeight: 600, color: '#475569', height: 38 }}
                   />
                 )}
                 {trfFromBranch === 'Other' && (
@@ -2921,26 +2937,26 @@ export default function InternalBranch() {
                     placeholder="Enter manual origin branch..."
                     value={trfCustomFromBranch}
                     onChange={e => setTrfCustomFromBranch(e.target.value)}
-                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5, background: '#fffbeb' }}
+                    style={{ width: '100%', marginTop: 5, padding: '6px 8px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12, background: '#fffbeb' }}
                   />
                 )}
-                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  Auto-detected from logged-in account
+                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
+                  Auto-detected account
                 </span>
               </div>
 
-              {/* Destination Branch (To Branch) */}
+              {/* 2. Destination Branch (Transfer To) - Compact */}
               <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
-                  Destination Branch (Transfer To) <span style={{ color: '#dc2626' }}>*</span>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
+                  Destination Branch (To) <span style={{ color: '#dc2626' }}>*</span>
                 </label>
                 <select
                   required
                   value={trfToBranch}
                   onChange={e => setTrfToBranch(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600, background: '#fff' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1.5px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff', height: 38 }}
                 >
-                  <option value="">Select Destination Branch...</option>
+                  <option value="">Select Destination...</option>
                   {branches.filter(b => b !== trfFromBranch).map(b => (
                     <option key={`trf-to-${b}`} value={b}>{b}</option>
                   ))}
@@ -2952,23 +2968,23 @@ export default function InternalBranch() {
                     placeholder="Enter manual destination branch..."
                     value={trfCustomToBranch}
                     onChange={e => setTrfCustomToBranch(e.target.value)}
-                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5, background: '#fffbeb' }}
+                    style={{ width: '100%', marginTop: 5, padding: '6px 8px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12, background: '#fffbeb' }}
                   />
                 )}
-                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  Branch that will receive and process this order
+                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
+                  Receiving branch
                 </span>
               </div>
 
-              {/* Transfer Purpose / Reason */}
+              {/* 3. Transfer Purpose / Reason */}
               <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
                   Transfer Purpose / Reason
                 </label>
                 <select
                   value={trfPurpose}
                   onChange={e => setTrfPurpose(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 600, background: '#fff' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff', height: 38 }}
                 >
                   <option value="Stock Replenishment">Stock Replenishment</option>
                   <option value="Urgent Customer Demand">Urgent Customer Demand</option>
@@ -2984,127 +3000,130 @@ export default function InternalBranch() {
                     placeholder="Specify purpose..."
                     value={trfCustomPurpose}
                     onChange={e => setTrfCustomPurpose(e.target.value)}
-                    style={{ width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+                    style={{ width: '100%', marginTop: 5, padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
                   />
                 )}
+                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
+                  Dispatch rationale
+                </span>
               </div>
 
-              {/* Needed Delivery Window */}
+              {/* 4. Needed Delivery Window (Dropdown: 1h, 2h, 3h, 4h, 5h, Custom) */}
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
-                    Needed Delivery Window <span style={{ color: '#dc2626' }}>*</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                  <label style={{ fontSize: 11.5, fontWeight: 700, color: '#0f172a' }}>
+                    Delivery Window <span style={{ color: '#dc2626' }}>*</span>
                   </label>
-                  <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 700 }}>
-                    ~{new Date(Date.now() + (trfDeliveryMinutes === 'custom' ? (parseInt(trfCustomDeliveryMinutes, 10) || 30) : trfDeliveryMinutes) * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  {trfDeliveryOption !== 'custom' && (
+                    <span style={{ fontSize: 10.5, color: '#2563eb', fontWeight: 700 }}>
+                      ~{new Date(Date.now() + (parseInt(trfDeliveryOption, 10) || 1) * 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
                 </div>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-                  {[15, 30, 45, 60].map(m => (
-                    <button
-                      key={`trf-m-${m}`}
-                      type="button"
-                      onClick={() => {
-                        setTrfDeliveryMinutes(m);
-                        const d = new Date(Date.now() + m * 60000);
-                        setTrfNeededByTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
-                      }}
-                      style={{
-                        flex: 1,
-                        padding: '6px 8px',
-                        borderRadius: 6,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        border: trfDeliveryMinutes === m ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                        background: trfDeliveryMinutes === m ? '#eff6ff' : '#fff',
-                        color: trfDeliveryMinutes === m ? '#1d4ed8' : '#475569'
-                      }}
-                    >
-                      {m}m
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setTrfDeliveryMinutes('custom')}
-                    style={{
-                      flex: 1,
-                      padding: '6px 8px',
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: trfDeliveryMinutes === 'custom' ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                      background: trfDeliveryMinutes === 'custom' ? '#eff6ff' : '#fff',
-                      color: trfDeliveryMinutes === 'custom' ? '#1d4ed8' : '#475569'
-                    }}
-                  >
-                    Custom
-                  </button>
-                </div>
-                {trfDeliveryMinutes === 'custom' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input
-                      type="number"
-                      min="5"
-                      max="720"
-                      required
-                      placeholder="Mins..."
-                      value={trfCustomDeliveryMinutes}
-                      onChange={e => {
-                        setTrfCustomDeliveryMinutes(e.target.value);
-                        const val = parseInt(e.target.value, 10);
-                        if (!isNaN(val) && val > 0) {
-                          const d = new Date(Date.now() + val * 60000);
-                          setTrfNeededByTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
-                        }
-                      }}
-                      style={{ width: 85, padding: '7px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
-                    />
-                    <span style={{ fontSize: 12, color: '#64748b' }}>minutes</span>
-                  </div>
-                )}
+                <select
+                  value={trfDeliveryOption}
+                  onChange={e => setTrfDeliveryOption(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1.5px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff', height: 38 }}
+                >
+                  <option value="1">1 Hour</option>
+                  <option value="2">2 Hours</option>
+                  <option value="3">3 Hours</option>
+                  <option value="4">4 Hours</option>
+                  <option value="5">5 Hours</option>
+                  <option value="custom">Custom (Date & Time)</option>
+                </select>
+                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
+                  {trfDeliveryOption === 'custom' ? 'Specify date & time below' : 'Expected delivery duration'}
+                </span>
+              </div>
+
+              {/* 5. Transfer Priority Dropdown (Normal, High, Urgent) */}
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
+                  Transfer Priority
+                </label>
+                <select
+                  value={trfPriority}
+                  onChange={e => setTrfPriority(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 7,
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    background: '#fff',
+                    height: 38,
+                    color: trfPriority === 'Urgent' ? '#dc2626' : (trfPriority === 'High' ? '#d97706' : '#0f172a')
+                  }}
+                >
+                  <option value="Normal">Normal</option>
+                  <option value="High">⚡ High Priority</option>
+                  <option value="Urgent">🚨 Urgent Rush</option>
+                </select>
+                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
+                  Request urgency level
+                </span>
               </div>
 
             </div>
 
-            {/* Transfer Items Checklist Card */}
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 18, marginBottom: 20, background: '#fafbfc', overflow: 'visible' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <div>
-                  <h3 style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', margin: '0 0 2px' }}>
-                    Transfer Items Checklist
-                  </h3>
-                  <span style={{ fontSize: 12, color: '#64748b' }}>
-                    Select inventory dishes or items from catalog. Units and SKUs will be automatically linked.
-                  </span>
+            {/* Custom Date & Time Selection (Visible only when Delivery Window is 'custom') */}
+            {trfDeliveryOption === 'custom' && (
+              <div style={{
+                background: '#eff6ff',
+                border: '1.5px solid #3b82f6',
+                borderRadius: 8,
+                padding: '8px 14px',
+                marginBottom: 14,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                flexWrap: 'wrap'
+              }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#1d4ed8' }}>
+                  Custom Delivery Schedule:
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: '#334155' }}>Delivery Date:</label>
+                  <input
+                    type="date"
+                    required
+                    value={trfCustomDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setTrfCustomDate(e.target.value)}
+                    style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, background: '#fff' }}
+                  />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowMenuBrowser(true);
-                    if (!dishes || dishes.length === 0) fetchDishes();
-                  }}
-                  style={{
-                    background: '#eff6ff',
-                    border: '1.5px solid #3b82f6',
-                    borderRadius: 6,
-                    padding: '7px 14px',
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    color: '#1d4ed8',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}
-                >
-                  <BookOpen size={16} /> Open Menu Items
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: '#334155' }}>Delivery Time:</label>
+                  <input
+                    type="time"
+                    required
+                    value={trfCustomTime}
+                    onChange={e => setTrfCustomTime(e.target.value)}
+                    style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, background: '#fff' }}
+                  />
+                </div>
+                <span style={{ fontSize: 11, color: '#64748b' }}>
+                  (Destination branch will receive this scheduled date and time)
+                </span>
               </div>
+            )}
 
-              {/* Items List Rows - Ultra-high z-index on active open row to float above all subsequent elements */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflow: 'visible', position: 'relative', zIndex: 10 }}>
+            {/* ── ROW 2: Item Entry Section (Heading & Description Removed) ── */}
+            <div style={{
+              border: '1px solid #e2e8f0',
+              borderRadius: 10,
+              padding: '12px 14px',
+              marginBottom: 14,
+              background: '#fafbfc',
+              overflow: 'visible',
+              position: 'relative'
+            }}>
+              
+              {/* Items List Rows - Unclipped overflow to guarantee dropdown foreground layering */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflow: 'visible', position: 'relative' }}>
                 {trfDishRows.map((row, idx) => {
                   const rowUnits = row.available_units && row.available_units.length > 0 
                     ? row.available_units 
@@ -3114,156 +3133,211 @@ export default function InternalBranch() {
                     <div
                       key={row.id}
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'minmax(330px, 3.2fr) minmax(130px, 1.2fr) minmax(110px, 1fr) minmax(140px, 1.4fr) 40px',
-                        gap: 12,
-                        alignItems: 'center',
                         background: '#ffffff',
-                        padding: '12px 14px',
+                        padding: '10px 12px',
                         borderRadius: 8,
                         border: '1px solid #e2e8f0',
                         position: 'relative',
                         zIndex: openDropdownRowId === row.id ? 999999 : (100 - idx),
-                        overflow: 'visible'
+                        overflow: 'visible',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6
                       }}
                     >
-                      {/* Dish Search Dropdown with SKU indicator */}
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                            Transfer Item #{idx + 1}
+                      {/* Item Row Header: Item number & SKU badge */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#475569' }}>
+                          Transfer Item #{idx + 1}
+                        </span>
+                        {(row.sku || row.barcode) && (
+                          <span style={{ fontSize: 10, background: '#f1f5f9', color: '#475569', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace' }}>
+                            SKU: {row.sku || row.barcode}
                           </span>
-                          {(row.sku || row.barcode) && (
-                            <span style={{ fontSize: 10, background: '#f1f5f9', color: '#475569', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace' }}>
-                              SKU: {row.sku || row.barcode}
-                            </span>
-                          )}
+                        )}
+                      </div>
+
+                      {/* Single Aligned Row: Search (widest) + Open Menu Items + Unit + Qty + Remarks + Delete */}
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(240px, 3.2fr) auto minmax(90px, 0.9fr) minmax(80px, 0.8fr) minmax(130px, 1.4fr) 36px',
+                          gap: 10,
+                          alignItems: 'center',
+                          position: 'relative',
+                          overflow: 'visible'
+                        }}
+                      >
+                        {/* Menu Item Search (Maximum width & prominent) */}
+                        <div style={{ position: 'relative', overflow: 'visible' }}>
+                          <DishSearchDropdown
+                            value={row.dish_name}
+                            imageUrl={row.image_url}
+                            dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
+                            popularityMap={popularityMap}
+                            onSelect={(dish) => handleSelectDishTrf(row.id, dish)}
+                            onOpenChange={(open) => setOpenDropdownRowId(open ? row.id : null)}
+                          />
                         </div>
-                        <DishSearchDropdown
-                          value={row.dish_name}
-                          imageUrl={row.image_url}
-                          dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
-                          popularityMap={popularityMap}
-                          onSelect={(dish) => handleSelectDishTrf(row.id, dish)}
-                          onOpenChange={(open) => setOpenDropdownRowId(open ? row.id : null)}
-                        />
-                      </div>
 
-                      {/* Unit (UOM) */}
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                          Unit (UOM)
-                        </span>
-                        <select
-                          value={row.uom || rowUnits[0]}
-                          onChange={e => handleDishRowChangeTrf(row.id, 'uom', e.target.value)}
-                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff' }}
-                        >
-                          {rowUnits.map((u, uIdx) => (
-                            <option key={`trf-uom-${row.id}-${uIdx}`} value={u}>{u}</option>
-                          ))}
-                        </select>
-                      </div>
+                        {/* Open Menu Items Button (Placed directly beside search) */}
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMenuBrowser(true);
+                              if (!dishes || dishes.length === 0) fetchDishes();
+                            }}
+                            style={{
+                              background: '#eff6ff',
+                              border: '1.5px solid #3b82f6',
+                              borderRadius: 6,
+                              padding: '8px 12px',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: '#1d4ed8',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              whiteSpace: 'nowrap',
+                              height: 38
+                            }}
+                            title="Open menu catalog to select dishes"
+                          >
+                            <BookOpen size={14} /> Open Menu Items
+                          </button>
+                        </div>
 
-                      {/* Requested Qty */}
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                          Transfer Qty <span style={{ color: '#dc2626' }}>*</span>
-                        </span>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0.1"
-                          placeholder="Qty"
-                          value={row.requested_qty}
-                          onChange={e => handleDishRowChangeTrf(row.id, 'requested_qty', e.target.value)}
-                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 700, textAlign: 'center' }}
-                        />
-                      </div>
+                        {/* Unit (UOM) - Compact */}
+                        <div>
+                          <select
+                            value={row.uom || rowUnits[0]}
+                            onChange={e => handleDishRowChangeTrf(row.id, 'uom', e.target.value)}
+                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, fontWeight: 600, background: '#fff', height: 38 }}
+                          >
+                            {rowUnits.map((u, uIdx) => (
+                              <option key={`trf-uom-${row.id}-${uIdx}`} value={u}>{u}</option>
+                            ))}
+                          </select>
+                        </div>
 
-                      {/* Item Remarks */}
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                          Item Remarks (Optional)
-                        </span>
-                        <input
-                          type="text"
-                          placeholder="e.g. Marinated, Fresh batch"
-                          value={row.remarks}
-                          onChange={e => handleDishRowChangeTrf(row.id, 'remarks', e.target.value)}
-                          style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
-                        />
-                      </div>
+                        {/* Transfer Qty - Compact */}
+                        <div>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.1"
+                            placeholder="Qty *"
+                            required
+                            value={row.requested_qty}
+                            onChange={e => handleDishRowChangeTrf(row.id, 'requested_qty', e.target.value)}
+                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 700, textAlign: 'center', height: 38 }}
+                          />
+                        </div>
 
-                      {/* Delete Row Button */}
-                      <div style={{ paddingTop: 18 }}>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveDishRowTrf(row.id)}
-                          disabled={trfDishRows.length <= 1}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: trfDishRows.length > 1 ? '#dc2626' : '#cbd5e1',
-                            cursor: trfDishRows.length > 1 ? 'pointer' : 'default',
-                            padding: 4
-                          }}
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
+                        {/* Item Remarks - Compact */}
+                        <div>
+                          <input
+                            type="text"
+                            placeholder="Remarks (Optional)"
+                            value={row.remarks}
+                            onChange={e => handleDishRowChangeTrf(row.id, 'remarks', e.target.value)}
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, height: 38 }}
+                          />
+                        </div>
 
+                        {/* Delete Row Button - Compact */}
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDishRowTrf(row.id)}
+                            disabled={trfDishRows.length <= 1}
+                            style={{
+                              width: 36,
+                              height: 38,
+                              borderRadius: 6,
+                              border: '1px solid #e2e8f0',
+                              background: trfDishRows.length > 1 ? '#fee2e2' : '#f8fafc',
+                              color: trfDishRows.length > 1 ? '#dc2626' : '#cbd5e1',
+                              cursor: trfDishRows.length > 1 ? 'pointer' : 'default',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 0
+                            }}
+                            title="Remove this item"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+
+                      </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Add item button */}
-              <div style={{ marginTop: 12, position: 'relative', zIndex: 0 }}>
+            </div>
+
+            {/* ── ROW 3: Item Actions & Remarks ── */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 14,
+              marginTop: 10,
+              flexWrap: 'wrap'
+            }}>
+              {/* Transfer Remarks / Dispatch Instructions (Left / Available space) */}
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <input
+                  type="text"
+                  placeholder="Transfer Remarks / Dispatch Instructions (Optional, e.g. driver details)..."
+                  value={trfNotes}
+                  onChange={e => setTrfNotes(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5 }}
+                />
+              </div>
+
+              {/* Add Another Item Button (Compact, aligned to right of item section) */}
+              <div>
                 <button
                   type="button"
                   onClick={handleAddDishRowTrf}
                   style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: 8,
-                    border: '1.5px dashed #2563eb',
+                    padding: '8px 16px',
+                    borderRadius: 6,
+                    border: '1.5px solid #2563eb',
                     background: '#eff6ff',
                     color: '#1d4ed8',
-                    fontSize: 13,
+                    fontSize: 12.5,
                     fontWeight: 700,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
+                    gap: 6,
+                    whiteSpace: 'nowrap',
                     transition: 'all 0.15s ease'
                   }}
                   onMouseEnter={e => { e.currentTarget.style.background = '#dbeafe'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff'; }}
                 >
-                  <PlusCircle size={16} /> + Add Another Item
+                  <PlusCircle size={15} /> + Add Another Item
                 </button>
               </div>
-
             </div>
 
-            {/* General Request Remarks */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
-                General Transfer Remarks / Dispatch Instructions (Optional)
-              </label>
-              <textarea
-                rows={2}
-                placeholder="e.g. Van driver arriving at 2:30 PM. Please package tightly in thermal crate."
-                value={trfNotes}
-                onChange={e => setTrfNotes(e.target.value)}
-                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12.5 }}
-              />
-            </div>
-
-            {/* Submit Action Bar */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+            {/* ── ROW 4: Final Form Actions (Clear Form & Submit Transfer Request) ── */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              gap: 12,
+              marginTop: 14,
+              paddingTop: 12,
+              borderTop: '1px solid #f1f5f9'
+            }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -3272,8 +3346,12 @@ export default function InternalBranch() {
                   setTrfNotes('');
                   setTrfPriority('Normal');
                   setTrfCustomToBranch('');
+                  setTrfDeliveryOption('1');
+                  setTrfCustomDate(new Date().toISOString().slice(0, 10));
+                  setTrfCustomTime('');
                 }}
                 disabled={submittingTrfRequest}
+                style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600 }}
               >
                 Clear Form
               </button>
@@ -3283,7 +3361,7 @@ export default function InternalBranch() {
                 className="btn btn-primary"
                 disabled={submittingTrfRequest}
                 style={{
-                  padding: '11px 26px',
+                  padding: '10px 24px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
@@ -3309,7 +3387,7 @@ export default function InternalBranch() {
         </div>
       )}
 
-      {/* ─────────────────────────────────────────────────────────────
+            {/* ─────────────────────────────────────────────────────────────
           TAB 1: DEDICATED TRANSFER REQUESTS (SENT REQUESTS - LATEST FIRST)
       ───────────────────────────────────────────────────────────── */}
       {activeTab === 'transfer_request' && (
@@ -3317,82 +3395,77 @@ export default function InternalBranch() {
           {/* Header Bar with Title, Counter, New Request CTA and Refresh */}
           <div style={{
             background: '#fff',
-            borderRadius: 12,
+            borderRadius: 10,
             border: '1px solid #e2e8f0',
-            padding: '16px 20px',
-            marginBottom: 20,
+            padding: '10px 16px',
+            marginBottom: 12,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: 14,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            gap: 10,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
           }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{
-                  background: '#eff6ff',
-                  color: '#2563eb',
-                  padding: '6px 10px',
-                  borderRadius: 8,
-                  display: 'inline-flex',
-                  alignItems: 'center'
-                }}>
-                  <ArrowLeftRight size={20} />
-                </span>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-                  Transfer Requests
-                </h2>
-                <span style={{
-                  fontSize: 12,
-                  fontWeight: 800,
-                  padding: '3px 10px',
-                  borderRadius: 12,
-                  background: '#dbeafe',
-                  color: '#1d4ed8',
-                  border: '1px solid #bfdbfe'
-                }}>
-                  {filteredSentTransfers.length} Active in Progress
-                </span>
-              </div>
-              <p style={{ margin: '4px 0 0', fontSize: 12.5, color: '#64748b' }}>
-                Latest requests displayed first. Orders requested by <strong>{adminSelectedBranch !== 'All' ? adminSelectedBranch : (user?.branch || 'your branch')}</strong> until completed or cancelled.
-              </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{
+                background: '#eff6ff',
+                color: '#2563eb',
+                padding: '5px 8px',
+                borderRadius: 7,
+                display: 'inline-flex',
+                alignItems: 'center'
+              }}>
+                <ArrowLeftRight size={18} />
+              </span>
+              <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                Transfer Requests
+              </h2>
+              <span style={{
+                fontSize: 11.5,
+                fontWeight: 800,
+                padding: '2px 9px',
+                borderRadius: 12,
+                background: '#dbeafe',
+                color: '#1d4ed8',
+                border: '1px solid #bfdbfe'
+              }}>
+                {filteredSentTransfers.length} Active in Progress
+              </span>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button
                 type="button"
                 onClick={() => setActiveTab('new')}
                 style={{
-                  padding: '9px 18px',
-                  borderRadius: 8,
+                  padding: '6px 14px',
+                  borderRadius: 6,
                   border: 'none',
                   background: '#2563eb',
                   color: '#fff',
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: 700,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 7,
-                  boxShadow: '0 2px 6px rgba(37,99,235,0.3)',
+                  gap: 6,
+                  boxShadow: '0 1px 4px rgba(37,99,235,0.25)',
                   transition: 'all 0.15s ease'
                 }}
               >
-                <PlusCircle size={16} /> + New Request
+                <PlusCircle size={15} /> + New Request
               </button>
 
               <button
                 type="button"
                 onClick={() => fetchTransfers()}
                 style={{
-                  padding: '9px 14px',
-                  borderRadius: 8,
+                  padding: '6px 12px',
+                  borderRadius: 6,
                   border: '1px solid #cbd5e1',
                   background: '#fff',
                   color: '#475569',
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: 600,
                   cursor: 'pointer',
                   display: 'flex',
@@ -3400,7 +3473,8 @@ export default function InternalBranch() {
                   gap: 6
                 }}
               >
-                <RefreshCw size={14} className={loadingTransfers ? 'animate-spin' : ''} /> Refresh
+                <RefreshCw size={14} className={loadingTransfers ? 'spin' : ''} />
+                Refresh
               </button>
             </div>
           </div>

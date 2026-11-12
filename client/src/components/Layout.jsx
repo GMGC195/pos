@@ -50,7 +50,7 @@ const navGroups = [
   {
     title: 'Main Menu',
     items: [
-      { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management', 'Operator'] },
+      { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard', roles: ['Developer', 'Admin', 'Management', 'Operator', 'Salary Pay Operator'] },
       { to: '/pos', icon: <Receipt size={18} strokeWidth={2.2} />, label: 'Order Taking', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/hold-payments', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Live Orders', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/held-deliveries', icon: <Bike size={18} strokeWidth={2.2} />, label: 'Held Deliveries', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
@@ -83,7 +83,7 @@ const navGroups = [
       { to: '/attendance', icon: <Fingerprint size={18} strokeWidth={2.2} />, label: 'Mark Attendance', roles: ['Admin', 'Management', 'Employee', 'HR Manager', 'Operator'] },
       { to: '/today-attendance', icon: <Clock size={18} strokeWidth={2.2} />, label: 'Today Attendance', roles: ['Admin', 'Management', 'HR Manager', 'Operator'] },
       { to: '/attendance-reports', icon: <CalendarRange size={18} strokeWidth={2.2} />, label: 'Attendance Sheet', roles: ['Admin', 'Management', 'HR Manager'] },
-      { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Management', 'HR Manager'] },
+      { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Payroll & Salary', roles: ['Admin', 'Management', 'HR Manager', 'Salary Pay Operator'] },
       { to: '/logs', icon: <History size={18} strokeWidth={2.2} />, label: 'Logs', roles: ['Admin', 'Management', 'HR Manager'] },
       { to: '/edited-logs', icon: <AlertTriangle size={18} strokeWidth={2.2} />, label: 'Edit Attendance Logs', roles: ['Admin', 'HR Manager', 'Operator'] },
     ]
@@ -251,8 +251,9 @@ export default function Layout() {
         combinedAlerts = [...stockAlerts];
       }
 
-      try {
-        const attRes = await axios.get('/api/attendance/notifications');
+      if (role !== 'salary pay operator') {
+        try {
+          const attRes = await axios.get('/api/attendance/notifications');
         const attAlerts = attRes.data.map(item => ({
           id: item.id,
           type: item.type,
@@ -264,8 +265,9 @@ export default function Layout() {
           branch: item.branch
         }));
         combinedAlerts = [...combinedAlerts, ...attAlerts];
-      } catch (err) {
-        console.error('Error fetching attendance warnings:', err);
+        } catch (err) {
+          console.error('Error fetching attendance warnings:', err);
+        }
       }
 
       // Filter out cleared alerts
@@ -436,8 +438,9 @@ export default function Layout() {
     }
   }, [isNotifOpen])
 
+  const isSalaryPayOp = user?.role?.trim().toLowerCase() === 'salary pay operator';
   let currentTitle = {
-    '/': 'Dashboard Overview',
+    '/': isSalaryPayOp ? 'Salary Pay Dashboard' : 'Dashboard Overview',
     '/pos': 'Order Taking',
     '/inventory': 'Add Item',
     '/hold-payments': 'Live Orders',
@@ -451,10 +454,11 @@ export default function Layout() {
     '/attendance': 'Mark Attendance Panel',
     '/today-attendance': "Today's Attendance Panel",
     '/attendance-reports': 'Attendance Sheet',
-    '/payroll': 'Employee Payroll & Slips',
+    '/payroll': isSalaryPayOp ? 'Salary Pay Operations' : 'Employee Payroll & Slips',
     '/settings': 'System Settings',
     '/help-support': 'Help & Support Center',
-    '/edited-logs': 'Edit Attendance Audit Logs'
+    '/edited-logs': 'Edit Attendance Audit Logs',
+    '/internal-branch': 'Internal Branch'
   }[location.pathname] || `${BRAND_NAME} Pro`
 
   if (location.pathname === '/pos' && ['cashier', 'order taker'].includes(user?.role?.trim().toLowerCase()) && user?.branch) {
@@ -474,7 +478,15 @@ export default function Layout() {
     navigate('/login', { replace: true })
   }
 
-  const filteredNavGroups = navGroups.map(group => {
+  const filteredNavGroups = isSalaryPayOp ? [
+    {
+      title: 'Salary Management',
+      items: [
+        { to: '/', icon: <LayoutDashboard size={18} strokeWidth={2.2} />, label: 'Dashboard' },
+        { to: '/payroll', icon: <Calculator size={18} strokeWidth={2.2} />, label: 'Salary Pay' }
+      ]
+    }
+  ] : navGroups.map(group => {
     let items = group.items.filter(item => {
       if (user?.role?.trim().toLowerCase() === 'developer') return true
       if (!item.roles) return true
@@ -718,23 +730,27 @@ export default function Layout() {
               ))}
             </div>
           ))}
-          <div className="sidebar-label" style={{ marginTop: 16 }}>System</div>
-          <NavLink 
-            to="/settings" 
-            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-            onClick={() => setIsSidebarOpen(false)}
-          >
-            <span className="nav-icon"><Settings size={18} strokeWidth={2.2} /></span>
-            <span className="nav-label">Settings</span>
-          </NavLink>
-          <NavLink 
-            to="/help-support" 
-            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-            onClick={() => setIsSidebarOpen(false)}
-          >
-            <span className="nav-icon"><HelpCircle size={18} strokeWidth={2.2} /></span>
-            <span className="nav-label">Help & Support</span>
-          </NavLink>
+          {!isSalaryPayOp && (
+            <>
+              <div className="sidebar-label" style={{ marginTop: 16 }}>System</div>
+              <NavLink 
+                to="/settings" 
+                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <span className="nav-icon"><Settings size={18} strokeWidth={2.2} /></span>
+                <span className="nav-label">Settings</span>
+              </NavLink>
+              <NavLink 
+                to="/help-support" 
+                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <span className="nav-icon"><HelpCircle size={18} strokeWidth={2.2} /></span>
+                <span className="nav-label">Help & Support</span>
+              </NavLink>
+            </>
+          )}
         </nav>
         <div className="sidebar-footer">
           {/* User info block */}
@@ -793,16 +809,50 @@ export default function Layout() {
             <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <div className="page-title">{currentTitle}</div>
               <div className="page-subtitle">
-                <div className="topbar-date-desktop" style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
-                  <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                  <span style={{ opacity: 0.5 }}>•</span>
-                  <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
-                </div>
-                <div className="topbar-date-mobile" style={{ display: 'none', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                  <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'short', day: 'numeric' })}</span>
-                  <span style={{ opacity: 0.5 }}>•</span>
-                  <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{liveKsaTime}</span>
-                </div>
+                {location.pathname === '/internal-branch' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--primary)' }}>Internal Branch Transfer Management</span>
+                    <span style={{ opacity: 0.5 }}>•</span>
+                    <div className="topbar-date-desktop" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                      <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                      <span style={{ opacity: 0.5 }}>•</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
+                    </div>
+                  </div>
+                ) : isSalaryPayOp && location.pathname === '/' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: '#16a34a' }}>Monthly Salary Disbursement & Carry-Forward Dashboard</span>
+                    <span style={{ opacity: 0.5 }}>•</span>
+                    <div className="topbar-date-desktop" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                      <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                      <span style={{ opacity: 0.5 }}>•</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
+                    </div>
+                  </div>
+                ) : isSalaryPayOp && location.pathname === '/payroll' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: '#16a34a' }}>Process Staff Payments & Slips</span>
+                    <span style={{ opacity: 0.5 }}>•</span>
+                    <div className="topbar-date-desktop" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                      <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                      <span style={{ opacity: 0.5 }}>•</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="topbar-date-desktop" style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                      <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                      <span style={{ opacity: 0.5 }}>•</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
+                    </div>
+                    <div className="topbar-date-mobile" style={{ display: 'none', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                      <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'short', day: 'numeric' })}</span>
+                      <span style={{ opacity: 0.5 }}>•</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{liveKsaTime}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

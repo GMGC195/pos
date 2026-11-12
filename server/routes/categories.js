@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, blockSalaryPayOperator } = require('../middleware/auth');
+router.use(blockSalaryPayOperator);
 
 // GET all categories
 router.get('/', authenticateToken, async (req, res) => {

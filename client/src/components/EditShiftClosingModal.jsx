@@ -240,6 +240,24 @@ export default function EditShiftClosingModal({
                 </span>
               </div>
 
+              {/* Previous Edit / Difference Reason Banner */}
+              {closing.difference_reason && (
+                <div style={{
+                  background: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  borderRadius: 8,
+                  padding: '12px 16px',
+                  marginBottom: 16
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <AlertCircle size={15} /> Previous Modification Reason & Audit Notes:
+                  </div>
+                  <div style={{ fontSize: 12, color: '#78350f', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>
+                    {closing.difference_reason}
+                  </div>
+                </div>
+              )}
+
               {/* Input Row: Actual Cash & Actual Card */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
                 <div>
