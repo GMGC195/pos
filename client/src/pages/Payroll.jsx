@@ -108,9 +108,7 @@ export default function Payroll() {
   }
 
   const getLastMonth = () => {
-    const d = new Date()
-    d.setMonth(d.getMonth() - 1)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    return getSaudiPreviousMonthStr()
   }
 
   // State Variables
@@ -118,7 +116,7 @@ export default function Payroll() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    return getSaudiCurrentMonthStr()
+    return getSaudiPreviousMonthStr()
   })
   const [viewMode, setViewMode] = useState('detail') // 'detail' by default | 'sheet' as alternative
   const [selectedBranchFilter, setSelectedBranchFilter] = useState(() => {
@@ -3175,7 +3173,7 @@ export default function Payroll() {
                                 <span style={{ fontSize: '12px', fontWeight: 900, color: '#059669', whiteSpace: 'nowrap' }}>
                                   {CURRENCY} {parseFloat(p.amount || 0).toFixed(2)}
                                 </span>
-                                {!isRowLocked && (
+                                {!isRowLocked && !isSalaryPayOperator && (
                                   <button
                                     type="button"
                                     onClick={() => handleDeletePayment(p.id, targetEmpData.id)}
