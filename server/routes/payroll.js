@@ -3025,7 +3025,7 @@ function buildSalarySlipEscPos(emp, currentUser) {
   const TEXT_DOUBLE = GS + '!' + '\x11'; // Double-width + Double-height
   const CUT = GS + 'V' + '\x41' + '\x03';
   const LF = '\n';
-  const LINE_WIDTH = 42;
+  const LINE_WIDTH = 38;
 
   const rightAlign = (leftStr, rightStr, width = LINE_WIDTH) => {
     const left = String(leftStr || '');
@@ -3034,7 +3034,11 @@ function buildSalarySlipEscPos(emp, currentUser) {
     return left + ' '.repeat(space) + right;
   };
 
-  const sanitizeStr = (s) => String(s || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+  const sanitizeStr = (s, fallback = '') => {
+    if (!s || s === 'undefined' || s === 'null') return fallback;
+    const clean = String(s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+    return (clean === 'undefined' || clean === 'null' || !clean) ? fallback : clean;
+  };
 
   const baseSal = parseFloat(emp.base_salary || 0);
   const deductions = parseFloat(emp.deductions || 0);
@@ -3054,12 +3058,14 @@ function buildSalarySlipEscPos(emp, currentUser) {
 
   const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
 
-  const targetMonth = emp?.month || emp?.pay_period || 'Current Month';
+  const targetMonth = sanitizeStr(emp?.month || emp?.pay_period, '');
   let monthFormatted = targetMonth;
   if (/^\d{4}-\d{2}$/.test(targetMonth)) {
     const [y, m] = targetMonth.split('-');
     const dateObj = new Date(parseInt(y), parseInt(m) - 1, 15, 12, 0, 0);
     monthFormatted = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  } else if (!monthFormatted) {
+    monthFormatted = 'Current Month';
   }
 
   const printTimeStr = new Date().toLocaleString('en-US', {
@@ -3075,12 +3081,15 @@ function buildSalarySlipEscPos(emp, currentUser) {
 
   // Employee details
   t += LEFT;
-  t += rightAlign('Employee:', sanitizeStr(emp.name || emp.employee_name || 'Staff')) + LF;
-  t += rightAlign('Employee ID:', sanitizeStr(emp.employee_id || emp.id || 'N/A')) + LF;
+  const empName = sanitizeStr(emp.name || emp.employee_name, 'Staff');
+  const empIdStr = sanitizeStr(emp.employee_id || emp.employee_code || emp.id, 'N/A');
+  t += rightAlign('Employee:', empName) + LF;
+  t += rightAlign('Employee ID:', empIdStr) + LF;
   
-  let branchName = String(emp.branch || 'Restaurant 1');
-  if (branchName.toLowerCase().includes('3')) branchName = 'B3';
-  else if (branchName.toLowerCase().includes('2')) branchName = 'B2';
+  let rawBranch = sanitizeStr(emp.branch || emp.employee_branch, 'Restaurant 1');
+  let branchName = 'B1';
+  if (rawBranch.toLowerCase().includes('3') || rawBranch.toUpperCase() === 'B3' || rawBranch.toUpperCase() === 'R3') branchName = 'B3';
+  else if (rawBranch.toLowerCase().includes('2') || rawBranch.toUpperCase() === 'B2' || rawBranch.toUpperCase() === 'R2') branchName = 'B2';
   else branchName = 'B1';
   t += rightAlign('Branch:', branchName) + LF;
   t += rightAlign('Pay Period:', monthFormatted) + LF;
@@ -3152,19 +3161,21 @@ function buildSalarySlipEscPos(emp, currentUser) {
     if (cashPaid > 0) t += rightAlign('  - Cash Paid:', `SAR ${cashPaid.toFixed(2)}`) + LF;
     if (bankPaid > 0) t += rightAlign('  - Bank Paid:', `SAR ${bankPaid.toFixed(2)}`) + LF;
   }
-  const payDateStr = emp.payment_date 
-    ? `${emp.payment_date}${emp.payment_time ? ' ' + emp.payment_time : ''}`
+  const rawDate = sanitizeStr(emp.payment_date, '');
+  const rawTime = sanitizeStr(emp.payment_time, '');
+  const payDateStr = rawDate 
+    ? `${rawDate}${rawTime ? ' ' + rawTime : ''}`
     : printTimeStr;
   t += rightAlign('Payment Date:', payDateStr) + LF;
-  const paidBy = emp.paid_by || currentUser?.username || 'Salary Pay Operator';
-  t += rightAlign('Disbursed By:', sanitizeStr(paidBy)) + LF;
+  const paidBy = sanitizeStr(emp.paid_by || currentUser?.username, 'Salary Pay Operator');
+  t += rightAlign('Disbursed By:', paidBy) + LF;
   t += rightAlign('Remaining Balance:', `SAR ${Math.max(0, remaining).toFixed(2)}`) + LF;
   t += '-'.repeat(LINE_WIDTH) + LF;
 
   // Signatures
   t += LF;
-  t += 'Employee Signature        Manager Signature' + LF;
-  t += '__________________        __________________' + LF;
+  t += 'Employee Signature    Manager Signature' + LF;
+  t += '__________________    __________________' + LF;
   t += LF;
   t += CENTER + 'Thank You' + LF;
   t += LF + LF + LF + LF + CUT;

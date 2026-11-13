@@ -117,11 +117,13 @@ export const printSalarySlipViaRawBT = (emp) => {
     : Math.max(0, payableSal - parseFloat(emp.this_month_adv || emp.advance_deduction || 0));
 
   const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
-  const targetMonth = emp?.month || emp?.pay_period || 'Current';
+  const cleanStr = (s, fallback = '') => (!s || s === 'undefined' || s === 'null') ? fallback : String(s).trim();
+  const targetMonth = cleanStr(emp?.month || emp?.pay_period, 'Current');
 
-  let branchName = String(emp.branch || 'B1');
-  if (branchName.toLowerCase().includes('3')) branchName = 'B3';
-  else if (branchName.toLowerCase().includes('2')) branchName = 'B2';
+  let rawBranch = cleanStr(emp.branch || emp.employee_branch, 'B1');
+  let branchName = 'B1';
+  if (rawBranch.toLowerCase().includes('3') || rawBranch.toUpperCase() === 'B3' || rawBranch.toUpperCase() === 'R3') branchName = 'B3';
+  else if (rawBranch.toLowerCase().includes('2') || rawBranch.toUpperCase() === 'B2' || rawBranch.toUpperCase() === 'R2') branchName = 'B2';
   else branchName = 'B1';
 
   receiptText += cmds;
@@ -133,8 +135,8 @@ export const printSalarySlipViaRawBT = (emp) => {
   receiptText += "================================" + crlf;
 
   receiptText += esc + 'a' + '\x00';
-  receiptText += rightAlign("Employee:", sanitizeThermalText(emp.name || emp.employee_name || 'Staff')) + crlf;
-  receiptText += rightAlign("ID:", sanitizeThermalText(emp.employee_id || emp.id || 'N/A')) + crlf;
+  receiptText += rightAlign("Employee:", sanitizeThermalText(cleanStr(emp.name || emp.employee_name, 'Staff'))) + crlf;
+  receiptText += rightAlign("ID:", sanitizeThermalText(cleanStr(emp.employee_id || emp.employee_code || emp.id, 'N/A'))) + crlf;
   receiptText += rightAlign("Branch:", branchName) + crlf;
   receiptText += rightAlign("Period:", targetMonth) + crlf;
   receiptText += "--------------------------------" + crlf;

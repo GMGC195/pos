@@ -40,6 +40,12 @@ export default function SalaryPayDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [selectedMonth, setSelectedMonth] = useState(() => getSaudiPreviousMonthStr());
+  const [salaryPermissions, setSalaryPermissions] = useState({
+    is_salary_pay_operator: false,
+    permission_type: 'pay_now',
+    allowed_months: []
+  });
+  const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [summary, setSummary] = useState({
@@ -104,13 +110,49 @@ export default function SalaryPayDashboard() {
     }
   }, [selectedMonth, user?.branch]);
 
+  // Load Salary Pay Operator permissions
   useEffect(() => {
-    fetchSummary();
-    fetchHistory();
-  }, [fetchSummary, fetchHistory]);
+    let isMounted = true;
+    const fetchPerms = async () => {
+      try {
+        const res = await axios.get('/api/payroll/my-permissions');
+        if (res.data && isMounted) {
+          setSalaryPermissions(res.data);
+          if (res.data.is_salary_pay_operator && res.data.allowed_months && res.data.allowed_months.length > 0) {
+            setSelectedMonth(prev => {
+              if (!res.data.allowed_months.includes(prev)) {
+                return res.data.allowed_months[0];
+              }
+              return prev;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load salary permissions in dashboard:', err);
+      } finally {
+        if (isMounted) setPermissionsLoaded(true);
+      }
+    };
+    fetchPerms();
+    return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (permissionsLoaded) {
+      fetchSummary();
+      fetchHistory();
+    }
+  }, [fetchSummary, fetchHistory, permissionsLoaded]);
 
   // Month navigation helpers
   const handlePrevMonth = () => {
+    if (salaryPermissions.allowed_months && salaryPermissions.allowed_months.length > 0) {
+      const idx = salaryPermissions.allowed_months.indexOf(selectedMonth);
+      if (idx > 0) {
+        setSelectedMonth(salaryPermissions.allowed_months[idx - 1]);
+      }
+      return;
+    }
     const [y, m] = selectedMonth.split('-').map(Number);
     let prevYear = y;
     let prevMonth = m - 1;
@@ -122,6 +164,13 @@ export default function SalaryPayDashboard() {
   };
 
   const handleNextMonth = () => {
+    if (salaryPermissions.allowed_months && salaryPermissions.allowed_months.length > 0) {
+      const idx = salaryPermissions.allowed_months.indexOf(selectedMonth);
+      if (idx !== -1 && idx < salaryPermissions.allowed_months.length - 1) {
+        setSelectedMonth(salaryPermissions.allowed_months[idx + 1]);
+      }
+      return;
+    }
     const [y, m] = selectedMonth.split('-').map(Number);
     let nextYear = y;
     let nextMonth = m + 1;
@@ -222,14 +271,17 @@ export default function SalaryPayDashboard() {
       });
     }
 
-    const empName = slip.employee_name || slip.name || 'Staff';
-    const empCode = slip.employee_code || slip.employee_id || '-';
-    const rawBranch = slip.branch || slip.employee_branch || '';
+    const cleanStr = (s, fallback = '') => (!s || s === 'undefined' || s === 'null') ? fallback : String(s).trim();
+    const empName = cleanStr(slip.employee_name || slip.name, 'Staff');
+    const empCode = cleanStr(slip.employee_code || slip.employee_id, '-');
+    const rawBranch = cleanStr(slip.branch || slip.employee_branch, '');
     const branchName = rawBranch ? formatBranchShort(rawBranch) : '-';
     const payStatus = slip.payment_status || (totalPaid > 0 ? (remaining <= 0 ? 'PAID' : 'PARTIAL') : 'PENDING');
-    const payDate = slip.payment_date || slip.paid_date || (slip.created_at ? new Date(slip.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
-    const payTime = slip.payment_time || (slip.created_at ? new Date(slip.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '');
-    const paidBy = slip.paid_by || 'Salary Pay Operator';
+    const rawDate = cleanStr(slip.payment_date || slip.paid_date, '');
+    const payDate = rawDate || (slip.created_at ? new Date(slip.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+    const rawTime = cleanStr(slip.payment_time, '');
+    const payTime = rawTime || (slip.created_at ? new Date(slip.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '');
+    const paidBy = cleanStr(slip.paid_by, 'Salary Pay Operator');
 
     return `
       <!DOCTYPE html>
@@ -512,10 +564,25 @@ export default function SalaryPayDashboard() {
   };
 
   const triggerBrowserPrint = async (slipToPrint) => {
-    const slip = (slipToPrint && typeof slipToPrint === 'object' && !slipToPrint.nativeEvent && !slipToPrint._reactName && !slipToPrint.target) 
+    const rawSlip = (slipToPrint && typeof slipToPrint === 'object' && !slipToPrint.nativeEvent && !slipToPrint._reactName && !slipToPrint.target) 
       ? slipToPrint 
       : selectedSlip;
-    if (!slip) return;
+    if (!rawSlip) return;
+
+    const cleanStr = (s, fallback = '') => (!s || s === 'undefined' || s === 'null') ? fallback : String(s).trim();
+    const slip = {
+      ...rawSlip,
+      name: cleanStr(rawSlip.name || rawSlip.employee_name, 'Staff'),
+      employee_name: cleanStr(rawSlip.employee_name || rawSlip.name, 'Staff'),
+      employee_id: cleanStr(rawSlip.employee_code || rawSlip.employee_id, '-'),
+      employee_code: cleanStr(rawSlip.employee_code || rawSlip.employee_id, '-'),
+      branch: cleanStr(rawSlip.branch || rawSlip.employee_branch, user?.branch || 'Restaurant 1'),
+      month: rawSlip.month || rawSlip.pay_period || selectedMonth,
+      pay_period: rawSlip.pay_period || rawSlip.month || selectedMonth,
+      payment_date: cleanStr(rawSlip.payment_date, new Date().toISOString().slice(0, 10)),
+      payment_time: cleanStr(rawSlip.payment_time, ''),
+      paid_by: cleanStr(rawSlip.paid_by, user?.username || 'Salary Pay Operator')
+    };
 
     const slipMode = localStorage.getItem('salarySlipPrintMode') || 'global';
     const effectivePrintMode = slipMode === 'global' ? (localStorage.getItem('printMode') || 'standard') : slipMode;
@@ -636,11 +703,13 @@ export default function SalaryPayDashboard() {
               type="button"
               onClick={handlePrevMonth}
               title="Previous Month"
+              disabled={salaryPermissions.allowed_months && salaryPermissions.allowed_months.length <= 1}
               style={{
                 background: 'none',
                 border: 'none',
                 padding: '6px',
-                cursor: 'pointer',
+                cursor: (salaryPermissions.allowed_months && salaryPermissions.allowed_months.length <= 1) ? 'not-allowed' : 'pointer',
+                opacity: (salaryPermissions.allowed_months && salaryPermissions.allowed_months.length <= 1) ? 0.35 : 1,
                 color: '#475569',
                 display: 'flex',
                 alignItems: 'center'
@@ -650,30 +719,52 @@ export default function SalaryPayDashboard() {
             </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px' }}>
               <Calendar size={14} style={{ color: '#0284c7' }} />
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: '#0f172a',
-                  outline: 'none',
-                  cursor: 'pointer'
-                }}
-              />
+              {salaryPermissions.allowed_months && salaryPermissions.allowed_months.length > 0 ? (
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#0f172a',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {salaryPermissions.allowed_months.map(m => (
+                    <option key={m} value={m}>{formatMonthDisplay(m)} ({m})</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#0f172a',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                />
+              )}
             </div>
             <button
               type="button"
               onClick={handleNextMonth}
               title="Next Month"
+              disabled={salaryPermissions.allowed_months && salaryPermissions.allowed_months.length <= 1}
               style={{
                 background: 'none',
                 border: 'none',
                 padding: '6px',
-                cursor: 'pointer',
+                cursor: (salaryPermissions.allowed_months && salaryPermissions.allowed_months.length <= 1) ? 'not-allowed' : 'pointer',
+                opacity: (salaryPermissions.allowed_months && salaryPermissions.allowed_months.length <= 1) ? 0.35 : 1,
                 color: '#475569',
                 display: 'flex',
                 alignItems: 'center'
@@ -710,7 +801,12 @@ export default function SalaryPayDashboard() {
           {/* Go to Salary Pay Screen */}
           <button
             type="button"
-            onClick={() => navigate('/payroll')}
+            onClick={() => {
+              try {
+                sessionStorage.setItem('payroll_selected_month', selectedMonth);
+              } catch (e) {}
+              navigate('/payroll', { state: { month: selectedMonth } });
+            }}
             style={{
               padding: '8px 16px',
               borderRadius: 8,

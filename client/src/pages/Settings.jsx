@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
+import { formatMonthDisplay } from '../utils/timezone'
 
 export default function Settings() {
   const { user, updateUser } = useAuth()
@@ -2302,8 +2303,7 @@ export default function Settings() {
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                                 {availableSalaryMonths.map(m => {
                                   const isAllowed = editingSalaryPerm.allowed_months.includes(m);
-                                  const [yr, mn] = m.split('-').map(Number);
-                                  const monthLabel = new Date(yr, mn - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                                  const monthLabel = formatMonthDisplay(m);
 
                                   return (
                                     <button

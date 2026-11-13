@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
 import axios from '../api'
 import { 
   Calculator, Settings, User, Clock, CalendarDays, Plus, Banknote, Users, 
@@ -88,6 +89,7 @@ const confirmAction = (message, onConfirm, confirmText = 'Confirm') => {
 
 export default function Payroll() {
   const { user } = useAuth()
+  const location = useLocation()
   const userRoleLower = (user?.role || '').toString().toLowerCase().trim().replace(/[-_]/g, ' ')
   const isDeveloper = userRoleLower === 'developer'
   const isAdmin = userRoleLower === 'admin' || isDeveloper
@@ -213,11 +215,17 @@ export default function Payroll() {
           setSalaryPermissions(res.data)
           if (res.data.is_salary_pay_operator && res.data.allowed_months && res.data.allowed_months.length > 0) {
             setSelectedMonth(prev => {
-              if (!res.data.allowed_months.includes(prev)) {
-                return res.data.allowed_months[0]
+              const routeMonth = location.state?.month;
+              if (routeMonth && res.data.allowed_months.includes(routeMonth)) {
+                return routeMonth;
               }
-              return prev
-            })
+              if (!res.data.allowed_months.includes(prev)) {
+                return res.data.allowed_months[0];
+              }
+              return prev;
+            });
+          } else if (location.state?.month) {
+            setSelectedMonth(location.state.month);
           }
         }
       } catch (err) {
@@ -1415,8 +1423,22 @@ export default function Payroll() {
   };
 
   // Print Official Employee Salary Slip (Optimized for 80mm Thermal Receipt Printers & Cloud)
-  const handlePrintSalarySlip = async (emp) => {
-    if (!emp) return;
+  const handlePrintSalarySlip = async (rawEmp) => {
+    if (!rawEmp) return;
+    const cleanStr = (s, fallback = '') => (!s || s === 'undefined' || s === 'null') ? fallback : String(s).trim();
+    const emp = {
+      ...rawEmp,
+      name: cleanStr(rawEmp.name || rawEmp.employee_name, 'Staff'),
+      employee_name: cleanStr(rawEmp.employee_name || rawEmp.name, 'Staff'),
+      employee_id: cleanStr(rawEmp.employee_code || rawEmp.employee_id, '-'),
+      employee_code: cleanStr(rawEmp.employee_code || rawEmp.employee_id, '-'),
+      branch: cleanStr(rawEmp.branch || rawEmp.employee_branch, user?.branch || 'Restaurant 1'),
+      month: rawEmp.month || rawEmp.pay_period || selectedMonth,
+      pay_period: rawEmp.pay_period || rawEmp.month || selectedMonth,
+      payment_date: cleanStr(rawEmp.payment_date, new Date().toISOString().slice(0, 10)),
+      payment_time: cleanStr(rawEmp.payment_time, ''),
+      paid_by: cleanStr(rawEmp.paid_by, user?.username || 'Salary Pay Operator')
+    };
 
     // Check configured print mode for salary slips
     const slipMode = localStorage.getItem('salarySlipPrintMode') || 'global';
@@ -5869,12 +5891,24 @@ export default function Payroll() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '6px' }}>
                       <CalendarDays size={14} style={{ color: 'var(--primary, #d97706)' }} />
                       <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Month:</span>
-                      <input 
-                        type="month"
-                        value={selectedMonth}
-                        onChange={e => setSelectedMonth(e.target.value)}
-                        style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
-                      />
+                      {isSalaryPayOperator && salaryPermissions.allowed_months && salaryPermissions.allowed_months.length > 0 ? (
+                        <select
+                          value={selectedMonth}
+                          onChange={e => setSelectedMonth(e.target.value)}
+                          style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
+                        >
+                          {salaryPermissions.allowed_months.map(m => (
+                            <option key={m} value={m}>{formatMonthDisplay(m)} ({m})</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input 
+                          type="month"
+                          value={selectedMonth}
+                          onChange={e => setSelectedMonth(e.target.value)}
+                          style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
+                        />
+                      )}
                     </div>
                     <button
                       type="button"
@@ -6020,12 +6054,24 @@ export default function Payroll() {
                   <CalendarDays size={18} style={{ color: 'var(--primary, #d97706)' }} />
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <span style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-secondary)', letterSpacing: '0.5px' }}>Selected Month</span>
-                    <input 
-                      type="month" 
-                      value={selectedMonth} 
-                      onChange={(e) => setSelectedMonth(e.target.value)}
-                      style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
-                    />
+                    {isSalaryPayOperator && salaryPermissions.allowed_months && salaryPermissions.allowed_months.length > 0 ? (
+                      <select
+                        value={selectedMonth}
+                        onChange={e => setSelectedMonth(e.target.value)}
+                        style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
+                      >
+                        {salaryPermissions.allowed_months.map(m => (
+                          <option key={m} value={m}>{formatMonthDisplay(m)} ({m})</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input 
+                        type="month" 
+                        value={selectedMonth} 
+                        onChange={(e) => setSelectedMonth(e.target.value)}
+                        style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', padding: 0 }}
+                      />
+                    )}
                   </div>
                 </div>
 
