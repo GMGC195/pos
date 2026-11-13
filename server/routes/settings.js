@@ -84,4 +84,81 @@ router.put('/', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/settings/salary-permissions - List all Salary Pay Operator users & their configured permissions
+router.get('/salary-permissions', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const usersRes = await pool.query(`
+      SELECT 
+        u.id, 
+        u.username, 
+        COALESCE(e.name, u.username) as name,
+        u.email, 
+        u.role, 
+        u.branch,
+        COALESCE(spp.permission_type, 'pay_now') as permission_type,
+        COALESCE(spp.allowed_months, '[]'::jsonb) as allowed_months,
+        spp.updated_at,
+        spp.updated_by
+      FROM users u
+      LEFT JOIN employees e ON (e.id::text = u.employee_id::text OR e.employee_id = u.employee_id::text)
+      LEFT JOIN salary_payable_permissions spp ON spp.user_id = u.id
+      WHERE LOWER(u.role) = 'salary pay operator'
+      ORDER BY u.id ASC
+    `);
+
+    // Generate recent 12 months list for convenience
+    const availableMonths = [];
+    const now = new Date();
+    for (let i = -1; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      availableMonths.push(mStr);
+    }
+
+    res.json({
+      users: usersRes.rows,
+      available_months: availableMonths
+    });
+  } catch (err) {
+    console.error('Error fetching salary permissions:', err);
+    res.status(500).json({ error: 'Failed to fetch salary permissions' });
+  }
+});
+
+// PUT /api/settings/salary-permissions/:userId - Update a Salary Pay Operator user's permission settings
+router.put('/salary-permissions/:userId', authenticateToken, isAdmin, async (req, res) => {
+  const { userId } = req.params;
+  const { permission_type, allowed_months } = req.body;
+
+  const validPermission = (permission_type === 'view_only') ? 'view_only' : 'pay_now';
+  const validMonths = Array.isArray(allowed_months) ? JSON.stringify(allowed_months.filter(m => /^\d{4}-\d{2}$/.test(m))) : '[]';
+  const updatedBy = req.user?.username || req.user?.name || 'Admin';
+
+  try {
+    const userCheck = await pool.query('SELECT id, username, role FROM users WHERE id = $1', [userId]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO salary_payable_permissions (user_id, permission_type, allowed_months, updated_at, updated_by)
+      VALUES ($1, $2, $3::jsonb, NOW(), $4)
+      ON CONFLICT (user_id) DO UPDATE SET
+        permission_type = EXCLUDED.permission_type,
+        allowed_months = EXCLUDED.allowed_months,
+        updated_at = NOW(),
+        updated_by = EXCLUDED.updated_by
+      RETURNING *
+    `, [userId, validPermission, validMonths, updatedBy]);
+
+    res.json({
+      message: 'Salary payable user permissions updated successfully',
+      permission: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating salary permissions:', err);
+    res.status(500).json({ error: 'Failed to update salary permissions' });
+  }
+});
+
 module.exports = router;

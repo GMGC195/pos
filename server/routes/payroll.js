@@ -358,8 +358,13 @@ async function computeMonthlyPayrollReport(month, branchFilter = null) {
     const adjTypesRes = await pool.query('SELECT * FROM "payroll_adjustment_types"');
     const adjTypes = adjTypesRes.rows;
 
-    // Get employees
-    let employeesRes = await pool.query("SELECT * FROM \"employees\" WHERE status = 'Active' ORDER BY id ASC");
+    // Get employees: active for payroll, or existing saved records for this month
+    let employeesRes = await pool.query(`
+      SELECT * FROM "employees" 
+      WHERE COALESCE(is_active_payroll, (status = 'Active')) = TRUE 
+         OR id IN (SELECT employee_id FROM employee_payroll_records WHERE month = $1)
+      ORDER BY id ASC
+    `, [month]);
     if (branchFilter && branchFilter !== 'All') {
       employeesRes.rows = employeesRes.rows.filter(e => matchBranch(e.branch, branchFilter));
     }
@@ -1049,11 +1054,67 @@ async function computeMonthlyPayrollReport(month, branchFilter = null) {
   return payrollReport;
 }
 
+// Helper: Fetch Salary Pay Operator permissions & allowed months
+async function getSalaryPayOperatorPermissions(userId) {
+  try {
+    const res = await pool.query(
+      'SELECT permission_type, allowed_months FROM salary_payable_permissions WHERE user_id = $1',
+      [userId]
+    );
+    if (res.rows.length === 0) {
+      return { permission_type: 'pay_now', allowed_months: [] };
+    }
+    let allowed = res.rows[0].allowed_months;
+    if (typeof allowed === 'string') {
+      try { allowed = JSON.parse(allowed); } catch (e) { allowed = []; }
+    }
+    return {
+      permission_type: res.rows[0].permission_type || 'pay_now',
+      allowed_months: Array.isArray(allowed) ? allowed : []
+    };
+  } catch (err) {
+    console.error('Error fetching salary payable permissions:', err);
+    return { permission_type: 'pay_now', allowed_months: [] };
+  }
+}
+
+// GET /api/payroll/my-permissions - Retrieve current user's salary payable permissions & allowed months
+router.get('/my-permissions', authenticateToken, async (req, res) => {
+  try {
+    const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+    if (!isSalaryPayOp) {
+      return res.json({
+        is_salary_pay_operator: false,
+        permission_type: 'pay_now',
+        allowed_months: []
+      });
+    }
+
+    const perms = await getSalaryPayOperatorPermissions(req.user.id);
+    return res.json({
+      is_salary_pay_operator: true,
+      permission_type: perms.permission_type,
+      allowed_months: perms.allowed_months
+    });
+  } catch (err) {
+    console.error('Error in /my-permissions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET Calculate Monthly Payroll
 router.get('/calculate', authenticateToken, async (req, res) => {
   const { month } = req.query; // format 'YYYY-MM'
   if (!month) {
     return res.status(400).json({ error: 'Month (YYYY-MM) is required' });
+  }
+
+  const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+  if (isSalaryPayOp) {
+    const perms = await getSalaryPayOperatorPermissions(req.user.id);
+    if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+      return res.status(403).json({ error: `Permission denied: You are not authorized to view payroll for month ${month}.` });
+    }
   }
 
   try {
@@ -1072,8 +1133,13 @@ router.get('/salary-pay-summary', authenticateToken, async (req, res) => {
     let branch = req.query.branch || null;
     const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
     if (isSalaryPayOp) {
-      branch = req.user.branch || req.query.branch || null;
+      const perms = await getSalaryPayOperatorPermissions(req.user.id);
+      if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+        return res.status(403).json({ error: `Permission denied: You are not authorized to view payroll for month ${month}.` });
+      }
+      branch = req.query.branch || req.user.branch || null;
     }
+    if (branch === 'All' || branch === 'all') branch = null;
 
     const [year, monthNum] = month.split('-').map(Number);
     let prevYear = year;
@@ -1178,8 +1244,15 @@ router.get('/payment-history', authenticateToken, async (req, res) => {
     const month = req.query.month || null;
     let branch = req.query.branch || null;
     if (isSalaryPayOp) {
-      branch = req.user.branch || req.query.branch || null;
+      if (month) {
+        const perms = await getSalaryPayOperatorPermissions(req.user.id);
+        if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+          return res.status(403).json({ error: `Permission denied: You are not authorized to view payment history for month ${month}.` });
+        }
+      }
+      branch = req.query.branch || req.user.branch || null;
     }
+    if (branch === 'All' || branch === 'all') branch = null;
 
     const normalizeB = (b) => (b || '').toString().toLowerCase().replace(/^restaurant\s*/i, 'b').replace(/^branch\s*/i, 'b').replace(/\s+/g, '');
     const matchB = (b1, b2) => {
@@ -1966,6 +2039,17 @@ router.post('/payments', authenticateToken, async (req, res) => {
   const { employee_id, month, cash_amount, bank_amount, notes } = req.body;
   if (!employee_id || !month) {
     return res.status(400).json({ error: 'employee_id and month are required' });
+  }
+
+  const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+  if (isSalaryPayOp) {
+    const perms = await getSalaryPayOperatorPermissions(req.user.id);
+    if (perms.permission_type === 'view_only') {
+      return res.status(403).json({ error: 'Permission denied: Salary Pay Operator is set to View Only and cannot process payments.' });
+    }
+    if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+      return res.status(403).json({ error: `Permission denied: You are not authorized to process payments for month ${month}.` });
+    }
   }
 
   const cashVal = parseFloat(cash_amount || 0);

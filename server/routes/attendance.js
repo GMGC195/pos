@@ -427,7 +427,7 @@ router.get('/today', authenticateToken, async (req, res) => {
              ewh.is_split_shift, ewh.start_time as shift_start_time, ewh.end_time as shift_end_time, ewh.start_time_2, ewh.end_time_2
       FROM employees e
       LEFT JOIN employee_working_hours ewh ON UPPER(ewh.name) = UPPER(e.working_hours)
-      WHERE e.status = 'Active'
+      WHERE COALESCE(e.is_active_attendance, (e.status = 'Active')) = TRUE
     `;
     const queryParams = [];
     const userRole = req.user.role?.toLowerCase();
@@ -1178,7 +1178,7 @@ router.post('/holiday', authenticateToken, async (req, res) => {
   try {
     if (is_global) {
       // Get all active employees
-      const activeEmps = await pool.query("SELECT id FROM employees WHERE status = 'Active'");
+      const activeEmps = await pool.query("SELECT id FROM employees WHERE COALESCE(is_active_attendance, (status = 'Active')) = TRUE");
       for (const emp of activeEmps.rows) {
         // Delete existing check-ins on this date
         await pool.query('DELETE FROM employee_attendance WHERE employee_id = $1 AND date = $2', [emp.id, date]);
@@ -1191,7 +1191,7 @@ router.post('/holiday', authenticateToken, async (req, res) => {
       res.json({ message: 'Global holiday set successfully' });
     } else if (shift && (!employee_id || employee_id === 'ShiftGlobal')) {
       // Get all active employees of that shift
-      const activeEmps = await pool.query("SELECT id FROM employees WHERE status = 'Active' AND COALESCE(shift, 'R1') = $1", [shift]);
+      const activeEmps = await pool.query("SELECT id FROM employees WHERE COALESCE(is_active_attendance, (status = 'Active')) = TRUE AND COALESCE(shift, 'R1') = $1", [shift]);
       for (const emp of activeEmps.rows) {
         await pool.query('DELETE FROM employee_attendance WHERE employee_id = $1 AND date = $2', [emp.id, date]);
         await pool.query(
@@ -1387,7 +1387,7 @@ router.get('/analytics', authenticateToken, async (req, res) => {
     weeklyQueryStr += " GROUP BY ea.date ORDER BY ea.date ASC";
     const weeklyQuery = await pool.query(weeklyQueryStr, weeklyParams);
     
-    let empsQueryStr = "SELECT COUNT(*) FROM employees WHERE status = 'Active'";
+    let empsQueryStr = "SELECT COUNT(*) FROM employees WHERE COALESCE(is_active_attendance, (status = 'Active')) = TRUE";
     const empsParams = [];
     if (userRole === 'operator') {
       if (req.user.shift) {
@@ -1444,7 +1444,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.trim().toLowerCase();
     
     // Total employees count
-    let empsQueryStr = "SELECT id, shift, branch FROM employees WHERE status = 'Active'";
+    let empsQueryStr = "SELECT id, shift, branch FROM employees WHERE COALESCE(is_active_attendance, (status = 'Active')) = TRUE";
     const empsParams = [];
     if (userRole === 'operator') {
       if (req.user.shift) {

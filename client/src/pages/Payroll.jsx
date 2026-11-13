@@ -91,7 +91,13 @@ export default function Payroll() {
   const isDeveloper = userRoleLower === 'developer'
   const isAdmin = userRoleLower === 'admin' || isDeveloper
   const isSalaryPayOperator = userRoleLower === 'salary pay operator' || userRoleLower === 'salary operator' || userRoleLower.includes('salary')
-  const canProcessPayments = isAdmin || isSalaryPayOperator
+  const [salaryPermissions, setSalaryPermissions] = useState({
+    is_salary_pay_operator: false,
+    permission_type: 'pay_now',
+    allowed_months: []
+  })
+  const isViewOnlySalaryOperator = isSalaryPayOperator && salaryPermissions.permission_type === 'view_only'
+  const canProcessPayments = (isAdmin || isSalaryPayOperator) && !isViewOnlySalaryOperator
   const showActions = isAdmin && !isSalaryPayOperator
 
   const formatMonth = (date) => {
@@ -195,6 +201,29 @@ export default function Payroll() {
     setAttendanceEditMode(mode);
     setShowAttendanceEditModal(true);
   };
+
+  // Fetch salary payable user permissions & allowed months
+  useEffect(() => {
+    const fetchPerms = async () => {
+      try {
+        const res = await axios.get('/api/payroll/my-permissions')
+        if (res.data) {
+          setSalaryPermissions(res.data)
+          if (res.data.is_salary_pay_operator && res.data.allowed_months && res.data.allowed_months.length > 0) {
+            setSelectedMonth(prev => {
+              if (!res.data.allowed_months.includes(prev)) {
+                return res.data.allowed_months[0]
+              }
+              return prev
+            })
+          }
+        }
+      } catch (err) {
+        console.error('Error loading permissions:', err)
+      }
+    }
+    fetchPerms()
+  }, [])
 
   useEffect(() => {
     if (selectedMonth) {
@@ -748,10 +777,12 @@ export default function Payroll() {
       }
 
       await loadPayroll(true);
+      return true;
     } catch (error) {
       console.error(error);
       const errMsg = error?.response?.data?.error || error.message || 'Failed to record payment.';
       toast.error(errMsg);
+      return false;
     } finally {
       setPayingRowId(null);
     }
@@ -839,9 +870,12 @@ export default function Payroll() {
     });
   };
 
-  const handleConfirmMobilePay = async () => {
+  const handleConfirmMobilePay = async (shouldPrint = false) => {
     if (!mobilePayModal.emp) return;
-    const empId = mobilePayModal.emp.id;
+    const emp = mobilePayModal.emp;
+    const empId = emp.id;
+    if (payingRowId === empId) return; // Prevent duplicate payment submissions
+
     const cashVal = parseFloat(mobilePayModal.cash || 0);
     const bankVal = parseFloat(mobilePayModal.bank || 0);
 
@@ -850,8 +884,34 @@ export default function Payroll() {
       return;
     }
 
+    const net = parseFloat(emp.net_salary || 0);
+    const curPaid = Math.round((parseFloat(emp.cash_paid || 0) + parseFloat(emp.bank_paid || 0)) * 100) / 100;
+    const currentRem = Math.round((net - curPaid) * 100) / 100;
+    const totalEntered = Math.round((cashVal + bankVal) * 100) / 100;
+    const threshold = currentRem > 0 ? currentRem : 0;
+
+    if (totalEntered > threshold) {
+      const overpaymentAmt = Math.round((totalEntered - threshold) * 100) / 100;
+      setOverpaymentModal({
+        isOpen: true,
+        empId,
+        empName: emp.name,
+        salaryAmount: currentRem > 0 ? currentRem : net,
+        paymentAmount: totalEntered,
+        overpaymentAmount: overpaymentAmt,
+        cashVal,
+        bankVal,
+        shouldPrint
+      });
+      return;
+    }
+
     setMobilePayModal({ isOpen: false, emp: null, cash: '', bank: '' });
-    await executePayment(empId, cashVal, bankVal);
+    const success = await executePayment(empId, cashVal, bankVal);
+    if (success && shouldPrint) {
+      const updatedEmp = editableData[empId] || emp;
+      handlePrintSalarySlip(updatedEmp);
+    }
   };
 
   const handleDeletePayment = (paymentId, empId) => {
@@ -2666,23 +2726,27 @@ export default function Payroll() {
                           (item.employee_id && item.employee_id.toLowerCase().includes(searchQuery.toLowerCase()));
     if (!matchesSearch) return false;
 
-    if (selectedBranchFilter === 'ALL') return true;
+    if (selectedBranchFilter === 'ALL' || selectedBranchFilter === 'All') return true;
 
     const b = String(item.branch || '').toUpperCase().trim();
     const s = String(item.shift || item.working_hours || '').toUpperCase().trim();
 
+    const isMatch1 = selectedBranchFilter === 'B1' || selectedBranchFilter === 'R1';
+    const isMatch2 = selectedBranchFilter === 'B2' || selectedBranchFilter === 'R2';
+    const isMatch3 = selectedBranchFilter === 'B3' || selectedBranchFilter === 'R3';
+
     if (b) {
-      if (selectedBranchFilter === 'R1' && (b.includes('1') || b === 'R1')) return true;
-      if (selectedBranchFilter === 'R2' && (b.includes('2') || b === 'R2')) return true;
-      if (selectedBranchFilter === 'R3' && (b.includes('3') || b === 'R3')) return true;
+      if (isMatch1 && (b.includes('1') || b === 'R1' || b === 'B1' || b.includes('BRANCH 1') || b.includes('RESTAURANT 1'))) return true;
+      if (isMatch2 && (b.includes('2') || b === 'R2' || b === 'B2' || b.includes('BRANCH 2') || b.includes('RESTAURANT 2'))) return true;
+      if (isMatch3 && (b.includes('3') || b === 'R3' || b === 'B3' || b.includes('BRANCH 3') || b.includes('RESTAURANT 3'))) return true;
     }
     if (s) {
-      if (selectedBranchFilter === 'R1' && (s.includes('1') || s === 'R1')) return true;
-      if (selectedBranchFilter === 'R2' && (s.includes('2') || s === 'R2')) return true;
-      if (selectedBranchFilter === 'R3' && (s.includes('3') || s === 'R3')) return true;
+      if (isMatch1 && (s.includes('1') || s === 'R1' || s === 'B1')) return true;
+      if (isMatch2 && (s.includes('2') || s === 'R2' || s === 'B2')) return true;
+      if (isMatch3 && (s.includes('3') || s === 'R3' || s === 'B3')) return true;
     }
 
-    return selectedBranchFilter === 'R1';
+    return isMatch1;
   });
 
   // Calculate Summary Totals
@@ -3331,83 +3395,118 @@ export default function Payroll() {
                   }}>
                     {/* Left: Inputs & Primary Action Buttons */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      {/* Cash Paid */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: 800, color: '#0369a1', whiteSpace: 'nowrap' }}>Cash Paid:</label>
-                        <input 
-                          type="text"
-                          inputMode="decimal"
-                          disabled={isRowLocked}
-                          value={payInputs[targetEmpData.id]?.cash !== undefined 
-                            ? payInputs[targetEmpData.id].cash 
-                            : (targetEmpData.payments && targetEmpData.payments.length > 0 ? '' : (targetEmpData.cash_paid || ''))}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setPayInputs(prev => ({
-                              ...prev,
-                              [targetEmpData.id]: {
-                                ...(prev[targetEmpData.id] || {}),
-                                cash: val
-                              }
-                            }));
-                          }}
-                          placeholder={rem > 0 && (!targetEmpData.payments || targetEmpData.payments.length === 0) ? rem.toFixed(2) : "0.00"}
-                          style={{ width: '80px', padding: '5px 8px', borderRadius: '6px', border: '1.5px solid #cbd5e1', fontSize: '12px', fontWeight: 800, color: '#0369a1', background: isRowLocked ? '#f1f5f9' : '#fff' }}
-                        />
-                      </div>
+                      {/* Payment Controls */}
+                      {isSalaryPayOperator ? (
+                        /* Salary Payable User: Clean Pay Now button opening popup modal */
+                        !isRowLocked && canProcessPayments && (
+                          <button 
+                            type="button"
+                            onClick={() => handleOpenMobilePay(targetEmpData)}
+                            disabled={payingRowId === targetEmpData.id}
+                            style={{ 
+                              padding: '8px 18px', 
+                              borderRadius: '7px', 
+                              fontSize: '13px', 
+                              fontWeight: 800, 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'center', 
+                              gap: '6px', 
+                              background: '#16a34a', 
+                              color: '#fff', 
+                              border: 'none', 
+                              cursor: 'pointer',
+                              boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                              whiteSpace: 'nowrap'
+                            }}
+                            title="Open payment modal to enter Cash/Bank and Pay"
+                          >
+                            <CheckCircle size={15} />
+                            Pay Now
+                          </button>
+                        )
+                      ) : (
+                        /* Standard / Admin View: Enlarged Desktop Fields */
+                        <>
+                          {/* Cash Paid */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: 800, color: '#0369a1', whiteSpace: 'nowrap' }}>Cash Paid:</label>
+                            <input 
+                              type="text"
+                              inputMode="decimal"
+                              disabled={isRowLocked}
+                              value={payInputs[targetEmpData.id]?.cash !== undefined 
+                                ? payInputs[targetEmpData.id].cash 
+                                : (targetEmpData.payments && targetEmpData.payments.length > 0 ? '' : (targetEmpData.cash_paid || ''))}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setPayInputs(prev => ({
+                                  ...prev,
+                                  [targetEmpData.id]: {
+                                    ...(prev[targetEmpData.id] || {}),
+                                    cash: val
+                                  }
+                                }));
+                              }}
+                              placeholder={rem > 0 && (!targetEmpData.payments || targetEmpData.payments.length === 0) ? rem.toFixed(2) : "0.00"}
+                              style={{ width: '120px', height: '38px', padding: '6px 10px', borderRadius: '7px', border: '1.5px solid #cbd5e1', fontSize: '13px', fontWeight: 800, color: '#0369a1', background: isRowLocked ? '#f1f5f9' : '#fff' }}
+                            />
+                          </div>
 
-                      {/* Bank Paid */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: 800, color: '#4338ca', whiteSpace: 'nowrap' }}>Bank Paid:</label>
-                        <input 
-                          type="text"
-                          inputMode="decimal"
-                          disabled={isRowLocked}
-                          value={payInputs[targetEmpData.id]?.bank !== undefined 
-                            ? payInputs[targetEmpData.id].bank 
-                            : (targetEmpData.payments && targetEmpData.payments.length > 0 ? '' : (targetEmpData.bank_paid || ''))}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setPayInputs(prev => ({
-                              ...prev,
-                              [targetEmpData.id]: {
-                                ...(prev[targetEmpData.id] || {}),
-                                bank: val
-                              }
-                            }));
-                          }}
-                          placeholder="0.00"
-                          style={{ width: '80px', padding: '5px 8px', borderRadius: '6px', border: '1.5px solid #cbd5e1', fontSize: '12px', fontWeight: 800, color: '#4338ca', background: isRowLocked ? '#f1f5f9' : '#fff' }}
-                        />
-                      </div>
+                          {/* Bank Paid */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: 800, color: '#4338ca', whiteSpace: 'nowrap' }}>Bank Paid:</label>
+                            <input 
+                              type="text"
+                              inputMode="decimal"
+                              disabled={isRowLocked}
+                              value={payInputs[targetEmpData.id]?.bank !== undefined 
+                                ? payInputs[targetEmpData.id].bank 
+                                : (targetEmpData.payments && targetEmpData.payments.length > 0 ? '' : (targetEmpData.bank_paid || ''))}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setPayInputs(prev => ({
+                                  ...prev,
+                                  [targetEmpData.id]: {
+                                    ...(prev[targetEmpData.id] || {}),
+                                    bank: val
+                                  }
+                                }));
+                              }}
+                              placeholder="0.00"
+                              style={{ width: '120px', height: '38px', padding: '6px 10px', borderRadius: '7px', border: '1.5px solid #cbd5e1', fontSize: '13px', fontWeight: 800, color: '#4338ca', background: isRowLocked ? '#f1f5f9' : '#fff' }}
+                            />
+                          </div>
 
-                      {/* Pay Now Button */}
-                      {!isRowLocked && canProcessPayments && (
-                        <button 
-                          type="button"
-                          onClick={() => handlePayNow(targetEmpData.id)}
-                          disabled={payingRowId === targetEmpData.id}
-                          style={{ 
-                            padding: '6px 14px', 
-                            borderRadius: '6px', 
-                            fontSize: '12px', 
-                            fontWeight: 800, 
-                            display: 'inline-flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center', 
-                            gap: '5px', 
-                            background: '#16a34a', 
-                            color: '#fff', 
-                            border: 'none', 
-                            cursor: 'pointer',
-                            boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
-                            whiteSpace: 'nowrap'
-                          }}
-                          title="Record payment and update Paid & Remaining"
-                        >
-                          {payingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle size={13} />}
-                          Pay Now
-                        </button>
+                          {/* Pay Now Button */}
+                          {!isRowLocked && canProcessPayments && (
+                            <button 
+                              type="button"
+                              onClick={() => handlePayNow(targetEmpData.id)}
+                              disabled={payingRowId === targetEmpData.id}
+                              style={{ 
+                                padding: '8px 16px', 
+                                borderRadius: '7px', 
+                                fontSize: '12px', 
+                                fontWeight: 800, 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center', 
+                                gap: '5px', 
+                                background: '#16a34a', 
+                                color: '#fff', 
+                                border: 'none', 
+                                cursor: 'pointer',
+                                boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                                whiteSpace: 'nowrap'
+                              }}
+                              title="Record payment and update Paid & Remaining"
+                            >
+                              {payingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle size={13} />}
+                              Pay Now
+                            </button>
+                          )}
+                        </>
                       )}
 
                       {/* Print Salary Slip (80mm Thermal Receipt) */}
@@ -4443,19 +4542,21 @@ export default function Payroll() {
           </button>
         </div>
 
-        {/* 3. Branch / Restaurant Filter: ALL, R1, R2, R3 */}
+        {/* 3. Branch Filter (All, B1, B2, B3 for Salary Payable User, ALL, R1, R2, R3 for Others) */}
         <div style={{ display: 'inline-flex', background: 'var(--surface-2)', padding: '2px', borderRadius: '6px', border: '1px solid var(--surface-2)', gap: '1px', flexShrink: 0 }}>
-          {(isSalaryPayOperator ? [selectedBranchFilter] : ['ALL', 'R1', 'R2', 'R3']).map(opt => {
-            const isActive = selectedBranchFilter === opt;
+          {(isSalaryPayOperator ? ['All', 'B1', 'B2', 'B3'] : ['ALL', 'R1', 'R2', 'R3']).map(opt => {
+            const isActive = isSalaryPayOperator
+              ? ((opt === 'All' && (selectedBranchFilter === 'ALL' || selectedBranchFilter === 'All')) || selectedBranchFilter === opt)
+              : (selectedBranchFilter === opt);
             return (
               <button
                 key={opt}
                 type="button"
-                onClick={() => { if (!isSalaryPayOperator) setSelectedBranchFilter(opt); }}
+                onClick={() => setSelectedBranchFilter(opt === 'All' ? 'ALL' : opt)}
                 style={{
-                  padding: '4px 7px',
+                  padding: '4px 8px',
                   borderRadius: '5px',
-                  fontSize: '10px',
+                  fontSize: '11px',
                   fontWeight: 800,
                   border: 'none',
                   cursor: 'pointer',
@@ -4473,15 +4574,29 @@ export default function Payroll() {
           })}
         </div>
 
-        {/* 4. Month Selector */}
+        {/* 4. Month Selector (Restricted to allowed_months for Salary Payable User if configured) */}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'var(--background)', border: '1px solid var(--surface-2)', padding: '3px 6px', borderRadius: '6px', flexShrink: 0 }}>
           <CalendarDays size={13} style={{ color: 'var(--primary, #d97706)' }} />
-          <input 
-            type="month" 
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            style={{ border: 'none', background: 'transparent', fontSize: '11px', color: 'var(--text-primary)', outline: 'none', fontWeight: 700, cursor: 'pointer', padding: 0 }}
-          />
+          {isSalaryPayOperator && salaryPermissions.allowed_months && salaryPermissions.allowed_months.length > 0 ? (
+            <select
+              value={selectedMonth}
+              onChange={e => setSelectedMonth(e.target.value)}
+              style={{ border: 'none', background: 'transparent', fontSize: '11px', color: 'var(--text-primary)', outline: 'none', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+            >
+              {salaryPermissions.allowed_months.map(m => {
+                const [yr, mn] = m.split('-').map(Number);
+                const label = new Date(yr, mn - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                return <option key={m} value={m}>{label} ({m})</option>;
+              })}
+            </select>
+          ) : (
+            <input 
+              type="month" 
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              style={{ border: 'none', background: 'transparent', fontSize: '11px', color: 'var(--text-primary)', outline: 'none', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+            />
+          )}
         </div>
 
         {/* Action Buttons & Refresh Button */}
@@ -4773,6 +4888,31 @@ export default function Payroll() {
                     {/* Action buttons */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        {isSalaryPayOperator && canProcessPayments && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenMobilePay(item)}
+                            disabled={item.status === 'Paid' && !unlockedRowIds.has(item.id)}
+                            style={{
+                              background: '#16a34a',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '5px 12px',
+                              borderRadius: '6px',
+                              cursor: (item.status === 'Paid' && !unlockedRowIds.has(item.id)) ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)',
+                              opacity: (item.status === 'Paid' && !unlockedRowIds.has(item.id)) ? 0.6 : 1
+                            }}
+                            title="Pay Salary"
+                          >
+                            <CheckCircle size={12} /> Pay Now
+                          </button>
+                        )}
                         <button 
                           onClick={() => {
                             handleSelectDetailEmp(item);
@@ -6187,15 +6327,12 @@ export default function Payroll() {
       )}
 
       {/* Carry Forward Remaining Salary Confirmation Modal */}
-      {/* Overpayment Confirmation Modal */}
+      {/* Enhanced Overpayment Confirmation Modal (English & Urdu) */}
       {overpaymentModal.isOpen && (
         <div style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(15, 23, 42, 0.65)',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.7)',
           backdropFilter: 'blur(4px)',
           display: 'flex',
           alignItems: 'center',
@@ -6206,9 +6343,12 @@ export default function Payroll() {
           <div style={{
             background: '#ffffff',
             borderRadius: '16px',
-            maxWidth: '480px',
+            maxWidth: '560px',
             width: '100%',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3)',
             overflow: 'hidden',
             border: '1.5px solid #fecaca'
           }}>
@@ -6219,129 +6359,166 @@ export default function Payroll() {
               borderBottom: '1.5px solid #fecaca',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between'
+              justifyContent: 'space-between',
+              flexShrink: 0
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{
-                  width: '36px',
-                  height: '36px',
+                  width: '40px',
+                  height: '40px',
                   borderRadius: '10px',
                   background: '#ef4444',
                   color: '#fff',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)'
+                  boxShadow: '0 2px 6px rgba(239, 68, 68, 0.35)',
+                  flexShrink: 0
                 }}>
-                  <AlertCircle size={20} />
+                  <AlertCircle size={22} />
                 </div>
                 <div>
-                  <div style={{ fontSize: '15px', fontWeight: 800, color: '#991b1b' }}>
+                  <div style={{ fontSize: '16px', fontWeight: 800, color: '#991b1b', lineHeight: 1.2 }}>
                     Overpayment Confirmation
                   </div>
-                  <div style={{ fontSize: '11px', color: '#b91c1c' }}>
-                    Payment exceeds salary or outstanding balance
+                  <div style={{ fontSize: '12px', color: '#b91c1c', marginTop: '2px' }}>
+                    اضافی ادائیگی کی تصدیق • Payment exceeds payable salary
                   </div>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setOverpaymentModal({ isOpen: false, empId: null })}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#991b1b', padding: '4px' }}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#991b1b', padding: '6px' }}
               >
-                <X size={18} />
+                <X size={20} />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <p style={{ fontSize: '13px', color: '#334155', lineHeight: 1.5, margin: 0 }}>
-                The salary amount is <strong>{CURRENCY} {overpaymentModal.salaryAmount?.toFixed(2)}</strong>, but you are about to pay <strong>{CURRENCY} {overpaymentModal.paymentAmount?.toFixed(2)}</strong>. This will create an overpayment of <strong style={{ color: '#dc2626' }}>{CURRENCY} {overpaymentModal.overpaymentAmount?.toFixed(2)}</strong>.
-              </p>
+            {/* Modal Body with vertical scrolling */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', overflowY: 'auto' }}>
+              {/* Employee Pill */}
+              <div style={{ background: '#f8fafc', padding: '8px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                <span style={{ color: '#475569', fontWeight: 600 }}>Employee / ملازم:</span>
+                <span style={{ fontWeight: 800, color: '#0f172a' }}>{overpaymentModal.empName}</span>
+              </div>
 
+              {/* English Summary Card */}
               <div style={{
                 background: '#fef2f2',
                 border: '1.5px solid #fecaca',
-                borderRadius: '10px',
-                padding: '12px 14px',
+                borderRadius: '12px',
+                padding: '14px 16px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '6px',
-                fontSize: '12px'
+                gap: '8px',
+                fontSize: '13px'
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Original / Outstanding Salary:</span>
-                  <span style={{ fontWeight: 700, color: '#1e293b' }}>{CURRENCY} {overpaymentModal.salaryAmount?.toFixed(2)}</span>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  English Breakdown
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Entered Payment:</span>
-                  <span style={{ fontWeight: 700, color: '#059669' }}>{CURRENCY} {overpaymentModal.paymentAmount?.toFixed(2)}</span>
+                  <span style={{ color: '#64748b' }}>Actual Payable Salary:</span>
+                  <span style={{ fontWeight: 800, color: '#1e293b' }}>{CURRENCY} {overpaymentModal.salaryAmount?.toFixed(2)}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #fee2e2', paddingTop: '6px', fontWeight: 800 }}>
-                  <span style={{ color: '#b91c1c' }}>Overpayment Amount:</span>
-                  <span style={{ color: '#dc2626' }}>+{CURRENCY} {overpaymentModal.overpaymentAmount?.toFixed(2)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Entered Payment Amount:</span>
+                  <span style={{ fontWeight: 800, color: '#059669' }}>{CURRENCY} {overpaymentModal.paymentAmount?.toFixed(2)}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f1d1d' }}>
-                  <span>Resulting Remaining Balance:</span>
-                  <span style={{ fontWeight: 800 }}>-{CURRENCY} {overpaymentModal.overpaymentAmount?.toFixed(2)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #fca5a5', paddingTop: '8px' }}>
+                  <span style={{ color: '#b91c1c', fontWeight: 800 }}>Overpayment Amount:</span>
+                  <span style={{ color: '#dc2626', fontWeight: 900, fontSize: '14px' }}>+{CURRENCY} {overpaymentModal.overpaymentAmount?.toFixed(2)}</span>
                 </div>
               </div>
 
-              <p style={{ fontSize: '12px', color: '#64748b', margin: 0, fontStyle: 'italic' }}>
-                Do you want to continue and record this overpayment?
-              </p>
+              {/* Urdu Explanation Card */}
+              <div dir="rtl" style={{
+                background: '#fffbeb',
+                border: '1.5px solid #fde68a',
+                borderRadius: '12px',
+                padding: '14px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                fontSize: '13px',
+                textAlign: 'right'
+              }}>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: '#b45309', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>اردو وضاحت (Urdu Details)</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#475569', fontWeight: 700 }}>اصل واجب الادا تنخواہ:</span>
+                  <span style={{ fontWeight: 800, color: '#1e293b', direction: 'ltr' }}>{overpaymentModal.salaryAmount?.toFixed(2)} {CURRENCY}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#475569', fontWeight: 700 }}>ادا کی جانے والی رقم:</span>
+                  <span style={{ fontWeight: 800, color: '#059669', direction: 'ltr' }}>{overpaymentModal.paymentAmount?.toFixed(2)} {CURRENCY}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #fcd34d', paddingTop: '8px' }}>
+                  <span style={{ color: '#b45309', fontWeight: 800 }}>اضافی ادائیگی (Overpayment):</span>
+                  <span style={{ color: '#dc2626', fontWeight: 900, fontSize: '14px', direction: 'ltr' }}>+{overpaymentModal.overpaymentAmount?.toFixed(2)} {CURRENCY}</span>
+                </div>
+                <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#78350f', lineHeight: 1.5, background: '#fef3c7', padding: '8px 10px', borderRadius: '6px' }}>
+                  یہ ادائیگی ملازم کی اصل واجب الادا تنخواہ سے زائد ہے۔ تصدیق کرنے پر اضافی رقم ({overpaymentModal.overpaymentAmount?.toFixed(2)} {CURRENCY}) بطور اوور پیمنٹ رجسٹر ہو جائے گی۔
+                </p>
+              </div>
             </div>
 
             {/* Modal Footer */}
             <div style={{
               background: '#f8fafc',
-              padding: '12px 20px',
+              padding: '14px 20px',
               borderTop: '1px solid #e2e8f0',
               display: 'flex',
               justifyContent: 'flex-end',
-              gap: '10px'
+              gap: '10px',
+              flexShrink: 0
             }}>
               <button
                 type="button"
                 onClick={() => setOverpaymentModal({ isOpen: false, empId: null })}
                 style={{
-                  padding: '8px 16px',
+                  padding: '9px 18px',
                   borderRadius: '8px',
                   border: '1.5px solid #cbd5e1',
                   background: '#fff',
                   color: '#475569',
                   fontWeight: 700,
-                  fontSize: '12px',
+                  fontSize: '13px',
                   cursor: 'pointer'
                 }}
               >
-                Cancel
+                Cancel / منسوخ
               </button>
               <button
                 type="button"
                 disabled={payingRowId === overpaymentModal.empId}
                 onClick={async () => {
-                  const { empId, cashVal, bankVal } = overpaymentModal;
+                  const { empId, cashVal, bankVal, shouldPrint } = overpaymentModal;
                   setOverpaymentModal({ isOpen: false, empId: null });
-                  await executePayment(empId, cashVal, bankVal);
+                  const success = await executePayment(empId, cashVal, bankVal);
+                  if (success && shouldPrint) {
+                    const updatedEmp = editableData[empId];
+                    if (updatedEmp) handlePrintSalarySlip(updatedEmp);
+                  }
                 }}
                 style={{
-                  padding: '8px 18px',
+                  padding: '9px 20px',
                   borderRadius: '8px',
                   border: '1.5px solid #dc2626',
                   background: '#dc2626',
                   color: '#fff',
                   fontWeight: 800,
-                  fontSize: '12px',
+                  fontSize: '13px',
                   cursor: payingRowId === overpaymentModal.empId ? 'not-allowed' : 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px',
-                  boxShadow: '0 2px 4px rgba(220, 38, 38, 0.25)'
+                  boxShadow: '0 2px 4px rgba(220, 38, 38, 0.3)'
                 }}
               >
-                {payingRowId === overpaymentModal.empId ? <RefreshCw size={13} className="spin" /> : <CheckCircle size={13} />}
-                <span>Confirm Payment</span>
+                {payingRowId === overpaymentModal.empId ? <RefreshCw size={14} className="spin" /> : <CheckCircle size={15} />}
+                Confirm Overpayment & Pay
               </button>
             </div>
           </div>
@@ -6362,27 +6539,27 @@ export default function Payroll() {
         }}>
           <div style={{
             background: '#fff',
-            borderRadius: '14px',
+            borderRadius: '16px',
             width: '100%',
-            maxWidth: '380px',
-            boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+            maxWidth: '440px',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
             overflow: 'hidden',
-            border: '1px solid #bbf7d0'
+            border: '1.5px solid #86efac'
           }}>
             {/* Header */}
             <div style={{
               background: '#f0fdf4',
-              padding: '12px 16px',
+              padding: '14px 18px',
               borderBottom: '1px solid #bbf7d0',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center'
             }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#14532d' }}>
-                  Pay Salary
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#14532d' }}>
+                  Salary Payment • ادائیگی
                 </h3>
-                <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>
+                <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600 }}>
                   {mobilePayModal.emp.name} ({mobilePayModal.emp.employee_id})
                 </span>
               </div>
@@ -6391,12 +6568,12 @@ export default function Payroll() {
                 onClick={() => setMobilePayModal({ isOpen: false, emp: null, cash: '', bank: '' })}
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#166534', padding: '4px' }}
               >
-                <X size={18} />
+                <X size={20} />
               </button>
             </div>
 
             {/* Body */}
-            <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {(() => {
                 const emp = mobilePayModal.emp;
                 const cashPaid = parseFloat(emp.cash_paid || 0);
@@ -6404,29 +6581,40 @@ export default function Payroll() {
                 const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
                 const net = parseFloat(emp.net_salary || 0);
                 const rem = Math.round((net - totalPaid) * 100) / 100;
+                const totalEntering = Math.round(((parseFloat(mobilePayModal.cash) || 0) + (parseFloat(mobilePayModal.bank) || 0)) * 100) / 100;
+                const newRem = Math.round((rem - totalEntering) * 100) / 100;
 
                 return (
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: '6px',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: '8px',
                     background: '#f8fafc',
-                    padding: '8px',
-                    borderRadius: '8px',
-                    border: '1px solid #e2e8f0',
-                    textAlign: 'center'
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid #e2e8f0'
                   }}>
                     <div>
-                      <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Net Pay</div>
-                      <div style={{ fontSize: '12px', fontWeight: 800, color: '#059669' }}>{CURRENCY} {net.toFixed(2)}</div>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Salary Amount</div>
+                      <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>{CURRENCY} {net.toFixed(2)}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '9px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Paid So Far</div>
-                      <div style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>{CURRENCY} {totalPaid.toFixed(2)}</div>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Paid Amount</div>
+                      <div style={{ fontSize: '13px', fontWeight: 800, color: '#0369a1' }}>{CURRENCY} {totalPaid.toFixed(2)}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '9px', fontWeight: 700, color: '#c2410c', textTransform: 'uppercase' }}>Remaining</div>
-                      <div style={{ fontSize: '12px', fontWeight: 800, color: rem > 0 ? '#ea580c' : '#16a34a' }}>{CURRENCY} {rem.toFixed(2)}</div>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Remaining Amount</div>
+                      <div style={{ fontSize: '13px', fontWeight: 800, color: rem > 0 ? '#ea580c' : '#16a34a' }}>{CURRENCY} {rem.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Current Payment</div>
+                      <div style={{ fontSize: '13px', fontWeight: 800, color: '#16a34a' }}>{CURRENCY} {totalEntering.toFixed(2)}</div>
+                    </div>
+                    <div style={{ gridColumn: 'span 2', borderTop: '1px solid #e2e8f0', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Remaining Balance After Payment:</span>
+                      <span style={{ fontSize: '13px', fontWeight: 900, color: newRem > 0 ? '#ea580c' : newRem < 0 ? '#dc2626' : '#16a34a' }}>
+                        {CURRENCY} {newRem.toFixed(2)} {newRem < 0 ? '(Overpayment)' : ''}
+                      </span>
                     </div>
                   </div>
                 );
@@ -6434,8 +6622,8 @@ export default function Payroll() {
 
               {/* Cash Pay Input */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
-                  Cash Pay ({CURRENCY})
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#0369a1', marginBottom: '5px' }}>
+                  Cash Payment ({CURRENCY})
                 </label>
                 <input
                   type="number"
@@ -6445,11 +6633,12 @@ export default function Payroll() {
                   placeholder="0.00"
                   style={{
                     width: '100%',
-                    padding: '8px 12px',
+                    height: '46px',
+                    padding: '10px 14px',
                     borderRadius: '8px',
-                    border: '1.5px solid #cbd5e1',
-                    fontSize: '14px',
-                    fontWeight: 700,
+                    border: '1.5px solid #93c5fd',
+                    fontSize: '15px',
+                    fontWeight: 800,
                     color: '#0369a1',
                     background: '#f0f9ff',
                     outline: 'none',
@@ -6460,8 +6649,8 @@ export default function Payroll() {
 
               {/* Card / Bank Pay Input */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
-                  Card / Bank Pay ({CURRENCY})
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#4338ca', marginBottom: '5px' }}>
+                  Bank Payment ({CURRENCY})
                 </label>
                 <input
                   type="number"
@@ -6471,11 +6660,12 @@ export default function Payroll() {
                   placeholder="0.00"
                   style={{
                     width: '100%',
-                    padding: '8px 12px',
+                    height: '46px',
+                    padding: '10px 14px',
                     borderRadius: '8px',
-                    border: '1.5px solid #cbd5e1',
-                    fontSize: '14px',
-                    fontWeight: 700,
+                    border: '1.5px solid #c7d2fe',
+                    fontSize: '15px',
+                    fontWeight: 800,
                     color: '#4338ca',
                     background: '#eef2ff',
                     outline: 'none',
@@ -6506,21 +6696,23 @@ export default function Payroll() {
               })()}
             </div>
 
-            {/* Actions */}
+            {/* Actions: Pay Now & Pay and Print */}
             <div style={{
               background: '#f8fafc',
               padding: '12px 16px',
               borderTop: '1px solid #e2e8f0',
               display: 'flex',
               justifyContent: 'flex-end',
+              alignItems: 'center',
+              flexWrap: 'wrap',
               gap: '8px'
             }}>
               <button
                 type="button"
                 onClick={() => setMobilePayModal({ isOpen: false, emp: null, cash: '', bank: '' })}
                 style={{
-                  padding: '7px 14px',
-                  borderRadius: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '7px',
                   border: '1px solid #cbd5e1',
                   background: '#fff',
                   color: '#475569',
@@ -6533,11 +6725,34 @@ export default function Payroll() {
               </button>
               <button
                 type="button"
-                onClick={handleConfirmMobilePay}
+                onClick={() => handleConfirmMobilePay(true)}
                 disabled={payingRowId === mobilePayModal.emp.id}
                 style={{
-                  padding: '7px 16px',
-                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  borderRadius: '7px',
+                  border: '1px solid #0284c7',
+                  background: '#0284c7',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '12px',
+                  cursor: payingRowId === mobilePayModal.emp.id ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 1px 3px rgba(2, 132, 199, 0.3)'
+                }}
+                title="Save payment and print salary slip"
+              >
+                <Printer size={13} />
+                Pay and Print
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmMobilePay(false)}
+                disabled={payingRowId === mobilePayModal.emp.id}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '7px',
                   border: 'none',
                   background: '#16a34a',
                   color: '#fff',
@@ -6546,8 +6761,10 @@ export default function Payroll() {
                   cursor: payingRowId === mobilePayModal.emp.id ? 'not-allowed' : 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '6px',
+                  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.3)'
                 }}
+                title="Save payment without printing"
               >
                 {payingRowId === mobilePayModal.emp.id ? <RefreshCw size={13} className="spin" /> : <CheckCircle size={14} />}
                 Pay Now

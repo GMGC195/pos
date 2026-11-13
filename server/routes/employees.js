@@ -80,7 +80,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const userRole = req.user.role?.toLowerCase();
     if (userRole === 'salary pay operator') {
       const result = await pool.query(
-        "SELECT id, name, employee_id, role, branch, department, status, salary FROM employees ORDER BY id ASC"
+        "SELECT id, name, employee_id, role, branch, department, status, salary, is_active_attendance, is_active_payroll FROM employees ORDER BY id ASC"
       );
       return res.json(result.rows);
     }
@@ -145,13 +145,17 @@ router.post('/', authenticateToken, async (req, res) => {
       );
     }
 
+    const actAtt = (typeof req.body.is_active_attendance === 'boolean') ? req.body.is_active_attendance : (status !== 'Inactive');
+    const actPay = (typeof req.body.is_active_payroll === 'boolean') ? req.body.is_active_payroll : (status !== 'Inactive');
+    const finalStatus = (!actAtt && !actPay) ? 'Inactive' : (status || 'Active');
+
     const result = await pool.query(
-      'INSERT INTO employees (name, role, salary, status, working_hours, shift_hours, department, position, employee_id, branch, shift, strict_attendance, custom_deduction_active, custom_deduction_rules, iqama_id, iqama_expiry, baladiya_card_expiry, insurance_expiry, phones, address, company_name, reference_info) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *',
+      'INSERT INTO employees (name, role, salary, status, working_hours, shift_hours, department, position, employee_id, branch, shift, strict_attendance, custom_deduction_active, custom_deduction_rules, iqama_id, iqama_expiry, baladiya_card_expiry, insurance_expiry, phones, address, company_name, reference_info, is_active_attendance, is_active_payroll) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) RETURNING *',
       [
         name, 
         role || 'Operator', 
         salary || 0, 
-        status || 'Active', 
+        finalStatus, 
         name, 
         shift_hours || 12.0,
         department || null,
@@ -169,7 +173,9 @@ router.post('/', authenticateToken, async (req, res) => {
         phones || null,
         address || null,
         company_name || null,
-        reference_info || null
+        reference_info || null,
+        actAtt,
+        actPay
       ]
     );
     const newEmp = result.rows[0];
@@ -208,13 +214,17 @@ router.put('/:id', authenticateToken, async (req, res) => {
       );
     }
 
+    const actAtt = (typeof req.body.is_active_attendance === 'boolean') ? req.body.is_active_attendance : (status !== 'Inactive');
+    const actPay = (typeof req.body.is_active_payroll === 'boolean') ? req.body.is_active_payroll : (status !== 'Inactive');
+    const finalStatus = (!actAtt && !actPay) ? 'Inactive' : (status || 'Active');
+
     const result = await pool.query(
-      'UPDATE employees SET name=$1, role=$2, salary=$3, status=$4, working_hours=$5, shift_hours=$6, department=$7, position=$8, employee_id=$9, branch=$10, shift=$11, strict_attendance=$12, custom_deduction_active=$13, custom_deduction_rules=$14, iqama_id=$15, iqama_expiry=$16, baladiya_card_expiry=$17, insurance_expiry=$18, phones=$19, address=$20, company_name=$21, reference_info=$22 WHERE id=$23 RETURNING *',
+      'UPDATE employees SET name=$1, role=$2, salary=$3, status=$4, working_hours=$5, shift_hours=$6, department=$7, position=$8, employee_id=$9, branch=$10, shift=$11, strict_attendance=$12, custom_deduction_active=$13, custom_deduction_rules=$14, iqama_id=$15, iqama_expiry=$16, baladiya_card_expiry=$17, insurance_expiry=$18, phones=$19, address=$20, company_name=$21, reference_info=$22, is_active_attendance=$23, is_active_payroll=$24 WHERE id=$25 RETURNING *',
       [
         name, 
         role || 'Operator', 
         salary || 0, 
-        status || 'Active', 
+        finalStatus, 
         name, 
         shift_hours || 12.0, 
         department || null,
@@ -233,6 +243,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         address || null,
         company_name || null,
         reference_info || null,
+        actAtt,
+        actPay,
         req.params.id
       ]
     );
@@ -243,6 +255,41 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     res.json(result.rows[0]);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH update employee independent status (attendance & payroll)
+router.patch('/:id/status', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { is_active_attendance, is_active_payroll } = req.body;
+
+  if (typeof is_active_attendance !== 'boolean' || typeof is_active_payroll !== 'boolean') {
+    return res.status(400).json({ error: 'is_active_attendance and is_active_payroll must be booleans' });
+  }
+
+  const overallStatus = (!is_active_attendance && !is_active_payroll) ? 'Inactive' : 'Active';
+
+  try {
+    const result = await pool.query(
+      `UPDATE employees SET 
+         is_active_attendance = $1, 
+         is_active_payroll = $2, 
+         status = $3 
+       WHERE id = $4 RETURNING *`,
+      [is_active_attendance, is_active_payroll, overallStatus, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    res.json({
+      message: 'Employee status updated successfully',
+      employee: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating employee status:', err);
     res.status(500).json({ error: err.message });
   }
 });

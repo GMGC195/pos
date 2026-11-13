@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { 
+  Banknote,
   User, 
   Users, 
   Lock, 
@@ -42,6 +43,14 @@ export default function Settings() {
   const [lowStockBehavior, setLowStockBehavior] = useState('block')
   const [stockViewMode, setStockViewMode] = useState(() => localStorage.getItem('pos_stock_view_mode') || 'cards')
   const [reportEmails, setReportEmails] = useState(['mr.caffee25@gmail.com'])
+  // Salary Payable User Permissions State
+  const [salaryUsers, setSalaryUsers] = useState([])
+  const [availableSalaryMonths, setAvailableSalaryMonths] = useState([])
+  const [selectedSalaryUserId, setSelectedSalaryUserId] = useState(null)
+  const [editingSalaryPerm, setEditingSalaryPerm] = useState({ permission_type: 'pay_now', allowed_months: [] })
+  const [loadingSalaryPerms, setLoadingSalaryPerms] = useState(false)
+  const [savingSalaryPerms, setSavingSalaryPerms] = useState(false)
+  const [customMonthInput, setCustomMonthInput] = useState('')
 
   const stockOptions = [
     {
@@ -176,7 +185,67 @@ export default function Settings() {
     if (activeTab === 'hardware' || ((activeTab === 'pos_settings' || activeTab === 'report_emails') && isAdminRole)) {
       fetchSettings()
     }
+    if (activeTab === 'salary_permissions' && isAdminRole) {
+      fetchSalaryPermissions()
+    }
   }, [activeTab, user?.role])
+
+
+  const fetchSalaryPermissions = async () => {
+    setLoadingSalaryPerms(true)
+    try {
+      const res = await api.get('/api/settings/salary-permissions')
+      if (res.data) {
+        const users = res.data.users || []
+        setSalaryUsers(users)
+        setAvailableSalaryMonths(res.data.available_months || [])
+        if (users.length > 0) {
+          const target = selectedSalaryUserId ? (users.find(u => u.id === selectedSalaryUserId) || users[0]) : users[0]
+          setSelectedSalaryUserId(target.id)
+          let months = target.allowed_months || []
+          if (typeof months === 'string') {
+            try { months = JSON.parse(months) } catch(e) { months = [] }
+          }
+          setEditingSalaryPerm({
+            permission_type: target.permission_type || 'pay_now',
+            allowed_months: Array.isArray(months) ? months : []
+          })
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load salary permissions:', err)
+      toast.error('Failed to load salary permissions')
+    } finally {
+      setLoadingSalaryPerms(false)
+    }
+  }
+
+  const handleSelectSalaryUser = (u) => {
+    setSelectedSalaryUserId(u.id)
+    let months = u.allowed_months || []
+    if (typeof months === 'string') {
+      try { months = JSON.parse(months) } catch(e) { months = [] }
+    }
+    setEditingSalaryPerm({
+      permission_type: u.permission_type || 'pay_now',
+      allowed_months: Array.isArray(months) ? months : []
+    })
+  }
+
+  const handleSaveSalaryPermissions = async () => {
+    if (!selectedSalaryUserId) return
+    setSavingSalaryPerms(true)
+    try {
+      await api.put(`/api/settings/salary-permissions/${selectedSalaryUserId}`, editingSalaryPerm)
+      toast.success('Salary payable user permissions saved successfully')
+      fetchSalaryPermissions()
+    } catch (err) {
+      console.error('Failed to save salary permissions:', err)
+      toast.error(err.response?.data?.error || 'Failed to save salary permissions')
+    } finally {
+      setSavingSalaryPerms(false)
+    }
+  }
 
   const fetchSettings = async () => {
     try {
@@ -524,6 +593,14 @@ export default function Settings() {
               onClick={() => setActiveTab('report_emails')}
             >
               <Mail size={18} /> Report Emails
+            </button>
+          )}
+          {isAdmin && (
+            <button 
+              className={`settings-nav-item ${activeTab === 'salary_permissions' ? 'active' : ''}`}
+              onClick={() => setActiveTab('salary_permissions')}
+            >
+              <Banknote size={18} /> Salary Permissions
             </button>
           )}
         </aside>
@@ -1794,6 +1871,313 @@ export default function Settings() {
               )}
             </div>
           )}
+
+          {activeTab === 'salary_permissions' && isAdmin && (
+            <div className="fade-in">
+              <div className="settings-card">
+                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 4px 0' }}>
+                      <Banknote size={22} style={{ color: 'var(--primary, #d97706)' }} />
+                      Salary Payable User Permissions
+                    </h2>
+                    <p style={{ margin: 0 }}>Configure access levels (Only View vs Pay Now) and authorized salary months for Salary Pay Operator users.</p>
+                  </div>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary btn-sm"
+                    onClick={fetchSalaryPermissions}
+                    disabled={loadingSalaryPerms}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  >
+                    <RefreshCw size={14} className={loadingSalaryPerms ? 'spin' : ''} />
+                    Refresh
+                  </button>
+                </div>
+
+                {loadingSalaryPerms ? (
+                  <div style={{ padding: '30px', textAlign: 'center', color: '#64748b' }}>
+                    <RefreshCw size={24} className="spin" style={{ margin: '0 auto 10px auto' }} />
+                    <p>Loading salary payable users & permissions...</p>
+                  </div>
+                ) : salaryUsers.length === 0 ? (
+                  <div style={{ padding: '30px', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', margin: '16px 0' }}>
+                    <ShieldAlert size={32} style={{ color: '#d97706', marginBottom: '8px' }} />
+                    <h4 style={{ margin: '0 0 6px 0', color: '#1e293b' }}>No Salary Pay Operator Users Found</h4>
+                    <p style={{ margin: 0, fontSize: '13px' }}>Create a user with the role "Salary Pay Operator" in User Management to configure permissions.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '24px', marginTop: '16px' }}>
+                    {/* User Selection Sidebar */}
+                    <div style={{ borderRight: '1px solid var(--border, #e2e8f0)', paddingRight: '16px' }}>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
+                        Salary Payable Users ({salaryUsers.length})
+                      </label>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {salaryUsers.map(u => {
+                          const isSelected = selectedSalaryUserId === u.id;
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => handleSelectSalaryUser(u)}
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'flex-start',
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                border: isSelected ? '2px solid var(--primary, #d97706)' : '1px solid var(--border, #cbd5e1)',
+                                background: isSelected ? '#fffbeb' : '#fff',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                                <span style={{ fontWeight: 800, fontSize: '13px', color: '#1e293b' }}>
+                                  {u.username}
+                                </span>
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: 800,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  background: (u.permission_type === 'pay_now' ? '#dcfce7' : '#e0f2fe'),
+                                  color: (u.permission_type === 'pay_now' ? '#15803d' : '#0369a1')
+                                }}>
+                                  {u.permission_type === 'pay_now' ? 'Pay Now' : 'Only View'}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                                {u.name ? `${u.name} • ` : ''}Branch: {u.branch || 'All'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Permissions Configuration Form */}
+                    <div>
+                      {(() => {
+                        const curUser = salaryUsers.find(u => u.id === selectedSalaryUserId);
+                        if (!curUser) return null;
+
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            {/* Selected User Header */}
+                            <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Configuring Permissions For:</span>
+                                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
+                                  {curUser.username} {curUser.name ? `(${curUser.name})` : ''}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#475569' }}>
+                                  Email: {curUser.email || 'None'} • Branch: {curUser.branch || 'All Branches'}
+                                </div>
+                              </div>
+                              {curUser.updated_at && (
+                                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                  Last updated by {curUser.updated_by || 'Admin'}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Section B: Access Permission */}
+                            <div>
+                              <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
+                                1. Access Permission
+                              </label>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                {/* Only View Card */}
+                                <div 
+                                  onClick={() => setEditingSalaryPerm(prev => ({ ...prev, permission_type: 'view_only' }))}
+                                  style={{
+                                    padding: '14px',
+                                    borderRadius: '10px',
+                                    border: editingSalaryPerm.permission_type === 'view_only' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                    background: editingSalaryPerm.permission_type === 'view_only' ? '#f0f9ff' : '#fff',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                    <input 
+                                      type="radio" 
+                                      name="salary_permission_type" 
+                                      checked={editingSalaryPerm.permission_type === 'view_only'}
+                                      onChange={() => {}} 
+                                      style={{ accentColor: '#0284c7' }}
+                                    />
+                                    <strong style={{ fontSize: '14px', color: '#0369a1' }}>Only View</strong>
+                                  </div>
+                                  <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+                                    The user can view permitted employees' salary records, paid amounts, and remaining balances. All <strong>Pay Now</strong> buttons are hidden, and payment submissions are strictly blocked.
+                                  </p>
+                                </div>
+
+                                {/* Pay Now Card */}
+                                <div 
+                                  onClick={() => setEditingSalaryPerm(prev => ({ ...prev, permission_type: 'pay_now' }))}
+                                  style={{
+                                    padding: '14px',
+                                    borderRadius: '10px',
+                                    border: editingSalaryPerm.permission_type === 'pay_now' ? '2px solid #16a34a' : '1px solid #cbd5e1',
+                                    background: editingSalaryPerm.permission_type === 'pay_now' ? '#f0fdf4' : '#fff',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                    <input 
+                                      type="radio" 
+                                      name="salary_permission_type" 
+                                      checked={editingSalaryPerm.permission_type === 'pay_now'}
+                                      onChange={() => {}} 
+                                      style={{ accentColor: '#16a34a' }}
+                                    />
+                                    <strong style={{ fontSize: '14px', color: '#15803d' }}>Pay Now</strong>
+                                  </div>
+                                  <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+                                    The user can view permitted salary records and process salary payments using the <strong>Pay Now Popup Modal</strong>. Both <strong>Pay Now</strong> and <strong>Pay and Print</strong> actions are enabled.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Section C: Month-Wise Salary Access */}
+                            <div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <div>
+                                  <label style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
+                                    2. Month-Wise Salary Access
+                                  </label>
+                                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                                    Select which salary months {curUser.username} is allowed to access. Unauthorized months will be completely hidden and blocked.
+                                  </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => {
+                                      setEditingSalaryPerm(prev => ({ ...prev, allowed_months: [...availableSalaryMonths] }));
+                                    }}
+                                    style={{ fontSize: '11px', padding: '3px 8px' }}
+                                  >
+                                    Select All
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => {
+                                      setEditingSalaryPerm(prev => ({ ...prev, allowed_months: [] }));
+                                    }}
+                                    style={{ fontSize: '11px', padding: '3px 8px' }}
+                                  >
+                                    Clear All
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Month Selection Chips */}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                {availableSalaryMonths.map(m => {
+                                  const isAllowed = editingSalaryPerm.allowed_months.includes(m);
+                                  const [yr, mn] = m.split('-').map(Number);
+                                  const monthLabel = new Date(yr, mn - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+                                  return (
+                                    <button
+                                      key={m}
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingSalaryPerm(prev => {
+                                          const next = isAllowed 
+                                            ? prev.allowed_months.filter(x => x !== m)
+                                            : [...prev.allowed_months, m];
+                                          return { ...prev, allowed_months: next };
+                                        });
+                                      }}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                        padding: '6px 12px',
+                                        borderRadius: '20px',
+                                        fontSize: '12px',
+                                        fontWeight: 700,
+                                        border: isAllowed ? '1.5px solid #16a34a' : '1px solid #cbd5e1',
+                                        background: isAllowed ? '#dcfce7' : '#fff',
+                                        color: isAllowed ? '#15803d' : '#475569',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease'
+                                      }}
+                                    >
+                                      {isAllowed ? <Check size={14} style={{ color: '#16a34a' }} /> : <span style={{ width: 14 }} />}
+                                      <span>{monthLabel} ({m})</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Custom Month Addition */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+                                <label style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Add specific month:</label>
+                                <input
+                                  type="month"
+                                  value={customMonthInput}
+                                  onChange={e => setCustomMonthInput(e.target.value)}
+                                  style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => {
+                                    if (customMonthInput && /^\d{4}-\d{2}$/.test(customMonthInput)) {
+                                      if (!availableSalaryMonths.includes(customMonthInput)) {
+                                        setAvailableSalaryMonths(prev => [...prev, customMonthInput]);
+                                      }
+                                      if (!editingSalaryPerm.allowed_months.includes(customMonthInput)) {
+                                        setEditingSalaryPerm(prev => ({
+                                          ...prev,
+                                          allowed_months: [...prev.allowed_months, customMonthInput]
+                                        }));
+                                      }
+                                      setCustomMonthInput('');
+                                    }
+                                  }}
+                                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                                >
+                                  Add Month
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Save Button */}
+                            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={handleSaveSalaryPermissions}
+                                disabled={savingSalaryPerms}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 24px', fontWeight: 800, fontSize: '13px' }}
+                              >
+                                {savingSalaryPerms ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+                                Save Permissions for {curUser.username}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
         </main>
       </div>
 

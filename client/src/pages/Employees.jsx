@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from '../api'
-import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings, Filter, FileText } from 'lucide-react'
+import { Users, UserPlus, Search, Edit2, Trash2, X, ShieldAlert, FileSpreadsheet, Settings, Filter, FileText, Power, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ImportEmployeesModal from '../components/ImportEmployeesModal'
 import { useAuth } from '../contexts/AuthContext'
@@ -119,6 +119,13 @@ export default function Employees() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [editingEmployee, setEditingEmployee] = useState(null)
   const [docsEmployee, setDocsEmployee] = useState(null)
+  const [statusModal, setStatusModal] = useState({
+    isOpen: false,
+    emp: null,
+    is_active_attendance: true,
+    is_active_payroll: true
+  })
+  const [savingStatus, setSavingStatus] = useState(false)
   
   // Form state
   const [formData, setFormData] = useState({
@@ -126,6 +133,8 @@ export default function Employees() {
     role: 'Operator',
     salary: 0,
     status: 'Active',
+    is_active_attendance: true,
+    is_active_payroll: true,
     working_hours: 'R1',
     shift: 'Day',
     branch: 'Restaurant 1',
@@ -363,6 +372,38 @@ export default function Employees() {
       newRules[index] = { ...newRules[index], [field]: value }
       return { ...prev, custom_deduction_rules: newRules }
     })
+  }
+
+
+  const handleOpenStatusModal = (emp) => {
+    setStatusModal({
+      isOpen: true,
+      emp,
+      is_active_attendance: emp.is_active_attendance !== false,
+      is_active_payroll: emp.is_active_payroll !== false
+    })
+  }
+
+  const handleSaveStatus = async () => {
+    if (!statusModal.emp) return
+    setSavingStatus(true)
+    try {
+      const res = await axios.patch(`/api/employees/${statusModal.emp.id}/status`, {
+        is_active_attendance: statusModal.is_active_attendance,
+        is_active_payroll: statusModal.is_active_payroll
+      })
+      const updatedEmp = res.data?.employee
+      if (updatedEmp) {
+        setEmployees(prev => prev.map(e => e.id === updatedEmp.id ? { ...e, ...updatedEmp } : e))
+      }
+      toast.success(res.data?.message || 'Employee status updated successfully')
+      setStatusModal({ isOpen: false, emp: null, is_active_attendance: true, is_active_payroll: true })
+    } catch (err) {
+      console.error('Failed to update status:', err)
+      toast.error(err.response?.data?.error || 'Failed to update employee status')
+    } finally {
+      setSavingStatus(false)
+    }
   }
 
   const handleDelete = async (id, name) => {
@@ -722,13 +763,61 @@ export default function Employees() {
                       </span>
                     </td>
                     <td>
-                      <span className={`badge ${emp.status === 'Active' ? 'badge-success' : 'badge-danger'}`} style={{
-                        background: emp.status === 'Active' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: emp.status === 'Active' ? 'var(--green)' : 'var(--red)',
-                        padding: '4px 10px', borderRadius: 6, fontSize: 12
-                      }}>
-                        {emp.status}
-                      </span>
+                      {(() => {
+                        const att = emp.is_active_attendance !== false;
+                        const pay = emp.is_active_payroll !== false;
+                        let badgeText = 'All Active';
+                        let badgeBg = '#dcfce7';
+                        let badgeColor = '#15803d';
+                        let badgeBorder = '1px solid #86efac';
+
+                        if (att && pay) {
+                          badgeText = 'All Active';
+                          badgeBg = '#dcfce7';
+                          badgeColor = '#15803d';
+                          badgeBorder = '1px solid #86efac';
+                        } else if (att && !pay) {
+                          badgeText = 'Attendance Only';
+                          badgeBg = '#e0f2fe';
+                          badgeColor = '#0369a1';
+                          badgeBorder = '1px solid #7dd3fc';
+                        } else if (!att && pay) {
+                          badgeText = 'Payroll Only';
+                          badgeBg = '#fef3c7';
+                          badgeColor = '#b45309';
+                          badgeBorder = '1px solid #fde68a';
+                        } else {
+                          badgeText = 'Inactive';
+                          badgeBg = '#fee2e2';
+                          badgeColor = '#dc2626';
+                          badgeBorder = '1px solid #fca5a5';
+                        }
+
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenStatusModal(emp)}
+                            title="Click to manage Attendance and Payroll status independently"
+                            style={{
+                              background: badgeBg,
+                              color: badgeColor,
+                              border: badgeBorder,
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: badgeColor }} />
+                            {badgeText}
+                          </button>
+                        );
+                      })()}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 8 }}>
@@ -736,6 +825,9 @@ export default function Employees() {
                           <>
                             <button className="btn btn-secondary btn-sm" onClick={() => setDocsEmployee(emp)} title="Documents" style={{ padding: '6px 8px' }}>
                               <FileText size={14} />
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => handleOpenStatusModal(emp)} title="Manage Attendance & Payroll Status" style={{ padding: '6px 8px', color: '#0284c7' }}>
+                              <Power size={14} />
                             </button>
                             <button className="btn btn-secondary btn-sm" onClick={() => handleOpenEdit(emp)} style={{ padding: '6px 8px' }}>
                               <Edit2 size={14} />
@@ -1349,6 +1441,249 @@ export default function Employees() {
       />
 
       {/* Employee Documents Modal */}
+      
+      {/* Independent Attendance & Payroll Status Confirmation Modal */}
+      {statusModal.isOpen && statusModal.emp && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            width: '100%',
+            maxWidth: '520px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1px solid #e2e8f0',
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{
+              background: '#f8fafc',
+              padding: '16px 20px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: '0 0 2px 0', fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
+                  Manage Employee Status
+                </h3>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  {statusModal.emp.name} ({statusModal.emp.employee_id || 'ID: ' + statusModal.emp.id}) • {statusModal.emp.branch || 'Branch'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStatusModal({ isOpen: false, emp: null, is_active_attendance: true, is_active_payroll: true })}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '70vh', overflowY: 'auto' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: '#334155', lineHeight: 1.5 }}>
+                Configure independent active/inactive controls for <strong>Attendance</strong> and <strong>Payroll</strong>. Deactivating does not delete any historical records.
+              </p>
+
+              {/* Control 1: Attendance Status */}
+              <div style={{
+                background: statusModal.is_active_attendance ? '#f0fdf4' : '#f8fafc',
+                border: statusModal.is_active_attendance ? '1.5px solid #86efac' : '1.5px solid #cbd5e1',
+                borderRadius: '12px',
+                padding: '14px',
+                transition: 'all 0.15s ease'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Users size={18} style={{ color: statusModal.is_active_attendance ? '#15803d' : '#64748b' }} />
+                    <span style={{ fontWeight: 800, fontSize: '14px', color: statusModal.is_active_attendance ? '#14532d' : '#334155' }}>
+                      Attendance Status
+                    </span>
+                  </div>
+                  <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: '8px', padding: '2px', gap: '2px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setStatusModal(prev => ({ ...prev, is_active_attendance: true }))}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: statusModal.is_active_attendance ? '#16a34a' : 'transparent',
+                        color: statusModal.is_active_attendance ? '#fff' : '#64748b'
+                      }}
+                    >
+                      Active
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusModal(prev => ({ ...prev, is_active_attendance: false }))}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: !statusModal.is_active_attendance ? '#dc2626' : 'transparent',
+                        color: !statusModal.is_active_attendance ? '#fff' : '#64748b'
+                      }}
+                    >
+                      Inactive
+                    </button>
+                  </div>
+                </div>
+                <p style={{ margin: 0, fontSize: '11.5px', color: '#64748b', lineHeight: 1.4 }}>
+                  {statusModal.is_active_attendance 
+                    ? '✓ Visible in daily attendance check-in, shift assignment, and holiday marking.'
+                    : '✗ Hidden from daily attendance check-in and active shift rosters. Historical logs preserved.'}
+                </p>
+              </div>
+
+              {/* Control 2: Payroll Status */}
+              <div style={{
+                background: statusModal.is_active_payroll ? '#f0fdf4' : '#f8fafc',
+                border: statusModal.is_active_payroll ? '1.5px solid #86efac' : '1.5px solid #cbd5e1',
+                borderRadius: '12px',
+                padding: '14px',
+                transition: 'all 0.15s ease'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FileText size={18} style={{ color: statusModal.is_active_payroll ? '#15803d' : '#64748b' }} />
+                    <span style={{ fontWeight: 800, fontSize: '14px', color: statusModal.is_active_payroll ? '#14532d' : '#334155' }}>
+                      Payroll Status
+                    </span>
+                  </div>
+                  <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: '8px', padding: '2px', gap: '2px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setStatusModal(prev => ({ ...prev, is_active_payroll: true }))}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: statusModal.is_active_payroll ? '#16a34a' : 'transparent',
+                        color: statusModal.is_active_payroll ? '#fff' : '#64748b'
+                      }}
+                    >
+                      Active
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusModal(prev => ({ ...prev, is_active_payroll: false }))}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: !statusModal.is_active_payroll ? '#dc2626' : 'transparent',
+                        color: !statusModal.is_active_payroll ? '#fff' : '#64748b'
+                      }}
+                    >
+                      Inactive
+                    </button>
+                  </div>
+                </div>
+                <p style={{ margin: 0, fontSize: '11.5px', color: '#64748b', lineHeight: 1.4 }}>
+                  {statusModal.is_active_payroll
+                    ? '✓ Included in monthly payroll computations and salary disbursements.'
+                    : '✗ Hidden from new monthly payroll sheets. Historical payroll statements preserved.'}
+                </p>
+              </div>
+
+              {/* Behavior Matrix Summary */}
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                fontSize: '12px'
+              }}>
+                <span style={{ fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>Resulting Behavior:</span>
+                {statusModal.is_active_attendance && statusModal.is_active_payroll && (
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>• Fully Active in both Attendance and Payroll modules.</span>
+                )}
+                {statusModal.is_active_attendance && !statusModal.is_active_payroll && (
+                  <span style={{ color: '#0284c7', fontWeight: 700 }}>• Attendance Only: Appears in daily attendance; excluded from new payroll runs.</span>
+                )}
+                {!statusModal.is_active_attendance && statusModal.is_active_payroll && (
+                  <span style={{ color: '#d97706', fontWeight: 700 }}>• Payroll Only: Hidden from daily attendance; remains visible in payroll reports.</span>
+                )}
+                {!statusModal.is_active_attendance && !statusModal.is_active_payroll && (
+                  <span style={{ color: '#dc2626', fontWeight: 700 }}>• Fully Inactive: Hidden from new entries in both Attendance and Payroll.</span>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              background: '#f8fafc',
+              padding: '14px 20px',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setStatusModal({ isOpen: false, emp: null, is_active_attendance: true, is_active_payroll: true })}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#475569',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveStatus}
+                disabled={savingStatus}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#16a34a',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '12px',
+                  cursor: savingStatus ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                {savingStatus ? 'Saving...' : 'Save Status'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {docsEmployee && (
         <EmployeeDocumentsModal 
           employee={docsEmployee} 
