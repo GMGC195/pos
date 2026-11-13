@@ -4,22 +4,31 @@ import EditShiftClosingModal from './EditShiftClosingModal';
 import { Edit3 } from 'lucide-react';
 
 /**
+ * Format numeric amount without SAR currency symbol
+ * Examples: 1000 -> 1,000 | 487.7 -> 487.70 | 0 -> 0
+ */
+const formatAmountOnly = (val) => {
+  if (val === null || val === undefined || isNaN(val)) return '0';
+  const n = Number(val);
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: n % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2
+  });
+};
+
+/**
  * BaseSaleSurplusChart
- * Replicates the "Base sale and surplus per shift" stacked bar visualization
- * with dynamic badge threshold indicators (under 25%, 25–50%, over 50%).
- * Features an enriched hover tooltip displaying:
- * - Shift Name / Shift Number
- * - Cashier Name
- * - Shift Start Time & Closing Time
- * - System Sale (ERP transaction calculated)
- * - Actual Sale (Cashier closing entered)
- * - Difference Amount & Difference Percentage
- * Plus controlled Edit capability for Admin & Developer roles.
+ * Stacked bar chart showing Branch 1, Branch 2, Branch 3 shift closings.
+ * Blue bar = System base amount
+ * Orange bar = Exceeded surplus
+ * Floating badge = Actual (Act) & System (Sys) amounts (NO SAR)
  */
 export default function BaseSaleSurplusChart({ 
   restaurants = [], 
   currency = 'SAR', 
   loading = false,
+  embedded = false,
+  hideHeader = false,
   onShiftUpdated
 }) {
   const { user } = useAuth();
@@ -88,23 +97,33 @@ export default function BaseSaleSurplusChart({
     const rate = base > 0 ? (surplus / base) * 100 : 0;
     const rateStr = `${rate.toFixed(1)}%`;
 
-    let badgeColor = '#16a34a'; // under 25% (green)
-    let badgeCategory = 'under 25%';
-    if (rate >= 25 && rate <= 50) {
-      badgeColor = '#b45309'; // 25–50% (brown/ochre)
-      badgeCategory = '25–50%';
-    } else if (rate > 50) {
-      badgeColor = '#dc2626'; // over 50% (red)
-      badgeCategory = 'over 50%';
-    }
-
     // Difference calculations
     const diffAmount = act - sys;
-    const diffPct = sys > 0 ? ((act - sys) / sys) * 100 : 0;
+
+    // Badge color: Green when balanced, Amber/Red when discrepancy
+    let badgeColor = '#16a34a'; // balanced
+    let badgeCategory = 'Balanced';
+    if (diffAmount < -0.01) {
+      badgeColor = '#dc2626'; // Shortage
+      badgeCategory = 'Shortage';
+    } else if (diffAmount > 0.01) {
+      if (rate > 50) {
+        badgeColor = '#dc2626'; // High Surplus
+        badgeCategory = 'High Surplus';
+      } else if (rate > 25) {
+        badgeColor = '#b45309'; // Moderate Surplus
+        badgeCategory = 'Surplus';
+      } else {
+        badgeColor = '#16a34a';
+        badgeCategory = 'Balanced';
+      }
+    }
 
     return {
       sys,
       act,
+      actStr: formatAmountOnly(act),
+      sysStr: formatAmountOnly(sys),
       base,
       surplus,
       total,
@@ -113,7 +132,7 @@ export default function BaseSaleSurplusChart({
       badgeColor,
       badgeCategory,
       diffAmount,
-      diffPct,
+      diffStr: formatAmountOnly(Math.abs(diffAmount)),
       cashier: shift?.cashier_name || fallbackCashier,
       shiftId: shift?.id || shift?.shift_id || null,
       shiftNumber: shift?.shift_number || (shift?.id ? `Shift #${shift.id}` : null),
@@ -125,12 +144,12 @@ export default function BaseSaleSurplusChart({
 
   // Dimensions & Coordinates
   const width = 860;
-  const height = 370;
+  const height = 305;
   const paddingLeft = 58;
   const paddingRight = 30;
-  const paddingTop = 44;
-  const yBase = 270;
-  const plotHeight = yBase - paddingTop; // 226
+  const paddingTop = 36;
+  const yBase = 226;
+  const plotHeight = yBase - paddingTop; // 190
 
   // Collect all shift totals to determine max scale
   const allTotals = [];
@@ -176,20 +195,40 @@ export default function BaseSaleSurplusChart({
   };
 
   return (
-    <div className="base-sale-surplus-card" style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', position: 'relative' }}>
+    <div 
+      className="base-sale-surplus-card" 
+      style={embedded ? { 
+        width: '100%', 
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        flex: 1,
+        minHeight: 0
+      } : { 
+        background: '#fff', 
+        borderRadius: 14, 
+        border: '1px solid #e2e8f0', 
+        padding: '20px 24px', 
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)', 
+        position: 'relative' 
+      }}
+    >
       
       {/* Header */}
-      <div style={{ marginBottom: 18 }}>
-        <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0', letterSpacing: '-0.01em' }}>
-          Base sale and surplus per shift
-        </h3>
-        <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-          Bar = system base (blue) + exceeded surplus (orange). Badge = surplus ÷ base.
-        </p>
-      </div>
+      {!hideHeader && (
+        <div style={{ marginBottom: 18 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0', letterSpacing: '-0.01em' }}>
+            Base sale and surplus per shift
+          </h3>
+          <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+            Bar = system base (blue) + exceeded surplus (orange). Badge = Actual (Act) &amp; System (Sys) amounts.
+          </p>
+        </div>
+      )}
 
       {/* SVG Chart with horizontal scrolling wrapper for mobile safety */}
-      <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ minWidth: 640 }}>
           <svg 
             viewBox={`0 0 ${width} ${height}`} 
@@ -268,10 +307,15 @@ export default function BaseSaleSurplusChart({
                     const baseY = yBase - baseH;
                     const surplusY = baseY - surplusH;
 
-                    const badgeW = m.rateStr.length > 5 ? 56 : 48;
-                    const badgeH = 19;
+                    const actStr = m.actStr;
+                    const sysStr = m.sysStr;
+
+                    const maxStrLen = Math.max(actStr.length, sysStr.length);
+                    const badgeW = Math.max(64, maxStrLen * 5.6 + 28);
+                    const badgeH = 26;
                     const badgeX = s.x + (barWidth / 2) - (badgeW / 2);
-                    const badgeY = (surplusH > 0 ? surplusY : baseY) - 17;
+                    const rawBadgeY = (surplusH > 0 ? surplusY : baseY) - 28;
+                    const badgeY = Math.max(6, rawBadgeY);
 
                     const shiftPayload = {
                       id: s.id,
@@ -283,10 +327,12 @@ export default function BaseSaleSurplusChart({
                       closingTime: m.closingTime,
                       sys: m.sys,
                       act: m.act,
+                      actStr: m.actStr,
+                      sysStr: m.sysStr,
                       base: m.base,
                       surplus: m.surplus,
                       diffAmount: m.diffAmount,
-                      diffPct: m.diffPct,
+                      diffStr: m.diffStr,
                       rateStr: m.rateStr,
                       badgeCategory: m.badgeCategory,
                       badgeColor: m.badgeColor,
@@ -310,15 +356,15 @@ export default function BaseSaleSurplusChart({
                         {isHovered && (
                           <rect
                             x={s.x - 6}
-                            y={paddingTop - 12}
+                            y={paddingTop - 10}
                             width={barWidth + 12}
-                            height={yBase - paddingTop + 20}
+                            height={yBase - paddingTop + 18}
                             fill="#f8fafc"
                             rx="8"
                           />
                         )}
 
-                        {/* Blue Base Bar */}
+                        {/* Blue Base Bar (System amount) */}
                         <rect
                           x={s.x}
                           y={baseY}
@@ -342,35 +388,49 @@ export default function BaseSaleSurplusChart({
                           />
                         )}
 
-                        {/* Floating Percentage Badge Pill */}
+                        {/* Floating Actual & System Amount Badge (NO SAR, ONLY AMOUNTS) */}
                         <g>
                           <rect
                             x={badgeX}
                             y={badgeY}
                             width={badgeW}
                             height={badgeH}
-                            rx={badgeH / 2}
+                            rx="5"
                             fill={m.badgeColor}
+                            filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.15))"
                           />
+                          {/* Actual Amount */}
                           <text
                             x={badgeX + badgeW / 2}
-                            y={badgeY + 13.5}
+                            y={badgeY + 11}
                             textAnchor="middle"
-                            fontSize="11"
+                            fontSize="9.5"
                             fontWeight="800"
                             fill="#ffffff"
                             fontFamily="system-ui, -apple-system, sans-serif"
                           >
-                            {m.rateStr}
+                            Act: {actStr}
+                          </text>
+                          {/* System Amount */}
+                          <text
+                            x={badgeX + badgeW / 2}
+                            y={badgeY + 22}
+                            textAnchor="middle"
+                            fontSize="9.5"
+                            fontWeight="700"
+                            fill="#bfdbfe"
+                            fontFamily="system-ui, -apple-system, sans-serif"
+                          >
+                            Sys: {sysStr}
                           </text>
                         </g>
 
                         {/* Shift Label Under Axis */}
                         <text
                           x={s.x + barWidth / 2}
-                          y={yBase + 18}
+                          y={yBase + 17}
                           textAnchor="middle"
-                          fontSize="13"
+                          fontSize="12.5"
                           fontWeight="700"
                           fill="#1e293b"
                           fontFamily="system-ui, -apple-system, sans-serif"
@@ -381,9 +441,9 @@ export default function BaseSaleSurplusChart({
                         {/* Cashier Name Under Shift Label */}
                         <text
                           x={s.x + barWidth / 2}
-                          y={yBase + 34}
+                          y={yBase + 31}
                           textAnchor="middle"
-                          fontSize="11.5"
+                          fontSize="11"
                           fontWeight="500"
                           fill="#64748b"
                           fontFamily="system-ui, -apple-system, sans-serif"
@@ -397,17 +457,17 @@ export default function BaseSaleSurplusChart({
                   {/* Branch Horizontal Divider Line & Label */}
                   <line
                     x1={nightX - 12}
-                    y1={yBase + 48}
+                    y1={yBase + 42}
                     x2={dayX + barWidth + 12}
-                    y2={yBase + 48}
+                    y2={yBase + 42}
                     stroke="#e2e8f0"
                     strokeWidth="1.5"
                   />
                   <text
                     x={branchCenterX}
-                    y={yBase + 66}
+                    y={yBase + 58}
                     textAnchor="middle"
-                    fontSize="13"
+                    fontSize="12.5"
                     fontWeight="600"
                     fill="#475569"
                     fontFamily="system-ui, -apple-system, sans-serif"
@@ -468,37 +528,31 @@ export default function BaseSaleSurplusChart({
             <span style={{ color: '#e2e8f0' }}>{hoveredShift.closingTime}</span>
           </div>
 
-          {/* System Sale & Actual Sale */}
+          {/* System Sale & Actual Sale (Only Amount, no SAR) */}
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4, paddingTop: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-              <span style={{ color: '#93c5fd' }}>System Sale:</span>
-              <strong style={{ color: '#bfdbfe' }}>{currency} {hoveredShift.sys.toFixed(2)}</strong>
+              <span style={{ color: '#93c5fd' }}>System Amount:</span>
+              <strong style={{ color: '#bfdbfe' }}>{hoveredShift.sysStr}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginTop: 2 }}>
-              <span style={{ color: '#fdba74' }}>Actual Sale:</span>
-              <strong style={{ color: '#fed7aa' }}>{currency} {hoveredShift.act.toFixed(2)}</strong>
+              <span style={{ color: '#fdba74' }}>Actual Amount:</span>
+              <strong style={{ color: '#fed7aa' }}>{hoveredShift.actStr}</strong>
             </div>
           </div>
 
-          {/* Difference Amount & Difference Percentage */}
+          {/* Difference Amount */}
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginTop: 2 }}>
             <span style={{ color: '#cbd5e1' }}>Difference:</span>
             <strong style={{ color: hoveredShift.diffAmount >= 0 ? '#4ade80' : '#f87171' }}>
-              {hoveredShift.diffAmount >= 0 ? '+' : ''}{currency} {hoveredShift.diffAmount.toFixed(2)}
-            </strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-            <span style={{ color: '#cbd5e1' }}>Difference %:</span>
-            <strong style={{ color: hoveredShift.diffPct >= 0 ? '#4ade80' : '#f87171' }}>
-              {hoveredShift.diffPct >= 0 ? '+' : ''}{hoveredShift.diffPct.toFixed(1)}%
+              {hoveredShift.diffAmount >= 0 ? '+' : '-'}{hoveredShift.diffStr}
             </strong>
           </div>
 
-          {/* Surplus Rate Badge info */}
+          {/* Status info */}
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: 4, marginTop: 2 }}>
-            <span style={{ color: '#94a3b8' }}>Surplus Rate:</span>
+            <span style={{ color: '#94a3b8' }}>Status:</span>
             <span style={{ color: hoveredShift.badgeColor, fontWeight: 800 }}>
-              {hoveredShift.rateStr} ({hoveredShift.badgeCategory})
+              {hoveredShift.badgeCategory}
             </span>
           </div>
 
@@ -533,14 +587,15 @@ export default function BaseSaleSurplusChart({
         </div>
       )}
 
-      {/* Legend at Bottom matching exact reference image */}
+      {/* Legend at Bottom (No percentages) */}
       <div style={{ 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'flex-start', 
         gap: 20, 
         flexWrap: 'wrap', 
-        marginTop: 14, 
+        marginTop: 'auto', 
+        paddingTop: 16,
         fontSize: 12, 
         fontWeight: 500, 
         color: '#334155' 
@@ -557,25 +612,25 @@ export default function BaseSaleSurplusChart({
           <span>Exceeded surplus</span>
         </div>
 
-        {/* under 25% (green pill) */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span style={{ background: '#16a34a', color: '#ffffff', padding: '2px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-            under 25%
+        {/* Matched (green pill) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ background: '#16a34a', color: '#ffffff', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+            Act = Sys
           </span>
+          <span style={{ color: '#64748b', fontSize: 11.5 }}>Matched</span>
         </div>
 
-        {/* 25–50% (brown pill) */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span style={{ background: '#b45309', color: '#ffffff', padding: '2px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-            25–50%
+        {/* Discrepancy (red pill) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ background: '#dc2626', color: '#ffffff', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+            Act ≠ Sys
           </span>
+          <span style={{ color: '#64748b', fontSize: 11.5 }}>Difference</span>
         </div>
 
-        {/* over 50% (red pill) */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span style={{ background: '#dc2626', color: '#ffffff', padding: '2px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-            over 50%
-          </span>
+        {/* Badge description */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#64748b', fontSize: 11.5, marginLeft: 'auto' }}>
+          <span>Badge: <strong>Act</strong> (Actual) &amp; <strong>Sys</strong> (System)</span>
         </div>
       </div>
 

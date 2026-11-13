@@ -24,6 +24,16 @@ import { getSaudiPreviousMonthStr, formatMonthDisplay } from '../utils/timezone'
 
 const CURRENCY = 'SAR';
 
+const formatBranchShort = (b) => {
+  if (!b) return '-';
+  const str = String(b).trim();
+  const m = str.match(/(?:Restaurant|Branch)\s*(\d+)/i);
+  if (m) return `B${m[1]}`;
+  if (/^B\d+$/i.test(str)) return str.toUpperCase();
+  if (/^\d+$/.test(str)) return `B${str}`;
+  return str;
+};
+
 export default function SalaryPayDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -136,155 +146,402 @@ export default function SalaryPayDashboard() {
     );
   });
 
-  // Print Salary Slip handler
+  // Print Salary Slip handler - triggers the exact same official slip format as Payroll
+  const generateSlipHtml = (rawSlip) => {
+    let slip = rawSlip;
+    // Guard: if slip is undefined, null, or a synthetic event, use selectedSlip
+    if (!slip || typeof slip !== 'object' || slip.nativeEvent || slip._reactName || slip.target) {
+      slip = selectedSlip || {};
+    }
+
+    const baseSal = parseFloat(slip.base_salary || slip.salary || slip.salary_amount || 0);
+    const payableSal = parseFloat(slip.payable_salary !== undefined && slip.payable_salary !== null && slip.payable_salary !== '' && Number(slip.payable_salary) !== 0 
+      ? slip.payable_salary 
+      : (slip.net_salary || slip.salary_amount || baseSal));
+    const totalPaid = parseFloat(slip.salary_amount || slip.paid_amount || 0);
+    const netSalary = parseFloat(slip.net_salary !== undefined && slip.net_salary !== null && slip.net_salary !== '' && Number(slip.net_salary) !== 0 
+      ? slip.net_salary 
+      : (totalPaid || payableSal || baseSal));
+    const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+    const lastMonthBal = parseFloat(slip.last_month_balance || 0);
+    const bonus = parseFloat(slip.bonus || 0);
+    const advDeduct = parseFloat(slip.advance_deduction || 0);
+    const advBalance = parseFloat(slip.advance_balance || 0);
+    const internet = parseFloat(slip.internet || 0);
+    const kafalat = parseFloat(slip.kafalat || 0);
+    const otherAdj = parseFloat(slip.other_adjustments || 0);
+    const deductions = parseFloat(slip.deduction_amount !== undefined ? slip.deduction_amount : (slip.deductions || 0));
+
+    const presents = parseInt(slip.presents || 0);
+    const absents = parseInt(slip.absents || 0);
+    const leaves = parseInt(slip.leaves || 0);
+    const holidays = parseInt(slip.holidays || 0);
+    const lateDays = parseInt(slip.late_days || 0);
+    const onlyOtDays = parseInt(slip.only_overtime_days || 0);
+    const onlyOtHours = parseFloat(slip.only_overtime_hours || 0);
+    const simpleOtHours = parseFloat(slip.other_overtime_hours || 0);
+    const rawTotalOtHours = Math.round((onlyOtHours + simpleOtHours) * 100) / 100;
+    const netOtHours = parseFloat(slip.overtime_hours || rawTotalOtHours);
+    const displayTotalOtHours = rawTotalOtHours > 0 ? rawTotalOtHours : Math.max(0, netOtHours);
+    const totalOtPay = parseFloat(slip.overtime_amount || slip.overtime_pay || 0);
+
+    const targetMonth = slip.month || selectedMonth || '';
+    let monthFormatted = targetMonth;
+    try {
+      if (targetMonth && /^\d{4}-\d{2}$/.test(targetMonth)) {
+        const dateObj = new Date(`${targetMonth}-01T00:00:00`);
+        monthFormatted = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      }
+    } catch {}
+
+    const printDate = new Date().toLocaleString('en-US', {
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const formatDuration = (totalMinutes) => {
+      const mins = Math.max(0, Math.round(parseFloat(totalMinutes) || 0));
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      if (h > 0 && m > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+      if (h > 0) return `${h}h 00m`;
+      return `${m}m`;
+    };
+
+    const reqMins = slip.expected_minutes !== undefined && slip.expected_minutes !== null && slip.expected_minutes !== 0 
+      ? slip.expected_minutes 
+      : (parseFloat(slip.expected_hours || 0) * 60);
+    const reqDutyStr = reqMins > 0 ? formatDuration(reqMins) : '360h 00m';
+    const actualMins = slip.actual_minutes !== undefined && slip.actual_minutes !== null && slip.actual_minutes !== 0 
+      ? slip.actual_minutes 
+      : (parseFloat(slip.actual_hours || 0) * 60);
+    const workedDutyStr = actualMins > 0 ? formatDuration(actualMins) : (presents > 0 ? formatDuration(presents * 12 * 60) : reqDutyStr);
+
+    const dynamicAdditions = [];
+    const dynamicDeductions = [];
+    if (slip.dynamic_adjustments && typeof slip.dynamic_adjustments === 'object') {
+      Object.entries(slip.dynamic_adjustments).forEach(([k, val]) => {
+        const v = parseFloat(val || 0);
+        if (v > 0) dynamicAdditions.push({ label: k, amount: v });
+        else if (v < 0) dynamicDeductions.push({ label: k, amount: Math.abs(v) });
+      });
+    }
+
+    const empName = slip.employee_name || slip.name || 'Staff';
+    const empCode = slip.employee_code || slip.employee_id || '-';
+    const rawBranch = slip.branch || slip.employee_branch || '';
+    const branchName = rawBranch ? formatBranchShort(rawBranch) : '-';
+    const payStatus = slip.payment_status || (totalPaid > 0 ? (remaining <= 0 ? 'PAID' : 'PARTIAL') : 'PENDING');
+    const payDate = slip.payment_date || slip.paid_date || (slip.created_at ? new Date(slip.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+    const payTime = slip.payment_time || (slip.created_at ? new Date(slip.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '');
+    const paidBy = slip.paid_by || 'Salary Pay Operator';
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Salary Slip - ${empName} (${monthFormatted})</title>
+        <style>
+          @page {
+            size: 80mm auto;
+            margin: 0 !important;
+          }
+          @media print {
+            html, body {
+              width: 100% !important;
+              max-width: 68mm !important;
+              margin: 0 !important;
+              padding: 0 1mm !important;
+              background: #fff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            * {
+              page-break-inside: avoid;
+              break-inside: avoid;
+              box-sizing: border-box !important;
+            }
+          }
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            color: #000000 !important;
+          }
+          body {
+            width: 100%;
+            max-width: 68mm;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 11px;
+            font-weight: 500;
+            line-height: 1.35;
+            padding: 0 1mm;
+            margin: 0 !important;
+            background: #fff;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+          }
+          .center { text-align: center; }
+          .bold { font-weight: 700; }
+          .divider-solid {
+            border-top: 1.5px solid #000;
+            margin: 4px 0;
+          }
+          .divider-double {
+            border-top: 2.5px solid #000;
+            margin: 5px 0;
+          }
+          .divider-dashed {
+            border-top: 1px dashed #000;
+            margin: 4px 0;
+          }
+          .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            width: 100%;
+            padding: 1.5px 0;
+            font-size: 11px;
+            font-weight: 500;
+            box-sizing: border-box;
+          }
+          .row-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-top: 3px;
+          }
+          .right { 
+            text-align: right; 
+            white-space: nowrap;
+            margin-left: auto;
+            padding-left: 4px;
+            padding-right: 1mm;
+            box-sizing: border-box;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="center">
+          <div class="bold" style="font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.5px;">EMPLOYEE SALARY SLIP</div>
+          <div style="font-size: 10px; font-weight: 500; margin-top: 2px;">Printed: ${printDate}</div>
+        </div>
+
+        <div class="divider-double"></div>
+
+        <div class="row">
+          <span class="bold">Employee:</span>
+          <span class="bold right">${empName}</span>
+        </div>
+        <div class="row">
+          <span>Employee ID:</span>
+          <span class="right">${empCode}</span>
+        </div>
+        <div class="row">
+          <span>Branch:</span>
+          <span class="right">${branchName}</span>
+        </div>
+        <div class="row">
+          <span>Pay Period:</span>
+          <span class="bold right">${monthFormatted}</span>
+        </div>
+
+        <div class="divider-dashed"></div>
+
+        <div class="bold" style="font-size: 10.5px; text-transform: uppercase;">ATTENDANCE SUMMARY</div>
+        <div class="row" style="font-size: 10.5px;">
+          <span>P:${presents}  A:${absents}  L:${leaves}</span>
+          <span class="right">H:${holidays}  OOT:${onlyOtDays}  Late:${lateDays}</span>
+        </div>
+        <div class="row" style="font-size: 10.5px;">
+          <span>Required Duty:</span>
+          <span class="right">${reqDutyStr}</span>
+        </div>
+        <div class="row" style="font-size: 10.5px;">
+          <span>Worked Duty:</span>
+          <span class="right">${workedDutyStr}</span>
+        </div>
+        ${(displayTotalOtHours > 0 || onlyOtDays > 0 || totalOtPay > 0) ? `
+          <div class="row bold" style="font-size: 10.5px;">
+            <span>Total Overtime:</span>
+            <span class="right">+${displayTotalOtHours.toFixed(1)} hrs</span>
+          </div>
+          ${totalOtPay > 0 ? `
+            <div class="row bold" style="font-size: 10.5px;">
+              <span>Total Overtime Pay:</span>
+              <span class="right">+${CURRENCY} ${totalOtPay.toFixed(2)}</span>
+            </div>
+          ` : ''}
+        ` : ''}
+
+        <div class="divider-dashed"></div>
+
+        <div class="row-title">EARNINGS / ADDITIONS (+)</div>
+        <div class="row">
+          <span>Payable (Worked Duty)</span>
+          <span class="right">${CURRENCY} ${payableSal.toFixed(2)}</span>
+        </div>
+        ${lastMonthBal > 0 ? `
+          <div class="row">
+            <span>Prev M. Remaining</span>
+            <span class="right">+${CURRENCY} ${lastMonthBal.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${bonus > 0 ? `
+          <div class="row">
+            <span>Bonus</span>
+            <span class="right">+${CURRENCY} ${bonus.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${dynamicAdditions.map(a => `
+          <div class="row">
+            <span>${a.label}</span>
+            <span class="right">+${CURRENCY} ${a.amount.toFixed(2)}</span>
+          </div>
+        `).join('')}
+        ${otherAdj > 0 ? `
+          <div class="row">
+            <span>Other Additions</span>
+            <span class="right">+${CURRENCY} ${otherAdj.toFixed(2)}</span>
+          </div>
+        ` : ''}
+
+        <div class="divider-dashed"></div>
+
+        <div class="row-title">DEDUCTIONS / CUTS (-)</div>
+        ${deductions > 0 ? `
+          <div class="row">
+            <span>Short / Absence Cuts</span>
+            <span class="right">-${CURRENCY} ${deductions.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${advDeduct > 0 ? `
+          <div class="row">
+            <span>Advance / Loan Cut</span>
+            <span class="right">-${CURRENCY} ${advDeduct.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${lastMonthBal < 0 ? `
+          <div class="row">
+            <span>Past Balance Cut</span>
+            <span class="right">-${CURRENCY} ${Math.abs(lastMonthBal).toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${internet > 0 ? `
+          <div class="row">
+            <span>Internet</span>
+            <span class="right">-${CURRENCY} ${internet.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${kafalat > 0 ? `
+          <div class="row">
+            <span>Kafalat</span>
+            <span class="right">-${CURRENCY} ${kafalat.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${dynamicDeductions.map(d => `
+          <div class="row">
+            <span>${d.label}</span>
+            <span class="right">-${CURRENCY} ${d.amount.toFixed(2)}</span>
+          </div>
+        `).join('')}
+
+        <div class="divider-solid"></div>
+
+        <div class="row">
+          <span>Basic Base Salary:</span>
+          <span class="right">${CURRENCY} ${baseSal.toFixed(2)}</span>
+        </div>
+        <div class="row bold" style="font-size: 12.5px; margin: 3px 0;">
+          <span>NET PAYABLE SALARY:</span>
+          <span class="right">${CURRENCY} ${netSalary.toFixed(2)}</span>
+        </div>
+
+        <div class="divider-double"></div>
+
+        <div class="row-title">PAYMENT DISTRIBUTION</div>
+        <div class="row">
+          <span>Total Disbursed:</span>
+          <span class="right bold">${CURRENCY} ${totalPaid.toFixed(2)}</span>
+        </div>
+        ${remaining !== 0 ? `
+          <div class="row bold" style="font-size: 11.5px; margin-top: 2px;">
+            <span>REMAINING SALARY:</span>
+            <span class="right">${CURRENCY} ${remaining.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        <div class="row" style="font-size: 10px; margin-top: 1px;">
+          <span>Payment Status:</span>
+          <span class="right bold">${payStatus}</span>
+        </div>
+        <div class="row" style="font-size: 10px; margin-top: 1px;">
+          <span>Payment Date:</span>
+          <span class="right">${payDate}${payTime ? ' ' + payTime : ''}</span>
+        </div>
+        <div class="row" style="font-size: 10px; margin-top: 1px;">
+          <span>Disbursed By:</span>
+          <span class="right">${paidBy}</span>
+        </div>
+
+        ${advBalance > 0 ? `
+          <div class="divider-dashed"></div>
+          <div class="row" style="font-size: 10px;">
+            <span>Remaining Loan Balance:</span>
+            <span class="right">${CURRENCY} ${advBalance.toFixed(2)}</span>
+          </div>
+        ` : ''}
+
+        <div class="divider-solid"></div>
+
+        <div style="margin-top: 20px; display: flex; justify-content: space-between; font-size: 10px; width: 100%;">
+          <div style="width: 46%; text-align: center;">
+            <div style="border-top: 1px solid #000; padding-top: 2px;">Employee Signature</div>
+          </div>
+          <div style="width: 46%; text-align: center;">
+            <div style="border-top: 1px solid #000; padding-top: 2px;">Manager Signature</div>
+          </div>
+        </div>
+
+        <div class="center bold" style="margin-top: 12px; font-size: 10.5px; letter-spacing: 0.5px;">
+          Thank You
+        </div>
+      </body>
+      </html>
+    `;
+  };
+
   const handlePrintSlip = (item) => {
     setSelectedSlip(item);
   };
 
-  const triggerBrowserPrint = () => {
-    if (!selectedSlip) return;
-    const printContent = document.getElementById('salary-slip-print-content');
-    if (!printContent) return;
+  const triggerBrowserPrint = (slipToPrint) => {
+    const slip = (slipToPrint && typeof slipToPrint === 'object' && !slipToPrint.nativeEvent && !slipToPrint._reactName && !slipToPrint.target) 
+      ? slipToPrint 
+      : selectedSlip;
+    if (!slip) return;
+    const htmlContent = generateSlipHtml(slip);
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
 
-    const printWin = window.open('', '_blank', 'width=800,height=900');
-    printWin.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Salary Slip - ${selectedSlip.employee_name} (${selectedSlip.month})</title>
-          <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-              padding: 24px;
-              color: #0f172a;
-              background: #fff;
-              line-height: 1.4;
-            }
-            .slip-box {
-              max-width: 650px;
-              margin: 0 auto;
-              border: 1px solid #cbd5e1;
-              border-radius: 8px;
-              padding: 24px;
-            }
-            .header {
-              text-align: center;
-              border-bottom: 2px solid #0f172a;
-              padding-bottom: 12px;
-              margin-bottom: 16px;
-            }
-            .header h2 { margin: 0; font-size: 20px; font-weight: 800; text-transform: uppercase; }
-            .header p { margin: 4px 0 0; font-size: 13px; color: #475569; }
-            .meta-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 8px 16px;
-              margin-bottom: 16px;
-              font-size: 13px;
-            }
-            .meta-item { display: flex; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 4px; }
-            .meta-label { color: #64748b; font-weight: 600; }
-            .meta-val { font-weight: 700; color: #0f172a; }
-            .finance-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 20px;
-              font-size: 13px;
-            }
-            .finance-table th, .finance-table td {
-              padding: 8px 12px;
-              border: 1px solid #cbd5e1;
-            }
-            .finance-table th {
-              background: #f8fafc;
-              font-weight: 800;
-              text-transform: uppercase;
-              font-size: 11px;
-            }
-            .total-row {
-              background: #f1f5f9;
-              font-weight: 900;
-              font-size: 14px;
-            }
-            .signatures {
-              margin-top: 40px;
-              display: flex;
-              justify-content: space-between;
-              padding-top: 16px;
-            }
-            .sig-box {
-              text-align: center;
-              width: 180px;
-              border-top: 1px solid #475569;
-              padding-top: 6px;
-              font-size: 12px;
-              color: #475569;
-              font-weight: 600;
-            }
-            @media print {
-              body { padding: 0; }
-              .slip-box { border: none; padding: 0; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="slip-box">
-            <div class="header">
-              <h2>Pizza Shop — Official Salary Slip</h2>
-              <p>Branch: ${selectedSlip.branch} • Period: ${selectedSlip.month}</p>
-            </div>
-            <div class="meta-grid">
-              <div class="meta-item"><span class="meta-label">Employee Name:</span><span class="meta-val">${selectedSlip.employee_name}</span></div>
-              <div class="meta-item"><span class="meta-label">Employee Code:</span><span class="meta-val">${selectedSlip.employee_code}</span></div>
-              <div class="meta-item"><span class="meta-label">Payment Date:</span><span class="meta-val">${selectedSlip.payment_date} ${selectedSlip.payment_time}</span></div>
-              <div class="meta-item"><span class="meta-label">Disbursed By:</span><span class="meta-val">${selectedSlip.paid_by}</span></div>
-              <div class="meta-item"><span class="meta-label">Payment Status:</span><span class="meta-val">${selectedSlip.payment_status}</span></div>
-              <div class="meta-item"><span class="meta-label">Branch:</span><span class="meta-val">${selectedSlip.branch}</span></div>
-            </div>
-            <table class="finance-table">
-              <thead>
-                <tr>
-                  <th>Description</th>
-                  <th style="text-align: right;">Amount (SAR)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Disbursed Salary Amount</td>
-                  <td style="text-align: right; font-weight: 700;">${selectedSlip.salary_amount.toFixed(2)}</td>
-                </tr>
-                <tr>
-                  <td>Overtime Amount Paid</td>
-                  <td style="text-align: right; color: #2563eb; font-weight: 700;">+ ${selectedSlip.overtime_amount.toFixed(2)}</td>
-                </tr>
-                <tr>
-                  <td>Deductions (Advances / Absents / Khata)</td>
-                  <td style="text-align: right; color: #dc2626; font-weight: 700;">- ${selectedSlip.deduction_amount.toFixed(2)}</td>
-                </tr>
-                <tr>
-                  <td>Carry Forward Amount</td>
-                  <td style="text-align: right; color: #ea580c; font-weight: 700;">${selectedSlip.carry_forward_amount.toFixed(2)}</td>
-                </tr>
-                <tr class="total-row">
-                  <td>Total Net Disbursed</td>
-                  <td style="text-align: right; color: #16a34a;">SAR ${selectedSlip.salary_amount.toFixed(2)}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="signatures">
-              <div class="sig-box">Employee Signature</div>
-              <div class="sig-box">Operator / Cashier Signature</div>
-            </div>
-          </div>
-          <script>
-            window.onload = function() {
-              window.print();
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWin.document.close();
+    iframe.contentDocument.write(htmlContent);
+    iframe.contentDocument.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 1000);
+    }, 400);
   };
 
   return (
@@ -791,17 +1048,19 @@ export default function SalaryPayDashboard() {
                       {item.employee_code}
                     </td>
 
-                    {/* 3. Branch */}
-                    <td style={{ padding: '10px 12px' }}>
+                    {/* 3. Branch (Formatted as B1, B2, B3) */}
+                    <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                       <span style={{
                         background: '#f1f5f9',
-                        color: '#334155',
-                        padding: '2px 8px',
+                        color: '#1e293b',
+                        padding: '3px 8px',
                         borderRadius: 4,
-                        fontSize: 11,
-                        fontWeight: 700
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        display: 'inline-block'
                       }}>
-                        {item.branch}
+                        {formatBranchShort(item.branch)}
                       </span>
                     </td>
 
@@ -936,70 +1195,27 @@ export default function SalaryPayDashboard() {
               </button>
             </div>
 
-            {/* Modal Body: Printable Slip Content */}
-            <div id="salary-slip-print-content" style={{ padding: 24, fontSize: 13, color: '#0f172a' }}>
-              <div style={{ textAlign: 'center', borderBottom: '2px solid #0f172a', paddingBottom: 12, marginBottom: 16 }}>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900, textTransform: 'uppercase' }}>
-                  PIZZA SHOP — SALARY PAYMENT SLIP
-                </h2>
-                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
-                  Branch: {selectedSlip.branch} • Month: {selectedSlip.month}
-                </p>
-              </div>
-
+            {/* Modal Body: Printable Slip Content (100% same as Payroll) */}
+            <div style={{ padding: '16px 20px', background: '#f8fafc', display: 'flex', justifyContent: 'center', maxHeight: '72vh', overflowY: 'auto' }}>
               <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '8px 16px',
-                marginBottom: 16,
-                fontSize: 12.5
+                width: '360px',
+                background: '#ffffff',
+                boxShadow: '0 4px 15px rgba(0,0,0,0.08)',
+                borderRadius: 8,
+                padding: '12px 14px',
+                border: '1px solid #e2e8f0'
               }}>
-                <div><strong>Employee:</strong> {selectedSlip.employee_name}</div>
-                <div><strong>Employee ID:</strong> {selectedSlip.employee_code}</div>
-                <div><strong>Date:</strong> {selectedSlip.payment_date}</div>
-                <div><strong>Time:</strong> {selectedSlip.payment_time}</div>
-                <div><strong>Paid By:</strong> {selectedSlip.paid_by}</div>
-                <div><strong>Status:</strong> <span style={{ color: '#16a34a', fontWeight: 800 }}>{selectedSlip.payment_status}</span></div>
-              </div>
-
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16, fontSize: 12.5 }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1', textAlign: 'left' }}>
-                    <th style={{ padding: '8px 10px', fontWeight: 800 }}>Component</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800 }}>Amount (SAR)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '8px 10px' }}>Disbursed Salary Amount</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{selectedSlip.salary_amount.toFixed(2)}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '8px 10px' }}>Overtime Amount Paid</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', color: '#2563eb', fontWeight: 700 }}>+ {selectedSlip.overtime_amount.toFixed(2)}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '8px 10px' }}>Deductions Applied</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', color: '#dc2626', fontWeight: 700 }}>- {selectedSlip.deduction_amount.toFixed(2)}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '8px 10px' }}>Carry Forward Amount</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', color: '#ea580c', fontWeight: 700 }}>{selectedSlip.carry_forward_amount.toFixed(2)}</td>
-                  </tr>
-                  <tr style={{ background: '#f8fafc', fontWeight: 900, fontSize: 13.5 }}>
-                    <td style={{ padding: '10px' }}>Total Amount Paid</td>
-                    <td style={{ padding: '10px', textAlign: 'right', color: '#16a34a' }}>SAR {selectedSlip.salary_amount.toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 36, paddingTop: 10 }}>
-                <div style={{ textAlign: 'center', width: 160, borderTop: '1px solid #94a3b8', paddingTop: 4, fontSize: 11, color: '#64748b' }}>
-                  Employee Signature
-                </div>
-                <div style={{ textAlign: 'center', width: 160, borderTop: '1px solid #94a3b8', paddingTop: 4, fontSize: 11, color: '#64748b' }}>
-                  Authorized Signatory
-                </div>
+                <iframe
+                  title="Salary Slip Preview"
+                  srcDoc={generateSlipHtml(selectedSlip)}
+                  style={{
+                    width: '100%',
+                    height: '520px',
+                    border: 'none',
+                    background: '#fff',
+                    display: 'block'
+                  }}
+                />
               </div>
             </div>
 
@@ -1030,7 +1246,7 @@ export default function SalaryPayDashboard() {
               </button>
               <button
                 type="button"
-                onClick={triggerBrowserPrint}
+                onClick={() => triggerBrowserPrint(selectedSlip)}
                 style={{
                   padding: '8px 16px',
                   borderRadius: 6,

@@ -1405,42 +1405,48 @@ export default function Payroll() {
         <style>
           @page {
             size: 80mm auto;
-            margin: 0;
+            margin: 0 !important;
           }
           @media print {
             html, body {
-              width: 80mm !important;
-              max-width: 80mm !important;
+              width: 100% !important;
+              max-width: 68mm !important;
               margin: 0 !important;
-              padding: 2mm 3mm !important;
+              padding: 0 1mm !important;
+              background: #fff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
             }
             * {
               page-break-inside: avoid;
               break-inside: avoid;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
+              box-sizing: border-box !important;
             }
           }
           * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            color: #000 !important;
+            color: #000000 !important;
           }
           body {
-            width: 80mm;
-            max-width: 80mm;
-            font-family: 'Courier New', Courier, monospace, system-ui;
+            width: 100%;
+            max-width: 68mm;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             font-size: 11px;
+            font-weight: 500;
             line-height: 1.35;
-            padding: 2mm 3mm;
-            margin: 0 auto;
+            padding: 0 1mm;
+            margin: 0 !important;
             background: #fff;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
           }
           .center { text-align: center; }
-          .bold { font-weight: bold; }
+          .bold { font-weight: 700; }
           .divider-solid {
-            border-top: 1px solid #000;
+            border-top: 1.5px solid #000;
             margin: 4px 0;
           }
           .divider-double {
@@ -1457,19 +1463,29 @@ export default function Payroll() {
             align-items: flex-start;
             padding: 1.5px 0;
             font-size: 11px;
+            font-weight: 500;
+            width: 100%;
+            box-sizing: border-box;
           }
           .row-title {
             font-size: 11px;
-            font-weight: bold;
+            font-weight: 700;
             text-transform: uppercase;
             margin-top: 3px;
           }
-          .right { text-align: right; }
+          .right { 
+            text-align: right; 
+            white-space: nowrap;
+            margin-left: auto;
+            padding-left: 4px;
+            padding-right: 1mm;
+            box-sizing: border-box;
+          }
         </style>
       </head>
       <body>
         <div class="center">
-          <div class="bold" style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">EMPLOYEE SALARY SLIP</div>
+          <div class="bold" style="font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.5px;">EMPLOYEE SALARY SLIP</div>
           <div style="font-size: 10px; margin-top: 2px;">Printed: ${printDate}</div>
         </div>
 
@@ -1477,7 +1493,15 @@ export default function Payroll() {
 
         <div class="row">
           <span class="bold">Employee:</span>
-          <span class="bold right">${emp.name}</span>
+          <span class="bold right">${emp.name || emp.employee_name || 'Staff'}</span>
+        </div>
+        <div class="row">
+          <span>Employee ID:</span>
+          <span class="right">${emp.employee_id || emp.employee_code || '-'}</span>
+        </div>
+        <div class="row">
+          <span>Branch:</span>
+          <span class="right">${emp.branch || emp.employee_branch || '-'}</span>
         </div>
         <div class="row">
           <span>Pay Period:</span>
@@ -1656,7 +1680,7 @@ export default function Payroll() {
 
         ${emp.payments && emp.payments.length > 0 ? `
           <div class="divider-dashed"></div>
-          <div class="row-title" style="font-size: 10px;">PAYMENT RECORDS (${emp.payments.length})</div>
+          <div class="row-title" style="font-size: 11px;">PAYMENT RECORDS (${emp.payments.length})</div>
           ${emp.payments.map((p, idx) => {
             const pDate = p.created_at ? new Date(p.created_at).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
             const pMonth = p.month || selectedMonth;
@@ -1664,12 +1688,12 @@ export default function Payroll() {
             const pAmt = parseFloat(p.amount || 0).toFixed(2);
             const pMethod = p.payment_method || 'Payment';
             return `
-              <div style="font-size: 9.5px; padding: 2px 0; border-bottom: 1px dotted #888;">
+              <div style="font-size: 10.5px; padding: 2px 0; border-bottom: 1px dashed #000;">
                 <div class="row bold">
                   <span>#${idx + 1} ${pMethod} (${pMonth})</span>
                   <span class="right">${CURRENCY} ${pAmt}</span>
                 </div>
-                <div class="row" style="font-size: 9px; color: #333;">
+                <div class="row" style="font-size: 10px; color: #000;">
                   <span>Paid By: ${pUser}</span>
                   <span class="right">${pDate}</span>
                 </div>
@@ -1680,7 +1704,7 @@ export default function Payroll() {
 
         ${advBalance > 0 ? `
           <div class="divider-dashed"></div>
-          <div class="row" style="font-size: 10px;">
+          <div class="row" style="font-size: 10.5px;">
             <span>Remaining Loan Balance:</span>
             <span class="right">${CURRENCY} ${advBalance.toFixed(2)}</span>
           </div>
@@ -1688,7 +1712,7 @@ export default function Payroll() {
 
         <div class="divider-solid"></div>
 
-        <div style="margin-top: 28px; display: flex; justify-content: space-between; font-size: 10px;">
+        <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 10.5px;">
           <div style="width: 45%; text-align: center;">
             <div style="border-top: 1px solid #000; padding-top: 2px;">Employee Signature</div>
           </div>
