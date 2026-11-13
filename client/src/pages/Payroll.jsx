@@ -14,7 +14,8 @@ import ManageSalaryModal from '../components/ManageSalaryModal'
 import AttendanceDetailModal from '../components/AttendanceDetailModal'
 import EditAttendanceModal from '../components/EditAttendanceModal'
 import EmployeeKhataModal from '../components/EmployeeKhataModal'
-import { getSaudiCurrentMonthStr, getSaudiPreviousMonthStr, formatSaudiDateTime } from '../utils/timezone'
+import { getSaudiCurrentMonthStr, getSaudiPreviousMonthStr, formatSaudiDateTime, formatMonthDisplay } from '../utils/timezone'
+import { printSalarySlipViaRawBT } from '../utils/rawbtPrinter'
 
 const confirmAction = (message, onConfirm, confirmText = 'Confirm') => {
   toast((t) => (
@@ -96,6 +97,7 @@ export default function Payroll() {
     permission_type: 'pay_now',
     allowed_months: []
   })
+  const [salaryPermissionsLoaded, setSalaryPermissionsLoaded] = useState(!isSalaryPayOperator)
   const isViewOnlySalaryOperator = isSalaryPayOperator && salaryPermissions.permission_type === 'view_only'
   const canProcessPayments = (isAdmin || isSalaryPayOperator) && !isViewOnlySalaryOperator
   const showActions = isAdmin && !isSalaryPayOperator
@@ -220,6 +222,8 @@ export default function Payroll() {
         }
       } catch (err) {
         console.error('Error loading permissions:', err)
+      } finally {
+        setSalaryPermissionsLoaded(true)
       }
     }
     fetchPerms()
@@ -430,7 +434,10 @@ export default function Payroll() {
 
         newEditableData[item.id] = {
           ...item,
-          payable_salary: item.payable_salary !== undefined ? item.payable_salary : (parseFloat(item.base_salary || 0) - parseFloat(item.deductions || 0)),
+          month: item.month || selectedMonth,
+          payable_salary: (item.payable_salary !== undefined && item.payable_salary !== null && item.payable_salary !== '')
+            ? parseFloat(item.payable_salary)
+            : Math.max(0, parseFloat(item.base_salary || 0) - parseFloat(item.deductions || 0)),
           last_month_balance: item.last_month_balance !== undefined ? item.last_month_balance : 0,
           this_month_adv: item.advance_deduction !== undefined ? item.advance_deduction : 0,
           calc_advance_deduction: item.calc_advance_deduction || 0,
@@ -453,8 +460,13 @@ export default function Payroll() {
       setEditableData(newEditableData)
       setSelectedEmployeeForModal(prev => prev ? (newEditableData[prev.id] || prev) : null)
     } catch (err) {
-      toast.error('Error loading payroll calculations')
-      console.error(err)
+      if (err?.response?.status === 403) {
+        console.warn('Access restricted for month:', selectedMonth);
+        toast.error(err?.response?.data?.error || `Access to ${selectedMonth} is restricted by administrator.`);
+      } else {
+        toast.error('Error loading payroll calculations')
+        console.error(err)
+      }
     } finally {
       if (!isSilent) setLoading(false)
     }
@@ -525,12 +537,20 @@ export default function Payroll() {
   }, [])
 
   useEffect(() => {
+    if (isSalaryPayOperator && !salaryPermissionsLoaded) {
+      return;
+    }
+    if (isSalaryPayOperator && salaryPermissions.allowed_months && salaryPermissions.allowed_months.length > 0) {
+      if (!salaryPermissions.allowed_months.includes(selectedMonth)) {
+        return;
+      }
+    }
     loadPayroll()
     const activeEmpId = selectedDetailEmpId || selectedEmployeeForModal?.id;
     if (activeEmpId) {
       loadEmpAdjs(activeEmpId, selectedMonth);
     }
-  }, [selectedMonth])
+  }, [selectedMonth, salaryPermissionsLoaded])
 
   useEffect(() => {
     if (selectedEmployeeForModal && editableData[selectedEmployeeForModal.id]) {
@@ -1394,11 +1414,41 @@ export default function Payroll() {
     }
   };
 
-  // Print Official Employee Salary Slip (Optimized for 80mm Thermal Receipt Printers)
-  const handlePrintSalarySlip = (emp) => {
+  // Print Official Employee Salary Slip (Optimized for 80mm Thermal Receipt Printers & Cloud)
+  const handlePrintSalarySlip = async (emp) => {
     if (!emp) return;
+
+    // Check configured print mode for salary slips
+    const slipMode = localStorage.getItem('salarySlipPrintMode') || 'global';
+    const effectivePrintMode = slipMode === 'global' ? (localStorage.getItem('printMode') || 'standard') : slipMode;
+
+    if (effectivePrintMode === 'cloud') {
+      const toastId = toast.loading('Sending salary slip to cloud thermal printer...');
+      try {
+        const printerIp = localStorage.getItem('printerIp') || '127.0.0.1';
+        const printerPort = localStorage.getItem('printerPort') || '9100';
+        await axios.post('/api/payroll/cloud-print-slip', {
+          emp,
+          printerIp,
+          printerPort
+        });
+        toast.success('Salary slip sent to cloud printer!', { id: toastId });
+        return;
+      } catch (printErr) {
+        console.error('Cloud print failed:', printErr);
+        toast.error(printErr?.response?.data?.error || 'Failed to print via Cloud. Falling back to browser print...', { id: toastId });
+        // Falls through to browser print below
+      }
+    } else if (effectivePrintMode === 'rawbt') {
+      printSalarySlipViaRawBT(emp);
+      toast.success('Sent to RawBT mobile printer');
+      return;
+    }
+
     const baseSal = parseFloat(emp.base_salary || 0);
-    const payableSal = parseFloat(emp.payable_salary !== undefined ? emp.payable_salary : (baseSal - parseFloat(emp.deductions || 0)));
+    const payableSal = (emp.payable_salary !== undefined && emp.payable_salary !== null && emp.payable_salary !== '')
+      ? parseFloat(emp.payable_salary)
+      : Math.max(0, baseSal - parseFloat(emp.deductions || 0));
     const cashPaid = parseFloat(emp.cash_paid || 0);
     const bankPaid = parseFloat(emp.bank_paid || 0);
     const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
@@ -1406,7 +1456,7 @@ export default function Payroll() {
     const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
     const lastMonthBal = parseFloat(emp.last_month_balance || 0);
     const bonus = parseFloat(emp.bonus || 0);
-    const advDeduct = parseFloat(emp.this_month_adv || 0);
+    const advDeduct = parseFloat(emp.this_month_adv || emp.advance_deduction || 0);
     const advBalance = parseFloat(emp.advance_balance || 0);
     const internet = parseFloat(emp.internet || 0);
     const kafalat = parseFloat(emp.kafalat || 0);
@@ -1437,8 +1487,8 @@ export default function Payroll() {
       ? parseFloat(emp.overtime_pay)
       : calcOtPay;
 
-    const dateObj = new Date(`${selectedMonth}-01T00:00:00`);
-    const monthFormatted = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const targetMonth = emp?.month || emp?.pay_period || selectedMonth;
+    const monthFormatted = formatMonthDisplay(targetMonth);
     const printDate = new Date().toLocaleString('en-US', { 
       day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' 
     });
@@ -1625,8 +1675,8 @@ export default function Payroll() {
 
         <div class="row-title">EARNINGS / ADDITIONS (+)</div>
         <div class="row">
-          <span>Payable (Worked Duty)</span>
-          <span class="right">${CURRENCY} ${payableSal.toFixed(2)}</span>
+          <span>Basic Base Salary</span>
+          <span class="right">${CURRENCY} ${baseSal.toFixed(2)}</span>
         </div>
         ${lastMonthBal > 0 ? `
           <div class="row">
@@ -1701,9 +1751,9 @@ export default function Payroll() {
 
         <div class="divider-solid"></div>
 
-        <div class="row">
-          <span>Basic Base Salary:</span>
-          <span class="right">${CURRENCY} ${baseSal.toFixed(2)}</span>
+        <div class="row bold">
+          <span>Payable (Worked Duty):</span>
+          <span class="right">${CURRENCY} ${payableSal.toFixed(2)}</span>
         </div>
         <div class="row">
           <span>Net Adjustments:</span>
@@ -1804,7 +1854,9 @@ export default function Payroll() {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
       setTimeout(() => {
-        document.body.removeChild(iframe);
+        if (iframe && iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
       }, 1000);
     }, 400);
   }
@@ -1892,7 +1944,9 @@ export default function Payroll() {
   const handlePrintA4SalarySlip = (emp) => {
     if (!emp) return;
     const baseSal = parseFloat(emp.base_salary || 0);
-    const payableSal = parseFloat(emp.payable_salary !== undefined ? emp.payable_salary : (baseSal - parseFloat(emp.deductions || 0)));
+    const payableSal = (emp.payable_salary !== undefined && emp.payable_salary !== null && emp.payable_salary !== '')
+      ? parseFloat(emp.payable_salary)
+      : Math.max(0, baseSal - parseFloat(emp.deductions || 0));
     const cashPaid = parseFloat(emp.cash_paid || 0);
     const bankPaid = parseFloat(emp.bank_paid || 0);
     const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
@@ -1910,6 +1964,7 @@ export default function Payroll() {
     const grossEarnings = payableSal + otPay + bonus + tips + internet + otherAdj;
     const totalDeductions = deductions + kafalat + khataDeduct;
     const statusText = emp.payment_status || (remaining <= 0 ? 'PAID' : (totalPaid > 0 ? 'PARTIAL' : 'DUE / UNPAID'));
+    const a4Month = formatMonthDisplay(emp?.month || emp?.pay_period || selectedMonth);
 
     const printDate = new Date().toLocaleString('en-US', {
       day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -2072,7 +2127,7 @@ export default function Payroll() {
             <div class="sub-title">OFFICIAL EMPLOYEE SALARY STATEMENT</div>
           </div>
           <div style="text-align: right;">
-            <div style="font-size: 15px; font-weight: 800; color: #0f172a;">Period: ${selectedMonth}</div>
+            <div style="font-size: 15px; font-weight: 800; color: #0f172a;">Period: ${a4Month}</div>
             <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Printed: ${printDate}</div>
           </div>
         </div>
@@ -2240,7 +2295,9 @@ export default function Payroll() {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
       setTimeout(() => {
-        document.body.removeChild(iframe);
+        if (iframe && iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
       }, 1000);
     }, 400);
   };
@@ -2481,7 +2538,9 @@ export default function Payroll() {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
       setTimeout(() => {
-        document.body.removeChild(iframe);
+        if (iframe && iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
       }, 1000);
     }, 400);
   };
@@ -4584,8 +4643,7 @@ export default function Payroll() {
               style={{ border: 'none', background: 'transparent', fontSize: '11px', color: 'var(--text-primary)', outline: 'none', fontWeight: 700, cursor: 'pointer', padding: 0 }}
             >
               {salaryPermissions.allowed_months.map(m => {
-                const [yr, mn] = m.split('-').map(Number);
-                const label = new Date(yr, mn - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                const label = formatMonthDisplay(m);
                 return <option key={m} value={m}>{label} ({m})</option>;
               })}
             </select>
@@ -6794,7 +6852,7 @@ export default function Payroll() {
           nextYear = year + 1;
         }
         const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
-        const nextMonthName = new Date(`${nextMonthStr}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const nextMonthName = formatMonthDisplay(nextMonthStr);
 
         return (
           <div style={{

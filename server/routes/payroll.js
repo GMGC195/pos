@@ -1,8 +1,32 @@
 const express = require('express');
 const router = express.Router();
+const net = require('net');
+const Pusher = require('pusher');
 const pool = require('../db');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { clampBreakLogsToDutyWindow } = require('../utils/attendanceHelper');
+
+// Initialize Pusher for Cloud Printing
+let pusher = null;
+try {
+  if (process.env.PUSHER_APP_ID && process.env.PUSHER_KEY && process.env.PUSHER_SECRET && process.env.PUSHER_CLUSTER) {
+    pusher = new Pusher({
+      appId: process.env.PUSHER_APP_ID,
+      key: process.env.PUSHER_KEY,
+      secret: process.env.PUSHER_SECRET,
+      cluster: process.env.PUSHER_CLUSTER,
+      useTLS: true
+    });
+  }
+} catch (err) {
+  console.warn('Pusher initialization in payroll skipped/failed:', err.message);
+}
+
+// Helper: Check if user role is Salary Pay Operator
+function isSalaryPayOperatorRole(role) {
+  const r = (role || '').toString().toLowerCase().trim().replace(/[-_]/g, ' ');
+  return r === 'salary pay operator' || r === 'salary operator' || r.includes('salary');
+}
 
 // KSA Current Month Helper (Asia/Riyadh - UTC+3)
 const getKsaCurrentMonthStr = () => {
@@ -973,6 +997,7 @@ async function computeMonthlyPayrollReport(month, branchFilter = null) {
       return {
         id: emp.id,
         employee_id: emp.employee_id || `EMP-${String(emp.id).padStart(4, '0')}`,
+        month: month,
         branch: emp.branch || 'Main',
         name: emp.name,
         role: emp.role,
@@ -1081,7 +1106,7 @@ async function getSalaryPayOperatorPermissions(userId) {
 // GET /api/payroll/my-permissions - Retrieve current user's salary payable permissions & allowed months
 router.get('/my-permissions', authenticateToken, async (req, res) => {
   try {
-    const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+    const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
     if (!isSalaryPayOp) {
       return res.json({
         is_salary_pay_operator: false,
@@ -1109,7 +1134,7 @@ router.get('/calculate', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Month (YYYY-MM) is required' });
   }
 
-  const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+  const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
   if (isSalaryPayOp) {
     const perms = await getSalaryPayOperatorPermissions(req.user.id);
     if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
@@ -1131,7 +1156,7 @@ router.get('/salary-pay-summary', authenticateToken, async (req, res) => {
   try {
     const month = req.query.month || getKsaCurrentMonthStr();
     let branch = req.query.branch || null;
-    const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+    const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
     if (isSalaryPayOp) {
       const perms = await getSalaryPayOperatorPermissions(req.user.id);
       if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
@@ -1240,7 +1265,7 @@ router.get('/salary-pay-summary', authenticateToken, async (req, res) => {
 // GET /api/payroll/payment-history (12 columns for Salary Pay Operator dashboard & auditing)
 router.get('/payment-history', authenticateToken, async (req, res) => {
   try {
-    const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+    const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
     const month = req.query.month || null;
     let branch = req.query.branch || null;
     if (isSalaryPayOp) {
@@ -2041,7 +2066,7 @@ router.post('/payments', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'employee_id and month are required' });
   }
 
-  const isSalaryPayOp = req.user?.role?.trim().toLowerCase() === 'salary pay operator';
+  const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
   if (isSalaryPayOp) {
     const perms = await getSalaryPayOperatorPermissions(req.user.id);
     if (perms.permission_type === 'view_only') {
@@ -2982,6 +3007,368 @@ router.get('/audit-logs', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error in /audit-logs:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= SALARY SLIP THERMAL ESC/POS BUILDER =================
+function buildSalarySlipEscPos(emp, currentUser) {
+  const ESC = '\x1B';
+  const GS = '\x1D';
+  const INIT = ESC + '@';
+  const SELECT_FONT_A = ESC + 'M' + '\x00';
+  const SET_LINE_SPACING = ESC + '3' + '\x26'; // 38 dots line spacing (~4.75mm)
+  const BOLD_ON = ESC + 'E' + '\x01';
+  const BOLD_OFF = ESC + 'E' + '\x00';
+  const CENTER = ESC + 'a' + '\x01';
+  const LEFT = ESC + 'a' + '\x00';
+  const TEXT_NORMAL = GS + '!' + '\x00';
+  const TEXT_DOUBLE = GS + '!' + '\x11'; // Double-width + Double-height
+  const CUT = GS + 'V' + '\x41' + '\x03';
+  const LF = '\n';
+  const LINE_WIDTH = 42;
+
+  const rightAlign = (leftStr, rightStr, width = LINE_WIDTH) => {
+    const left = String(leftStr || '');
+    const right = String(rightStr || '');
+    const space = Math.max(1, width - (left.length + right.length));
+    return left + ' '.repeat(space) + right;
+  };
+
+  const sanitizeStr = (s) => String(s || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+
+  const baseSal = parseFloat(emp.base_salary || 0);
+  const deductions = parseFloat(emp.deductions || 0);
+  const payableSal = (emp.payable_salary !== undefined && emp.payable_salary !== null && emp.payable_salary !== '')
+    ? parseFloat(emp.payable_salary)
+    : Math.max(0, baseSal - deductions);
+
+  const cashPaid = parseFloat(emp.cash_paid || 0);
+  const bankPaid = parseFloat(emp.bank_paid || 0);
+  const totalPaid = (emp.paid_amount !== undefined && emp.paid_amount !== null && parseFloat(emp.paid_amount) > 0)
+    ? parseFloat(emp.paid_amount)
+    : Math.round((cashPaid + bankPaid) * 100) / 100;
+
+  const netSalary = (emp.net_salary !== undefined && emp.net_salary !== null && emp.net_salary !== '')
+    ? parseFloat(emp.net_salary)
+    : Math.max(0, payableSal - parseFloat(emp.this_month_adv || emp.advance_deduction || 0));
+
+  const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+
+  const targetMonth = emp?.month || emp?.pay_period || 'Current Month';
+  let monthFormatted = targetMonth;
+  if (/^\d{4}-\d{2}$/.test(targetMonth)) {
+    const [y, m] = targetMonth.split('-');
+    const dateObj = new Date(parseInt(y), parseInt(m) - 1, 15, 12, 0, 0);
+    monthFormatted = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+
+  const printTimeStr = new Date().toLocaleString('en-US', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+
+  let t = INIT + SELECT_FONT_A + SET_LINE_SPACING;
+
+  // Header
+  t += CENTER + BOLD_ON + TEXT_DOUBLE + 'EMPLOYEE SALARY SLIP' + TEXT_NORMAL + BOLD_OFF + LF;
+  t += CENTER + `Printed: ${printTimeStr}` + LF;
+  t += '='.repeat(LINE_WIDTH) + LF;
+
+  // Employee details
+  t += LEFT;
+  t += rightAlign('Employee:', sanitizeStr(emp.name || emp.employee_name || 'Staff')) + LF;
+  t += rightAlign('Employee ID:', sanitizeStr(emp.employee_id || emp.id || 'N/A')) + LF;
+  
+  let branchName = String(emp.branch || 'Restaurant 1');
+  if (branchName.toLowerCase().includes('3')) branchName = 'B3';
+  else if (branchName.toLowerCase().includes('2')) branchName = 'B2';
+  else branchName = 'B1';
+  t += rightAlign('Branch:', branchName) + LF;
+  t += rightAlign('Pay Period:', monthFormatted) + LF;
+  t += '-'.repeat(LINE_WIDTH) + LF;
+
+  // Attendance summary
+  const p = emp.present_days !== undefined ? emp.present_days : (emp.attendance?.present_days ?? 0);
+  const a = emp.absent_days !== undefined ? emp.absent_days : (emp.attendance?.absent_days ?? 0);
+  const l = emp.leave_days !== undefined ? emp.leave_days : (emp.attendance?.leave_days ?? 0);
+  const h = emp.holiday_days !== undefined ? emp.holiday_days : (emp.attendance?.holiday_days ?? 0);
+  const oot = emp.only_overtime_days !== undefined ? emp.only_overtime_days : 0;
+  const lateMin = emp.late_minutes !== undefined ? emp.late_minutes : (emp.attendance?.late_minutes ?? 0);
+  const lateStr = lateMin > 0 ? `${lateMin}m` : '0m';
+
+  t += BOLD_ON + 'ATTENDANCE SUMMARY' + BOLD_OFF + LF;
+  t += `P:${p}  A:${a}  L:${l}   H:${h}  OOT:${oot}  Late:${lateStr}` + LF;
+
+  const reqH = emp.expected_hours !== undefined ? `${emp.expected_hours}h 00m` : '360h 00m';
+  const workH = emp.total_working_hours !== undefined 
+    ? `${emp.total_working_hours}h ${String(emp.total_working_minutes || '00').padStart(2, '0')}m` 
+    : (emp.total_hours_formatted || `${emp.worked_hours || 0}h 00m`);
+  t += rightAlign('Required Duty:', reqH) + LF;
+  t += rightAlign('Worked Duty:', workH) + LF;
+  t += '-'.repeat(LINE_WIDTH) + LF;
+
+  // Earnings
+  t += BOLD_ON + 'EARNINGS / ADDITIONS (+)' + BOLD_OFF + LF;
+  t += rightAlign('Payable (Worked Duty):', `SAR ${payableSal.toFixed(2)}`) + LF;
+  const otPay = parseFloat(emp.overtime_pay || 0);
+  if (otPay > 0) {
+    t += rightAlign('Overtime Pay:', `SAR ${otPay.toFixed(2)}`) + LF;
+  }
+  const bonus = parseFloat(emp.bonus || 0);
+  if (bonus > 0) {
+    t += rightAlign('Bonus:', `SAR ${bonus.toFixed(2)}`) + LF;
+  }
+  t += '-'.repeat(LINE_WIDTH) + LF;
+
+  // Deductions
+  t += BOLD_ON + 'DEDUCTIONS / CUTS (-)' + BOLD_OFF + LF;
+  t += rightAlign('Basic Base Salary:', `SAR ${baseSal.toFixed(2)}`) + LF;
+  if (deductions > 0) {
+    t += rightAlign('Short / Absence Cuts:', `SAR ${deductions.toFixed(2)}`) + LF;
+  }
+  const advDeduct = parseFloat(emp.this_month_adv || emp.advance_deduction || 0);
+  if (advDeduct > 0) {
+    t += rightAlign('Advance Deduction:', `SAR ${advDeduct.toFixed(2)}`) + LF;
+  }
+  const kafalat = parseFloat(emp.kafalat || 0);
+  if (kafalat > 0) {
+    t += rightAlign('Kafalat:', `SAR ${kafalat.toFixed(2)}`) + LF;
+  }
+  const internet = parseFloat(emp.internet || 0);
+  if (internet > 0) {
+    t += rightAlign('Internet:', `SAR ${internet.toFixed(2)}`) + LF;
+  }
+  t += '-'.repeat(LINE_WIDTH) + LF;
+
+  // Net Payable
+  t += BOLD_ON + rightAlign('NET PAYABLE SALARY:', `SAR ${netSalary.toFixed(2)}`) + BOLD_OFF + LF;
+  t += '='.repeat(LINE_WIDTH) + LF;
+
+  // Payment Details
+  t += BOLD_ON + 'PAYMENT DISTRIBUTION' + BOLD_OFF + LF;
+  t += rightAlign('Total Disbursed:', `SAR ${totalPaid.toFixed(2)}`) + LF;
+  const statusStr = totalPaid >= netSalary && netSalary > 0 ? 'PAID' : (totalPaid > 0 ? 'PARTIAL' : 'PENDING');
+  t += rightAlign('Payment Status:', statusStr) + LF;
+  if (totalPaid > 0) {
+    if (cashPaid > 0) t += rightAlign('  - Cash Paid:', `SAR ${cashPaid.toFixed(2)}`) + LF;
+    if (bankPaid > 0) t += rightAlign('  - Bank Paid:', `SAR ${bankPaid.toFixed(2)}`) + LF;
+  }
+  const payDateStr = emp.payment_date 
+    ? `${emp.payment_date}${emp.payment_time ? ' ' + emp.payment_time : ''}`
+    : printTimeStr;
+  t += rightAlign('Payment Date:', payDateStr) + LF;
+  const paidBy = emp.paid_by || currentUser?.username || 'Salary Pay Operator';
+  t += rightAlign('Disbursed By:', sanitizeStr(paidBy)) + LF;
+  t += rightAlign('Remaining Balance:', `SAR ${Math.max(0, remaining).toFixed(2)}`) + LF;
+  t += '-'.repeat(LINE_WIDTH) + LF;
+
+  // Signatures
+  t += LF;
+  t += 'Employee Signature        Manager Signature' + LF;
+  t += '__________________        __________________' + LF;
+  t += LF;
+  t += CENTER + 'Thank You' + LF;
+  t += LF + LF + LF + LF + CUT;
+
+  return t;
+}
+
+// POST /api/payroll/cloud-print-slip - Send employee salary slip to Cloud Thermal Printer
+router.post('/cloud-print-slip', authenticateToken, async (req, res) => {
+  try {
+    const { emp, printerIp: reqIp, printerPort: reqPort, branchId: reqBranch } = req.body;
+    if (!emp) {
+      return res.status(400).json({ error: 'Employee data is required for printing' });
+    }
+
+    // 1. Resolve settings and printer IP/Port
+    const settingsRes = await pool.query('SELECT auto_print_enabled, printer_ip FROM settings ORDER BY id ASC LIMIT 1');
+    const dbPrinterIp = settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip ? settingsRes.rows[0].printer_ip : '127.0.0.1';
+    const printerIp = reqIp || dbPrinterIp;
+    const printerPort = parseInt(reqPort || 9100);
+
+    // 2. Resolve Branch number
+    const effectiveBranch = emp.branch || reqBranch || req.user?.branch || '1';
+    const branchNumber = String(effectiveBranch).replace(/\D/g, '') || '1';
+    const channelName = `branch-${branchNumber}-orders`;
+
+    // 3. Generate ESC/POS ticket string
+    const ticketText = buildSalarySlipEscPos(emp, req.user);
+    const rawBuffer = Buffer.from(ticketText, 'latin1');
+    const base64EscPos = rawBuffer.toString('base64');
+
+    const payload = {
+      ticketType: 'salary-slip',
+      employeeName: emp.name || emp.employee_name || 'Staff',
+      employeeId: emp.employee_id || emp.id || 'N/A',
+      branchId: parseInt(branchNumber),
+      printerIp: printerIp,
+      printerPort: printerPort,
+      rawEscPos: base64EscPos,
+      printedAt: new Date().toISOString()
+    };
+
+    let dispatchedPusher = false;
+    let pusherError = null;
+
+    if (pusher) {
+      try {
+        await pusher.trigger(channelName, 'print-salary-slip', payload);
+        dispatchedPusher = true;
+      } catch (pErr) {
+        pusherError = pErr.message;
+        console.error('[PUSHER ERROR] Failed to send salary slip:', pErr);
+      }
+    }
+
+    // 4. Also attempt direct TCP print to printerIp:printerPort if reachable
+    let tcpSuccess = false;
+    try {
+      await new Promise((resolve) => {
+        const socket = new net.Socket();
+        socket.setTimeout(2500);
+        socket.connect(printerPort, printerIp, () => {
+          socket.write(rawBuffer, (wErr) => {
+            if (!wErr) tcpSuccess = true;
+            socket.end();
+            resolve();
+          });
+        });
+        socket.on('error', () => {
+          socket.destroy();
+          resolve();
+        });
+        socket.on('timeout', () => {
+          socket.destroy();
+          resolve();
+        });
+      });
+    } catch (tcpErr) {
+      // non-fatal, pusher handles it if TCP fails
+    }
+
+    if (!dispatchedPusher && !tcpSuccess) {
+      return res.status(500).json({ 
+        error: pusherError || 'Unable to reach printer or cloud print agent. Ensure printer IP is correct and print agent is running.' 
+      });
+    }
+
+    return res.json({ 
+      success: true, 
+      message: 'Salary slip sent to cloud printer successfully',
+      target: `${printerIp}:${printerPort}`,
+      channel: channelName,
+      tcpDirect: tcpSuccess,
+      pusherDispatched: dispatchedPusher
+    });
+  } catch (err) {
+    console.error('Error in /cloud-print-slip:', err);
+    res.status(500).json({ error: err.message || 'Failed to print salary slip' });
+  }
+});
+
+// POST /api/payroll/test-cloud-slip - Send test salary slip to verify thermal printer connectivity
+router.post('/test-cloud-slip', authenticateToken, async (req, res) => {
+  try {
+    const { printerIp: reqIp, printerPort: reqPort, branchId: reqBranch } = req.body;
+    const testEmp = {
+      name: 'TEST EMPLOYEE',
+      employee_id: 'EMP-9999',
+      branch: reqBranch ? `Restaurant ${reqBranch}` : 'Restaurant 1',
+      month: getKsaCurrentMonthStr(),
+      base_salary: 3000,
+      payable_salary: 3000,
+      deductions: 0,
+      this_month_adv: 200,
+      overtime_pay: 150,
+      bonus: 100,
+      net_salary: 3050,
+      cash_paid: 2000,
+      bank_paid: 1050,
+      paid_amount: 3050,
+      present_days: 30,
+      absent_days: 0,
+      leave_days: 0,
+      holiday_days: 0,
+      only_overtime_days: 0,
+      late_minutes: 0,
+      expected_hours: 360,
+      total_working_hours: 360,
+      total_working_minutes: 0,
+      payment_date: new Date().toISOString().slice(0, 10),
+      payment_time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      paid_by: req.user?.username || 'Admin Tester'
+    };
+
+    // Forward through the same cloud-print-slip logic
+    const settingsRes = await pool.query('SELECT auto_print_enabled, printer_ip FROM settings ORDER BY id ASC LIMIT 1');
+    const dbPrinterIp = settingsRes.rows.length > 0 && settingsRes.rows[0].printer_ip ? settingsRes.rows[0].printer_ip : '127.0.0.1';
+    const printerIp = reqIp || dbPrinterIp;
+    const printerPort = parseInt(reqPort || 9100);
+    const branchNumber = String(reqBranch || req.user?.branch || '1').replace(/\D/g, '') || '1';
+    const channelName = `branch-${branchNumber}-orders`;
+
+    const ticketText = buildSalarySlipEscPos(testEmp, req.user);
+    const rawBuffer = Buffer.from(ticketText, 'latin1');
+    const base64EscPos = rawBuffer.toString('base64');
+
+    const payload = {
+      ticketType: 'salary-slip',
+      employeeName: testEmp.name,
+      employeeId: testEmp.employee_id,
+      branchId: parseInt(branchNumber),
+      printerIp: printerIp,
+      printerPort: printerPort,
+      rawEscPos: base64EscPos,
+      isTest: true,
+      printedAt: new Date().toISOString()
+    };
+
+    let dispatchedPusher = false;
+    let pusherError = null;
+
+    if (pusher) {
+      try {
+        await pusher.trigger(channelName, 'print-salary-slip', payload);
+        dispatchedPusher = true;
+      } catch (pErr) {
+        pusherError = pErr.message;
+      }
+    }
+
+    let tcpSuccess = false;
+    try {
+      await new Promise((resolve) => {
+        const socket = new net.Socket();
+        socket.setTimeout(2500);
+        socket.connect(printerPort, printerIp, () => {
+          socket.write(rawBuffer, (wErr) => {
+            if (!wErr) tcpSuccess = true;
+            socket.end();
+            resolve();
+          });
+        });
+        socket.on('error', () => { socket.destroy(); resolve(); });
+        socket.on('timeout', () => { socket.destroy(); resolve(); });
+      });
+    } catch (e) {}
+
+    if (!dispatchedPusher && !tcpSuccess) {
+      return res.status(500).json({ 
+        error: pusherError || 'Could not reach printer at ' + printerIp + ':' + printerPort + '. Please check if print agent or printer is running.' 
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Test salary slip sent to printer successfully!',
+      target: `${printerIp}:${printerPort}`,
+      channel: channelName,
+      tcpDirect: tcpSuccess,
+      pusherDispatched: dispatchedPusher
+    });
+  } catch (err) {
+    console.error('Error in /test-cloud-slip:', err);
+    res.status(500).json({ error: err.message || 'Failed to send test salary slip' });
   }
 });
 

@@ -26,7 +26,11 @@ import {
   ListFilter,
   Info,
   Save,
-  Check
+  Check,
+  Printer,
+  FileText,
+  Smartphone,
+  Wifi
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -38,6 +42,13 @@ export default function Settings() {
   const [printMode, setPrintMode] = useState(localStorage.getItem('printMode') || 'standard')
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
   const [printerIp, setPrinterIp] = useState(() => localStorage.getItem('printerIp') || '127.0.0.1')
+  const [printerPort, setPrinterPort] = useState(() => localStorage.getItem('printerPort') || '9100')
+  const [paperWidth, setPaperWidth] = useState(() => localStorage.getItem('paperWidth') || '80mm')
+  const [salarySlipPrintMode, setSalarySlipPrintMode] = useState(() => localStorage.getItem('salarySlipPrintMode') || 'global')
+  const [salarySlipPaperFormat, setSalarySlipPaperFormat] = useState(() => localStorage.getItem('salarySlipPaperFormat') || '80mm')
+  const [autoPrintSalaryPayment, setAutoPrintSalaryPayment] = useState(() => localStorage.getItem('autoPrintSalaryPayment') === 'true')
+  const [testingKitchenPrint, setTestingKitchenPrint] = useState(false)
+  const [testingSalaryPrint, setTestingSalaryPrint] = useState(false)
   const [savingPrinterIp, setSavingPrinterIp] = useState(false)
   const [printerIpSaved, setPrinterIpSaved] = useState(false)
   const [lowStockBehavior, setLowStockBehavior] = useState('block')
@@ -285,6 +296,7 @@ export default function Settings() {
   const handleSavePrinterIp = async (e) => {
     if (e) e.preventDefault()
     const trimmedIp = (printerIp || '').trim()
+    const trimmedPort = (printerPort || '').trim() || '9100'
     if (!trimmedIp) {
       toast.error('Please enter a printer IP address')
       return
@@ -294,14 +306,17 @@ export default function Settings() {
     try {
       // 1. Immediately store to local device storage
       localStorage.setItem('printerIp', trimmedIp)
+      localStorage.setItem('printerPort', trimmedPort)
+      localStorage.setItem('paperWidth', paperWidth)
       setPrinterIp(trimmedIp)
+      setPrinterPort(trimmedPort)
 
       // 2. Persist to server backend database
       await api.put('/api/settings', { printer_ip: trimmedIp })
 
       setPrinterIpSaved(true)
       setTimeout(() => setPrinterIpSaved(false), 2500)
-      toast.success('Thermal Printer IP saved successfully!')
+      toast.success('Thermal Printer Settings saved successfully!')
     } catch (err) {
       console.error('Failed to save printer IP to server:', err)
       setPrinterIpSaved(true)
@@ -309,6 +324,42 @@ export default function Settings() {
       toast.success('Printer IP saved for this device')
     } finally {
       setSavingPrinterIp(false)
+    }
+  }
+
+  const handleTestKitchenPrint = async () => {
+    setTestingKitchenPrint(true)
+    const toastId = toast.loading('Sending test kitchen ticket to printer...')
+    try {
+      const res = await api.post('/api/settings/test-print', {
+        printerIp: (printerIp || '').trim() || '127.0.0.1',
+        printerPort: (printerPort || '').trim() || '9100',
+        branchId: user?.branch || '1'
+      })
+      toast.success(res.data?.message || 'Test kitchen ticket printed successfully!', { id: toastId })
+    } catch (err) {
+      console.error('Kitchen test print error:', err)
+      toast.error(err?.response?.data?.error || 'Failed to print test ticket. Ensure printer/agent is running.', { id: toastId })
+    } finally {
+      setTestingKitchenPrint(false)
+    }
+  }
+
+  const handleTestSalaryPrint = async () => {
+    setTestingSalaryPrint(true)
+    const toastId = toast.loading('Sending test salary slip to printer...')
+    try {
+      const res = await api.post('/api/payroll/test-cloud-slip', {
+        printerIp: (printerIp || '').trim() || '127.0.0.1',
+        printerPort: (printerPort || '').trim() || '9100',
+        branchId: user?.branch || '1'
+      })
+      toast.success(res.data?.message || 'Test salary slip sent to thermal printer!', { id: toastId })
+    } catch (err) {
+      console.error('Salary test print error:', err)
+      toast.error(err?.response?.data?.error || 'Failed to print test salary slip. Ensure printer/agent is running.', { id: toastId })
+    } finally {
+      setTestingSalaryPrint(false)
     }
   }
 
@@ -608,16 +659,31 @@ export default function Settings() {
         {/* Content Area */}
         <main className="settings-content">
           {activeTab === 'hardware' && (
-            <div className="settings-card fade-in">
-              <div className="card-header">
+            <div className="settings-card fade-in" style={{ maxWidth: 840 }}>
+              <div className="card-header" style={{ borderBottom: '1px solid var(--surface-2)', paddingBottom: '16px', marginBottom: '24px' }}>
                 <div>
-                  <h2>Hardware & Printers</h2>
-                  <p>Configure device-specific hardware settings (These settings apply only to this device)</p>
+                  <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Printer size={22} style={{ color: 'var(--primary)' }} />
+                    Hardware & Printers Configuration
+                  </h2>
+                  <p>Configure device print modes, thermal network printers, employee salary slips, and hardware testing</p>
                 </div>
               </div>
-              <div className="settings-form">
-                <div className="form-group" style={{ maxWidth: 400 }}>
-                  <label>Print Mode</label>
+
+              <div className="settings-form" style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                
+                {/* 1. Global POS / Kitchen Print Mode */}
+                <div style={{ background: 'var(--surface-1, #f8fafc)', border: '1px solid var(--surface-2, #e2e8f0)', borderRadius: '12px', padding: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <label style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '7px' }}>
+                      <Wifi size={17} style={{ color: '#0284c7' }} />
+                      Default Print Mode (POS & Kitchen)
+                    </label>
+                    <span style={{ fontSize: '11px', padding: '3px 9px', borderRadius: '6px', background: printMode === 'cloud' ? '#ecfdf5' : '#f1f5f9', color: printMode === 'cloud' ? '#059669' : '#64748b', fontWeight: 700, border: '1px solid #cbd5e1' }}>
+                      {printMode === 'cloud' ? '⚡ Cloud Active' : printMode === 'rawbt' ? '📱 Mobile RawBT' : '💻 Standard USB'}
+                    </span>
+                  </div>
+
                   <select 
                     value={printMode} 
                     onChange={e => {
@@ -625,130 +691,281 @@ export default function Settings() {
                       localStorage.setItem('printMode', e.target.value)
                       toast.success('Print mode saved for this device')
                     }}
-                    style={{ padding: '12px', borderRadius: '8px', border: '1px solid var(--surface-2)', width: '100%' }}
+                    style={{ padding: '11px 14px', borderRadius: '8px', border: '1.5px solid var(--surface-2, #cbd5e1)', width: '100%', fontSize: '14px', fontWeight: 600, background: 'var(--surface, #ffffff)', color: 'var(--text-primary)' }}
                   >
-                    <option value="standard">Standard Print (Browser / Laptop USB)</option>
-                    <option value="cloud">Cloud Auto-Printing (Thermal Printer)</option>
-                    <option value="rawbt">RawBT App (Android Mobile Direct Print)</option>
+                    <option value="standard">Standard Print (Browser Dialog / Laptop USB Printer)</option>
+                    <option value="cloud">Cloud Auto-Printing (Direct ESC/POS 80mm via Local Agent / LAN)</option>
+                    <option value="rawbt">RawBT App (Android Mobile Direct Print via App Intent)</option>
                   </select>
-                  <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+
+                  <p style={{ fontSize: 12.5, color: 'var(--text-muted, #64748b)', marginTop: 10, lineHeight: 1.5, marginBottom: 0 }}>
                     {printMode === 'standard' 
-                      ? 'Uses the standard browser print dialog. Best for laptops or desktop computers connected to a USB printer.' 
+                      ? 'Opens the standard browser print dialog. Best for laptops or desktop computers connected to a USB receipt printer.' 
                       : printMode === 'cloud'
-                      ? 'Automatically pushes new orders directly to the kitchen thermal printer over the local network via Pusher.'
-                      : 'Uses the RawBT Android app to print directly to a network/LAN printer. Best for waiters punching orders from mobile phones.'}
+                      ? 'Instantly pushes orders and slips to network thermal receipt printers via Pusher and local print agents on Port 9100.'
+                      : 'Uses the RawBT Android app to print directly from mobile phones/tablets over LAN or Bluetooth. Ideal for mobile order-takers.'}
                   </p>
                 </div>
-                
-                {printMode === 'cloud' && (
-                  <div className="form-group" style={{ maxWidth: 460, marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--surface-2)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <label style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
-                        Cloud Printer Configuration
+
+                {/* 2. Network Thermal Printer Settings (IP, Port, Test Print) */}
+                <div style={{ background: 'var(--surface-1, #f8fafc)', border: '1px solid var(--surface-2, #e2e8f0)', borderRadius: '12px', padding: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                    <label style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '7px' }}>
+                      <Printer size={17} style={{ color: '#d97706' }} />
+                      Network Thermal Receipt Printer
+                    </label>
+                    <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', fontWeight: 700 }}>
+                      TCP RAW ESC/POS
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(110px, 1fr) auto', gap: '12px', alignItems: 'end' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #475569)', display: 'block', marginBottom: '6px' }}>
+                        Printer IP Address
                       </label>
-                      <span style={{ 
-                        fontSize: '11px', 
-                        padding: '2px 8px', 
-                        borderRadius: '6px', 
-                        background: 'rgba(16, 185, 129, 0.12)', 
-                        color: '#10b981', 
-                        fontWeight: 600 
-                      }}>
-                        Port 9100 (TCP RAW)
+                      <input 
+                        type="text" 
+                        value={printerIp}
+                        onChange={e => {
+                          setPrinterIp(e.target.value)
+                          setPrinterIpSaved(false)
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleSavePrinterIp()
+                          }
+                        }}
+                        placeholder="e.g. 192.168.1.100 or 127.0.0.1"
+                        style={{ 
+                          padding: '10px 12px', 
+                          borderRadius: '8px', 
+                          border: printerIpSaved ? '1.5px solid #10b981' : '1px solid var(--surface-2, #cbd5e1)', 
+                          width: '100%', 
+                          background: 'var(--surface, #ffffff)',
+                          fontSize: '13.5px',
+                          fontFamily: 'monospace',
+                          color: 'var(--text-primary)',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #475569)', display: 'block', marginBottom: '6px' }}>
+                        Printer Port
+                      </label>
+                      <input 
+                        type="text" 
+                        value={printerPort}
+                        onChange={e => {
+                          setPrinterPort(e.target.value)
+                          setPrinterIpSaved(false)
+                        }}
+                        placeholder="9100"
+                        style={{ 
+                          padding: '10px 12px', 
+                          borderRadius: '8px', 
+                          border: '1px solid var(--surface-2, #cbd5e1)', 
+                          width: '100%', 
+                          background: 'var(--surface, #ffffff)',
+                          fontSize: '13.5px',
+                          fontFamily: 'monospace',
+                          color: 'var(--text-primary)',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      id="btn-save-printer-ip"
+                      onClick={handleSavePrinterIp}
+                      disabled={savingPrinterIp}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        padding: '10px 18px',
+                        background: printerIpSaved ? '#10b981' : 'var(--primary, #e11d48)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        cursor: savingPrinterIp ? 'not-allowed' : 'pointer',
+                        whiteSpace: 'nowrap',
+                        height: '40px'
+                      }}
+                    >
+                      {savingPrinterIp ? <RefreshCw size={14} className="spin" /> : printerIpSaved ? <Check size={15} /> : <Save size={15} />}
+                      <span>{printerIpSaved ? 'Saved' : 'Save Printer'}</span>
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginTop: '16px', paddingTop: '14px', borderTop: '1px dashed #cbd5e1' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Info size={13} color="var(--text-muted)" />
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        Default thermal receipt port is <strong>9100</strong>. Enter printer's static LAN IP address.
                       </span>
                     </div>
 
-                    <div style={{ marginTop: '14px' }}>
-                      <label style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                        Thermal Printer IP Address
+                    <button
+                      type="button"
+                      onClick={handleTestKitchenPrint}
+                      disabled={testingKitchenPrint}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 14px',
+                        borderRadius: '6px',
+                        background: '#eff6ff',
+                        color: '#0284c7',
+                        border: '1px solid #bfdbfe',
+                        fontSize: '12.5px',
+                        fontWeight: 700,
+                        cursor: testingKitchenPrint ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {testingKitchenPrint ? <RefreshCw size={13} className="spin" /> : <Printer size={13} />}
+                      Test Kitchen Slip Print
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Dedicated Salary Slip Printing Options */}
+                <div style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <div>
+                      <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '7px' }}>
+                        <Banknote size={18} style={{ color: '#059669' }} />
+                        Salary Slip Printing Preferences
+                      </h3>
+                      <p style={{ fontSize: '12px', color: '#64748b', margin: '3px 0 0 0' }}>
+                        Configure format, routing, and automation for official employee salary payment receipts
+                      </p>
+                    </div>
+
+                    <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#059669', fontWeight: 700, border: '1px solid #a7f3d0' }}>
+                      Salary Module
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+                    {/* Salary Slip Print Routing */}
+                    <div>
+                      <label style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                        Salary Slip Print Destination
                       </label>
-                      
-                      {/* IP Input with Save Button directly next to it */}
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <div style={{ position: 'relative', flex: 1 }}>
-                          <input 
-                            type="text" 
-                            value={printerIp}
-                            onChange={e => {
-                              setPrinterIp(e.target.value)
-                              setPrinterIpSaved(false)
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                handleSavePrinterIp()
-                              }
-                            }}
-                            placeholder="e.g. 192.168.1.100"
-                            style={{ 
-                              padding: '11px 14px', 
-                              borderRadius: '8px', 
-                              border: printerIpSaved ? '1.5px solid #10b981' : '1px solid var(--surface-2)', 
-                              width: '100%', 
-                              background: 'var(--surface)',
-                              fontSize: '14px',
-                              fontFamily: 'monospace',
-                              color: 'var(--text-primary)',
-                              boxSizing: 'border-box',
-                              transition: 'border-color 0.2s ease',
-                              outline: 'none'
-                            }}
-                          />
-                        </div>
+                      <select 
+                        value={salarySlipPrintMode}
+                        onChange={e => {
+                          setSalarySlipPrintMode(e.target.value)
+                          localStorage.setItem('salarySlipPrintMode', e.target.value)
+                          toast.success('Salary slip print destination updated')
+                        }}
+                        style={{ padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', width: '100%', fontSize: '13px', fontWeight: 600, background: '#fff', color: '#1e293b' }}
+                      >
+                        <option value="global">Follow Device Default ({printMode === 'cloud' ? 'Cloud Printer' : printMode === 'rawbt' ? 'RawBT' : 'Standard Browser'})</option>
+                        <option value="cloud">Always Cloud Auto-Print (Direct 80mm ESC/POS Thermal)</option>
+                        <option value="standard">Always Browser Print Dialog (Window Preview / PDF)</option>
+                        <option value="rawbt">Always RawBT App (Android Mobile)</option>
+                      </select>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '4px' }}>
+                        {salarySlipPrintMode === 'cloud' ? 'Outputs directly to Port 9100 thermal printer without dialog.' : 'Can open print preview or send to mobile app.'}
+                      </span>
+                    </div>
 
-                        <button
-                          type="button"
-                          id="btn-save-printer-ip"
-                          onClick={handleSavePrinterIp}
-                          disabled={savingPrinterIp}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '7px',
-                            padding: '11px 20px',
-                            background: printerIpSaved ? '#10b981' : 'var(--primary, #e11d48)',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '8px',
-                            fontSize: '13.5px',
-                            fontWeight: 600,
-                            cursor: savingPrinterIp ? 'not-allowed' : 'pointer',
-                            opacity: savingPrinterIp ? 0.75 : 1,
-                            whiteSpace: 'nowrap',
-                            boxShadow: '0 2px 6px rgba(0, 0, 0, 0.12)',
-                            transition: 'all 0.2s ease',
-                            flexShrink: 0
-                          }}
-                        >
-                          {savingPrinterIp ? (
-                            <>
-                              <RefreshCw size={15} className="spin" />
-                              <span>Saving...</span>
-                            </>
-                          ) : printerIpSaved ? (
-                            <>
-                              <Check size={16} />
-                              <span>Saved</span>
-                            </>
-                          ) : (
-                            <>
-                              <Save size={16} />
-                              <span>Save</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px' }}>
-                        <Info size={13} color="var(--text-muted)" />
-                        <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
-                          Enter the local IP address of your receipt thermal printer (e.g., 192.168.1.87) and click <strong>Save</strong>.
-                        </p>
-                      </div>
+                    {/* Salary Slip Paper Layout */}
+                    <div>
+                      <label style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                        Paper & Slip Format
+                      </label>
+                      <select 
+                        value={salarySlipPaperFormat}
+                        onChange={e => {
+                          setSalarySlipPaperFormat(e.target.value)
+                          localStorage.setItem('salarySlipPaperFormat', e.target.value)
+                          toast.success('Salary slip paper format saved')
+                        }}
+                        style={{ padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', width: '100%', fontSize: '13px', fontWeight: 600, background: '#fff', color: '#1e293b' }}
+                      >
+                        <option value="80mm">80mm Thermal Receipt (Standard POS Roll)</option>
+                        <option value="a4">A4 Full Page Voucher Statement</option>
+                      </select>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '4px' }}>
+                        Optimized with clear borders, duty hours breakdown, and signature boxes.
+                      </span>
                     </div>
                   </div>
-                )}
+
+                  {/* Auto-Print on Salary Payment Toggle */}
+                  <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
+                      <input 
+                        type="checkbox"
+                        checked={autoPrintSalaryPayment}
+                        onChange={e => {
+                          setAutoPrintSalaryPayment(e.target.checked)
+                          localStorage.setItem('autoPrintSalaryPayment', e.target.checked ? 'true' : 'false')
+                          toast.success(e.target.checked ? 'Auto-print on salary payment enabled' : 'Auto-print on salary payment disabled')
+                        }}
+                        style={{ width: '17px', height: '17px', accentColor: '#059669', cursor: 'pointer' }}
+                      />
+                      <div>
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', display: 'block' }}>
+                          Auto-Print on Salary Payment
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          Automatically print or dispatch the salary receipt whenever a payment is confirmed in the Pay Now popup
+                        </span>
+                      </div>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleTestSalaryPrint}
+                      disabled={testingSalaryPrint}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 14px',
+                        borderRadius: '6px',
+                        background: '#ecfdf5',
+                        color: '#059669',
+                        border: '1px solid #a7f3d0',
+                        fontSize: '12.5px',
+                        fontWeight: 700,
+                        cursor: testingSalaryPrint ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {testingSalaryPrint ? <RefreshCw size={13} className="spin" /> : <Printer size={13} />}
+                      Test Salary Slip Print
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Cloud Printing Infrastructure & Diagnostics */}
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Wifi size={14} style={{ color: '#10b981' }} />
+                      Cloud Print Agent Infrastructure
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#059669', fontWeight: 700 }}>
+                      Cluster: ap2 | Active
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5, margin: 0 }}>
+                    When using Cloud Printing, orders and salary slips are sent across the Pusher event channels (<code>branch-1-orders</code>, <code>branch-2-orders</code>, <code>branch-3-orders</code>). The local Windows print agent running in <code>print_agents/</code> receives these events and immediately prints them to the receipt printer at port 9100.
+                  </p>
+                </div>
+
               </div>
             </div>
           )}

@@ -112,6 +112,11 @@ function initPusher() {
     dispatchPrint(data);
   });
 
+  channel.bind('print-salary-slip', (data) => {
+    log(`\n[SALARY SLIP RECEIVED] Branch ${BRANCH_ID} Employee: ${data.employeeName || data.employeeId || 'Staff'}`);
+    dispatchPrint(data);
+  });
+
   if (watchdogInterval) clearInterval(watchdogInterval);
   watchdogInterval = setInterval(() => {
     if (!pusher || !pusher.connection) return;
@@ -301,10 +306,19 @@ function dispatchPrint(data, retryCount = 0) {
   log(`[DISPATCH] Connecting to printer at ${targetIp}:${targetPort}...`);
 
   socket.connect(targetPort, targetIp, () => {
-    log(`[DISPATCH] Connected! Sending ticket for Order #${data.orderNumber || data.orderId}...`);
+    const isSalarySlip = data.ticketType === 'salary-slip';
+    const label = isSalarySlip ? `Salary Slip (${data.employeeName || data.employeeId || 'Staff'})` : `Order #${data.orderNumber || data.orderId || 'N/A'}`;
+    log(`[DISPATCH] Connected! Sending ticket for ${label}...`);
 
-    const ticket = buildTicket(data);
-    const buffer = Buffer.from(ticket, 'latin1');
+    let buffer;
+    let ticket = '';
+    if (data.rawEscPos) {
+      buffer = Buffer.from(data.rawEscPos, 'base64');
+      ticket = buffer.toString('latin1');
+    } else {
+      ticket = buildTicket(data);
+      buffer = Buffer.from(ticket, 'latin1');
+    }
 
     // Auto-update preview HTML
     try {

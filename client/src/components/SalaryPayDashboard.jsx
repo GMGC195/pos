@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getSaudiPreviousMonthStr, formatMonthDisplay } from '../utils/timezone';
+import toast from 'react-hot-toast';
+import { printSalarySlipViaRawBT } from '../utils/rawbtPrinter';
 
 const CURRENCY = 'SAR';
 
@@ -154,14 +156,14 @@ export default function SalaryPayDashboard() {
       slip = selectedSlip || {};
     }
 
-    const baseSal = parseFloat(slip.base_salary || slip.salary || slip.salary_amount || 0);
-    const payableSal = parseFloat(slip.payable_salary !== undefined && slip.payable_salary !== null && slip.payable_salary !== '' && Number(slip.payable_salary) !== 0 
-      ? slip.payable_salary 
-      : (slip.net_salary || slip.salary_amount || baseSal));
+    const baseSal = parseFloat(slip.base_salary || slip.salary || 0);
+    const payableSal = (slip.payable_salary !== undefined && slip.payable_salary !== null && slip.payable_salary !== '')
+      ? parseFloat(slip.payable_salary)
+      : Math.max(0, baseSal - parseFloat(slip.deduction_amount !== undefined ? slip.deduction_amount : (slip.deductions || 0)));
     const totalPaid = parseFloat(slip.salary_amount || slip.paid_amount || 0);
-    const netSalary = parseFloat(slip.net_salary !== undefined && slip.net_salary !== null && slip.net_salary !== '' && Number(slip.net_salary) !== 0 
-      ? slip.net_salary 
-      : (totalPaid || payableSal || baseSal));
+    const netSalary = (slip.net_salary !== undefined && slip.net_salary !== null && slip.net_salary !== '')
+      ? parseFloat(slip.net_salary)
+      : (totalPaid || payableSal || baseSal);
     const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
     const lastMonthBal = parseFloat(slip.last_month_balance || 0);
     const bonus = parseFloat(slip.bonus || 0);
@@ -185,14 +187,8 @@ export default function SalaryPayDashboard() {
     const displayTotalOtHours = rawTotalOtHours > 0 ? rawTotalOtHours : Math.max(0, netOtHours);
     const totalOtPay = parseFloat(slip.overtime_amount || slip.overtime_pay || 0);
 
-    const targetMonth = slip.month || selectedMonth || '';
-    let monthFormatted = targetMonth;
-    try {
-      if (targetMonth && /^\d{4}-\d{2}$/.test(targetMonth)) {
-        const dateObj = new Date(`${targetMonth}-01T00:00:00`);
-        monthFormatted = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      }
-    } catch {}
+    const targetMonth = slip.month || slip.pay_period || selectedMonth || '';
+    const monthFormatted = formatMonthDisplay(targetMonth);
 
     const printDate = new Date().toLocaleString('en-US', {
       day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -379,8 +375,8 @@ export default function SalaryPayDashboard() {
 
         <div class="row-title">EARNINGS / ADDITIONS (+)</div>
         <div class="row">
-          <span>Payable (Worked Duty)</span>
-          <span class="right">${CURRENCY} ${payableSal.toFixed(2)}</span>
+          <span>Basic Base Salary</span>
+          <span class="right">${CURRENCY} ${baseSal.toFixed(2)}</span>
         </div>
         ${lastMonthBal > 0 ? `
           <div class="row">
@@ -449,9 +445,9 @@ export default function SalaryPayDashboard() {
 
         <div class="divider-solid"></div>
 
-        <div class="row">
-          <span>Basic Base Salary:</span>
-          <span class="right">${CURRENCY} ${baseSal.toFixed(2)}</span>
+        <div class="row bold">
+          <span>Payable (Worked Duty):</span>
+          <span class="right">${CURRENCY} ${payableSal.toFixed(2)}</span>
         </div>
         <div class="row bold" style="font-size: 12.5px; margin: 3px 0;">
           <span>NET PAYABLE SALARY:</span>
@@ -515,11 +511,37 @@ export default function SalaryPayDashboard() {
     setSelectedSlip(item);
   };
 
-  const triggerBrowserPrint = (slipToPrint) => {
+  const triggerBrowserPrint = async (slipToPrint) => {
     const slip = (slipToPrint && typeof slipToPrint === 'object' && !slipToPrint.nativeEvent && !slipToPrint._reactName && !slipToPrint.target) 
       ? slipToPrint 
       : selectedSlip;
     if (!slip) return;
+
+    const slipMode = localStorage.getItem('salarySlipPrintMode') || 'global';
+    const effectivePrintMode = slipMode === 'global' ? (localStorage.getItem('printMode') || 'standard') : slipMode;
+
+    if (effectivePrintMode === 'cloud') {
+      const toastId = toast.loading('Sending salary slip to cloud printer...');
+      try {
+        const printerIp = localStorage.getItem('printerIp') || '127.0.0.1';
+        const printerPort = localStorage.getItem('printerPort') || '9100';
+        await axios.post('/api/payroll/cloud-print-slip', {
+          emp: slip,
+          printerIp,
+          printerPort
+        });
+        toast.success('Salary slip sent to cloud printer!', { id: toastId });
+        return;
+      } catch (printErr) {
+        console.error('Cloud print failed:', printErr);
+        toast.error(printErr?.response?.data?.error || 'Failed to print via Cloud. Falling back to browser print...', { id: toastId });
+      }
+    } else if (effectivePrintMode === 'rawbt') {
+      printSalarySlipViaRawBT(slip);
+      toast.success('Sent to RawBT mobile printer');
+      return;
+    }
+
     const htmlContent = generateSlipHtml(slip);
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
@@ -537,8 +559,8 @@ export default function SalaryPayDashboard() {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
       setTimeout(() => {
-        if (document.body.contains(iframe)) {
-          document.body.removeChild(iframe);
+        if (iframe && iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
         }
       }, 1000);
     }, 400);

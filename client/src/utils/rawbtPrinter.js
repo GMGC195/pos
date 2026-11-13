@@ -84,3 +84,100 @@ export const printViaRawBT = (orderData) => {
   const rawbtUrl = `intent:${encodedText}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
   window.location.href = rawbtUrl;
 };
+
+export const printSalarySlipViaRawBT = (emp) => {
+  if (!emp) return;
+  let receiptText = "";
+  const esc = '\x1B';
+  const crlf = '\r\n';
+  const cmds = esc + "@" + esc + "2";
+  const LINE_WIDTH = 32;
+
+  const rightAlign = (leftStr, rightStr, width = LINE_WIDTH) => {
+    const left = String(leftStr || '');
+    const right = String(rightStr || '');
+    const space = Math.max(1, width - (left.length + right.length));
+    return left + ' '.repeat(space) + right;
+  };
+
+  const baseSal = parseFloat(emp.base_salary || 0);
+  const deductions = parseFloat(emp.deductions || 0);
+  const payableSal = (emp.payable_salary !== undefined && emp.payable_salary !== null && emp.payable_salary !== '')
+    ? parseFloat(emp.payable_salary)
+    : Math.max(0, baseSal - deductions);
+
+  const cashPaid = parseFloat(emp.cash_paid || 0);
+  const bankPaid = parseFloat(emp.bank_paid || 0);
+  const totalPaid = (emp.paid_amount !== undefined && emp.paid_amount !== null && parseFloat(emp.paid_amount) > 0)
+    ? parseFloat(emp.paid_amount)
+    : Math.round((cashPaid + bankPaid) * 100) / 100;
+
+  const netSalary = (emp.net_salary !== undefined && emp.net_salary !== null && emp.net_salary !== '')
+    ? parseFloat(emp.net_salary)
+    : Math.max(0, payableSal - parseFloat(emp.this_month_adv || emp.advance_deduction || 0));
+
+  const remaining = Math.round((netSalary - totalPaid) * 100) / 100;
+  const targetMonth = emp?.month || emp?.pay_period || 'Current';
+
+  let branchName = String(emp.branch || 'B1');
+  if (branchName.toLowerCase().includes('3')) branchName = 'B3';
+  else if (branchName.toLowerCase().includes('2')) branchName = 'B2';
+  else branchName = 'B1';
+
+  receiptText += cmds;
+  receiptText += esc + 'a' + '\x01';
+  receiptText += esc + '!' + '\x18';
+  receiptText += "SALARY SLIP" + crlf;
+  receiptText += esc + '!' + '\x00';
+  receiptText += new Date().toLocaleString() + crlf;
+  receiptText += "================================" + crlf;
+
+  receiptText += esc + 'a' + '\x00';
+  receiptText += rightAlign("Employee:", sanitizeThermalText(emp.name || emp.employee_name || 'Staff')) + crlf;
+  receiptText += rightAlign("ID:", sanitizeThermalText(emp.employee_id || emp.id || 'N/A')) + crlf;
+  receiptText += rightAlign("Branch:", branchName) + crlf;
+  receiptText += rightAlign("Period:", targetMonth) + crlf;
+  receiptText += "--------------------------------" + crlf;
+
+  receiptText += rightAlign("Base Salary:", `SAR ${baseSal.toFixed(2)}`) + crlf;
+  receiptText += rightAlign("Worked Duty:", `SAR ${payableSal.toFixed(2)}`) + crlf;
+  const otPay = parseFloat(emp.overtime_pay || 0);
+  if (otPay > 0) {
+    receiptText += rightAlign("Overtime:", `SAR ${otPay.toFixed(2)}`) + crlf;
+  }
+  const bonus = parseFloat(emp.bonus || 0);
+  if (bonus > 0) {
+    receiptText += rightAlign("Bonus:", `SAR ${bonus.toFixed(2)}`) + crlf;
+  }
+
+  if (deductions > 0) {
+    receiptText += rightAlign("Cuts/Absence:", `SAR ${deductions.toFixed(2)}`) + crlf;
+  }
+  const advDeduct = parseFloat(emp.this_month_adv || emp.advance_deduction || 0);
+  if (advDeduct > 0) {
+    receiptText += rightAlign("Advance Deduct:", `SAR ${advDeduct.toFixed(2)}`) + crlf;
+  }
+
+  receiptText += "--------------------------------" + crlf;
+  receiptText += esc + '!' + '\x10';
+  receiptText += rightAlign("NET PAYABLE:", `SAR ${netSalary.toFixed(2)}`) + crlf;
+  receiptText += esc + '!' + '\x00';
+  receiptText += "================================" + crlf;
+
+  receiptText += rightAlign("Total Paid:", `SAR ${totalPaid.toFixed(2)}`) + crlf;
+  if (cashPaid > 0) receiptText += rightAlign("Cash Paid:", `SAR ${cashPaid.toFixed(2)}`) + crlf;
+  if (bankPaid > 0) receiptText += rightAlign("Bank Paid:", `SAR ${bankPaid.toFixed(2)}`) + crlf;
+  receiptText += rightAlign("Remaining:", `SAR ${Math.max(0, remaining).toFixed(2)}`) + crlf;
+  receiptText += rightAlign("Status:", totalPaid >= netSalary ? "PAID" : "PARTIAL") + crlf;
+  receiptText += "--------------------------------" + crlf;
+
+  receiptText += crlf + "Sign: __________________________" + crlf;
+  receiptText += esc + 'a' + '\x01';
+  receiptText += crlf + "Thank You" + crlf;
+  receiptText += crlf + crlf + crlf;
+  receiptText += esc + "i";
+
+  const encodedText = btoa(unescape(encodeURIComponent(receiptText)));
+  const rawbtUrl = `intent:${encodedText}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
+  window.location.href = rawbtUrl;
+};
