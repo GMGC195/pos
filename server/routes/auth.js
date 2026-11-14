@@ -390,18 +390,18 @@ router.post('/verify-developer', async (req, res) => {
     }
 
     const userRole = (user.role || '').trim().toLowerCase();
-    if (userRole !== 'developer') {
+    if (userRole !== 'developer' && userRole !== 'admin') {
       return res.status(403).json({ 
-        error: `Access Denied: Account '${user.username}' has role '${user.role}'. Only authorized Developer accounts can edit closed shift records.` 
+        error: `Access Denied: Account '${user.username}' has role '${user.role}'. Only authorized Developer and Admin accounts can edit closed shift records.` 
       });
     }
 
-    // Generate short-lived developer authorization token (valid for 15 minutes)
+    // Generate short-lived authorization token (valid for 15 minutes)
     const devToken = jwt.sign(
       {
         id: user.id,
         username: user.username,
-        role: 'developer',
+        role: userRole,
         purpose: 'shift_closing_edit'
       },
       process.env.JWT_SECRET || 'fallback_secret',

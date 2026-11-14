@@ -118,10 +118,11 @@ export default function SalaryPayDashboard() {
         const res = await axios.get('/api/payroll/my-permissions');
         if (res.data && isMounted) {
           setSalaryPermissions(res.data);
-          if (res.data.is_salary_pay_operator && res.data.allowed_months && res.data.allowed_months.length > 0) {
+          const viewMonths = res.data.allowed_view_months || res.data.allowed_months || [];
+          if (res.data.is_salary_pay_operator && viewMonths.length > 0) {
             setSelectedMonth(prev => {
-              if (!res.data.allowed_months.includes(prev)) {
-                return res.data.allowed_months[0];
+              if (!viewMonths.includes(prev)) {
+                return viewMonths[0];
               }
               return prev;
             });
@@ -508,21 +509,71 @@ export default function SalaryPayDashboard() {
 
         <div class="divider-double"></div>
 
-        <div class="row-title">PAYMENT DISTRIBUTION</div>
-        <div class="row">
-          <span>Total Disbursed:</span>
-          <span class="right bold">${CURRENCY} ${totalPaid.toFixed(2)}</span>
-        </div>
-        ${remaining !== 0 ? `
-          <div class="row bold" style="font-size: 11.5px; margin-top: 2px;">
+        ${parseFloat(slip.current_paid_amount || 0) > 0 ? `
+          <div class="row-title" style="color: #0284c7;">CURRENT PAYMENT TRANSACTION</div>
+          ${parseFloat(slip.current_cash_paid || 0) > 0 ? `
+            <div class="row">
+              <span>Current Cash Paid:</span>
+              <span class="right bold">${CURRENCY} ${parseFloat(slip.current_cash_paid).toFixed(2)}</span>
+            </div>
+          ` : ''}
+          ${parseFloat(slip.current_bank_paid || 0) > 0 ? `
+            <div class="row">
+              <span>Current Card / Bank:</span>
+              <span class="right bold">${CURRENCY} ${parseFloat(slip.current_bank_paid).toFixed(2)}</span>
+            </div>
+          ` : ''}
+          <div class="row bold" style="font-size: 12px; border-top: 1px dashed #000; padding-top: 2px;">
+            <span>CURRENT TRANSACTION TOTAL:</span>
+            <span class="right">${CURRENCY} ${parseFloat(slip.current_paid_amount).toFixed(2)}</span>
+          </div>
+          <div class="divider-solid"></div>
+          <div class="row-title">CUMULATIVE SALARY SUMMARY</div>
+          <div class="row">
+            <span>Previous Accumulated Paid:</span>
+            <span class="right bold">${CURRENCY} ${parseFloat(slip.previous_paid_amount !== undefined ? slip.previous_paid_amount : Math.max(0, totalPaid - parseFloat(slip.current_paid_amount))).toFixed(2)}</span>
+          </div>
+          <div class="row">
+            <span>Total Paid to Date:</span>
+            <span class="right bold">${CURRENCY} ${totalPaid.toFixed(2)}</span>
+          </div>
+          <div class="row bold" style="font-size: 12px; border-top: 1px dashed #000; padding-top: 2px; margin-top: 2px;">
             <span>REMAINING SALARY:</span>
             <span class="right">${CURRENCY} ${remaining.toFixed(2)}</span>
           </div>
-        ` : ''}
-        <div class="row" style="font-size: 10px; margin-top: 1px;">
-          <span>Payment Status:</span>
-          <span class="right bold">${payStatus}</span>
-        </div>
+          <div class="row" style="font-size: 10px; margin-top: 1px;">
+            <span>Payment Status:</span>
+            <span class="right bold">${totalPaid >= netSalary ? 'FULLY SETTLED' : 'PARTIALLY PAID / CARRIED'}</span>
+          </div>
+        ` : `
+          <div class="row-title">PAYMENT DISTRIBUTION</div>
+          <div class="row">
+            <span>Total Disbursed:</span>
+            <span class="right bold">${CURRENCY} ${totalPaid.toFixed(2)}</span>
+          </div>
+          ${parseFloat(slip.cash_paid || 0) > 0 ? `
+            <div class="row">
+              <span>Cash Paid:</span>
+              <span class="right">${CURRENCY} ${parseFloat(slip.cash_paid).toFixed(2)}</span>
+            </div>
+          ` : ''}
+          ${parseFloat(slip.bank_paid || 0) > 0 ? `
+            <div class="row">
+              <span>Bank / Card Paid:</span>
+              <span class="right">${CURRENCY} ${parseFloat(slip.bank_paid).toFixed(2)}</span>
+            </div>
+          ` : ''}
+          ${remaining !== 0 ? `
+            <div class="row bold" style="font-size: 11.5px; margin-top: 2px;">
+              <span>REMAINING SALARY:</span>
+              <span class="right">${CURRENCY} ${remaining.toFixed(2)}</span>
+            </div>
+          ` : ''}
+          <div class="row" style="font-size: 10px; margin-top: 1px;">
+            <span>Payment Status:</span>
+            <span class="right bold">${payStatus}</span>
+          </div>
+        `}
         <div class="row" style="font-size: 10px; margin-top: 1px;">
           <span>Payment Date:</span>
           <span class="right">${payDate}${payTime ? ' ' + payTime : ''}</span>

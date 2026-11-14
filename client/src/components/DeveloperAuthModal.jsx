@@ -5,8 +5,8 @@ import { ShieldCheck, Lock, Eye, EyeOff, X, AlertCircle } from 'lucide-react';
 
 export default function DeveloperAuthModal({
   isOpen = true,
-  title = 'Developer Authorization Required',
-  actionDescription = 'Editing closed shift records requires verified Developer credentials for financial audit compliance.',
+  title = 'Admin & Developer Authorization Required',
+  actionDescription = 'Editing closed shift records requires verified Admin or Developer credentials for financial audit compliance.',
   onClose,
   onAuthorized
 }) {

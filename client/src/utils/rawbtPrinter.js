@@ -166,11 +166,34 @@ export const printSalarySlipViaRawBT = (emp) => {
   receiptText += esc + '!' + '\x00';
   receiptText += "================================" + crlf;
 
-  receiptText += rightAlign("Total Paid:", `SAR ${totalPaid.toFixed(2)}`) + crlf;
-  if (cashPaid > 0) receiptText += rightAlign("Cash Paid:", `SAR ${cashPaid.toFixed(2)}`) + crlf;
-  if (bankPaid > 0) receiptText += rightAlign("Bank Paid:", `SAR ${bankPaid.toFixed(2)}`) + crlf;
-  receiptText += rightAlign("Remaining:", `SAR ${Math.max(0, remaining).toFixed(2)}`) + crlf;
-  receiptText += rightAlign("Status:", totalPaid >= netSalary ? "PAID" : "PARTIAL") + crlf;
+  const curTransPaid = parseFloat(emp.current_paid_amount || 0);
+  const curTransCash = parseFloat(emp.current_cash_paid || 0);
+  const curTransBank = parseFloat(emp.current_bank_paid || 0);
+  const prevPaid = emp.previous_paid_amount !== undefined 
+    ? parseFloat(emp.previous_paid_amount) 
+    : Math.max(0, totalPaid - curTransPaid);
+
+  if (curTransPaid > 0) {
+    receiptText += "CURRENT PAYMENT TRANSACTION" + crlf;
+    if (curTransCash > 0) receiptText += rightAlign("Current Cash:", `SAR ${curTransCash.toFixed(2)}`) + crlf;
+    if (curTransBank > 0) receiptText += rightAlign("Current Card/Bank:", `SAR ${curTransBank.toFixed(2)}`) + crlf;
+    receiptText += esc + '!' + '\x10';
+    receiptText += rightAlign("Current Disbursed:", `SAR ${curTransPaid.toFixed(2)}`) + crlf;
+    receiptText += esc + '!' + '\x00';
+    receiptText += "--------------------------------" + crlf;
+
+    receiptText += "CUMULATIVE SALARY SUMMARY" + crlf;
+    receiptText += rightAlign("Previous Paid:", `SAR ${prevPaid.toFixed(2)}`) + crlf;
+    receiptText += rightAlign("Total Paid to Date:", `SAR ${totalPaid.toFixed(2)}`) + crlf;
+    receiptText += rightAlign("Remaining Salary:", `SAR ${Math.max(0, remaining).toFixed(2)}`) + crlf;
+    receiptText += rightAlign("Status:", totalPaid >= netSalary ? "PAID" : "PARTIAL") + crlf;
+  } else {
+    receiptText += rightAlign("Total Paid:", `SAR ${totalPaid.toFixed(2)}`) + crlf;
+    if (cashPaid > 0) receiptText += rightAlign("Cash Paid:", `SAR ${cashPaid.toFixed(2)}`) + crlf;
+    if (bankPaid > 0) receiptText += rightAlign("Bank Paid:", `SAR ${bankPaid.toFixed(2)}`) + crlf;
+    receiptText += rightAlign("Remaining:", `SAR ${Math.max(0, remaining).toFixed(2)}`) + crlf;
+    receiptText += rightAlign("Status:", totalPaid >= netSalary ? "PAID" : "PARTIAL") + crlf;
+  }
   receiptText += "--------------------------------" + crlf;
 
   receiptText += crlf + "Sign: __________________________" + crlf;

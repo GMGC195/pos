@@ -334,8 +334,8 @@ router.post('/transfers', authenticateToken, async (req, res) => {
 
       const itemRes = await client.query(`
         INSERT INTO internal_branch_transfer_items (
-          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode, needed_by_time, priority
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *
       `, [
         createdTransfer.id,
@@ -348,7 +348,9 @@ router.post('/transfers', authenticateToken, async (req, res) => {
         item.image_url || null,
         item.price ? parseFloat(item.price) : null,
         itemSku,
-        itemBarcode
+        itemBarcode,
+        item.needed_by_time || createdTransfer.needed_by_time || null,
+        item.priority || createdTransfer.priority || 'Normal'
       ]);
       insertedItems.push(itemRes.rows[0]);
     }
@@ -802,11 +804,12 @@ async function recalculateTransferStatus(client, transferId) {
   return newStatus;
 }
 
-// PUT /api/internal-branch/transfers/:id/items/:itemId/accept - Accept single item
+// PUT /api/internal-branch/transfers/:id/items/:itemId/accept - Accept single item (supports quantity modification with mandatory reason)
 router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id, itemId } = req.params;
+    const { accepted_qty, modification_reason } = req.body;
     await client.query('BEGIN');
 
     const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
@@ -836,21 +839,45 @@ router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req,
 
     const item = itemRes.rows[0];
     const reqQty = parseFloat(item.requested_qty || 0);
+    const finalAcceptedQty = accepted_qty !== undefined && accepted_qty !== null && accepted_qty !== ''
+      ? parseFloat(accepted_qty)
+      : reqQty;
+
+    if (isNaN(finalAcceptedQty) || finalAcceptedQty < 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Accepted quantity must be a non-negative number.' });
+    }
+
+    // Validation: If accepted quantity differs from requested quantity (reduced or increased), mandatory reason is required
+    const isModified = Math.abs(finalAcceptedQty - reqQty) > 0.0001;
+    const cleanModReason = (modification_reason || '').trim();
+    if (isModified && !cleanModReason) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ 
+        error: `A reason is mandatory when modifying the requested quantity from ${reqQty} to ${finalAcceptedQty} ${item.uom}.` 
+      });
+    }
 
     const updateItemRes = await client.query(`
       UPDATE internal_branch_transfer_items
       SET item_status = 'Accepted',
           accepted_qty = $1,
+          confirmed_qty = $1,
           rejected_qty = 0,
           rejection_reason = NULL,
-          accepted_by_name = $2,
+          modification_reason = $2,
+          accepted_by_name = $3,
           accepted_at = CURRENT_TIMESTAMP
-      WHERE id = $3 AND transfer_id = $4
+      WHERE id = $4 AND transfer_id = $5
       RETURNING *
-    `, [reqQty, userName, itemId, id]);
+    `, [finalAcceptedQty, isModified ? cleanModReason : null, userName, itemId, id]);
 
     const updatedItem = updateItemRes.rows[0];
     const overallStatus = await recalculateTransferStatus(client, id);
+
+    const modDetails = isModified 
+      ? ` (qty modified from ${reqQty} to ${finalAcceptedQty} ${item.uom}: "${cleanModReason}")` 
+      : ` (${finalAcceptedQty} ${item.uom})`;
 
     await logTransferActivity(client, {
       transferId: transfer.id,
@@ -861,7 +888,7 @@ router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req,
       userRole: req.user.role,
       previousValue: item.item_status || 'Pending',
       newValue: 'Accepted',
-      details: `Item "${item.dish_name}" accepted (${reqQty} ${item.uom}) by ${userName}. Request status is now "${overallStatus}".`
+      details: `Item "${item.dish_name}" accepted${modDetails} by ${userName}. Request status is now "${overallStatus}".`
     });
 
     await client.query('COMMIT');
@@ -884,12 +911,17 @@ router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req,
   }
 });
 
-// PUT /api/internal-branch/transfers/:id/items/:itemId/reject - Reject single item
+// PUT /api/internal-branch/transfers/:id/items/:itemId/reject - Reject single item (mandatory rejection reason required)
 router.put('/transfers/:id/items/:itemId/reject', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id, itemId } = req.params;
     const { rejection_reason } = req.body;
+
+    const cleanReason = (rejection_reason || '').trim();
+    if (!cleanReason) {
+      return res.status(400).json({ error: 'A rejection reason is mandatory before rejecting an item.' });
+    }
 
     await client.query('BEGIN');
 
@@ -920,19 +952,19 @@ router.put('/transfers/:id/items/:itemId/reject', authenticateToken, async (req,
 
     const item = itemRes.rows[0];
     const reqQty = parseFloat(item.requested_qty || 0);
-    const reasonText = rejection_reason?.trim() || 'Item unavailable at supplying branch';
 
     const updateItemRes = await client.query(`
       UPDATE internal_branch_transfer_items
       SET item_status = 'Rejected',
           rejected_qty = $1,
           accepted_qty = 0,
+          confirmed_qty = 0,
           rejection_reason = $2,
           rejected_by_name = $3,
           rejected_at = CURRENT_TIMESTAMP
       WHERE id = $4 AND transfer_id = $5
       RETURNING *
-    `, [reqQty, reasonText, userName, itemId, id]);
+    `, [reqQty, cleanReason, userName, itemId, id]);
 
     const updatedItem = updateItemRes.rows[0];
     const overallStatus = await recalculateTransferStatus(client, id);

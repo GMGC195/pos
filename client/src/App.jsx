@@ -106,8 +106,8 @@ export default function App() {
                 <Route path="/edited-logs"        element={<ProtectedRoute allowedRoles={['Admin', 'HR Manager', 'Operator']}><EditAttendanceLogs /></ProtectedRoute>} />
 
                 {/* Settings & Support (Protected) */}
-                <Route path="/settings"     element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier']}><Settings /></ProtectedRoute>} />
-                <Route path="/help-support" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator', 'Cashier', 'Order Taker']}><HelpSupport /></ProtectedRoute>} />
+                <Route path="/settings"     element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier', 'Salary Pay Operator', 'Salary Operator']}><Settings /></ProtectedRoute>} />
+                <Route path="/help-support" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator', 'Cashier', 'Order Taker', 'Salary Pay Operator', 'Salary Operator']}><HelpSupport /></ProtectedRoute>} />
                 <Route path="*"             element={<Navigate to="/" replace />} />
               </Route>
             </Routes>

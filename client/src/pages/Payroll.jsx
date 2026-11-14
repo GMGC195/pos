@@ -97,11 +97,16 @@ export default function Payroll() {
   const [salaryPermissions, setSalaryPermissions] = useState({
     is_salary_pay_operator: false,
     permission_type: 'pay_now',
-    allowed_months: []
+    allowed_months: [],
+    allowed_view_months: [],
+    allowed_pay_months: []
   })
   const [salaryPermissionsLoaded, setSalaryPermissionsLoaded] = useState(!isSalaryPayOperator)
   const isViewOnlySalaryOperator = isSalaryPayOperator && salaryPermissions.permission_type === 'view_only'
-  const canProcessPayments = (isAdmin || isSalaryPayOperator) && !isViewOnlySalaryOperator
+  const isMonthPayAllowed = isSalaryPayOperator 
+    ? (Array.isArray(salaryPermissions.allowed_pay_months) && salaryPermissions.allowed_pay_months.includes(selectedMonth))
+    : true;
+  const canProcessPayments = isAdmin || (isSalaryPayOperator && isMonthPayAllowed && !isViewOnlySalaryOperator)
   const showActions = isAdmin && !isSalaryPayOperator
 
   const formatMonth = (date) => {
@@ -771,21 +776,42 @@ export default function Payroll() {
         bank_amount: bankVal
       });
 
-      const { payments, cash_paid, bank_paid, paid_amount, status, message } = res.data;
+      const { 
+        payments, 
+        cash_paid, 
+        bank_paid, 
+        paid_amount, 
+        status, 
+        message,
+        current_cash_paid,
+        current_bank_paid,
+        current_paid_amount,
+        previous_paid_amount,
+        remaining
+      } = res.data;
       toast.success(message || 'Payment recorded successfully!');
 
+      // Clear input fields
       setPayInputs(prev => ({
         ...prev,
         [empId]: { cash: '', bank: '' }
       }));
 
-      const row = editableData[empId];
+      const row = editableData[empId] || {};
       const updatedRow = {
         ...row,
         payments: payments || [],
         cash_paid,
         bank_paid,
         paid_amount,
+        remaining,
+        current_cash_paid: current_cash_paid !== undefined ? current_cash_paid : cashVal,
+        current_bank_paid: current_bank_paid !== undefined ? current_bank_paid : bankVal,
+        current_paid_amount: current_paid_amount !== undefined ? current_paid_amount : (cashVal + bankVal),
+        previous_paid_amount: previous_paid_amount !== undefined ? previous_paid_amount : Math.max(0, paid_amount - (cashVal + bankVal)),
+        payment_date: new Date().toISOString().slice(0, 10),
+        payment_time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        paid_by: user?.username || 'Salary Pay Operator',
         status
       };
 
@@ -805,7 +831,18 @@ export default function Payroll() {
       }
 
       await loadPayroll(true);
-      return true;
+      return { 
+        success: true, 
+        updatedRow,
+        currentCash: current_cash_paid !== undefined ? current_cash_paid : cashVal,
+        currentBank: current_bank_paid !== undefined ? current_bank_paid : bankVal,
+        currentTotal: current_paid_amount !== undefined ? current_paid_amount : (cashVal + bankVal),
+        previousPaid: previous_paid_amount !== undefined ? previous_paid_amount : Math.max(0, paid_amount - (cashVal + bankVal)),
+        cash_paid,
+        bank_paid,
+        paid_amount,
+        remaining
+      };
     } catch (error) {
       console.error(error);
       const errMsg = error?.response?.data?.error || error.message || 'Failed to record payment.';
@@ -816,7 +853,7 @@ export default function Payroll() {
     }
   };
 
-  const handlePayNow = async (empId) => {
+  const handlePayNow = async (empId, shouldPrint = false) => {
     const row = editableData[empId];
     if (!row) return;
 
@@ -858,7 +895,8 @@ export default function Payroll() {
         paymentAmount: totalEntered,
         overpaymentAmount: overpaymentAmt,
         cashVal,
-        bankVal
+        bankVal,
+        shouldPrint
       });
       return;
     }
@@ -874,12 +912,16 @@ export default function Payroll() {
         bankVal,
         khataAmount: khataDeduct,
         netPayable: net,
-        month: selectedMonth
+        month: selectedMonth,
+        shouldPrint
       });
       return;
     }
 
-    await executePayment(empId, cashVal, bankVal);
+    const payResult = await executePayment(empId, cashVal, bankVal);
+    if (payResult && payResult.success && shouldPrint) {
+      handlePrintSalarySlip(payResult.updatedRow);
+    }
   };
 
   const handleOpenMobilePay = (emp) => {
@@ -935,10 +977,9 @@ export default function Payroll() {
     }
 
     setMobilePayModal({ isOpen: false, emp: null, cash: '', bank: '' });
-    const success = await executePayment(empId, cashVal, bankVal);
-    if (success && shouldPrint) {
-      const updatedEmp = editableData[empId] || emp;
-      handlePrintSalarySlip(updatedEmp);
+    const payResult = await executePayment(empId, cashVal, bankVal);
+    if (payResult && payResult.success && shouldPrint) {
+      handlePrintSalarySlip(payResult.updatedRow);
     }
   };
 
@@ -1788,27 +1829,65 @@ export default function Payroll() {
 
         <div class="divider-double"></div>
 
-        <div class="row-title">PAYMENT DISTRIBUTION</div>
-        <div class="row">
-          <span>Cash Paid:</span>
-          <span class="right bold">${CURRENCY} ${cashPaid.toFixed(2)}</span>
-        </div>
-        <div class="row">
-          <span>Bank Paid:</span>
-          <span class="right bold">${CURRENCY} ${bankPaid.toFixed(2)}</span>
-        </div>
-        <div class="row bold" style="font-size: 12px; border-top: 1px dashed #000; padding-top: 2px; margin-top: 2px;">
-          <span>TOTAL PAID:</span>
-          <span class="right">${CURRENCY} ${totalPaid.toFixed(2)}</span>
-        </div>
-        <div class="row bold" style="font-size: 12px; margin-top: 2px;">
-          <span>REMAINING SALARY:</span>
-          <span class="right">${CURRENCY} ${remaining.toFixed(2)}</span>
-        </div>
-        <div class="row" style="font-size: 10px; margin-top: 1px;">
-          <span>Payment Status:</span>
-          <span class="right bold">${remaining === 0 ? 'FULLY SETTLED' : (remaining < 0 ? 'NEGATIVE BALANCE / OWED' : (totalPaid > 0 ? 'PARTIALLY PAID / CARRIED' : 'PENDING'))}</span>
-        </div>
+        ${parseFloat(emp.current_paid_amount || 0) > 0 ? `
+          <div class="row-title" style="color: #0284c7;">CURRENT PAYMENT TRANSACTION</div>
+          ${parseFloat(emp.current_cash_paid || 0) > 0 ? `
+            <div class="row">
+              <span>Current Cash Paid:</span>
+              <span class="right bold">${CURRENCY} ${parseFloat(emp.current_cash_paid).toFixed(2)}</span>
+            </div>
+          ` : ''}
+          ${parseFloat(emp.current_bank_paid || 0) > 0 ? `
+            <div class="row">
+              <span>Current Card / Bank:</span>
+              <span class="right bold">${CURRENCY} ${parseFloat(emp.current_bank_paid).toFixed(2)}</span>
+            </div>
+          ` : ''}
+          <div class="row bold" style="font-size: 12px; border-top: 1px dashed #000; padding-top: 2px;">
+            <span>CURRENT TRANSACTION TOTAL:</span>
+            <span class="right">${CURRENCY} ${parseFloat(emp.current_paid_amount).toFixed(2)}</span>
+          </div>
+          <div class="divider-solid"></div>
+          <div class="row-title">CUMULATIVE SALARY SUMMARY</div>
+          <div class="row">
+            <span>Previous Accumulated Paid:</span>
+            <span class="right bold">${CURRENCY} ${parseFloat(emp.previous_paid_amount !== undefined ? emp.previous_paid_amount : Math.max(0, totalPaid - parseFloat(emp.current_paid_amount))).toFixed(2)}</span>
+          </div>
+          <div class="row">
+            <span>Total Paid to Date:</span>
+            <span class="right bold">${CURRENCY} ${totalPaid.toFixed(2)}</span>
+          </div>
+          <div class="row bold" style="font-size: 12px; border-top: 1px dashed #000; padding-top: 2px; margin-top: 2px;">
+            <span>REMAINING SALARY:</span>
+            <span class="right">${CURRENCY} ${remaining.toFixed(2)}</span>
+          </div>
+          <div class="row" style="font-size: 10px; margin-top: 1px;">
+            <span>Payment Status:</span>
+            <span class="right bold">${totalPaid >= netSalary ? 'FULLY SETTLED' : 'PARTIALLY PAID / CARRIED'}</span>
+          </div>
+        ` : `
+          <div class="row-title">PAYMENT DISTRIBUTION</div>
+          <div class="row">
+            <span>Cash Paid:</span>
+            <span class="right bold">${CURRENCY} ${cashPaid.toFixed(2)}</span>
+          </div>
+          <div class="row">
+            <span>Bank Paid:</span>
+            <span class="right bold">${CURRENCY} ${bankPaid.toFixed(2)}</span>
+          </div>
+          <div class="row bold" style="font-size: 12px; border-top: 1px dashed #000; padding-top: 2px; margin-top: 2px;">
+            <span>TOTAL PAID:</span>
+            <span class="right">${CURRENCY} ${totalPaid.toFixed(2)}</span>
+          </div>
+          <div class="row bold" style="font-size: 12px; margin-top: 2px;">
+            <span>REMAINING SALARY:</span>
+            <span class="right">${CURRENCY} ${remaining.toFixed(2)}</span>
+          </div>
+          <div class="row" style="font-size: 10px; margin-top: 1px;">
+            <span>Payment Status:</span>
+            <span class="right bold">${remaining === 0 ? 'FULLY SETTLED' : (remaining < 0 ? 'NEGATIVE BALANCE / OWED' : (totalPaid > 0 ? 'PARTIALLY PAID / CARRIED' : 'PENDING'))}</span>
+          </div>
+        `}
 
         ${emp.payments && emp.payments.length > 0 ? `
           <div class="divider-dashed"></div>
@@ -3559,33 +3638,61 @@ export default function Payroll() {
                             />
                           </div>
 
-                          {/* Pay Now Button */}
+                          {/* Pay Now & Pay & Print Buttons */}
                           {!isRowLocked && canProcessPayments && (
-                            <button 
-                              type="button"
-                              onClick={() => handlePayNow(targetEmpData.id)}
-                              disabled={payingRowId === targetEmpData.id}
-                              style={{ 
-                                padding: '8px 16px', 
-                                borderRadius: '7px', 
-                                fontSize: '12px', 
-                                fontWeight: 800, 
-                                display: 'inline-flex', 
-                                alignItems: 'center', 
-                                justifyContent: 'center', 
-                                gap: '5px', 
-                                background: '#16a34a', 
-                                color: '#fff', 
-                                border: 'none', 
-                                cursor: 'pointer',
-                                boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
-                                whiteSpace: 'nowrap'
-                              }}
-                              title="Record payment and update Paid & Remaining"
-                            >
-                              {payingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle size={13} />}
-                              Pay Now
-                            </button>
+                            <>
+                              <button 
+                                type="button"
+                                onClick={() => handlePayNow(targetEmpData.id, false)}
+                                disabled={payingRowId === targetEmpData.id}
+                                style={{ 
+                                  padding: '8px 14px', 
+                                  borderRadius: '7px', 
+                                  fontSize: '12px', 
+                                  fontWeight: 800, 
+                                  display: 'inline-flex', 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center', 
+                                  gap: '5px', 
+                                  background: '#16a34a', 
+                                  color: '#fff', 
+                                  border: 'none', 
+                                  cursor: 'pointer',
+                                  boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                title="Record payment without printing"
+                              >
+                                {payingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle size={13} />}
+                                Pay Now
+                              </button>
+
+                              <button 
+                                type="button"
+                                onClick={() => handlePayNow(targetEmpData.id, true)}
+                                disabled={payingRowId === targetEmpData.id}
+                                style={{ 
+                                  padding: '8px 14px', 
+                                  borderRadius: '7px', 
+                                  fontSize: '12px', 
+                                  fontWeight: 800, 
+                                  display: 'inline-flex', 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center', 
+                                  gap: '5px', 
+                                  background: '#0284c7', 
+                                  color: '#fff', 
+                                  border: 'none', 
+                                  cursor: 'pointer',
+                                  boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                title="Record payment and immediately print thermal slip"
+                              >
+                                {payingRowId === targetEmpData.id ? <RefreshCw size={12} className="spin" /> : <Printer size={13} />}
+                                Pay & Print
+                              </button>
+                            </>
                           )}
                         </>
                       )}
@@ -6600,10 +6707,9 @@ export default function Payroll() {
                 onClick={async () => {
                   const { empId, cashVal, bankVal, shouldPrint } = overpaymentModal;
                   setOverpaymentModal({ isOpen: false, empId: null });
-                  const success = await executePayment(empId, cashVal, bankVal);
-                  if (success && shouldPrint) {
-                    const updatedEmp = editableData[empId];
-                    if (updatedEmp) handlePrintSalarySlip(updatedEmp);
+                  const payResult = await executePayment(empId, cashVal, bankVal);
+                  if (payResult && payResult.success && shouldPrint) {
+                    handlePrintSalarySlip(payResult.updatedRow);
                   }
                 }}
                 style={{

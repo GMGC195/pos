@@ -1079,27 +1079,52 @@ async function computeMonthlyPayrollReport(month, branchFilter = null) {
   return payrollReport;
 }
 
-// Helper: Fetch Salary Pay Operator permissions & allowed months
+// Helper: Fetch Salary Pay Operator permissions & independent allowed months (view & pay)
 async function getSalaryPayOperatorPermissions(userId) {
   try {
     const res = await pool.query(
-      'SELECT permission_type, allowed_months FROM salary_payable_permissions WHERE user_id = $1',
+      'SELECT permission_type, allowed_months, allowed_view_months, allowed_pay_months FROM salary_payable_permissions WHERE user_id = $1',
       [userId]
     );
     if (res.rows.length === 0) {
-      return { permission_type: 'pay_now', allowed_months: [] };
+      return { 
+        permission_type: 'pay_now', 
+        allowed_months: [], 
+        allowed_view_months: [], 
+        allowed_pay_months: [] 
+      };
     }
-    let allowed = res.rows[0].allowed_months;
-    if (typeof allowed === 'string') {
-      try { allowed = JSON.parse(allowed); } catch (e) { allowed = []; }
-    }
+
+    const parseM = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val;
+      if (typeof val === 'string') {
+        try { return JSON.parse(val); } catch (e) { return []; }
+      }
+      return [];
+    };
+
+    const legacyMonths = parseM(res.rows[0].allowed_months);
+    let viewMonths = parseM(res.rows[0].allowed_view_months);
+    let payMonths = parseM(res.rows[0].allowed_pay_months);
+
+    if (viewMonths.length === 0 && legacyMonths.length > 0) viewMonths = legacyMonths;
+    if (payMonths.length === 0 && res.rows[0].permission_type === 'pay_now' && legacyMonths.length > 0) payMonths = legacyMonths;
+
     return {
       permission_type: res.rows[0].permission_type || 'pay_now',
-      allowed_months: Array.isArray(allowed) ? allowed : []
+      allowed_months: viewMonths,
+      allowed_view_months: viewMonths,
+      allowed_pay_months: payMonths
     };
   } catch (err) {
     console.error('Error fetching salary payable permissions:', err);
-    return { permission_type: 'pay_now', allowed_months: [] };
+    return { 
+      permission_type: 'pay_now', 
+      allowed_months: [], 
+      allowed_view_months: [], 
+      allowed_pay_months: [] 
+    };
   }
 }
 
@@ -1111,7 +1136,9 @@ router.get('/my-permissions', authenticateToken, async (req, res) => {
       return res.json({
         is_salary_pay_operator: false,
         permission_type: 'pay_now',
-        allowed_months: []
+        allowed_months: [],
+        allowed_view_months: [],
+        allowed_pay_months: []
       });
     }
 
@@ -1119,7 +1146,9 @@ router.get('/my-permissions', authenticateToken, async (req, res) => {
     return res.json({
       is_salary_pay_operator: true,
       permission_type: perms.permission_type,
-      allowed_months: perms.allowed_months
+      allowed_months: perms.allowed_view_months,
+      allowed_view_months: perms.allowed_view_months,
+      allowed_pay_months: perms.allowed_pay_months
     });
   } catch (err) {
     console.error('Error in /my-permissions:', err.message);
@@ -1137,7 +1166,8 @@ router.get('/calculate', authenticateToken, async (req, res) => {
   const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
   if (isSalaryPayOp) {
     const perms = await getSalaryPayOperatorPermissions(req.user.id);
-    if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+    const viewMonths = perms.allowed_view_months || [];
+    if (viewMonths.length > 0 && !viewMonths.includes(month)) {
       return res.status(403).json({ error: `Permission denied: You are not authorized to view payroll for month ${month}.` });
     }
   }
@@ -1159,7 +1189,8 @@ router.get('/salary-pay-summary', authenticateToken, async (req, res) => {
     const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
     if (isSalaryPayOp) {
       const perms = await getSalaryPayOperatorPermissions(req.user.id);
-      if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+      const viewMonths = perms.allowed_view_months || [];
+      if (viewMonths.length > 0 && !viewMonths.includes(month)) {
         return res.status(403).json({ error: `Permission denied: You are not authorized to view payroll for month ${month}.` });
       }
       branch = req.query.branch || req.user.branch || null;
@@ -1271,7 +1302,8 @@ router.get('/payment-history', authenticateToken, async (req, res) => {
     if (isSalaryPayOp) {
       if (month) {
         const perms = await getSalaryPayOperatorPermissions(req.user.id);
-        if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+        const viewMonths = perms.allowed_view_months || [];
+        if (viewMonths.length > 0 && !viewMonths.includes(month)) {
           return res.status(403).json({ error: `Permission denied: You are not authorized to view payment history for month ${month}.` });
         }
       }
@@ -2069,10 +2101,11 @@ router.post('/payments', authenticateToken, async (req, res) => {
   const isSalaryPayOp = isSalaryPayOperatorRole(req.user?.role);
   if (isSalaryPayOp) {
     const perms = await getSalaryPayOperatorPermissions(req.user.id);
-    if (perms.permission_type === 'view_only') {
+    const payAllowed = perms.allowed_pay_months || [];
+    if (perms.permission_type === 'view_only' && payAllowed.length === 0) {
       return res.status(403).json({ error: 'Permission denied: Salary Pay Operator is set to View Only and cannot process payments.' });
     }
-    if (perms.allowed_months && perms.allowed_months.length > 0 && !perms.allowed_months.includes(month)) {
+    if (payAllowed.length > 0 && !payAllowed.includes(month)) {
       return res.status(403).json({ error: `Permission denied: You are not authorized to process payments for month ${month}.` });
     }
   }
@@ -2205,6 +2238,10 @@ router.post('/payments', authenticateToken, async (req, res) => {
       message: isOverpaid
         ? `Payment of SAR ${Math.round((cashVal + bankVal) * 100) / 100} recorded with SAR ${overpaymentAmt.toFixed(2)} overpayment.`
         : `Payment of SAR ${Math.round((cashVal + bankVal) * 100) / 100} recorded by ${paidBy}`,
+      current_cash_paid: cashVal,
+      current_bank_paid: bankVal,
+      current_paid_amount: Math.round((cashVal + bankVal) * 100) / 100,
+      previous_paid_amount: Math.max(0, previousPaid),
       payments: allPaymentsRes.rows,
       cash_paid: totalCash,
       bank_paid: totalBank,
@@ -3152,15 +3189,42 @@ function buildSalarySlipEscPos(emp, currentUser) {
   t += BOLD_ON + rightAlign('NET PAYABLE SALARY:', `SAR ${netSalary.toFixed(2)}`) + BOLD_OFF + LF;
   t += '='.repeat(LINE_WIDTH) + LF;
 
-  // Payment Details
-  t += BOLD_ON + 'PAYMENT DISTRIBUTION' + BOLD_OFF + LF;
-  t += rightAlign('Total Disbursed:', `SAR ${totalPaid.toFixed(2)}`) + LF;
-  const statusStr = totalPaid >= netSalary && netSalary > 0 ? 'PAID' : (totalPaid > 0 ? 'PARTIAL' : 'PENDING');
-  t += rightAlign('Payment Status:', statusStr) + LF;
-  if (totalPaid > 0) {
-    if (cashPaid > 0) t += rightAlign('  - Cash Paid:', `SAR ${cashPaid.toFixed(2)}`) + LF;
-    if (bankPaid > 0) t += rightAlign('  - Bank Paid:', `SAR ${bankPaid.toFixed(2)}`) + LF;
+  // Check if printing a specific current transaction
+  const curTransPaid = parseFloat(emp.current_paid_amount || 0);
+  const curTransCash = parseFloat(emp.current_cash_paid || 0);
+  const curTransBank = parseFloat(emp.current_bank_paid || 0);
+  const prevPaid = emp.previous_paid_amount !== undefined 
+    ? parseFloat(emp.previous_paid_amount) 
+    : Math.max(0, totalPaid - curTransPaid);
+
+  if (curTransPaid > 0) {
+    // 1. Current Transaction Payment Section
+    t += BOLD_ON + 'CURRENT PAYMENT TRANSACTION' + BOLD_OFF + LF;
+    if (curTransCash > 0) t += rightAlign('  Cash Paid:', `SAR ${curTransCash.toFixed(2)}`) + LF;
+    if (curTransBank > 0) t += rightAlign('  Card/Bank Paid:', `SAR ${curTransBank.toFixed(2)}`) + LF;
+    t += BOLD_ON + rightAlign('Current Disbursed:', `SAR ${curTransPaid.toFixed(2)}`) + BOLD_OFF + LF;
+    t += '-'.repeat(LINE_WIDTH) + LF;
+
+    // 2. Cumulative Salary Summary Section
+    t += BOLD_ON + 'CUMULATIVE SALARY SUMMARY' + BOLD_OFF + LF;
+    t += rightAlign('Previous Paid:', `SAR ${prevPaid.toFixed(2)}`) + LF;
+    t += rightAlign('Total Paid to Date:', `SAR ${totalPaid.toFixed(2)}`) + LF;
+    t += rightAlign('Remaining Salary:', `SAR ${Math.max(0, remaining).toFixed(2)}`) + LF;
+    const statusStr = totalPaid >= netSalary && netSalary > 0 ? 'PAID' : (totalPaid > 0 ? 'PARTIAL' : 'PENDING');
+    t += rightAlign('Payment Status:', statusStr) + LF;
+  } else {
+    // Standard Payment Distribution (History Reprint)
+    t += BOLD_ON + 'PAYMENT DISTRIBUTION' + BOLD_OFF + LF;
+    t += rightAlign('Total Disbursed:', `SAR ${totalPaid.toFixed(2)}`) + LF;
+    const statusStr = totalPaid >= netSalary && netSalary > 0 ? 'PAID' : (totalPaid > 0 ? 'PARTIAL' : 'PENDING');
+    t += rightAlign('Payment Status:', statusStr) + LF;
+    if (totalPaid > 0) {
+      if (cashPaid > 0) t += rightAlign('  - Cash Paid:', `SAR ${cashPaid.toFixed(2)}`) + LF;
+      if (bankPaid > 0) t += rightAlign('  - Bank Paid:', `SAR ${bankPaid.toFixed(2)}`) + LF;
+    }
+    t += rightAlign('Remaining Balance:', `SAR ${Math.max(0, remaining).toFixed(2)}`) + LF;
   }
+
   const rawDate = sanitizeStr(emp.payment_date, '');
   const rawTime = sanitizeStr(emp.payment_time, '');
   const payDateStr = rawDate 
@@ -3169,7 +3233,6 @@ function buildSalarySlipEscPos(emp, currentUser) {
   t += rightAlign('Payment Date:', payDateStr) + LF;
   const paidBy = sanitizeStr(emp.paid_by || currentUser?.username, 'Salary Pay Operator');
   t += rightAlign('Disbursed By:', paidBy) + LF;
-  t += rightAlign('Remaining Balance:', `SAR ${Math.max(0, remaining).toFixed(2)}`) + LF;
   t += '-'.repeat(LINE_WIDTH) + LF;
 
   // Signatures

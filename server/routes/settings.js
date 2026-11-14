@@ -114,6 +114,8 @@ router.get('/salary-permissions', authenticateToken, isAdmin, async (req, res) =
         u.branch,
         COALESCE(spp.permission_type, 'pay_now') as permission_type,
         COALESCE(spp.allowed_months, '[]'::jsonb) as allowed_months,
+        COALESCE(spp.allowed_view_months, spp.allowed_months, '[]'::jsonb) as allowed_view_months,
+        COALESCE(spp.allowed_pay_months, CASE WHEN spp.permission_type = 'pay_now' THEN spp.allowed_months ELSE '[]'::jsonb END, '[]'::jsonb) as allowed_pay_months,
         spp.updated_at,
         spp.updated_by
       FROM users u
@@ -145,10 +147,21 @@ router.get('/salary-permissions', authenticateToken, isAdmin, async (req, res) =
 // PUT /api/settings/salary-permissions/:userId - Update a Salary Pay Operator user's permission settings
 router.put('/salary-permissions/:userId', authenticateToken, isAdmin, async (req, res) => {
   const { userId } = req.params;
-  const { permission_type, allowed_months } = req.body;
+  const { permission_type, allowed_months, allowed_view_months, allowed_pay_months } = req.body;
 
   const validPermission = (permission_type === 'view_only') ? 'view_only' : 'pay_now';
-  const validMonths = Array.isArray(allowed_months) ? JSON.stringify(allowed_months.filter(m => /^\d{4}-\d{2}$/.test(m))) : '[]';
+  const filterMonths = (arr) => Array.isArray(arr) ? arr.filter(m => /^\d{4}-\d{2}$/.test(m)) : [];
+
+  let viewArr = filterMonths(allowed_view_months);
+  let payArr = filterMonths(allowed_pay_months);
+  const legacyArr = filterMonths(allowed_months);
+
+  if (viewArr.length === 0 && legacyArr.length > 0) viewArr = legacyArr;
+  if (payArr.length === 0 && validPermission === 'pay_now' && legacyArr.length > 0) payArr = legacyArr;
+
+  const validViewMonths = JSON.stringify(viewArr);
+  const validPayMonths = JSON.stringify(payArr);
+  const validLegacyMonths = JSON.stringify(viewArr);
   const updatedBy = req.user?.username || req.user?.name || 'Admin';
 
   try {
@@ -158,15 +171,19 @@ router.put('/salary-permissions/:userId', authenticateToken, isAdmin, async (req
     }
 
     const result = await pool.query(`
-      INSERT INTO salary_payable_permissions (user_id, permission_type, allowed_months, updated_at, updated_by)
-      VALUES ($1, $2, $3::jsonb, NOW(), $4)
+      INSERT INTO salary_payable_permissions (
+        user_id, permission_type, allowed_months, allowed_view_months, allowed_pay_months, updated_at, updated_by
+      )
+      VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, NOW(), $6)
       ON CONFLICT (user_id) DO UPDATE SET
         permission_type = EXCLUDED.permission_type,
         allowed_months = EXCLUDED.allowed_months,
+        allowed_view_months = EXCLUDED.allowed_view_months,
+        allowed_pay_months = EXCLUDED.allowed_pay_months,
         updated_at = NOW(),
         updated_by = EXCLUDED.updated_by
       RETURNING *
-    `, [userId, validPermission, validMonths, updatedBy]);
+    `, [userId, validPermission, validLegacyMonths, validViewMonths, validPayMonths, updatedBy]);
 
     res.json({
       message: 'Salary payable user permissions updated successfully',

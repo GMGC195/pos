@@ -59,7 +59,12 @@ export default function Settings() {
   const [salaryUsers, setSalaryUsers] = useState([])
   const [availableSalaryMonths, setAvailableSalaryMonths] = useState([])
   const [selectedSalaryUserId, setSelectedSalaryUserId] = useState(null)
-  const [editingSalaryPerm, setEditingSalaryPerm] = useState({ permission_type: 'pay_now', allowed_months: [] })
+  const [editingSalaryPerm, setEditingSalaryPerm] = useState({ 
+    permission_type: 'pay_now', 
+    allowed_months: [], 
+    allowed_view_months: [], 
+    allowed_pay_months: [] 
+  })
   const [loadingSalaryPerms, setLoadingSalaryPerms] = useState(false)
   const [savingSalaryPerms, setSavingSalaryPerms] = useState(false)
   const [customMonthInput, setCustomMonthInput] = useState('')
@@ -214,13 +219,25 @@ export default function Settings() {
         if (users.length > 0) {
           const target = selectedSalaryUserId ? (users.find(u => u.id === selectedSalaryUserId) || users[0]) : users[0]
           setSelectedSalaryUserId(target.id)
-          let months = target.allowed_months || []
-          if (typeof months === 'string') {
-            try { months = JSON.parse(months) } catch(e) { months = [] }
-          }
+          const parseArr = (v) => {
+            if (!v) return [];
+            if (Array.isArray(v)) return v;
+            if (typeof v === 'string') {
+              try { return JSON.parse(v); } catch(e) { return []; }
+            }
+            return [];
+          };
+          let viewMonths = parseArr(target.allowed_view_months);
+          let payMonths = parseArr(target.allowed_pay_months);
+          const legacyMonths = parseArr(target.allowed_months);
+          if (viewMonths.length === 0 && legacyMonths.length > 0) viewMonths = legacyMonths;
+          if (payMonths.length === 0 && target.permission_type === 'pay_now' && legacyMonths.length > 0) payMonths = legacyMonths;
+
           setEditingSalaryPerm({
             permission_type: target.permission_type || 'pay_now',
-            allowed_months: Array.isArray(months) ? months : []
+            allowed_months: viewMonths,
+            allowed_view_months: viewMonths,
+            allowed_pay_months: payMonths
           })
         }
       }
@@ -234,13 +251,25 @@ export default function Settings() {
 
   const handleSelectSalaryUser = (u) => {
     setSelectedSalaryUserId(u.id)
-    let months = u.allowed_months || []
-    if (typeof months === 'string') {
-      try { months = JSON.parse(months) } catch(e) { months = [] }
-    }
+    const parseArr = (v) => {
+      if (!v) return [];
+      if (Array.isArray(v)) return v;
+      if (typeof v === 'string') {
+        try { return JSON.parse(v); } catch(e) { return []; }
+      }
+      return [];
+    };
+    let viewMonths = parseArr(u.allowed_view_months);
+    let payMonths = parseArr(u.allowed_pay_months);
+    const legacyMonths = parseArr(u.allowed_months);
+    if (viewMonths.length === 0 && legacyMonths.length > 0) viewMonths = legacyMonths;
+    if (payMonths.length === 0 && u.permission_type === 'pay_now' && legacyMonths.length > 0) payMonths = legacyMonths;
+
     setEditingSalaryPerm({
       permission_type: u.permission_type || 'pay_now',
-      allowed_months: Array.isArray(months) ? months : []
+      allowed_months: viewMonths,
+      allowed_view_months: viewMonths,
+      allowed_pay_months: payMonths
     })
   }
 
@@ -2202,145 +2231,257 @@ export default function Settings() {
                               )}
                             </div>
 
-                            {/* Section B: Access Permission */}
-                            <div>
-                              <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
-                                1. Access Permission
-                              </label>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                {/* Only View Card */}
-                                <div 
-                                  onClick={() => setEditingSalaryPerm(prev => ({ ...prev, permission_type: 'view_only' }))}
-                                  style={{
-                                    padding: '14px',
-                                    borderRadius: '10px',
-                                    border: editingSalaryPerm.permission_type === 'view_only' ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                    background: editingSalaryPerm.permission_type === 'view_only' ? '#f0f9ff' : '#fff',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s ease'
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                                    <input 
-                                      type="radio" 
-                                      name="salary_permission_type" 
-                                      checked={editingSalaryPerm.permission_type === 'view_only'}
-                                      onChange={() => {}} 
-                                      style={{ accentColor: '#0284c7' }}
-                                    />
-                                    <strong style={{ fontSize: '14px', color: '#0369a1' }}>Only View</strong>
+                            {/* Section B: Independent View & Payment Month Permissions */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                              
+                              {/* 1. Month View Permission */}
+                              <div style={{ background: '#f0f9ff', border: '1.5px solid #bae6fd', borderRadius: '12px', padding: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                                  <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      <Eye size={16} color="#0284c7" />
+                                      <label style={{ fontSize: '13.5px', fontWeight: 800, color: '#0369a1', margin: 0 }}>
+                                        1. Month View Permission (View Only / Access)
+                                      </label>
+                                    </div>
+                                    <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#0284c7' }}>
+                                      Select months that {curUser.username} is authorized to <strong>VIEW</strong>. Unselected months will be hidden.
+                                    </p>
                                   </div>
-                                  <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
-                                    The user can view permitted employees' salary records, paid amounts, and remaining balances. All <strong>Pay Now</strong> buttons are hidden, and payment submissions are strictly blocked.
-                                  </p>
-                                </div>
-
-                                {/* Pay Now Card */}
-                                <div 
-                                  onClick={() => setEditingSalaryPerm(prev => ({ ...prev, permission_type: 'pay_now' }))}
-                                  style={{
-                                    padding: '14px',
-                                    borderRadius: '10px',
-                                    border: editingSalaryPerm.permission_type === 'pay_now' ? '2px solid #16a34a' : '1px solid #cbd5e1',
-                                    background: editingSalaryPerm.permission_type === 'pay_now' ? '#f0fdf4' : '#fff',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s ease'
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                                    <input 
-                                      type="radio" 
-                                      name="salary_permission_type" 
-                                      checked={editingSalaryPerm.permission_type === 'pay_now'}
-                                      onChange={() => {}} 
-                                      style={{ accentColor: '#16a34a' }}
-                                    />
-                                    <strong style={{ fontSize: '14px', color: '#15803d' }}>Pay Now</strong>
-                                  </div>
-                                  <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
-                                    The user can view permitted salary records and process salary payments using the <strong>Pay Now Popup Modal</strong>. Both <strong>Pay Now</strong> and <strong>Pay and Print</strong> actions are enabled.
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Section C: Month-Wise Salary Access */}
-                            <div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                <div>
-                                  <label style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
-                                    2. Month-Wise Salary Access
-                                  </label>
-                                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
-                                    Select which salary months {curUser.username} is allowed to access. Unauthorized months will be completely hidden and blocked.
-                                  </p>
-                                </div>
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => {
-                                      setEditingSalaryPerm(prev => ({ ...prev, allowed_months: [...availableSalaryMonths] }));
-                                    }}
-                                    style={{ fontSize: '11px', padding: '3px 8px' }}
-                                  >
-                                    Select All
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => {
-                                      setEditingSalaryPerm(prev => ({ ...prev, allowed_months: [] }));
-                                    }}
-                                    style={{ fontSize: '11px', padding: '3px 8px' }}
-                                  >
-                                    Clear All
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Month Selection Chips */}
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                {availableSalaryMonths.map(m => {
-                                  const isAllowed = editingSalaryPerm.allowed_months.includes(m);
-                                  const monthLabel = formatMonthDisplay(m);
-
-                                  return (
+                                  <div style={{ display: 'flex', gap: '6px' }}>
                                     <button
-                                      key={m}
                                       type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => {
+                                        setEditingSalaryPerm(prev => ({ 
+                                          ...prev, 
+                                          allowed_view_months: [...availableSalaryMonths],
+                                          allowed_months: [...availableSalaryMonths]
+                                        }));
+                                      }}
+                                      style={{ fontSize: '11px', padding: '3px 9px', background: '#fff', borderColor: '#38bdf8', color: '#0369a1' }}
+                                    >
+                                      Select All View
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => {
+                                        setEditingSalaryPerm(prev => ({ 
+                                          ...prev, 
+                                          allowed_view_months: [],
+                                          allowed_months: []
+                                        }));
+                                      }}
+                                      style={{ fontSize: '11px', padding: '3px 9px', background: '#fff', borderColor: '#cbd5e1' }}
+                                    >
+                                      Clear All View
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* View Month Selection Chips */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e0f2fe' }}>
+                                  {availableSalaryMonths.map(m => {
+                                    const isViewAllowed = (editingSalaryPerm.allowed_view_months || []).includes(m);
+                                    const monthLabel = formatMonthDisplay(m);
+
+                                    return (
+                                      <button
+                                        key={`view-${m}`}
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingSalaryPerm(prev => {
+                                            const curList = prev.allowed_view_months || [];
+                                            const next = isViewAllowed 
+                                              ? curList.filter(x => x !== m)
+                                              : [...curList, m];
+                                            return { ...prev, allowed_view_months: next, allowed_months: next };
+                                          });
+                                        }}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '6px',
+                                          padding: '5px 12px',
+                                          borderRadius: '20px',
+                                          fontSize: '11.5px',
+                                          fontWeight: 700,
+                                          border: isViewAllowed ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                                          background: isViewAllowed ? '#e0f2fe' : '#fff',
+                                          color: isViewAllowed ? '#0369a1' : '#64748b',
+                                          cursor: 'pointer',
+                                          transition: 'all 0.15s ease'
+                                        }}
+                                      >
+                                        <Eye size={13} style={{ color: isViewAllowed ? '#0284c7' : '#94a3b8' }} />
+                                        <span>{monthLabel} ({m})</span>
+                                        {isViewAllowed && <Check size={13} style={{ color: '#0284c7' }} />}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* 2. Salary Payment Permission */}
+                              <div style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '12px', padding: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                                  <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      <CreditCard size={16} color="#16a34a" />
+                                      <label style={{ fontSize: '13.5px', fontWeight: 800, color: '#15803d', margin: 0 }}>
+                                        2. Salary Payment Permission (Pay Now & Pay and Print)
+                                      </label>
+                                    </div>
+                                    <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#15803d' }}>
+                                      Select months that {curUser.username} is authorized to <strong>PROCESS SALARY PAYMENTS</strong> for.
+                                    </p>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
                                       onClick={() => {
                                         setEditingSalaryPerm(prev => {
-                                          const next = isAllowed 
-                                            ? prev.allowed_months.filter(x => x !== m)
-                                            : [...prev.allowed_months, m];
-                                          return { ...prev, allowed_months: next };
+                                          const nextPay = [...availableSalaryMonths];
+                                          // Auto-ensure view is enabled for payment months
+                                          const curView = prev.allowed_view_months || [];
+                                          const unionView = Array.from(new Set([...curView, ...nextPay]));
+                                          return { 
+                                            ...prev, 
+                                            allowed_pay_months: nextPay,
+                                            allowed_view_months: unionView,
+                                            allowed_months: unionView,
+                                            permission_type: 'pay_now'
+                                          };
                                         });
                                       }}
-                                      style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '6px',
-                                        padding: '6px 12px',
-                                        borderRadius: '20px',
-                                        fontSize: '12px',
-                                        fontWeight: 700,
-                                        border: isAllowed ? '1.5px solid #16a34a' : '1px solid #cbd5e1',
-                                        background: isAllowed ? '#dcfce7' : '#fff',
-                                        color: isAllowed ? '#15803d' : '#475569',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.15s ease'
-                                      }}
+                                      style={{ fontSize: '11px', padding: '3px 9px', background: '#fff', borderColor: '#4ade80', color: '#15803d' }}
                                     >
-                                      {isAllowed ? <Check size={14} style={{ color: '#16a34a' }} /> : <span style={{ width: 14 }} />}
-                                      <span>{monthLabel} ({m})</span>
+                                      Select All Pay
                                     </button>
-                                  );
-                                })}
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => {
+                                        setEditingSalaryPerm(prev => ({ 
+                                          ...prev, 
+                                          allowed_pay_months: [] 
+                                        }));
+                                      }}
+                                      style={{ fontSize: '11px', padding: '3px 9px', background: '#fff', borderColor: '#cbd5e1' }}
+                                    >
+                                      Clear All Pay
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Pay Month Selection Chips */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', background: '#ffffff', borderRadius: '8px', border: '1px solid #dcfce7' }}>
+                                  {availableSalaryMonths.map(m => {
+                                    const isPayAllowed = (editingSalaryPerm.allowed_pay_months || []).includes(m);
+                                    const monthLabel = formatMonthDisplay(m);
+
+                                    return (
+                                      <button
+                                        key={`pay-${m}`}
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingSalaryPerm(prev => {
+                                            const curList = prev.allowed_pay_months || [];
+                                            const nextPay = isPayAllowed 
+                                              ? curList.filter(x => x !== m)
+                                              : [...curList, m];
+                                            
+                                            // If enabling payment for a month, also auto-enable view for that month
+                                            let nextView = prev.allowed_view_months || [];
+                                            if (!isPayAllowed && !nextView.includes(m)) {
+                                              nextView = [...nextView, m];
+                                            }
+
+                                            return { 
+                                              ...prev, 
+                                              allowed_pay_months: nextPay,
+                                              allowed_view_months: nextView,
+                                              allowed_months: nextView,
+                                              permission_type: nextPay.length > 0 ? 'pay_now' : 'view_only'
+                                            };
+                                          });
+                                        }}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '6px',
+                                          padding: '5px 12px',
+                                          borderRadius: '20px',
+                                          fontSize: '11.5px',
+                                          fontWeight: 700,
+                                          border: isPayAllowed ? '1.5px solid #16a34a' : '1px solid #cbd5e1',
+                                          background: isPayAllowed ? '#dcfce7' : '#fff',
+                                          color: isPayAllowed ? '#15803d' : '#64748b',
+                                          cursor: 'pointer',
+                                          transition: 'all 0.15s ease'
+                                        }}
+                                      >
+                                        <CreditCard size={13} style={{ color: isPayAllowed ? '#16a34a' : '#94a3b8' }} />
+                                        <span>{monthLabel} ({m})</span>
+                                        {isPayAllowed && <Check size={13} style={{ color: '#16a34a' }} />}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* Month Permission Matrix Summary */}
+                              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px' }}>
+                                <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#334155', marginBottom: '8px' }}>
+                                  Configured Monthly Access Summary for @{curUser.username}:
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '8px' }}>
+                                  {availableSalaryMonths.slice(0, 8).map(m => {
+                                    const canView = (editingSalaryPerm.allowed_view_months || []).includes(m);
+                                    const canPay = (editingSalaryPerm.allowed_pay_months || []).includes(m);
+
+                                    return (
+                                      <div key={`summary-${m}`} style={{
+                                        background: '#fff',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '6px',
+                                        padding: '6px 10px',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        fontSize: '11.5px'
+                                      }}>
+                                        <span style={{ fontWeight: 700, color: '#1e293b' }}>{formatMonthDisplay(m)}</span>
+                                        <div style={{ display: 'flex', gap: '4px' }}>
+                                          {canView ? (
+                                            <span style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                                              VIEW
+                                            </span>
+                                          ) : (
+                                            <span style={{ background: '#f1f5f9', color: '#94a3b8', fontSize: '10px', padding: '2px 6px', borderRadius: '4px' }}>
+                                              NO VIEW
+                                            </span>
+                                          )}
+                                          {canPay ? (
+                                            <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                                              PAY
+                                            </span>
+                                          ) : (
+                                            <span style={{ background: '#fef2f2', color: '#991b1b', fontSize: '10px', padding: '2px 6px', borderRadius: '4px' }}>
+                                              LOCKED
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
 
                               {/* Custom Month Addition */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <label style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Add specific month:</label>
                                 <input
                                   type="month"
@@ -2356,12 +2497,12 @@ export default function Settings() {
                                       if (!availableSalaryMonths.includes(customMonthInput)) {
                                         setAvailableSalaryMonths(prev => [...prev, customMonthInput]);
                                       }
-                                      if (!editingSalaryPerm.allowed_months.includes(customMonthInput)) {
-                                        setEditingSalaryPerm(prev => ({
-                                          ...prev,
-                                          allowed_months: [...prev.allowed_months, customMonthInput]
-                                        }));
-                                      }
+                                      setEditingSalaryPerm(prev => ({
+                                        ...prev,
+                                        allowed_view_months: Array.from(new Set([...(prev.allowed_view_months || []), customMonthInput])),
+                                        allowed_pay_months: Array.from(new Set([...(prev.allowed_pay_months || []), customMonthInput])),
+                                        allowed_months: Array.from(new Set([...(prev.allowed_months || []), customMonthInput]))
+                                      }));
                                       setCustomMonthInput('');
                                     }
                                   }}

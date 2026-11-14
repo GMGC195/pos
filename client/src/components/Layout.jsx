@@ -730,27 +730,23 @@ export default function Layout() {
               ))}
             </div>
           ))}
-          {!isSalaryPayOp && (
-            <>
-              <div className="sidebar-label" style={{ marginTop: 16 }}>System</div>
-              <NavLink 
-                to="/settings" 
-                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-                onClick={() => setIsSidebarOpen(false)}
-              >
-                <span className="nav-icon"><Settings size={18} strokeWidth={2.2} /></span>
-                <span className="nav-label">Settings</span>
-              </NavLink>
-              <NavLink 
-                to="/help-support" 
-                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-                onClick={() => setIsSidebarOpen(false)}
-              >
-                <span className="nav-icon"><HelpCircle size={18} strokeWidth={2.2} /></span>
-                <span className="nav-label">Help & Support</span>
-              </NavLink>
-            </>
-          )}
+          <div className="sidebar-label" style={{ marginTop: 16 }}>System</div>
+          <NavLink 
+            to="/settings" 
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <span className="nav-icon"><Settings size={18} strokeWidth={2.2} /></span>
+            <span className="nav-label">Settings</span>
+          </NavLink>
+          <NavLink 
+            to="/help-support" 
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <span className="nav-icon"><HelpCircle size={18} strokeWidth={2.2} /></span>
+            <span className="nav-label">Help & Support</span>
+          </NavLink>
         </nav>
         <div className="sidebar-footer">
           {/* User info block */}
