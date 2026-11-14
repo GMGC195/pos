@@ -102,12 +102,6 @@ export default function Payroll() {
     allowed_pay_months: []
   })
   const [salaryPermissionsLoaded, setSalaryPermissionsLoaded] = useState(!isSalaryPayOperator)
-  const isViewOnlySalaryOperator = isSalaryPayOperator && salaryPermissions.permission_type === 'view_only'
-  const isMonthPayAllowed = isSalaryPayOperator 
-    ? (Array.isArray(salaryPermissions.allowed_pay_months) && salaryPermissions.allowed_pay_months.includes(selectedMonth))
-    : true;
-  const canProcessPayments = isAdmin || (isSalaryPayOperator && isMonthPayAllowed && !isViewOnlySalaryOperator)
-  const showActions = isAdmin && !isSalaryPayOperator
 
   const formatMonth = (date) => {
     const d = new Date(date)
@@ -134,6 +128,12 @@ export default function Payroll() {
   const [selectedMonth, setSelectedMonth] = useState(() => {
     return getSaudiPreviousMonthStr()
   })
+  const isViewOnlySalaryOperator = isSalaryPayOperator && salaryPermissions.permission_type === 'view_only'
+  const isMonthPayAllowed = isSalaryPayOperator 
+    ? (Array.isArray(salaryPermissions.allowed_pay_months) && salaryPermissions.allowed_pay_months.includes(selectedMonth))
+    : true;
+  const canProcessPayments = isAdmin || (isSalaryPayOperator && isMonthPayAllowed && !isViewOnlySalaryOperator)
+  const showActions = isAdmin && !isSalaryPayOperator
   const [viewMode, setViewMode] = useState('detail') // 'detail' by default | 'sheet' as alternative
   const [selectedBranchFilter, setSelectedBranchFilter] = useState(() => {
     const isSalOp = user?.role?.trim().toLowerCase() === 'salary pay operator';
