@@ -791,9 +791,10 @@ export default function InternalBranch() {
   const [sentFilterBranch, setSentFilterBranch] = useState('All');
   const [sentFilterPriority, setSentFilterPriority] = useState('All');
 
-  // Sorted and filtered active sent transfer requests (LATEST REQUESTS FIRST)
+  // Sorted and filtered active sent transfer requests (LATEST REQUESTS FIRST, ACTIVE ONLY)
   const filteredSentTransfers = useMemo(() => {
-    let list = [...transfers];
+    // Only display active & in-progress requests (Completed and Cancelled move to Transfer Logs)
+    let list = transfers.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled');
 
     // Always sort latest requests first
     list.sort((a, b) => {
@@ -860,7 +861,22 @@ export default function InternalBranch() {
   const [trfNeededByTime, setTrfNeededByTime] = useState('');
   const [trfNotes, setTrfNotes] = useState('');
   const [trfDishRows, setTrfDishRows] = useState([
-    { id: 1, dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', needed_by_time: '', priority: 'Normal', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }
+    { 
+      id: 1, 
+      dish_name: '', 
+      item_id: null, 
+      sku: '', 
+      barcode: '', 
+      uom: 'KG', 
+      requested_qty: '', 
+      needed_by_date: new Date().toISOString().split('T')[0],
+      needed_by_time: new Date(Date.now() + 60*60*1000).toTimeString().substring(0, 5), 
+      priority: 'Normal', 
+      remarks: '', 
+      image_url: null, 
+      price: null, 
+      available_units: [...STANDARD_TOP_UNITS] 
+    }
   ]);
   const [submittingTrfRequest, setSubmittingTrfRequest] = useState(false);
 
@@ -927,6 +943,17 @@ export default function InternalBranch() {
   const [acceptItemModal, setAcceptItemModal] = useState(null); // { transferId, item, acceptedQty, reason, saving }
   // 8. Item-Level Reject Modal (Mandatory rejection reason)
   const [rejectItemModal, setRejectItemModal] = useState(null); // { transferId, item, reason, saving }
+  // 9. Bulk Actions Modals
+  const [acceptAllConfirmModal, setAcceptAllConfirmModal] = useState(null); // { transfer, items, saving }
+  const [rejectAllModal, setRejectAllModal] = useState(null); // { transfer, reason, saving }
+  // 10. Clear All Active Requests Modal
+  const [clearAllModalOpen, setClearAllModalOpen] = useState(false);
+  const [clearAllReason, setClearAllReason] = useState('');
+  const [clearingAll, setClearingAll] = useState(false);
+  // 11. Partial Dispatch & Partial Receive selections
+  const [dispatchSelectedItems, setDispatchSelectedItems] = useState({});
+  const [receiveSelectedItems, setReceiveSelectedItems] = useState({});
+  const [itemAcceptedQtys, setItemAcceptedQtys] = useState({});
 
   // Double-click protection refs & socket event deduplication
   const isSubmittingRef = useRef(false);
@@ -1594,7 +1621,8 @@ export default function InternalBranch() {
         barcode: '',
         uom: 'KG',
         requested_qty: '',
-        needed_by_time: '',
+        needed_by_date: new Date().toISOString().split('T')[0],
+        needed_by_time: new Date(Date.now() + 60*60*1000).toTimeString().substring(0, 5),
         priority: 'Normal',
         remarks: '',
         image_url: null,
@@ -1696,6 +1724,7 @@ export default function InternalBranch() {
         image_url: r.image_url || null,
         price: r.price ? parseFloat(r.price) : null,
         needed_by_time: r.needed_by_time ? r.needed_by_time.trim() : formattedNeededBy,
+        needed_by_date: r.needed_by_date ? r.needed_by_date.trim() : new Date().toISOString().split('T')[0],
         priority: r.priority || trfPriority || 'Normal'
       }))
     };
@@ -2064,12 +2093,15 @@ export default function InternalBranch() {
     setDispatchNotes('');
     const initQtys = {};
     const initRemarks = {};
+    const initSelected = {};
     (t.items || []).forEach(item => {
+      initSelected[item.id] = (item.item_status !== 'Rejected' && item.item_status !== 'Cancelled');
       initQtys[item.id] = item.sent_qty !== null && item.sent_qty !== undefined 
         ? item.sent_qty 
-        : (item.confirmed_qty !== null && item.confirmed_qty !== undefined ? item.confirmed_qty : item.requested_qty);
+        : (item.accepted_qty !== null && item.accepted_qty !== undefined ? item.accepted_qty : (item.confirmed_qty ?? item.requested_qty));
       initRemarks[item.id] = item.remarks || '';
     });
+    setDispatchSelectedItems(initSelected);
     setDispatchItemQuantities(initQtys);
     setDispatchItemRemarks(initRemarks);
   };
@@ -2081,14 +2113,25 @@ export default function InternalBranch() {
       return toast.error('Please specify Handover To (Driver / Branch Representative Name).');
     }
 
+    const itemsPayload = (dispatchModalTransfer.items || []).map(item => {
+      const isSelected = dispatchSelectedItems[item.id] !== undefined ? dispatchSelectedItems[item.id] : true;
+      return {
+        id: item.id,
+        is_dispatched: isSelected,
+        mark_pending: !isSelected,
+        sent_qty: isSelected ? parseFloat(dispatchItemQuantities[item.id] || 0) : 0,
+        remarks: dispatchItemRemarks[item.id] || ''
+      };
+    });
+
+    const hasAnyDispatched = itemsPayload.some(it => it.is_dispatched && it.sent_qty > 0);
+    if (!hasAnyDispatched) {
+      return toast.error('Please check at least one item with quantity > 0 to dispatch.');
+    }
+
     try {
       isDispatchingRef.current = true;
       setDispatching(true);
-      const itemsPayload = (dispatchModalTransfer.items || []).map(item => ({
-        id: item.id,
-        sent_qty: parseFloat(dispatchItemQuantities[item.id] || 0),
-        remarks: dispatchItemRemarks[item.id] || ''
-      }));
 
       await axios.put(`/api/internal-branch/transfers/${dispatchModalTransfer.id}/dispatch`, {
         handover_by_name: handoverByName.trim(),
@@ -2123,12 +2166,18 @@ export default function InternalBranch() {
     setReceiveNotes('');
     const initQtys = {};
     const initRemarks = {};
+    const initSelected = {};
     (t.items || []).forEach(item => {
+      // Only items that were dispatched (sent_qty > 0 or dispatched_qty > 0) are eligible to be received
+      const sentAmount = parseFloat(item.sent_qty !== null && item.sent_qty !== undefined ? item.sent_qty : (item.dispatched_qty ?? 0));
+      const isEligible = sentAmount > 0;
+      initSelected[item.id] = isEligible;
       initQtys[item.id] = item.received_qty !== null && item.received_qty !== undefined
         ? item.received_qty
-        : (item.sent_qty !== null && item.sent_qty !== undefined ? item.sent_qty : (item.confirmed_qty ?? item.requested_qty));
+        : (sentAmount > 0 ? sentAmount : (item.confirmed_qty ?? item.requested_qty));
       initRemarks[item.id] = item.remarks || '';
     });
+    setReceiveSelectedItems(initSelected);
     setReceiveItemQuantities(initQtys);
     setReceiveItemRemarks(initRemarks);
   };
@@ -2137,9 +2186,26 @@ export default function InternalBranch() {
   const handleConfirmReceive = async () => {
     if (!receiveModalTransfer || receiving || isReceivingRef.current) return;
 
-    // Check if any discrepancy exists between sent and received
+    const itemsPayload = (receiveModalTransfer.items || []).map(item => {
+      const isSelected = receiveSelectedItems[item.id] !== undefined ? receiveSelectedItems[item.id] : true;
+      return {
+        id: item.id,
+        is_received: isSelected,
+        mark_pending: !isSelected,
+        received_qty: isSelected ? parseFloat(receiveItemQuantities[item.id] || 0) : 0,
+        remarks: receiveItemRemarks[item.id] || ''
+      };
+    });
+
+    const hasAnyReceived = itemsPayload.some(it => it.is_received && it.received_qty > 0);
+    if (!hasAnyReceived) {
+      return toast.error('Please select at least one dispatched item with received quantity > 0 to confirm receiving.');
+    }
+
+    // Check if any discrepancy exists between sent and received for selected items
     let hasVariance = false;
     (receiveModalTransfer.items || []).forEach(it => {
+      if (receiveSelectedItems[it.id] === false) return; // Unchecked items will be received later
       const sentQ = parseFloat(it.sent_qty !== null ? it.sent_qty : (it.confirmed_qty ?? it.requested_qty));
       const recQ = parseFloat(receiveItemQuantities[it.id] ?? sentQ);
       if (Math.abs(recQ - sentQ) > 0.001) {
@@ -2154,11 +2220,6 @@ export default function InternalBranch() {
     try {
       isReceivingRef.current = true;
       setReceiving(true);
-      const itemsPayload = (receiveModalTransfer.items || []).map(item => ({
-        id: item.id,
-        received_qty: parseFloat(receiveItemQuantities[item.id] || 0),
-        remarks: receiveItemRemarks[item.id] || ''
-      }));
 
       const res = await axios.put(`/api/internal-branch/transfers/${receiveModalTransfer.id}/receive`, {
         items: itemsPayload,
@@ -2465,6 +2526,148 @@ export default function InternalBranch() {
     }
   };
 
+  // Fast Accept Handler (No confirmation modal if quantity unchanged)
+  const handleFastAcceptItem = async (transferId, item, acceptedQty) => {
+    try {
+      const res = await axios.put(`/api/internal-branch/transfers/${transferId}/items/${item.id}/accept`, {
+        accepted_qty: acceptedQty,
+        modification_reason: ''
+      });
+      setTransfers(prev => prev.map(t => t.id === Number(transferId) ? { ...t, ...res.data } : t));
+      toast.success(`Item "${item.dish_name}" accepted (${acceptedQty} ${item.uom})`);
+      fetchTransfers();
+      fetchStats();
+      if (detailModalTransfer && detailModalTransfer.id === Number(transferId)) {
+        setDetailModalTransfer(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to fast accept item:', err);
+      toast.error(err.response?.data?.error || 'Failed to accept item');
+    }
+  };
+
+  // Bulk Accept All Click Handler
+  const handleAcceptAllClick = async (transfer) => {
+    const pendingItems = (transfer.items || []).filter(it => it.item_status === 'Pending' || !it.item_status);
+    if (pendingItems.length === 0) {
+      return toast.info('No pending items to accept in this transfer.');
+    }
+
+    const modifiedItems = [];
+    pendingItems.forEach(it => {
+      const customQty = itemAcceptedQtys[it.id] !== undefined ? parseFloat(itemAcceptedQtys[it.id]) : parseFloat(it.requested_qty);
+      if (Math.abs(customQty - parseFloat(it.requested_qty)) > 0.0001) {
+        modifiedItems.push({ ...it, customQty });
+      }
+    });
+
+    if (modifiedItems.length === 0) {
+      // Direct Fast Accept All with NO modal!
+      try {
+        const res = await axios.put(`/api/internal-branch/transfers/${transfer.id}/accept-all`);
+        setTransfers(prev => prev.map(t => t.id === transfer.id ? { ...t, ...res.data } : t));
+        toast.success(`All items in Transfer #${transfer.transfer_id} accepted!`);
+        fetchTransfers();
+        fetchStats();
+      } catch (err) {
+        console.error('Failed to accept all items:', err);
+        toast.error(err.response?.data?.error || 'Failed to accept all items');
+      }
+    } else {
+      // Open confirmation modal displaying modified items and mandatory reason
+      setAcceptAllConfirmModal({
+        transfer,
+        modifiedItems,
+        reason: '',
+        saving: false
+      });
+    }
+  };
+
+  // Confirm Accept All with modifications
+  const handleConfirmAcceptAllWithModifications = async () => {
+    if (!acceptAllConfirmModal) return;
+    const { transfer, modifiedItems, reason } = acceptAllConfirmModal;
+    if (!reason || !reason.trim()) {
+      return toast.error('A reason is mandatory when bulk accepting with modified quantities.');
+    }
+
+    try {
+      setAcceptAllConfirmModal(prev => ({ ...prev, saving: true }));
+      const itemsPayload = modifiedItems.map(it => ({
+        id: it.id,
+        accepted_qty: it.customQty,
+        modification_reason: reason.trim()
+      }));
+
+      const res = await axios.put(`/api/internal-branch/transfers/${transfer.id}/accept-all`, {
+        items: itemsPayload,
+        modification_reason: reason.trim()
+      });
+
+      setTransfers(prev => prev.map(t => t.id === transfer.id ? { ...t, ...res.data } : t));
+      toast.success(`All items accepted with modifications for Transfer #${transfer.transfer_id}!`);
+      setAcceptAllConfirmModal(null);
+      fetchTransfers();
+      fetchStats();
+    } catch (err) {
+      console.error('Failed to accept all items with modifications:', err);
+      toast.error(err.response?.data?.error || 'Failed to accept all items');
+      setAcceptAllConfirmModal(prev => ({ ...prev, saving: false }));
+    }
+  };
+
+  // Confirm Reject All
+  const handleConfirmRejectAll = async () => {
+    if (!rejectAllModal) return;
+    const { transfer, reason } = rejectAllModal;
+    if (!reason || !reason.trim()) {
+      return toast.error('A rejection reason is mandatory before rejecting all items.');
+    }
+
+    try {
+      setRejectAllModal(prev => ({ ...prev, saving: true }));
+      const res = await axios.put(`/api/internal-branch/transfers/${transfer.id}/reject-all`, {
+        rejection_reason: reason.trim()
+      });
+
+      setTransfers(prev => prev.map(t => t.id === transfer.id ? { ...t, ...res.data } : t));
+      toast.success(`All pending items rejected for Transfer #${transfer.transfer_id}`);
+      setRejectAllModal(null);
+      fetchTransfers();
+      fetchStats();
+    } catch (err) {
+      console.error('Failed to reject all items:', err);
+      toast.error(err.response?.data?.error || 'Failed to reject all items');
+      setRejectAllModal(prev => ({ ...prev, saving: false }));
+    }
+  };
+
+  // Confirm Clear All Active Transfers (Safety: only cancels active transfers, logs preserved)
+  const handleConfirmClearAll = async () => {
+    if (!clearAllReason || !clearAllReason.trim()) {
+      return toast.error('A reason is mandatory before clearing all active transfer requests.');
+    }
+
+    try {
+      setClearingAll(true);
+      const res = await axios.put('/api/internal-branch/transfers/clear-all', {
+        cancellation_reason: clearAllReason.trim()
+      });
+
+      toast.success(res.data?.message || 'All active transfers successfully cleared.');
+      setClearAllModalOpen(false);
+      setClearAllReason('');
+      fetchTransfers();
+      fetchStats();
+    } catch (err) {
+      console.error('Failed to clear active transfers:', err);
+      toast.error(err.response?.data?.error || 'Failed to clear active transfers');
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
   // Two-Level Row Layout: Row 1 = Common Transfer Summary, Row 2 = Dish Items Table
   const renderTransferCardRow = (t, isIncoming) => {
     const canModify = ['Pending', 'In Progress'].includes(t.status);
@@ -2558,6 +2761,52 @@ export default function InternalBranch() {
 
           {/* Right Action buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {/* Bulk Actions for Incoming Requests */}
+            {isIncoming && canAcceptReject && (t.status === 'Pending' || t.status === 'In Progress') && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleAcceptAllClick(t)}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#16a34a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="Accept all pending items in this transfer request"
+                >
+                  <CheckCircle2 size={13} /> Accept All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRejectAllModal({ transfer: t, reason: '', saving: false })}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#dc2626',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="Reject all pending items in this transfer request (requires reason)"
+                >
+                  <XCircle size={13} /> Reject All
+                </button>
+              </>
+            )}
+
             {/* If incoming and pending, allow Start Processing */}
             {isIncoming && t.status === 'Pending' && (
               <button
@@ -2740,21 +2989,24 @@ export default function InternalBranch() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, textAlign: 'left' }}>
             <thead>
               <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '8px 14px', width: 36, color: '#64748b', fontWeight: 700 }}>#</th>
-                <th style={{ padding: '8px 14px', color: '#475569', fontWeight: 700 }}>Dish Name</th>
-                <th style={{ padding: '8px 14px', width: 80, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Unit</th>
-                <th style={{ padding: '8px 14px', width: 100, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Requested Qty</th>
-                <th style={{ padding: '8px 14px', width: 100, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Accepted Qty</th>
-                <th style={{ padding: '8px 14px', width: 110, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Need By</th>
-                <th style={{ padding: '8px 14px', width: 120, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Status</th>
-                <th style={{ padding: '8px 14px', color: '#475569', fontWeight: 700 }}>Reason / Remarks</th>
-                <th style={{ padding: '8px 14px', width: 160, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Actions</th>
+                <th style={{ padding: '8px 12px', width: 32, color: '#64748b', fontWeight: 700 }}>#</th>
+                <th style={{ padding: '8px 12px', color: '#475569', fontWeight: 700 }}>Dish Name</th>
+                <th style={{ padding: '8px 12px', width: 65, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Unit</th>
+                <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Requested</th>
+                <th style={{ padding: '8px 10px', width: 110, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Accepted / Mod</th>
+                <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Dispatched</th>
+                <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Received</th>
+                <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Remaining</th>
+                <th style={{ padding: '8px 10px', width: 105, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Need By</th>
+                <th style={{ padding: '8px 10px', width: 95, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Status</th>
+                <th style={{ padding: '8px 12px', color: '#475569', fontWeight: 700 }}>Reason / Remarks</th>
+                <th style={{ padding: '8px 12px', width: 155, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>No dishes listed in this request.</td>
+                  <td colSpan={12} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>No dishes listed in this request.</td>
                 </tr>
               ) : (
                 items.map((it, idx) => {
@@ -2764,7 +3016,19 @@ export default function InternalBranch() {
                   const isItemPending = !isAccepted && !isRejected;
                   const reqQty = parseFloat(it.requested_qty || 0);
                   const accQty = it.accepted_qty !== null && it.accepted_qty !== undefined ? parseFloat(it.accepted_qty) : (it.confirmed_qty !== null && it.confirmed_qty !== undefined ? parseFloat(it.confirmed_qty) : null);
-                  const isQtyModified = isAccepted && accQty !== null && Math.abs(accQty - reqQty) > 0.0001;
+                  const dispQty = it.sent_qty !== null && it.sent_qty !== undefined ? parseFloat(it.sent_qty) : (it.dispatched_qty !== null && it.dispatched_qty !== undefined ? parseFloat(it.dispatched_qty) : 0);
+                  const recQty = it.received_qty !== null && it.received_qty !== undefined ? parseFloat(it.received_qty) : 0;
+                  const remQty = Math.max(0, reqQty - recQty);
+                  const isQtyModified = (isAccepted && accQty !== null && Math.abs(accQty - reqQty) > 0.0001) || (it.modification_reason && it.modification_reason.trim() !== '');
+
+                  let historyList = [];
+                  if (it.quantity_history) {
+                    try {
+                      historyList = Array.isArray(it.quantity_history) ? it.quantity_history : JSON.parse(it.quantity_history);
+                    } catch (e) {
+                      historyList = [];
+                    }
+                  }
 
                   return (
                     <tr
@@ -2774,8 +3038,8 @@ export default function InternalBranch() {
                         background: isRejected ? '#fef2f2' : (isAccepted ? '#f0fdf4' : (idx % 2 === 0 ? '#fff' : '#fafafa'))
                       }}
                     >
-                      <td style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: 600 }}>{idx + 1}</td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 600 }}>{idx + 1}</td>
+                      <td style={{ padding: '10px 12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div style={{ width: 28, height: 28, borderRadius: 4, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
                             {it.image_url ? (
@@ -2790,26 +3054,65 @@ export default function InternalBranch() {
                           </div>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600, color: '#334155' }}>
+                      <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                         {it.uom || 'Pices'}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>
                         {reqQty}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800 }}>
-                        {accQty !== null ? (
-                          <span style={{ color: isQtyModified ? '#d97706' : '#16a34a' }}>
-                            {accQty}
-                            {isQtyModified && <span style={{ fontSize: 10, display: 'block', color: '#ea580c' }}>Modified</span>}
-                          </span>
+                      <td style={{ padding: '10px 10px', textAlign: 'right' }}>
+                        {isIncoming && isItemPending && canAcceptReject ? (
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={itemAcceptedQtys[it.id] !== undefined ? itemAcceptedQtys[it.id] : reqQty}
+                            onChange={e => setItemAcceptedQtys({ ...itemAcceptedQtys, [it.id]: e.target.value })}
+                            style={{ width: 68, padding: '4px 6px', textAlign: 'right', borderRadius: 4, border: '1.5px solid #cbd5e1', fontSize: 12, fontWeight: 700 }}
+                            title="Edit accepted quantity before confirming"
+                          />
+                        ) : accQty !== null ? (
+                          <div>
+                            <span style={{ color: isQtyModified ? '#2563eb' : '#16a34a', fontWeight: 800 }}>
+                              {accQty}
+                              {isQtyModified && (
+                                <span style={{ color: '#2563eb', fontWeight: 800, marginLeft: 4 }} title="Modified Quantity">
+                                  (E)
+                                </span>
+                              )}
+                            </span>
+                            {/* Chronological Modification History */}
+                            {historyList.length > 0 && (
+                              <div style={{ fontSize: 10, color: '#1e40af', marginTop: 3, textAlign: 'right', background: '#eff6ff', padding: '3px 6px', borderRadius: 4, border: '1px solid #bfdbfe' }}>
+                                <div style={{ fontWeight: 700 }}>
+                                  {historyList.map(h => `${h.prev_qty} → ${h.new_qty}`).join(' → ')}
+                                </div>
+                                {historyList.map((h, hIdx) => (
+                                  <div key={`h-${hIdx}`} style={{ marginTop: 1, fontSize: 9.5, color: '#3b82f6' }}>
+                                    {h.author || 'User'}: "{h.reason || 'Qty modified'}" {h.timestamp ? `(${new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <span style={{ color: '#94a3b8' }}>—</span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center', fontSize: 11.5, color: '#64748b' }}>
-                        {it.needed_by_time || t.needed_by_time || 'ASAP'}
+                      <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700 }}>
+                        {dispQty > 0 ? <strong style={{ color: '#d97706' }}>{dispQty}</strong> : <span style={{ color: '#94a3b8' }}>0</span>}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700 }}>
+                        {recQty > 0 ? <strong style={{ color: '#16a34a' }}>{recQty}</strong> : <span style={{ color: '#94a3b8' }}>0</span>}
+                      </td>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700 }}>
+                        {remQty > 0 ? <span style={{ color: '#dc2626' }}>{remQty}</span> : <span style={{ color: '#16a34a' }}>0</span>}
+                      </td>
+                      <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 11.5, color: '#64748b' }}>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{it.needed_by_time || t.needed_by_time || 'ASAP'}</div>
+                        {it.needed_by_date && <div style={{ fontSize: 10, color: '#64748b' }}>{it.needed_by_date}</div>}
+                      </td>
+                      <td style={{ padding: '10px 10px', textAlign: 'center' }}>
                         {isAccepted && (
                           <span style={{ background: '#dcfce7', color: '#166534', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #bbf7d0', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                             <CheckCircle2 size={12} /> Accepted
@@ -2826,9 +3129,9 @@ export default function InternalBranch() {
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 14px', fontSize: 11.5, color: '#475569' }}>
+                      <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#475569' }}>
                         {it.modification_reason && (
-                          <div style={{ color: '#b45309', fontWeight: 600 }}>
+                          <div style={{ color: '#2563eb', fontWeight: 600 }}>
                             Mod: "{it.modification_reason}"
                           </div>
                         )}
@@ -2849,58 +3152,114 @@ export default function InternalBranch() {
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                        {isItemPending ? (
-                          canAcceptReject ? (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        {!isIncoming ? (
+                          // SENDING BRANCH VIEW (Transfer Requests): NO Accept/Reject!
+                          // Show actual processing status and active Modify button!
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <span style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              background: isAccepted ? '#dcfce7' : (isRejected ? '#fee2e2' : '#fef3c7'),
+                              color: isAccepted ? '#166534' : (isRejected ? '#991b1b' : '#92400e'),
+                              border: '1px solid ' + (isAccepted ? '#bbf7d0' : (isRejected ? '#fca5a5' : '#fde68a'))
+                            }}>
+                              {itemStatus}
+                            </span>
+                            {canModify && (
                               <button
                                 type="button"
-                                onClick={() => handleOpenAcceptItemModal(t.id, it)}
+                                onClick={() => handleOpenEditRequestModal(t)}
                                 style={{
-                                  background: '#16a34a',
-                                  color: '#fff',
-                                  fontSize: 11.5,
+                                  background: '#fff',
+                                  color: '#2563eb',
+                                  border: '1px solid #bfdbfe',
+                                  borderRadius: 4,
+                                  fontSize: 11,
                                   fontWeight: 700,
-                                  padding: '4px 10px',
-                                  borderRadius: 5,
-                                  border: 'none',
+                                  padding: '2px 7px',
                                   cursor: 'pointer',
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: 4
+                                  gap: 3
                                 }}
-                                title="Accept item (confirm quantity or modify with reason)"
+                                title="Modify request items or quantities"
                               >
-                                <CheckCircle2 size={13} /> Accept
+                                <Edit3 size={11} /> Modify
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenRejectItemModal(t.id, it)}
-                                style={{
-                                  background: '#dc2626',
-                                  color: '#fff',
-                                  fontSize: 11.5,
-                                  fontWeight: 700,
-                                  padding: '4px 10px',
-                                  borderRadius: 5,
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 4
-                                }}
-                                title="Reject item (requires mandatory reason)"
-                              >
-                                <XCircle size={13} /> Reject
-                              </button>
-                            </div>
-                          ) : (
-                            <span style={{ fontSize: 11, color: '#94a3b8' }}>Awaiting Supply Branch</span>
-                          )
+                            )}
+                          </div>
                         ) : (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: isAccepted ? '#16a34a' : '#dc2626' }}>
-                            {isAccepted ? 'Action Completed' : 'Item Rejected'}
-                          </span>
+                          // INCOMING REQUEST: Accept & Reject buttons for supplying branch!
+                          isItemPending ? (
+                            canAcceptReject ? (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const chosenQty = parseFloat(itemAcceptedQtys[it.id] !== undefined ? itemAcceptedQtys[it.id] : reqQty);
+                                    if (Math.abs(chosenQty - reqQty) < 0.0001) {
+                                      // Fast Accept (No modal!)
+                                      handleFastAcceptItem(t.id, it, chosenQty);
+                                    } else {
+                                      // Modified Quantity confirmation modal
+                                      setAcceptItemModal({
+                                        transferId: t.id,
+                                        item: it,
+                                        acceptedQty: chosenQty,
+                                        reason: '',
+                                        saving: false
+                                      });
+                                    }
+                                  }}
+                                  style={{
+                                    background: '#16a34a',
+                                    color: '#fff',
+                                    fontSize: 11.5,
+                                    fontWeight: 700,
+                                    padding: '4px 10px',
+                                    borderRadius: 5,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4
+                                  }}
+                                  title="Accept item (Fast accept if unchanged, modal if modified)"
+                                >
+                                  <CheckCircle2 size={13} /> Accept
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenRejectItemModal(t.id, it)}
+                                  style={{
+                                    background: '#dc2626',
+                                    color: '#fff',
+                                    fontSize: 11.5,
+                                    fontWeight: 700,
+                                    padding: '4px 10px',
+                                    borderRadius: 5,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4
+                                  }}
+                                  title="Reject item (requires mandatory reason)"
+                                >
+                                  <XCircle size={13} /> Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11, color: '#94a3b8' }}>Awaiting Supply Branch</span>
+                            )
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: isAccepted ? '#16a34a' : '#dc2626' }}>
+                              {isAccepted ? 'Action Completed' : 'Item Rejected'}
+                            </span>
+                          )
                         )}
                       </td>
                     </tr>
@@ -3712,7 +4071,7 @@ export default function InternalBranch() {
                       <div
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: 'minmax(220px, 2.5fr) minmax(95px, 0.9fr) minmax(80px, 0.8fr) minmax(140px, 1.2fr) minmax(105px, 0.9fr) minmax(130px, 1.2fr) 36px',
+                          gridTemplateColumns: 'minmax(200px, 2.2fr) minmax(90px, 0.8fr) minmax(75px, 0.7fr) minmax(185px, 1.6fr) minmax(100px, 0.9fr) minmax(120px, 1fr) 36px',
                           gap: 10,
                           alignItems: 'end',
                           position: 'relative',
@@ -3799,15 +4158,26 @@ export default function InternalBranch() {
                         {/* 4. Need By Date & Time */}
                         <div>
                           <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
-                            Need By
+                            Need By (Date & Time)
                           </label>
-                          <input
-                            type="text"
-                            placeholder="e.g. 5:00 PM / ASAP"
-                            value={row.needed_by_time || ''}
-                            onChange={e => handleDishRowChangeTrf(row.id, 'needed_by_time', e.target.value)}
-                            style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, height: 38 }}
-                          />
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <input
+                              type="date"
+                              value={row.needed_by_date || ''}
+                              onChange={e => handleDishRowChangeTrf(row.id, 'needed_by_date', e.target.value)}
+                              onClick={e => { try { e.target.showPicker && e.target.showPicker(); } catch (err) {} }}
+                              style={{ width: '56%', padding: '7px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11, height: 38, cursor: 'pointer' }}
+                              title="Click to select date"
+                            />
+                            <input
+                              type="time"
+                              value={row.needed_by_time || ''}
+                              onChange={e => handleDishRowChangeTrf(row.id, 'needed_by_time', e.target.value)}
+                              onClick={e => { try { e.target.showPicker && e.target.showPicker(); } catch (err) {} }}
+                              style={{ width: '44%', padding: '7px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11, height: 38, cursor: 'pointer' }}
+                              title="Click to select time"
+                            />
+                          </div>
                         </div>
 
                         {/* 5. Priority */}
@@ -4010,6 +4380,29 @@ export default function InternalBranch() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isSuperUser && (
+                <button
+                  type="button"
+                  onClick={() => { setClearAllReason(''); setClearAllModalOpen(true); }}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 6,
+                    background: '#fef2f2',
+                    border: '1.5px solid #fca5a5',
+                    color: '#b91c1c',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                  title="Clear/cancel all active transfer requests across branches (Transfer logs are safely preserved)"
+                >
+                  <Trash2 size={14} /> Clear All Active
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setActiveTab('new')}
@@ -4968,51 +5361,85 @@ export default function InternalBranch() {
               </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {(dispatchModalTransfer.items || []).map((it) => (
-                  <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, alignItems: 'center', background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                        {it.image_url ? (
-                          <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
-                        ) : (
-                          <Utensils size={16} color="#94a3b8" />
-                        )}
-                      </div>
+                {(dispatchModalTransfer.items || []).map((it) => {
+                  const isChecked = dispatchSelectedItems[it.id] !== undefined ? dispatchSelectedItems[it.id] : true;
+                  return (
+                    <div
+                      key={it.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '28px 2fr 1fr 1fr',
+                        gap: 10,
+                        alignItems: 'center',
+                        background: isChecked ? '#f8fafc' : '#f1f5f9',
+                        opacity: isChecked ? 1 : 0.6,
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        border: isChecked ? '1px solid #e2e8f0' : '1px dashed #cbd5e1'
+                      }}
+                    >
                       <div>
-                        <strong style={{ fontSize: 13.5, color: '#0f172a', display: 'block' }}>{it.dish_name}</strong>
-                        <span style={{ fontSize: 11.5, color: '#64748b' }}>
-                          Req: <strong>{it.requested_qty} {it.uom}</strong>
-                          {it.confirmed_qty !== null && it.confirmed_qty !== undefined && it.confirmed_qty !== it.requested_qty && (
-                            <span style={{ color: '#d97706', marginLeft: 4 }}>(Conf: {it.confirmed_qty})</span>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={e => setDispatchSelectedItems({ ...dispatchSelectedItems, [it.id]: e.target.checked })}
+                          style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#d97706' }}
+                          title={isChecked ? 'Uncheck to leave pending' : 'Check to dispatch'}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                          {it.image_url ? (
+                            <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                          ) : (
+                            <Utensils size={16} color="#94a3b8" />
                           )}
-                        </span>
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{it.dish_name}</strong>
+                            {!isChecked && (
+                              <span style={{ fontSize: 10, background: '#e2e8f0', color: '#64748b', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
+                                Will stay Pending
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 11.5, color: '#64748b' }}>
+                            Req: <strong>{it.requested_qty} {it.uom}</strong>
+                            {it.accepted_qty !== null && it.accepted_qty !== undefined && it.accepted_qty !== it.requested_qty && (
+                              <span style={{ color: '#d97706', marginLeft: 4 }}>(Acc: {it.accepted_qty})</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Sent Qty</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          disabled={!isChecked}
+                          value={dispatchItemQuantities[it.id] ?? (it.accepted_qty ?? (it.confirmed_qty ?? it.requested_qty))}
+                          onChange={e => setDispatchItemQuantities({ ...dispatchItemQuantities, [it.id]: e.target.value })}
+                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700, background: isChecked ? '#fff' : '#e2e8f0' }}
+                        />
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
+                        <input
+                          type="text"
+                          placeholder="e.g. 2 thermal crates"
+                          disabled={!isChecked}
+                          value={dispatchItemRemarks[it.id] ?? ''}
+                          onChange={e => setDispatchItemRemarks({ ...dispatchItemRemarks, [it.id]: e.target.value })}
+                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, background: isChecked ? '#fff' : '#e2e8f0' }}
+                        />
                       </div>
                     </div>
-
-                    <div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Sent Qty</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={dispatchItemQuantities[it.id] ?? (it.confirmed_qty ?? it.requested_qty)}
-                        onChange={e => setDispatchItemQuantities({ ...dispatchItemQuantities, [it.id]: e.target.value })}
-                        style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
-                      />
-                    </div>
-
-                    <div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
-                      <input
-                        type="text"
-                        placeholder="e.g. 2 thermal crates"
-                        value={dispatchItemRemarks[it.id] ?? ''}
-                        onChange={e => setDispatchItemRemarks({ ...dispatchItemRemarks, [it.id]: e.target.value })}
-                        style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* General Dispatch Notes */}
@@ -5604,73 +6031,121 @@ export default function InternalBranch() {
               )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
-                {(receiveModalTransfer.items || []).map((it) => {
-                  const sentQ = it.sent_qty !== null ? parseFloat(it.sent_qty) : parseFloat(it.confirmed_qty ?? it.requested_qty);
-                  const recQ = parseFloat(receiveItemQuantities[it.id] !== undefined ? receiveItemQuantities[it.id] : sentQ) || 0;
-                  const variance = recQ - sentQ;
+                {(() => {
+                  const dispatchedItems = (receiveModalTransfer.items || []).filter(it => {
+                    const sentQ = it.sent_qty !== null && it.sent_qty !== undefined ? parseFloat(it.sent_qty) : (it.dispatched_qty !== null && it.dispatched_qty !== undefined ? parseFloat(it.dispatched_qty) : 0);
+                    return sentQ > 0;
+                  });
 
-                  return (
-                    <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr 1.2fr', gap: 10, alignItems: 'center', background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                          {it.image_url ? (
-                            <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
-                          ) : (
-                            <Utensils size={16} color="#94a3b8" />
-                          )}
-                        </div>
+                  if (dispatchedItems.length === 0) {
+                    return (
+                      <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', background: '#f8fafc', borderRadius: 8 }}>
+                        No dispatched items found in this transfer to receive.
+                      </div>
+                    );
+                  }
+
+                  return dispatchedItems.map((it) => {
+                    const isChecked = receiveSelectedItems[it.id] !== undefined ? receiveSelectedItems[it.id] : true;
+                    const sentQ = it.sent_qty !== null ? parseFloat(it.sent_qty) : parseFloat(it.confirmed_qty ?? it.requested_qty);
+                    const recQ = parseFloat(receiveItemQuantities[it.id] !== undefined ? receiveItemQuantities[it.id] : sentQ) || 0;
+                    const variance = recQ - sentQ;
+
+                    return (
+                      <div
+                        key={it.id}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '28px 2fr 1fr 1.2fr 1.2fr',
+                          gap: 10,
+                          alignItems: 'center',
+                          background: isChecked ? '#f8fafc' : '#f1f5f9',
+                          opacity: isChecked ? 1 : 0.6,
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: isChecked ? '1px solid #e2e8f0' : '1px dashed #cbd5e1'
+                        }}
+                      >
                         <div>
-                          <strong style={{ fontSize: 13.5, color: '#0f172a', display: 'block' }}>{it.dish_name}</strong>
-                          <span style={{ fontSize: 11.5, color: '#64748b' }}>
-                            Sent: <strong>{sentQ} {it.uom}</strong> (Req: {it.requested_qty})
-                          </span>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => setReceiveSelectedItems({ ...receiveSelectedItems, [it.id]: e.target.checked })}
+                            style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#16a34a' }}
+                            title={isChecked ? 'Uncheck to receive later' : 'Check to receive'}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                            {it.image_url ? (
+                              <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                            ) : (
+                              <Utensils size={16} color="#94a3b8" />
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{it.dish_name}</strong>
+                              {!isChecked && (
+                                <span style={{ fontSize: 10, background: '#e2e8f0', color: '#64748b', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
+                                  Will receive later
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: 11.5, color: '#64748b' }}>
+                              Sent: <strong>{sentQ} {it.uom}</strong> (Req: {it.requested_qty})
+                            </span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Received Qty</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            disabled={!isChecked}
+                            value={receiveItemQuantities[it.id] ?? sentQ}
+                            onChange={e => setReceiveItemQuantities({ ...receiveItemQuantities, [it.id]: e.target.value })}
+                            style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700, background: isChecked ? '#fff' : '#e2e8f0' }}
+                          />
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Variance</span>
+                          <div style={{ fontSize: 12.5, fontWeight: 800, color: variance < 0 ? '#dc2626' : (variance > 0 ? '#2563eb' : '#16a34a') }}>
+                            {variance === 0 ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#16a34a' }}>
+                                <CheckCircle2 size={13} /> Matched
+                              </span>
+                            ) : variance < 0 ? (
+                              <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: 4 }}>
+                                Short: {variance.toFixed(2)} {it.uom}
+                              </span>
+                            ) : (
+                              <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: 4 }}>
+                                Excess: +{variance.toFixed(2)} {it.uom}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
+                          <input
+                            type="text"
+                            placeholder="Condition / damage"
+                            disabled={!isChecked}
+                            value={receiveItemRemarks[it.id] ?? ''}
+                            onChange={e => setReceiveItemRemarks({ ...receiveItemRemarks, [it.id]: e.target.value })}
+                            style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, background: isChecked ? '#fff' : '#e2e8f0' }}
+                          />
                         </div>
                       </div>
-
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Received Qty</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={receiveItemQuantities[it.id] ?? sentQ}
-                          onChange={e => setReceiveItemQuantities({ ...receiveItemQuantities, [it.id]: e.target.value })}
-                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700 }}
-                        />
-                      </div>
-
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Variance</span>
-                        <div style={{ fontSize: 12.5, fontWeight: 800, color: variance < 0 ? '#dc2626' : (variance > 0 ? '#2563eb' : '#16a34a') }}>
-                          {variance === 0 ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#16a34a' }}>
-                              <CheckCircle2 size={13} /> Matched
-                            </span>
-                          ) : variance < 0 ? (
-                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: 4 }}>
-                              Short: {variance.toFixed(2)} {it.uom}
-                            </span>
-                          ) : (
-                            <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: 4 }}>
-                              Excess: +{variance.toFixed(2)} {it.uom}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
-                        <input
-                          type="text"
-                          placeholder="Condition / damage"
-                          value={receiveItemRemarks[it.id] ?? ''}
-                          onChange={e => setReceiveItemRemarks({ ...receiveItemRemarks, [it.id]: e.target.value })}
-                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
 
               {/* Mandatory Discrepancy Reason if variance detected */}
@@ -7287,6 +7762,349 @@ export default function InternalBranch() {
               >
                 <XCircle size={15} />
                 {rejectItemModal.saving ? 'Rejecting...' : 'Confirm Rejection'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL: ACCEPT ALL WITH MODIFICATIONS (Mandatory Reason)
+      ───────────────────────────────────────────────────────────── */}
+      {acceptAllConfirmModal && (
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 9999, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)' }}
+          onClick={e => { if (e.target.classList.contains('modal-overlay')) setAcceptAllConfirmModal(null); }}
+        >
+          <div
+            className="modal"
+            style={{
+              maxWidth: 540,
+              width: '95%',
+              background: '#fff',
+              borderRadius: 12,
+              padding: 0,
+              overflow: 'hidden',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+            }}
+          >
+            <div style={{ background: '#f0fdf4', padding: '16px 20px', borderBottom: '1px solid #dcfce7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 6, background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#16a34a' }}>
+                  <CheckCircle2 size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#166534' }}>Accept All Items (Modifications Detected)</h3>
+                  <div style={{ fontSize: 11.5, color: '#15803d' }}>Transfer #{acceptAllConfirmModal.transfer.transfer_id}</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAcceptAllConfirmModal(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: 20 }}>
+              <p style={{ margin: '0 0 12px', fontSize: 12.5, color: '#475569' }}>
+                The following items have modified quantities from the original request. A reason is mandatory:
+              </p>
+              <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, marginBottom: 16 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <th style={{ padding: '6px 10px', textAlign: 'left', color: '#64748b' }}>Dish Name</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', color: '#64748b' }}>Original Qty</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', color: '#16a34a' }}>Accepted Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {acceptAllConfirmModal.modifiedItems.map(it => (
+                      <tr key={`mod-summary-${it.id}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '6px 10px', fontWeight: 600, color: '#0f172a' }}>{it.dish_name}</td>
+                        <td style={{ padding: '6px 10px', textAlign: 'right', color: '#64748b' }}>{it.requested_qty} {it.uom}</td>
+                        <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 800, color: '#2563eb' }}>{it.customQty} {it.uom}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
+                  Reason for Quantity Adjustments * (Mandatory):
+                </label>
+                <textarea
+                  rows={3}
+                  value={acceptAllConfirmModal.reason}
+                  onChange={e => setAcceptAllConfirmModal(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="e.g., Partial dough batch available / supplying remaining from central batch later..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    fontSize: 12.5,
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setAcceptAllConfirmModal(null)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAcceptAllWithModifications}
+                disabled={acceptAllConfirmModal.saving || !acceptAllConfirmModal.reason.trim()}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: !acceptAllConfirmModal.reason.trim() ? '#94a3b8' : '#16a34a',
+                  color: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: !acceptAllConfirmModal.reason.trim() ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <CheckCircle2 size={15} />
+                {acceptAllConfirmModal.saving ? 'Accepting...' : 'Confirm & Accept All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL: REJECT ALL PENDING ITEMS (Mandatory Rejection Reason)
+      ───────────────────────────────────────────────────────────── */}
+      {rejectAllModal && (
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 9999, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)' }}
+          onClick={e => { if (e.target.classList.contains('modal-overlay')) setRejectAllModal(null); }}
+        >
+          <div
+            className="modal"
+            style={{
+              maxWidth: 480,
+              width: '95%',
+              background: '#fff',
+              borderRadius: 12,
+              padding: 0,
+              overflow: 'hidden',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+            }}
+          >
+            <div style={{ background: '#fef2f2', padding: '16px 20px', borderBottom: '1px solid #fee2e2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 6, background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#dc2626' }}>
+                  <XCircle size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#991b1b' }}>Reject All Pending Items</h3>
+                  <div style={{ fontSize: 11.5, color: '#b91c1c' }}>Transfer #{rejectAllModal.transfer.transfer_id}</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectAllModal(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: 20 }}>
+              <p style={{ margin: '0 0 12px', fontSize: 12.5, color: '#475569' }}>
+                Are you sure you want to reject all pending items for this transfer? A mandatory reason is required:
+              </p>
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
+                  Rejection Reason * (Mandatory):
+                </label>
+                <textarea
+                  rows={3}
+                  value={rejectAllModal.reason}
+                  onChange={e => setRejectAllModal(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="e.g., Supplying branch currently out of capacity / raw materials unavailable..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #fca5a5',
+                    fontSize: 12.5,
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setRejectAllModal(null)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRejectAll}
+                disabled={rejectAllModal.saving || !rejectAllModal.reason.trim()}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: !rejectAllModal.reason.trim() ? '#94a3b8' : '#dc2626',
+                  color: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: !rejectAllModal.reason.trim() ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <XCircle size={15} />
+                {rejectAllModal.saving ? 'Rejecting...' : 'Confirm Reject All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL: CLEAR ALL ACTIVE TRANSFERS (Admin / Developer)
+      ───────────────────────────────────────────────────────────── */}
+      {clearAllModalOpen && (
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 9999, background: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(3px)' }}
+          onClick={e => { if (e.target.classList.contains('modal-overlay')) setClearAllModalOpen(false); }}
+        >
+          <div
+            className="modal"
+            style={{
+              maxWidth: 500,
+              width: '95%',
+              background: '#fff',
+              borderRadius: 12,
+              padding: 0,
+              overflow: 'hidden',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+            }}
+          >
+            <div style={{ background: '#fef2f2', padding: '16px 20px', borderBottom: '1px solid #fee2e2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 6, background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#dc2626' }}>
+                  <Trash2 size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#991b1b' }}>Clear All Active Transfers</h3>
+                  <div style={{ fontSize: 11.5, color: '#b91c1c' }}>Administrative Action Across All Branches</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClearAllModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: 20 }}>
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12.5, color: '#92400e' }}>
+                <strong>Critical Safety Notice:</strong> This action will cancel all active, pending, or in-progress transfer requests across branches. <strong>Transfer Logs, completed transfer records, and inventory history are completely preserved.</strong>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
+                  Reason for Clearing Active Transfers * (Mandatory):
+                </label>
+                <textarea
+                  rows={3}
+                  value={clearAllReason}
+                  onChange={e => setClearAllReason(e.target.value)}
+                  placeholder="e.g., End-of-day kitchen clean reset / routine operational flush..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #fca5a5',
+                    fontSize: 12.5,
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setClearAllModalOpen(false)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearAll}
+                disabled={clearingAll || !clearAllReason.trim()}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: !clearAllReason.trim() ? '#94a3b8' : '#dc2626',
+                  color: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: !clearAllReason.trim() ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <Trash2 size={15} />
+                {clearingAll ? 'Clearing...' : 'Confirm Clear All Active'}
               </button>
             </div>
           </div>

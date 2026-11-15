@@ -334,8 +334,8 @@ router.post('/transfers', authenticateToken, async (req, res) => {
 
       const itemRes = await client.query(`
         INSERT INTO internal_branch_transfer_items (
-          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode, needed_by_time, priority
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode, needed_by_time, needed_by_date, priority
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING *
       `, [
         createdTransfer.id,
@@ -350,6 +350,7 @@ router.post('/transfers', authenticateToken, async (req, res) => {
         itemSku,
         itemBarcode,
         item.needed_by_time || createdTransfer.needed_by_time || null,
+        item.needed_by_date || null,
         item.priority || createdTransfer.priority || 'Normal'
       ]);
       insertedItems.push(itemRes.rows[0]);
@@ -858,6 +859,20 @@ router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req,
       });
     }
 
+    let currentHistory = Array.isArray(item.quantity_history) ? item.quantity_history : [];
+    if (typeof item.quantity_history === 'string') {
+      try { currentHistory = JSON.parse(item.quantity_history); } catch(e) {}
+    }
+    if (isModified) {
+      currentHistory.push({
+        prev_qty: reqQty,
+        new_qty: finalAcceptedQty,
+        author: userName,
+        timestamp: new Date().toISOString(),
+        reason: cleanModReason
+      });
+    }
+
     const updateItemRes = await client.query(`
       UPDATE internal_branch_transfer_items
       SET item_status = 'Accepted',
@@ -867,10 +882,11 @@ router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req,
           rejection_reason = NULL,
           modification_reason = $2,
           accepted_by_name = $3,
-          accepted_at = CURRENT_TIMESTAMP
-      WHERE id = $4 AND transfer_id = $5
+          accepted_at = CURRENT_TIMESTAMP,
+          quantity_history = $4
+      WHERE id = $5 AND transfer_id = $6
       RETURNING *
-    `, [finalAcceptedQty, isModified ? cleanModReason : null, userName, itemId, id]);
+    `, [finalAcceptedQty, isModified ? cleanModReason : null, userName, JSON.stringify(currentHistory), itemId, id]);
 
     const updatedItem = updateItemRes.rows[0];
     const overallStatus = await recalculateTransferStatus(client, id);
@@ -978,8 +994,8 @@ router.put('/transfers/:id/items/:itemId/reject', authenticateToken, async (req,
       userRole: req.user.role,
       previousValue: item.item_status || 'Pending',
       newValue: 'Rejected',
-      reason: reasonText,
-      details: `Item "${item.dish_name}" rejected by ${userName}. Reason: "${reasonText}". Request status is now "${overallStatus}".`
+      reason: cleanReason,
+      details: `Item "${item.dish_name}" rejected by ${userName}. Reason: "${cleanReason}". Request status is now "${overallStatus}".`
     });
 
     await client.query('COMMIT');
@@ -997,6 +1013,87 @@ router.put('/transfers/:id/items/:itemId/reject', authenticateToken, async (req,
     await client.query('ROLLBACK');
     console.error('Error rejecting item:', err);
     res.status(500).json({ error: err.message || 'Failed to reject item' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/clear-all - Cancel and clear all active/pending requests across branches (Transfer logs preserved)
+router.put('/transfers/clear-all', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const superUser = isSuperUser(req.user);
+    if (!superUser) {
+      return res.status(403).json({ error: 'Unauthorized. Only Admin and Developer accounts can perform Clear All.' });
+    }
+
+    const { reason, cancellation_reason } = req.body;
+    const authorName = req.user.name || req.user.username || 'Admin';
+    const clearReason = (cancellation_reason || reason || '').trim() || 'Admin Clear All Active Transfers';
+
+    await client.query('BEGIN');
+
+    // 1. Fetch all active transfer IDs (NOT Completed, Cancelled, or Rejected)
+    const activeRes = await client.query(`
+      SELECT id, transfer_id, from_branch, to_branch, status 
+      FROM internal_branch_transfers 
+      WHERE status NOT IN ('Completed', 'Cancelled', 'Rejected')
+      FOR UPDATE
+    `);
+
+    const clearedCount = activeRes.rows.length;
+
+    if (clearedCount > 0) {
+      const activeIds = activeRes.rows.map(r => r.id);
+
+      // 2. Mark active transfers as Cancelled
+      await client.query(`
+        UPDATE internal_branch_transfers
+        SET status = 'Cancelled',
+            cancellation_reason = $1,
+            cancelled_by = $2,
+            cancelled_at = CURRENT_TIMESTAMP
+        WHERE id = ANY($3::int[])
+      `, [clearReason, authorName, activeIds]);
+
+      // 3. Mark items of those transfers as Cancelled if not already finalized
+      await client.query(`
+        UPDATE internal_branch_transfer_items
+        SET item_status = 'Cancelled',
+            rejection_reason = COALESCE(rejection_reason, $1)
+        WHERE transfer_id = ANY($2::int[]) 
+          AND (item_status IS NULL OR item_status NOT IN ('Completed', 'Rejected'))
+      `, [clearReason, activeIds]);
+
+      // 4. Log transfer activity for audit trail
+      for (const t of activeRes.rows) {
+        await logTransferActivity(client, {
+          transferId: t.id,
+          action: 'CLEAR_ALL_CANCELLED',
+          fromBranch: t.from_branch,
+          toBranch: t.to_branch,
+          user: req.user,
+          userRole: req.user.role,
+          previousValue: t.status,
+          newValue: 'Cancelled',
+          reason: clearReason,
+          details: `Active transfer #${t.transfer_id} cleared by ${authorName}. Reason: "${clearReason}". Transfer logs preserved.`
+        });
+      }
+    }
+
+    await client.query('COMMIT');
+
+    if (req.io) {
+      req.io.emit('internal_transfer_cleared_all', { clearedCount, author: authorName });
+      req.io.emit('internal_transfers_refresh');
+    }
+
+    res.json({ success: true, clearedCount, message: `Successfully cleared ${clearedCount} active transfer request(s).` });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error clearing active transfers:', err);
+    res.status(500).json({ error: err.message || 'Failed to clear active transfers' });
   } finally {
     client.release();
   }
@@ -1024,17 +1121,72 @@ router.put('/transfers/:id/accept-all', authenticateToken, async (req, res) => {
     }
 
     const userName = req.user.name || req.user.username || 'Kitchen Staff';
+    const { items: customItems, modification_reason } = req.body;
 
-    await client.query(`
-      UPDATE internal_branch_transfer_items
-      SET item_status = 'Accepted',
-          accepted_qty = requested_qty,
-          rejected_qty = 0,
-          rejection_reason = NULL,
-          accepted_by_name = $1,
-          accepted_at = CURRENT_TIMESTAMP
-      WHERE transfer_id = $2 AND (item_status = 'Pending' OR item_status IS NULL)
-    `, [userName, id]);
+    if (customItems && Array.isArray(customItems) && customItems.length > 0) {
+      for (const cit of customItems) {
+        const itemAcceptedQty = cit.accepted_qty !== undefined && cit.accepted_qty !== null ? parseFloat(cit.accepted_qty) : null;
+        const itemReason = (cit.modification_reason || modification_reason || '').trim() || null;
+        
+        // Fetch current item to append quantity history if modified
+        const curRes = await client.query(`SELECT requested_qty, quantity_history FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2`, [cit.id, id]);
+        let historyJson = '[]';
+        if (curRes.rows.length > 0) {
+          const cur = curRes.rows[0];
+          let history = [];
+          try {
+            history = Array.isArray(cur.quantity_history) ? cur.quantity_history : (cur.quantity_history ? JSON.parse(cur.quantity_history) : []);
+          } catch (e) { history = []; }
+          const prevQ = parseFloat(cur.requested_qty || 0);
+          if (itemAcceptedQty !== null && Math.abs(itemAcceptedQty - prevQ) > 0.0001) {
+            history.push({
+              prev_qty: prevQ,
+              new_qty: itemAcceptedQty,
+              author: userName,
+              timestamp: new Date().toISOString(),
+              reason: itemReason || 'Bulk accepted with modified quantity'
+            });
+          }
+          historyJson = JSON.stringify(history);
+        }
+
+        await client.query(`
+          UPDATE internal_branch_transfer_items
+          SET item_status = 'Accepted',
+              accepted_qty = COALESCE($1, requested_qty),
+              modification_reason = $2,
+              quantity_history = $3::jsonb,
+              rejected_qty = 0,
+              rejection_reason = NULL,
+              accepted_by_name = $4,
+              accepted_at = CURRENT_TIMESTAMP
+          WHERE id = $5 AND transfer_id = $6
+        `, [itemAcceptedQty, itemReason, historyJson, userName, cit.id, id]);
+      }
+
+      // Also accept any other pending items with requested_qty
+      await client.query(`
+        UPDATE internal_branch_transfer_items
+        SET item_status = 'Accepted',
+            accepted_qty = requested_qty,
+            rejected_qty = 0,
+            rejection_reason = NULL,
+            accepted_by_name = $1,
+            accepted_at = CURRENT_TIMESTAMP
+        WHERE transfer_id = $2 AND (item_status = 'Pending' OR item_status IS NULL)
+      `, [userName, id]);
+    } else {
+      await client.query(`
+        UPDATE internal_branch_transfer_items
+        SET item_status = 'Accepted',
+            accepted_qty = requested_qty,
+            rejected_qty = 0,
+            rejection_reason = NULL,
+            accepted_by_name = $1,
+            accepted_at = CURRENT_TIMESTAMP
+        WHERE transfer_id = $2 AND (item_status = 'Pending' OR item_status IS NULL)
+      `, [userName, id]);
+    }
 
     const overallStatus = await recalculateTransferStatus(client, id);
 
@@ -1612,9 +1764,10 @@ router.put('/transfers/:id/modify-quantities', authenticateToken, async (req, re
     const superUser = isSuperUser(req.user);
     const userBranch = req.user.branch;
 
-    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+    const userName = req.user.name || req.user.username || 'Staff';
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch && userBranch !== transfer.from_branch) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Unauthorized. Only supplying branch can modify quantities.' });
+      return res.status(403).json({ error: 'Unauthorized. Only involved branches or superusers can modify quantities.' });
     }
 
     const changes = [];
@@ -1624,14 +1777,36 @@ router.put('/transfers/:id/modify-quantities', authenticateToken, async (req, re
         throw new Error(`Confirmed quantity for item #${item.id} must be a valid non-negative number.`);
       }
 
+      const existingItemRes = await client.query(`SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE`, [item.id, transfer.id]);
+      if (existingItemRes.rows.length === 0) continue;
+      const curItem = existingItemRes.rows[0];
+
+      let curHistory = Array.isArray(curItem.quantity_history) ? curItem.quantity_history : [];
+      if (typeof curItem.quantity_history === 'string') {
+        try { curHistory = JSON.parse(curItem.quantity_history); } catch(e) {}
+      }
+      const prevQ = parseFloat(curItem.confirmed_qty !== null && curItem.confirmed_qty !== undefined ? curItem.confirmed_qty : (curItem.accepted_qty !== null && curItem.accepted_qty !== undefined ? curItem.accepted_qty : (curItem.requested_qty ?? 0)));
+      if (Math.abs(confQty - prevQ) > 0.0001) {
+        curHistory.push({
+          prev_qty: prevQ,
+          new_qty: confQty,
+          author: userName,
+          timestamp: new Date().toISOString(),
+          reason: item.reason || general_reason || 'Quantity modified'
+        });
+      }
+
       const itemRes = await client.query(`
         UPDATE internal_branch_transfer_items
         SET confirmed_qty = $1,
+            accepted_qty = $1,
             sent_qty = $1,
-            quantity_change_reason = COALESCE($2, quantity_change_reason)
-        WHERE id = $3 AND transfer_id = $4
+            quantity_change_reason = COALESCE($2, quantity_change_reason),
+            modification_reason = COALESCE($2, modification_reason),
+            quantity_history = $3
+        WHERE id = $4 AND transfer_id = $5
         RETURNING *
-      `, [confQty, item.reason || general_reason || null, item.id, transfer.id]);
+      `, [confQty, item.reason || general_reason || null, JSON.stringify(curHistory), item.id, transfer.id]);
 
       if (itemRes.rows[0]) {
         changes.push(itemRes.rows[0]);
@@ -1803,7 +1978,7 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
         const acceptedQty = parseFloat(currentItem.accepted_qty !== null && currentItem.accepted_qty !== undefined ? currentItem.accepted_qty : (currentItem.confirmed_qty ?? currentItem.requested_qty ?? 0));
         const dispatchQty = parseFloat(item.dispatch_qty !== undefined ? item.dispatch_qty : (item.sent_qty !== undefined ? item.sent_qty : acceptedQty));
 
-        if (item.mark_pending || isNaN(dispatchQty) || dispatchQty <= 0) {
+        if (item.mark_pending || item.is_dispatched === false || isNaN(dispatchQty) || dispatchQty <= 0) {
           // Item marked as Pending Dispatch / Not Available
           totalPendingDispatchCount++;
           await client.query(`
@@ -2025,7 +2200,7 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
           WHERE id = $5 AND transfer_id = $6
         `, [rejQty, reasonText, receiverName, item.remarks || null, item.id, transfer.id]);
 
-      } else if (item.mark_pending) {
+      } else if (item.mark_pending || item.is_received === false) {
         // Item explicitly marked as Pending Receive (not yet arrived)
         allReceived = false;
         allRejected = false;

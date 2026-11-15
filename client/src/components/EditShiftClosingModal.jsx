@@ -20,10 +20,13 @@ export default function EditShiftClosingModal({
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
   const [reason, setReason] = useState('');
+  const [reasonError, setReasonError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('edit'); // 'edit' | 'audit'
   const [auditLogs, setAuditLogs] = useState([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const reasonRef = React.useRef(null);
 
   // Lock background scroll while modal is active
   useEffect(() => {
@@ -98,7 +101,7 @@ export default function EditShiftClosingModal({
 
   const hasChanges = (newCashNum !== origCash || newCardNum !== origCard);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
 
     if (isNaN(newCashNum) || newCashNum < 0) {
@@ -108,13 +111,20 @@ export default function EditShiftClosingModal({
       return toast.error('Please enter a valid non-negative Actual Card amount.');
     }
     if (!reason || !reason.trim()) {
-      return toast.error('Mandatory: Please provide a clear reason for this correction before saving.');
-    }
-
-    if (!window.confirm('Are you sure you want to update this closed shift record? This will be permanently recorded in the developer audit logs.')) {
+      setReasonError(true);
+      toast.error('Please enter a reason before updating the shift.');
+      if (reasonRef.current) {
+        reasonRef.current.focus();
+      }
       return;
     }
 
+    setReasonError(false);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (saving) return;
     try {
       setSaving(true);
       const headers = devToken ? { 'x-developer-token': devToken } : {};
@@ -126,6 +136,7 @@ export default function EditShiftClosingModal({
       }, { headers });
 
       toast.success('Shift closing amounts updated and developer audit log recorded!');
+      setShowConfirmModal(false);
       if (onSuccess) {
         onSuccess(res.data?.closing || res.data);
       }
@@ -259,7 +270,7 @@ export default function EditShiftClosingModal({
               )}
 
               {/* Input Row: Actual Cash & Actual Card */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
                     Actual Cash Counted ({currency}) <span style={{ color: '#dc2626' }}>*</span>
@@ -317,8 +328,42 @@ export default function EditShiftClosingModal({
                 </div>
               </div>
 
+              {/* Mandatory Reason Field Directly Below Editable Inputs */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+                  Reason for Editing (Mandatory for Audit Trail) <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <textarea
+                  ref={reasonRef}
+                  rows={2}
+                  value={reason}
+                  onChange={e => {
+                    setReason(e.target.value);
+                    if (e.target.value.trim()) setReasonError(false);
+                  }}
+                  placeholder="Please enter a reason before updating the shift (e.g. Cashier miscounted drawer, recount verified)."
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: reasonError ? '2px solid #ef4444' : '1.5px solid #cbd5e1',
+                    background: reasonError ? '#fef2f2' : '#fff',
+                    fontSize: 13,
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    resize: 'vertical',
+                    transition: 'border-color 0.2s, background-color 0.2s'
+                  }}
+                />
+                {reasonError && (
+                  <div style={{ color: '#dc2626', fontSize: 12, fontWeight: 700, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <AlertCircle size={13} /> Please enter a reason before updating the shift.
+                  </div>
+                )}
+              </div>
+
               {/* Live Recalculation Comparison Box */}
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 16px', marginBottom: 6 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 8, textTransform: 'uppercase' }}>
                   Real-Time Impact & Recalculation
                 </div>
@@ -345,30 +390,6 @@ export default function EditShiftClosingModal({
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Mandatory Reason for Editing */}
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
-                  Reason for Editing (Mandatory for Audit Trail) <span style={{ color: '#dc2626' }}>*</span>
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={reason}
-                  onChange={e => setReason(e.target.value)}
-                  placeholder="e.g. Cashier miscounted 50 SAR in drawer; verified with cash drawer recount by Developer."
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    border: '1.5px solid #cbd5e1',
-                    fontSize: 13,
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                    resize: 'vertical'
-                  }}
-                />
               </div>
 
             </form>
@@ -452,7 +473,7 @@ export default function EditShiftClosingModal({
               type="submit"
               form="edit-shift-closing-form"
               className="btn btn-primary"
-              disabled={saving || !reason.trim()}
+              disabled={saving}
               style={{
                 padding: '8px 22px',
                 display: 'flex',
@@ -461,7 +482,7 @@ export default function EditShiftClosingModal({
                 background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
                 border: 'none',
                 color: '#fff',
-                opacity: (!reason.trim() || saving) ? 0.6 : 1
+                cursor: saving ? 'not-allowed' : 'pointer'
               }}
             >
               <Save size={16} />
@@ -471,6 +492,141 @@ export default function EditShiftClosingModal({
         </div>
 
       </div>
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && (
+        <div 
+          className="modal-overlay" 
+          style={{ zIndex: 10001, background: 'rgba(15, 23, 42, 0.7)' }}
+          onClick={e => { if (e.target.classList.contains('modal-overlay') && !saving) setShowConfirmModal(false); }}
+        >
+          <div 
+            className="modal" 
+            style={{ 
+              maxWidth: 500, 
+              width: '92%', 
+              background: '#fff', 
+              borderRadius: 12, 
+              padding: 0, 
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            }}
+          >
+            <div style={{ background: '#0f172a', padding: '16px 20px', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 16 }}>
+                <AlertCircle size={18} color="#f59e0b" /> Confirm Shift Closing Update
+              </div>
+              <button 
+                type="button" 
+                disabled={saving}
+                onClick={() => setShowConfirmModal(false)}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '20px' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 13, color: '#475569', lineHeight: 1.5 }}>
+                Please review the summary of changes before confirming. This change will be permanently recorded in the developer audit logs.
+              </p>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 14px', marginBottom: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12.5, marginBottom: 8, paddingBottom: 8, borderBottom: '1px dashed #cbd5e1' }}>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Closing ID:</span> <strong>#{closing.id}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Branch:</span> <strong>{closing.branch || 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Cashier:</span> <strong>{closing.cashier_name || 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Authorized By:</span> <strong>{authorDisplayName}</strong>
+                  </div>
+                </div>
+
+                <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>
+                      <th style={{ padding: '4px 0' }}>Field</th>
+                      <th style={{ padding: '4px 0' }}>Previous</th>
+                      <th style={{ padding: '4px 0' }}>Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding: '6px 0', color: '#334155' }}>Actual Cash</td>
+                      <td style={{ padding: '6px 0', color: '#64748b' }}>{currency} {origCash.toFixed(2)}</td>
+                      <td style={{ padding: '6px 0', fontWeight: 700, color: '#0f172a' }}>{currency} {newCashNum.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '6px 0', color: '#334155' }}>Actual Card</td>
+                      <td style={{ padding: '6px 0', color: '#64748b' }}>{currency} {origCard.toFixed(2)}</td>
+                      <td style={{ padding: '6px 0', fontWeight: 700, color: '#0f172a' }}>{currency} {newCardNum.toFixed(2)}</td>
+                    </tr>
+                    <tr style={{ borderTop: '1px dashed #e2e8f0' }}>
+                      <td style={{ padding: '6px 0', color: '#334155', fontWeight: 600 }}>Total Counted</td>
+                      <td style={{ padding: '6px 0', color: '#64748b' }}>{currency} {origActual.toFixed(2)}</td>
+                      <td style={{ padding: '6px 0', fontWeight: 800, color: '#0f172a' }}>{currency} {newActual.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '6px 0', color: '#334155', fontWeight: 600 }}>Difference</td>
+                      <td style={{ padding: '6px 0', color: origDiff >= 0 ? '#16a34a' : '#dc2626' }}>
+                        {origDiff >= 0 ? '+' : ''}{currency} {origDiff.toFixed(2)}
+                      </td>
+                      <td style={{ padding: '6px 0', fontWeight: 800, color: newDiff >= 0 ? '#16a34a' : '#dc2626' }}>
+                        {newDiff >= 0 ? '+' : ''}{currency} {newDiff.toFixed(2)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px', marginBottom: 16 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: '#92400e', marginBottom: 4 }}>
+                  Mandatory Reason:
+                </div>
+                <div style={{ fontSize: 12.5, color: '#78350f', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>
+                  "{reason.trim()}"
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowConfirmModal(false)}
+                  disabled={saving}
+                  style={{ padding: '8px 16px', fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleConfirmSave}
+                  disabled={saving}
+                  style={{
+                    padding: '8px 20px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: '#dc2626',
+                    border: 'none',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  {saving ? 'Updating...' : 'Confirm Update'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

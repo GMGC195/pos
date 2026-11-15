@@ -55,7 +55,20 @@ async function migrate() {
       ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(255) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(100) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal';
+      ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal',
+      ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS received_qty NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]'::jsonb;
+    `);
+
+    // 3. internal_branch_transfers (cancellation tracking)
+    console.log('📦 Updating internal_branch_transfers schema...');
+    await client.query(`
+      ALTER TABLE internal_branch_transfers
+      ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(255) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
     `);
 
     // Backfill item_status based on transfer status if item_status is null
@@ -71,7 +84,12 @@ async function migrate() {
         WHEN t.status IN ('Completed', 'Received', 'Dispatched', 'Ready for Dispatch', 'In Transit') AND i.accepted_qty IS NULL 
         THEN COALESCE(i.received_qty, i.sent_qty, i.requested_qty)
         ELSE i.accepted_qty
-      END
+      END,
+      dispatched_qty = CASE
+        WHEN i.dispatched_qty IS NULL OR i.dispatched_qty = 0 THEN COALESCE(i.sent_qty, 0)
+        ELSE i.dispatched_qty
+      END,
+      quantity_history = COALESCE(i.quantity_history, '[]'::jsonb)
       FROM internal_branch_transfers t
       WHERE i.transfer_id = t.id AND (i.item_status IS NULL OR i.item_status = 'Pending');
     `);

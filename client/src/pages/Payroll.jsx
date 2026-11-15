@@ -3344,28 +3344,57 @@ export default function Payroll() {
           </div>
 
           {/* Payment Execution Controls (Structured Two-Row Layout) */}
-          <div style={{ 
-            background: '#f8fafc', 
-            padding: isMobile ? '12px' : '10px 14px', 
-            borderRadius: '10px', 
-            border: '1.5px solid #e2e8f0', 
-            display: 'flex', 
-            flexDirection: 'column',
-            gap: '10px',
-            marginBottom: '10px'
-          }}>
-            {(() => {
-              const cash = parseFloat(targetEmpData.cash_paid || 0);
-              const bank = parseFloat(targetEmpData.bank_paid || 0);
-              const totalPaid = Math.round((cash + bank) * 100) / 100;
-              const netSal = dynamicNetSalary;
-              const rem = Math.round((netSal - totalPaid) * 100) / 100;
-              const carryVal = carryInputValues[targetEmpData.id] !== undefined 
-                ? carryInputValues[targetEmpData.id] 
-                : (rem > 0 ? rem.toFixed(2) : '');
+          {(() => {
+            const cash = parseFloat(targetEmpData.cash_paid || 0);
+            const bank = parseFloat(targetEmpData.bank_paid || 0);
+            const totalPaid = Math.round((cash + bank) * 100) / 100;
+            const netSal = dynamicNetSalary;
+            const rem = Math.round((netSal - totalPaid) * 100) / 100;
+            const isOverpaid = totalPaid > netSal;
+            const overpaidAmount = isOverpaid ? Math.round((totalPaid - netSal) * 100) / 100 : 0;
+            const carryVal = carryInputValues[targetEmpData.id] !== undefined 
+              ? carryInputValues[targetEmpData.id] 
+              : (rem > 0 ? rem.toFixed(2) : '');
 
-              return (
-                <>
+            return (
+              <div style={{ 
+                background: isOverpaid ? '#fee2e2' : '#f8fafc', 
+                padding: isMobile ? '12px' : '10px 14px', 
+                borderRadius: '10px', 
+                border: isOverpaid ? '2px solid #fca5a5' : '1.5px solid #e2e8f0', 
+                display: 'flex', 
+                flexDirection: 'column',
+                gap: '10px',
+                marginBottom: '10px',
+                transition: 'all 0.2s ease'
+              }}>
+                {/* Overpayment Notice Banner */}
+                {isOverpaid && (
+                  <div style={{
+                    background: '#fef2f2',
+                    border: '1.5px solid #f87171',
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '6px'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <AlertTriangle size={15} color="#dc2626" />
+                      OVERPAID: Total Paid ({CURRENCY} {totalPaid.toFixed(2)}) exceeds Total Salary ({CURRENCY} {netSal.toFixed(2)})
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#991b1b', background: '#fee2e2', border: '1px solid #fca5a5', padding: '3px 8px', borderRadius: '4px' }}>
+                        Overpaid Amount: {CURRENCY} {overpaidAmount.toFixed(2)}
+                      </span>
+                      <span style={{ fontSize: '11px', fontWeight: 900, color: '#fff', background: '#dc2626', padding: '3px 8px', borderRadius: '4px' }}>
+                        Remaining: {CURRENCY} {rem.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                )}
                   {/* Payment History Log Table (Installments) */}
                   {targetEmpData.payments && targetEmpData.payments.length > 0 && (
                     <div style={{
@@ -3808,6 +3837,24 @@ export default function Payroll() {
                         </span>
                       </div>
 
+                      {/* Overpaid Amount Badge */}
+                      {isOverpaid && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: 800, color: '#dc2626' }}>Overpaid:</label>
+                          <span style={{ 
+                            fontSize: '12px', 
+                            fontWeight: 800, 
+                            padding: '4px 10px', 
+                            borderRadius: '6px', 
+                            background: '#fee2e2', 
+                            color: '#dc2626',
+                            border: '1.5px solid #fca5a5'
+                          }}>
+                            {CURRENCY} {overpaidAmount.toFixed(2)}
+                          </span>
+                        </div>
+                      )}
+
                       {/* Remaining Badge */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <label style={{ fontSize: '11px', fontWeight: 800, color: rem < 0 ? '#dc2626' : '#ea580c' }}>Remaining:</label>
@@ -3816,9 +3863,9 @@ export default function Payroll() {
                           fontWeight: 800, 
                           padding: '4px 10px', 
                           borderRadius: '6px', 
-                          background: rem > 0 ? '#ffedd5' : rem < 0 ? '#fef2f2' : '#ecfdf5', 
+                          background: rem > 0 ? '#ffedd5' : rem < 0 ? '#fee2e2' : '#ecfdf5', 
                           color: rem > 0 ? '#c2410c' : rem < 0 ? '#dc2626' : '#059669',
-                          border: '1.5px solid ' + (rem > 0 ? '#fdba74' : rem < 0 ? '#fecaca' : '#a7f3d0')
+                          border: '1.5px solid ' + (rem > 0 ? '#fdba74' : rem < 0 ? '#fca5a5' : '#a7f3d0')
                         }}>
                           {CURRENCY} {rem.toFixed(2)}
                         </span>
@@ -3838,14 +3885,14 @@ export default function Payroll() {
                   }}>
                     {/* Left: Settlement / Unpaid Notice */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: rem === 0 ? '#059669' : rem > 0 ? '#ea580c' : '#0284c7' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: isOverpaid ? '#dc2626' : (rem === 0 ? '#059669' : rem > 0 ? '#ea580c' : '#0284c7') }}>
                         {parseFloat(targetEmpData.carried_forward_to_next || 0) !== 0 
                           ? '✓ Balance carried forward to next month' 
-                          : rem === 0 
-                            ? '✓ Salary fully paid / Settled' 
-                            : (rem > 0 
-                                ? `Unpaid balance remaining: ${CURRENCY} ${rem.toFixed(2)}` 
-                                : `Overpayment balance: ${CURRENCY} ${Math.abs(rem).toFixed(2)}`)}
+                          : isOverpaid 
+                            ? `⚠️ OVERPAID: Received ${CURRENCY} ${overpaidAmount.toFixed(2)} more than actual salary (Remaining: ${CURRENCY} ${rem.toFixed(2)})`
+                            : rem === 0 
+                              ? '✓ Salary fully paid / Settled' 
+                              : `Unpaid balance remaining: ${CURRENCY} ${rem.toFixed(2)}`}
                       </span>
                     </div>
 
@@ -3931,10 +3978,9 @@ export default function Payroll() {
                       )}
                     </div>
                   </div>
-                </>
+                </div>
               );
             })()}
-          </div>
         </div>
 
         {/* Locked Warning banner */}
@@ -4970,14 +5016,17 @@ export default function Payroll() {
                   const cash = parseFloat(item.cash_paid || 0);
                   const bank = parseFloat(item.bank_paid || 0);
                   const totalPaid = Math.round((cash + bank) * 100) / 100;
-                  const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
-                  const isPaid = item.status === 'Paid' || (totalPaid > 0 && rem <= 0);
-                  const isPartial = !isPaid && totalPaid > 0 && rem > 0;
+                  const net = parseFloat(item.net_salary || 0);
+                  const rem = Math.round((net - totalPaid) * 100) / 100;
+                  const isOverpaid = totalPaid > net;
+                  const overpaidAmount = isOverpaid ? Math.round((totalPaid - net) * 100) / 100 : 0;
+                  const isPaid = !isOverpaid && (item.status === 'Paid' || (totalPaid > 0 && rem <= 0));
+                  const isPartial = !isPaid && !isOverpaid && totalPaid > 0 && rem > 0;
 
                   return (
                   <div key={item.id} style={{ 
-                    background: isPaid ? '#f0fdf4' : isPartial ? '#eff6ff' : 'var(--surface)', 
-                    border: '1.5px solid ' + (isPaid ? '#bbf7d0' : isPartial ? '#bfdbfe' : 'var(--surface-2)'), 
+                    background: isOverpaid ? '#fee2e2' : (isPaid ? '#f0fdf4' : isPartial ? '#eff6ff' : 'var(--surface)'), 
+                    border: '1.5px solid ' + (isOverpaid ? '#fca5a5' : (isPaid ? '#bbf7d0' : isPartial ? '#bfdbfe' : 'var(--surface-2)')), 
                     borderRadius: '10px', 
                     padding: '12px', 
                     boxShadow: 'var(--shadow-sm)' 
@@ -5010,11 +5059,11 @@ export default function Payroll() {
                           fontWeight: 700, 
                           padding: '2px 8px', 
                           borderRadius: '4px', 
-                          background: isPaid ? '#ecfdf5' : isPartial ? '#dbeafe' : '#fffbeb',
-                          color: isPaid ? '#059669' : isPartial ? '#1d4ed8' : '#d97706',
-                          border: '1px solid ' + (isPaid ? '#a7f3d0' : isPartial ? '#93c5fd' : '#fde68a')
+                          background: isOverpaid ? '#fef2f2' : (isPaid ? '#ecfdf5' : isPartial ? '#dbeafe' : '#fffbeb'),
+                          color: isOverpaid ? '#dc2626' : (isPaid ? '#059669' : isPartial ? '#1d4ed8' : '#d97706'),
+                          border: '1px solid ' + (isOverpaid ? '#f87171' : (isPaid ? '#a7f3d0' : isPartial ? '#93c5fd' : '#fde68a'))
                         }}>
-                          {isPaid ? 'Paid' : isPartial ? 'Partial' : 'Pending'}
+                          {isOverpaid ? 'Overpaid' : (isPaid ? 'Paid' : isPartial ? 'Partial' : 'Pending')}
                         </span>
                       </div>
                     </div>
@@ -5062,9 +5111,24 @@ export default function Payroll() {
                           const cash = parseFloat(item.cash_paid || 0);
                           const bank = parseFloat(item.bank_paid || 0);
                           const totalPaid = Math.round((cash + bank) * 100) / 100;
-                          const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
+                          const net = parseFloat(item.net_salary || 0);
+                          const rem = Math.round((net - totalPaid) * 100) / 100;
+                          const isOver = totalPaid > net;
+                          const overAmt = isOver ? Math.round((totalPaid - net) * 100) / 100 : 0;
+                          if (isOver) {
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                <span style={{ fontSize: '12px', fontWeight: 900, color: '#dc2626', whiteSpace: 'nowrap' }}>
+                                  {rem.toFixed(2)}
+                                </span>
+                                <span style={{ fontSize: '8px', color: '#b91c1c', fontWeight: 800 }}>
+                                  Over: {overAmt.toFixed(2)}
+                                </span>
+                              </div>
+                            );
+                          }
                           return (
-                            <div style={{ fontSize: '12px', fontWeight: 900, color: rem > 0 ? '#ea580c' : rem < 0 ? '#0284c7' : '#16a34a', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 900, color: rem > 0 ? '#ea580c' : '#16a34a', whiteSpace: 'nowrap' }}>
                               {rem.toFixed(2)}
                             </div>
                           );
@@ -5501,11 +5565,25 @@ export default function Payroll() {
                           const cash = parseFloat(item.cash_paid || 0);
                           const bank = parseFloat(item.bank_paid || 0);
                           const totalPaid = Math.round((cash + bank) * 100) / 100;
-                          const rem = Math.round((parseFloat(item.net_salary || 0) - totalPaid) * 100) / 100;
-                          if (rem > 0) {
+                          const net = parseFloat(item.net_salary || 0);
+                          const rem = Math.round((net - totalPaid) * 100) / 100;
+                          const isOver = totalPaid > net;
+                          const overAmt = isOver ? Math.round((totalPaid - net) * 100) / 100 : 0;
+                          if (isOver) {
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                <span style={{ color: '#dc2626', fontWeight: 900, background: '#fee2e2', padding: '1px 6px', borderRadius: '4px', border: '1px solid #fca5a5' }} title={`Overpaid by ${overAmt.toFixed(2)}`}>
+                                  {rem.toFixed(2)}
+                                </span>
+                                <span style={{ fontSize: '9px', color: '#991b1b', fontWeight: 800 }}>
+                                  Over: {overAmt.toFixed(2)}
+                                </span>
+                              </div>
+                            );
+                          } else if (rem > 0) {
                             return <span style={{ color: '#ea580c' }}>{rem.toFixed(2)}</span>;
                           } else if (rem < 0) {
-                            return <span style={{ color: '#dc2626', fontWeight: 800 }} title="Negative Balance / Deductions exceed salary">{rem.toFixed(2)}</span>;
+                            return <span style={{ color: '#dc2626', fontWeight: 800 }} title="Negative Balance">{rem.toFixed(2)}</span>;
                           }
                           return <span style={{ color: '#16a34a' }}>0.00</span>;
                         })()}
@@ -6791,6 +6869,8 @@ export default function Payroll() {
                 const totalPaid = Math.round((cashPaid + bankPaid) * 100) / 100;
                 const net = parseFloat(emp.net_salary || 0);
                 const rem = Math.round((net - totalPaid) * 100) / 100;
+                const isOver = totalPaid > net;
+                const overAmt = isOver ? Math.round((totalPaid - net) * 100) / 100 : 0;
                 const totalEntering = Math.round(((parseFloat(mobilePayModal.cash) || 0) + (parseFloat(mobilePayModal.bank) || 0)) * 100) / 100;
                 const newRem = Math.round((rem - totalEntering) * 100) / 100;
 
@@ -6799,10 +6879,10 @@ export default function Payroll() {
                     display: 'grid',
                     gridTemplateColumns: 'repeat(2, 1fr)',
                     gap: '8px',
-                    background: '#f8fafc',
+                    background: isOver ? '#fee2e2' : '#f8fafc',
                     padding: '12px 14px',
                     borderRadius: '10px',
-                    border: '1px solid #e2e8f0'
+                    border: isOver ? '1.5px solid #fca5a5' : '1.5px solid #e2e8f0'
                   }}>
                     <div>
                       <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Salary Amount</div>
@@ -6813,17 +6893,27 @@ export default function Payroll() {
                       <div style={{ fontSize: '13px', fontWeight: 800, color: '#0369a1' }}>{CURRENCY} {totalPaid.toFixed(2)}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Remaining Amount</div>
-                      <div style={{ fontSize: '13px', fontWeight: 800, color: rem > 0 ? '#ea580c' : '#16a34a' }}>{CURRENCY} {rem.toFixed(2)}</div>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: isOver ? '#dc2626' : '#64748b', textTransform: 'uppercase' }}>
+                        {isOver ? 'Overpaid Amount' : 'Remaining Amount'}
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 800, color: isOver ? '#dc2626' : (rem > 0 ? '#ea580c' : '#16a34a') }}>
+                        {CURRENCY} {isOver ? overAmt.toFixed(2) : rem.toFixed(2)}
+                      </div>
                     </div>
                     <div>
                       <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Current Payment</div>
                       <div style={{ fontSize: '13px', fontWeight: 800, color: '#16a34a' }}>{CURRENCY} {totalEntering.toFixed(2)}</div>
                     </div>
+                    {isOver && (
+                      <div style={{ gridColumn: 'span 2', background: '#fef2f2', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fca5a5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 800, color: '#dc2626' }}>Actual Remaining:</span>
+                        <span style={{ fontSize: '13px', fontWeight: 900, color: '#dc2626' }}>{CURRENCY} {rem.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div style={{ gridColumn: 'span 2', borderTop: '1px solid #e2e8f0', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Remaining Balance After Payment:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Remaining After This Payment:</span>
                       <span style={{ fontSize: '13px', fontWeight: 900, color: newRem > 0 ? '#ea580c' : newRem < 0 ? '#dc2626' : '#16a34a' }}>
-                        {CURRENCY} {newRem.toFixed(2)} {newRem < 0 ? '(Overpayment)' : ''}
+                        {CURRENCY} {newRem.toFixed(2)} {newRem < 0 ? `(Overpaid by ${CURRENCY} ${Math.abs(newRem).toFixed(2)})` : ''}
                       </span>
                     </div>
                   </div>
