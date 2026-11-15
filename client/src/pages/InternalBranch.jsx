@@ -383,7 +383,7 @@ function printTransferSlip(t) {
       </head>
       <body>
         <div class="header">
-          <div class="header-brand">AL REWAK RESTAURANT</div>
+          <div class="header-brand">AL RAWAQ RESTAURANT</div>
           <div class="header-title">INTERNAL BRANCH TRANSFER</div>
           <div class="header-id">ID: ${t.transfer_id}</div>
           <div class="header-demand">DEMAND FROM: ${(t.from_branch || '').toUpperCase()}</div>
@@ -616,7 +616,7 @@ function printAcceptedItemsSlip(t) {
       </head>
       <body>
         <div class="header">
-          <div class="header-brand">AL REWAK RESTAURANT</div>
+          <div class="header-brand">AL RAWAQ RESTAURANT</div>
           <div class="header-title">INTERNAL BRANCH TRANSFER</div>
           <div class="header-id">ID: ${t.transfer_id}</div>
           <div class="header-demand">DEMAND FROM: ${(t.from_branch || '').toUpperCase()}</div>
@@ -834,7 +834,7 @@ function printDispatchedItemsSlip(t) {
       </head>
       <body>
         <div class="header">
-          <div class="header-brand">AL REWAK RESTAURANT</div>
+          <div class="header-brand">AL RAWAQ RESTAURANT</div>
           <div class="header-title">INTERNAL BRANCH TRANSFER</div>
           <div class="header-id">ID: ${t.transfer_id}</div>
           <div class="header-demand">DEMAND FROM: ${(t.from_branch || '').toUpperCase()}</div>
@@ -2741,7 +2741,7 @@ export default function InternalBranch() {
   };
 
   // Submit Receiving & Quantity Verification
-  const handleConfirmReceive = async () => {
+  const handleConfirmReceive = async (autoPrint = false) => {
     if (!receiveModalTransfer || receiving || isReceivingRef.current) return;
 
     const itemsPayload = (receiveModalTransfer.items || []).map(item => {
@@ -2791,12 +2791,103 @@ export default function InternalBranch() {
 
       const statusRes = res.data?.status || (hasVariance ? 'Partially Received' : 'Fully Received');
       toast.success(`Transfer ${receiveModalTransfer.transfer_id} verified: Status is ${statusRes}!`);
+
+      if (autoPrint) {
+        const printPayload = {
+          ...receiveModalTransfer,
+          ...(res.data || {}),
+          status: statusRes,
+          received_at: res.data?.received_at || new Date().toISOString(),
+          received_by_name: res.data?.received_by_name || user?.name || user?.username || 'Staff',
+          items: res.data?.items || (receiveModalTransfer.items || []).map(it => {
+            const isSelected = receiveSelectedItems[it.id] !== undefined ? receiveSelectedItems[it.id] : true;
+            const recQ = isSelected ? parseFloat(receiveItemQuantities[it.id] || 0) : (it.received_qty || 0);
+            return {
+              ...it,
+              received_qty: recQ,
+              item_status: isSelected && recQ > 0 ? 'Received' : (it.item_status || 'Pending')
+            };
+          })
+        };
+        printTransferSlip(printPayload);
+      }
+
       setReceiveModalTransfer(null);
       fetchStats();
       fetchTransfers();
     } catch (err) {
       console.error('Error receiving transfer:', err);
       const msg = err.response?.data?.error || err.message || 'Failed to receive and complete transfer.';
+      toast.error(msg);
+    } finally {
+      setReceiving(false);
+      isReceivingRef.current = false;
+    }
+  };
+
+  // Direct Receive & Accept from card without opening modal (accepting 100% dispatched quantities)
+  const handleDirectReceive = async (t, autoPrint = false) => {
+    if (!t || receiving || isReceivingRef.current) return;
+
+    const itemsPayload = (t.items || []).map(item => {
+      const sentQ = parseFloat(item.sent_qty !== null && item.sent_qty !== undefined ? item.sent_qty : (item.dispatched_qty ?? (item.confirmed_qty ?? item.requested_qty)));
+      return {
+        id: item.id,
+        is_received: true,
+        mark_pending: false,
+        received_qty: sentQ > 0 ? sentQ : parseFloat(item.requested_qty || 0),
+        remarks: ''
+      };
+    });
+
+    const hasAnyReceived = itemsPayload.some(it => it.received_qty > 0);
+    if (!hasAnyReceived) {
+      return toast.error('No dispatched items available to receive.');
+    }
+
+    try {
+      isReceivingRef.current = true;
+      setReceiving(true);
+
+      const res = await axios.put(`/api/internal-branch/transfers/${t.id}/receive`, {
+        items: itemsPayload,
+        notes: t.notes || '',
+        discrepancy_reason: ''
+      });
+
+      localActionTransferIdsRef.current.set(`received_${t.transfer_id}`, Date.now());
+      localActionTransferIdsRef.current.set(`received_${t.id}`, Date.now());
+
+      const statusRes = res.data?.status || 'Fully Received';
+      toast.success(`Transfer ${t.transfer_id} received: Status is ${statusRes}!`);
+
+      if (autoPrint) {
+        const printPayload = {
+          ...t,
+          ...(res.data || {}),
+          status: statusRes,
+          received_at: res.data?.received_at || new Date().toISOString(),
+          received_by_name: res.data?.received_by_name || user?.name || user?.username || 'Staff',
+          items: res.data?.items || (t.items || []).map(it => {
+            const sentQ = parseFloat(it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : (it.dispatched_qty ?? (it.confirmed_qty ?? it.requested_qty)));
+            return {
+              ...it,
+              received_qty: sentQ,
+              item_status: 'Received'
+            };
+          })
+        };
+        printTransferSlip(printPayload);
+      }
+
+      if (receiveModalTransfer && receiveModalTransfer.id === t.id) {
+        setReceiveModalTransfer(null);
+      }
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error receiving transfer directly:', err);
+      const msg = err.response?.data?.error || err.message || 'Failed to receive transfer.';
       toast.error(msg);
     } finally {
       setReceiving(false);
@@ -4097,7 +4188,7 @@ export default function InternalBranch() {
               )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={() => printDispatchedItemsSlip(t)}
@@ -4121,24 +4212,71 @@ export default function InternalBranch() {
 
               <button
                 type="button"
-                onClick={() => openReceiveModal(t)}
+                onClick={() => handleDirectReceive(t, false)}
+                disabled={receiving}
                 style={{
-                  padding: '7px 16px',
-                  background: '#16a34a',
+                  padding: '7px 14px',
+                  background: receiving ? '#94a3b8' : '#16a34a',
                   color: '#fff',
                   border: 'none',
                   borderRadius: 6,
-                  fontSize: 12.5,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: receiving ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)',
+                  opacity: receiving ? 0.7 : 1
+                }}
+                title="Receive and accept all dispatched goods without printing"
+              >
+                <CheckCircle2 size={14} /> Receive & Accept
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDirectReceive(t, true)}
+                disabled={receiving}
+                style={{
+                  padding: '7px 14px',
+                  background: receiving ? '#94a3b8' : '#0284c7',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: receiving ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  boxShadow: '0 1px 3px rgba(2, 132, 199, 0.25)',
+                  opacity: receiving ? 0.7 : 1
+                }}
+                title="Receive and accept all dispatched goods, then automatically print receiving slip"
+              >
+                <Printer size={14} /> Receive & Print
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openReceiveModal(t)}
+                style={{
+                  padding: '7px 12px',
+                  background: '#f1f5f9',
+                  color: '#334155',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 6,
-                  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
+                  gap: 5
                 }}
-                title="Verify and confirm received shipment"
+                title="Verify and adjust quantities item-by-item"
               >
-                <PackageCheck size={15} /> Verify & Confirm Receiving
+                <PackageCheck size={14} /> Verify / Custom Qty
               </button>
             </div>
           </div>
@@ -7047,7 +7185,7 @@ export default function InternalBranch() {
                 <Printer size={15} /> Print Slip
               </button>
 
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -7058,10 +7196,10 @@ export default function InternalBranch() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleConfirmReceive}
+                  onClick={() => handleConfirmReceive(false)}
                   disabled={receiving}
                   style={{
-                    padding: '9px 20px',
+                    padding: '9px 18px',
                     background: receiving ? '#94a3b8' : '#16a34a',
                     color: '#fff',
                     border: 'none',
@@ -7073,16 +7211,50 @@ export default function InternalBranch() {
                     alignItems: 'center',
                     gap: 6,
                     opacity: receiving ? 0.7 : 1,
-                    pointerEvents: receiving ? 'none' : 'auto'
+                    pointerEvents: receiving ? 'none' : 'auto',
+                    boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
                   }}
+                  title="Save receiving confirmation without printing"
                 >
                   {receiving ? (
                     <>
-                      <RefreshCw size={16} className="animate-spin" /> Verifying...
+                      <RefreshCw size={16} className="animate-spin" /> Saving...
                     </>
                   ) : (
                     <>
-                      <PackageCheck size={16} /> Confirm & Verify Receiving
+                      <CheckCircle2 size={16} /> Receive & Accept
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConfirmReceive(true)}
+                  disabled={receiving}
+                  style={{
+                    padding: '9px 18px',
+                    background: receiving ? '#94a3b8' : '#0284c7',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: receiving ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    opacity: receiving ? 0.7 : 1,
+                    pointerEvents: receiving ? 'none' : 'auto',
+                    boxShadow: '0 1px 3px rgba(2, 132, 199, 0.25)'
+                  }}
+                  title="Save receiving confirmation and automatically print receiving slip"
+                >
+                  {receiving ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" /> Saving & Printing...
+                    </>
+                  ) : (
+                    <>
+                      <Printer size={16} /> Receive & Print
                     </>
                   )}
                 </button>
