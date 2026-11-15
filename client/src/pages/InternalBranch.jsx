@@ -277,8 +277,8 @@ function printTransferSlip(t) {
             color: #000;
             background: #fff;
             margin: 0;
-            padding: 3px 20px 8px 4px;
-            line-height: 1.28;
+            padding: 2px 20px 2px 4px;
+            line-height: 1.25;
             text-rendering: geometricPrecision;
             overflow-x: hidden;
             word-break: break-word;
@@ -287,54 +287,64 @@ function printTransferSlip(t) {
             text-align: center;
             border-bottom: 1.5px dashed #000;
             padding-bottom: 4px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
           }
-          .header h2 {
+          .header .header-brand {
             margin: 0 0 2px;
             font-size: 14px;
             text-transform: uppercase;
             font-weight: 700;
             letter-spacing: 0.5px;
-          }
-          .header .header-sub {
-            margin: 1px 0 2px;
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: #334155;
+            color: #000;
           }
           .header .header-title {
-            margin: 2px 0 1px;
-            font-size: 11px;
+            margin: 1px 0;
+            font-size: 12px;
             font-weight: 800;
             text-transform: uppercase;
-            word-break: break-word;
+            letter-spacing: 0.3px;
+            color: #000;
+          }
+          .header .header-id {
+            margin: 1px 0;
+            font-size: 11.5px;
+            font-weight: 700;
+            color: #000;
+          }
+          .header .header-demand {
+            margin: 1px 0;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #000;
           }
           .header .header-route {
             margin: 1px 0 2px;
-            font-size: 11.5px;
+            font-size: 12px;
             font-weight: 900;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             word-break: break-word;
+            color: #000;
           }
           .meta-table {
             width: 100%;
             table-layout: fixed;
             font-size: 10.5px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             border-collapse: collapse;
           }
           .meta-table td {
-            padding: 1.5px 0;
+            padding: 1px 0;
             word-break: break-word;
+            color: #000;
           }
           .items-table {
             width: 100%;
             table-layout: fixed;
             border-collapse: collapse;
             font-size: 10.5px;
-            margin: 5px 0;
+            margin: 4px 0;
           }
           .items-table th {
             border-bottom: 1.5px solid #000;
@@ -342,18 +352,22 @@ function printTransferSlip(t) {
             padding: 3px 2px;
             font-weight: 700;
             font-size: 10.5px;
+            color: #000;
           }
           .footer {
-            margin-top: 8px;
+            margin-top: 5px;
             border-top: 1px dashed #000;
-            padding-top: 4px;
-            font-size: 9.5px;
+            padding-top: 3px;
+            padding-bottom: 0;
+            margin-bottom: 0;
+            font-size: 10px;
             text-align: center;
+            color: #000;
           }
           .sign-area {
             display: flex;
             justify-content: space-between;
-            margin-top: 12px;
+            margin-top: 8px;
             padding-top: 2px;
           }
           .sign-box {
@@ -363,15 +377,17 @@ function printTransferSlip(t) {
             font-size: 9px;
             padding-top: 2px;
             font-weight: 600;
+            color: #000;
           }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2>AL RAWAQ RESTAURANT</h2>
-          <div class="header-sub">TRANSFER DEMAND VOUCHER</div>
-          <div class="header-title"><strong>${t.transfer_id} | INTERNAL BRANCH TRANSFER</strong></div>
-          <div class="header-route"><strong>${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</strong></div>
+          <div class="header-brand">AL REWAK RESTAURANT</div>
+          <div class="header-title">INTERNAL BRANCH TRANSFER</div>
+          <div class="header-id">ID: ${t.transfer_id}</div>
+          <div class="header-demand">DEMAND FROM: ${(t.from_branch || '').toUpperCase()}</div>
+          <div class="header-route">${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</div>
         </div>
 
         <table class="meta-table">
@@ -405,7 +421,7 @@ function printTransferSlip(t) {
           </tbody>
         </table>
 
-        ${t.notes ? `<div style="font-size: 10px; margin-top: 5px; padding: 4px 5px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; word-break: break-word;"><strong>Notes:</strong> ${t.notes}</div>` : ''}
+        ${t.notes ? `<div style="font-size: 10px; margin-top: 4px; padding: 3px 5px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; word-break: break-word; color: #000;"><strong>Notes:</strong> ${t.notes}</div>` : ''}
 
         <div class="sign-area">
           <div class="sign-box">Dispatcher Signature</div>
@@ -413,8 +429,8 @@ function printTransferSlip(t) {
         </div>
 
         <div class="footer">
-          <p style="margin: 0; font-weight: 600;">Verified via Electronic POS System</p>
-          <p style="margin: 2px 0 0; font-size: 9px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 0; font-weight: 700; color: #000;">Verified via Electronic POS System</p>
+          <p style="margin: 2px 0 0; font-size: 11px; font-weight: 700; color: #000;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
@@ -494,8 +510,8 @@ function printAcceptedItemsSlip(t) {
             color: #000;
             background: #fff;
             margin: 0;
-            padding: 3px 20px 8px 4px;
-            line-height: 1.28;
+            padding: 2px 20px 2px 4px;
+            line-height: 1.25;
             text-rendering: geometricPrecision;
             overflow-x: hidden;
             word-break: break-word;
@@ -504,54 +520,64 @@ function printAcceptedItemsSlip(t) {
             text-align: center;
             border-bottom: 1.5px dashed #000;
             padding-bottom: 4px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
           }
-          .header h2 {
+          .header .header-brand {
             margin: 0 0 2px;
             font-size: 14px;
             text-transform: uppercase;
             font-weight: 700;
             letter-spacing: 0.5px;
-          }
-          .header .header-sub {
-            margin: 1px 0 2px;
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: #334155;
+            color: #000;
           }
           .header .header-title {
-            margin: 2px 0 1px;
-            font-size: 11px;
+            margin: 1px 0;
+            font-size: 12px;
             font-weight: 800;
             text-transform: uppercase;
-            word-break: break-word;
+            letter-spacing: 0.3px;
+            color: #000;
+          }
+          .header .header-id {
+            margin: 1px 0;
+            font-size: 11.5px;
+            font-weight: 700;
+            color: #000;
+          }
+          .header .header-demand {
+            margin: 1px 0;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #000;
           }
           .header .header-route {
             margin: 1px 0 2px;
-            font-size: 11.5px;
+            font-size: 12px;
             font-weight: 900;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             word-break: break-word;
+            color: #000;
           }
           .meta-table {
             width: 100%;
             table-layout: fixed;
             font-size: 10.5px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             border-collapse: collapse;
           }
           .meta-table td {
-            padding: 1.5px 0;
+            padding: 1px 0;
             word-break: break-word;
+            color: #000;
           }
           .items-table {
             width: 100%;
             table-layout: fixed;
             border-collapse: collapse;
             font-size: 10.5px;
-            margin: 5px 0;
+            margin: 4px 0;
           }
           .items-table th {
             border-bottom: 1.5px solid #000;
@@ -559,18 +585,22 @@ function printAcceptedItemsSlip(t) {
             padding: 3px 2px;
             font-weight: 700;
             font-size: 10.5px;
+            color: #000;
           }
           .footer {
-            margin-top: 8px;
+            margin-top: 5px;
             border-top: 1px dashed #000;
-            padding-top: 4px;
-            font-size: 9.5px;
+            padding-top: 3px;
+            padding-bottom: 0;
+            margin-bottom: 0;
+            font-size: 10px;
             text-align: center;
+            color: #000;
           }
           .sign-area {
             display: flex;
             justify-content: space-between;
-            margin-top: 12px;
+            margin-top: 8px;
             padding-top: 2px;
           }
           .sign-box {
@@ -580,15 +610,17 @@ function printAcceptedItemsSlip(t) {
             font-size: 9px;
             padding-top: 2px;
             font-weight: 600;
+            color: #000;
           }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2>AL RAWAQ RESTAURANT</h2>
-          <div class="header-sub">ACCEPTED ITEMS VOUCHER</div>
-          <div class="header-title"><strong>${t.transfer_id} | INTERNAL BRANCH TRANSFER</strong></div>
-          <div class="header-route"><strong>${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</strong></div>
+          <div class="header-brand">AL REWAK RESTAURANT</div>
+          <div class="header-title">INTERNAL BRANCH TRANSFER</div>
+          <div class="header-id">ID: ${t.transfer_id}</div>
+          <div class="header-demand">DEMAND FROM: ${(t.from_branch || '').toUpperCase()}</div>
+          <div class="header-route">${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</div>
         </div>
 
         <table class="meta-table">
@@ -623,8 +655,8 @@ function printAcceptedItemsSlip(t) {
         </div>
 
         <div class="footer">
-          <p style="margin: 0; font-weight: 600;">Verified Accepted Goods</p>
-          <p style="margin: 2px 0 0; font-size: 9px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 0; font-weight: 700; color: #000;">Verified Accepted Goods</p>
+          <p style="margin: 2px 0 0; font-size: 11px; font-weight: 700; color: #000;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
@@ -696,8 +728,8 @@ function printDispatchedItemsSlip(t) {
             color: #000;
             background: #fff;
             margin: 0;
-            padding: 3px 20px 8px 4px;
-            line-height: 1.28;
+            padding: 2px 20px 2px 4px;
+            line-height: 1.25;
             text-rendering: geometricPrecision;
             overflow-x: hidden;
             word-break: break-word;
@@ -706,54 +738,64 @@ function printDispatchedItemsSlip(t) {
             text-align: center;
             border-bottom: 1.5px dashed #000;
             padding-bottom: 4px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
           }
-          .header h2 {
+          .header .header-brand {
             margin: 0 0 2px;
             font-size: 14px;
             text-transform: uppercase;
             font-weight: 700;
             letter-spacing: 0.5px;
-          }
-          .header .header-sub {
-            margin: 1px 0 2px;
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: #334155;
+            color: #000;
           }
           .header .header-title {
-            margin: 2px 0 1px;
-            font-size: 11px;
+            margin: 1px 0;
+            font-size: 12px;
             font-weight: 800;
             text-transform: uppercase;
-            word-break: break-word;
+            letter-spacing: 0.3px;
+            color: #000;
+          }
+          .header .header-id {
+            margin: 1px 0;
+            font-size: 11.5px;
+            font-weight: 700;
+            color: #000;
+          }
+          .header .header-demand {
+            margin: 1px 0;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #000;
           }
           .header .header-route {
             margin: 1px 0 2px;
-            font-size: 11.5px;
+            font-size: 12px;
             font-weight: 900;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             word-break: break-word;
+            color: #000;
           }
           .meta-table {
             width: 100%;
             table-layout: fixed;
             font-size: 10.5px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             border-collapse: collapse;
           }
           .meta-table td {
-            padding: 1.5px 0;
+            padding: 1px 0;
             word-break: break-word;
+            color: #000;
           }
           .items-table {
             width: 100%;
             table-layout: fixed;
             border-collapse: collapse;
             font-size: 10.5px;
-            margin: 5px 0;
+            margin: 4px 0;
           }
           .items-table th {
             border-bottom: 1.5px solid #000;
@@ -761,18 +803,22 @@ function printDispatchedItemsSlip(t) {
             padding: 3px 2px;
             font-weight: 700;
             font-size: 10.5px;
+            color: #000;
           }
           .footer {
-            margin-top: 8px;
+            margin-top: 5px;
             border-top: 1px dashed #000;
-            padding-top: 4px;
-            font-size: 9.5px;
+            padding-top: 3px;
+            padding-bottom: 0;
+            margin-bottom: 0;
+            font-size: 10px;
             text-align: center;
+            color: #000;
           }
           .sign-area {
             display: flex;
             justify-content: space-between;
-            margin-top: 12px;
+            margin-top: 8px;
             padding-top: 2px;
           }
           .sign-box {
@@ -782,15 +828,17 @@ function printDispatchedItemsSlip(t) {
             font-size: 9px;
             padding-top: 2px;
             font-weight: 600;
+            color: #000;
           }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2>AL RAWAQ RESTAURANT</h2>
-          <div class="header-sub">DISPATCHED GOODS VOUCHER</div>
-          <div class="header-title"><strong>${t.transfer_id} | INTERNAL BRANCH TRANSFER</strong></div>
-          <div class="header-route"><strong>${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</strong></div>
+          <div class="header-brand">AL REWAK RESTAURANT</div>
+          <div class="header-title">INTERNAL BRANCH TRANSFER</div>
+          <div class="header-id">ID: ${t.transfer_id}</div>
+          <div class="header-demand">DEMAND FROM: ${(t.from_branch || '').toUpperCase()}</div>
+          <div class="header-route">${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</div>
         </div>
 
         <table class="meta-table">
@@ -825,8 +873,8 @@ function printDispatchedItemsSlip(t) {
         </div>
 
         <div class="footer">
-          <p style="margin: 0; font-weight: 600;">Dispatched Shipment Verification</p>
-          <p style="margin: 2px 0 0; font-size: 9px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 0; font-weight: 700; color: #000;">Dispatched Shipment Verification</p>
+          <p style="margin: 2px 0 0; font-size: 11px; font-weight: 700; color: #000;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
