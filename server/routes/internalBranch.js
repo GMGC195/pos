@@ -7,43 +7,65 @@ const { authenticateToken, blockSalaryPayOperator } = require('../middleware/aut
 router.use(blockSalaryPayOperator);
 
 // Auto-verify and ensure required columns exist to protect against missing-column errors
-(async () => {
+let schemaEnsured = false;
+async function ensureInternalBranchSchema() {
+  if (schemaEnsured) return;
   try {
     await pool.query(`
-      ALTER TABLE internal_branch_transfer_items
-      ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]',
-      ADD COLUMN IF NOT EXISTS item_status VARCHAR(50) DEFAULT 'Pending',
-      ADD COLUMN IF NOT EXISTS accepted_qty NUMERIC(12,2) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS rejected_qty NUMERIC(12,2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS modification_reason TEXT DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal',
-      ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC(12,2) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS received_qty NUMERIC(12,2) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS rejected_by_name VARCHAR(150) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS pending_receive_qty NUMERIC(12,2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS pending_dispatch_qty NUMERIC(12,2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS rejected_receive_qty NUMERIC(12,2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS receive_rejection_reason TEXT DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS receive_rejected_by_name VARCHAR(150) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS receive_rejected_at TIMESTAMP DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS is_additional BOOLEAN DEFAULT FALSE;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS delivery_day VARCHAR(50) DEFAULT 'Today';
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS delivery_minutes INTEGER DEFAULT 30;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_delivery_minutes INTEGER DEFAULT 30;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_needed_by_time VARCHAR(50);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'Transfer Request';
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'Normal';
 
-      ALTER TABLE internal_branch_transfers
-      ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS delivery_day VARCHAR(50) DEFAULT 'Today';
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(50) DEFAULT 'Pending';
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_qty NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS modification_reason TEXT DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal';
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sent_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS received_qty NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS pending_receive_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS pending_dispatch_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_receive_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejection_reason TEXT DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejected_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejected_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS is_additional BOOLEAN DEFAULT FALSE;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS remarks TEXT;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS price NUMERIC(10,2);
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sku VARCHAR(100);
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100);
     `);
+    schemaEnsured = true;
   } catch (err) {
     console.warn('Auto-verify schema note:', err.message);
   }
-})();
+}
+// Trigger on module startup
+ensureInternalBranchSchema();
+// And protect routes if database was not connected on initial file load
+router.use(async (req, res, next) => {
+  if (!schemaEnsured) {
+    await ensureInternalBranchSchema();
+  }
+  next();
+});
 
 // Default standard branches including Central Kitchen and Other
 const STANDARD_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen', 'Other'];
@@ -269,7 +291,7 @@ router.post('/transfers', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { 
-      to_branch, needed_by_time, delivery_day, notes, items, is_external,
+      to_branch, needed_by_time, delivery_day, delivery_minutes, notes, items, is_external,
       request_type, priority 
     } = req.body;
     let from_branch = req.body.from_branch;
@@ -339,7 +361,7 @@ router.post('/transfers', authenticateToken, async (req, res) => {
     const requestedByName = req.user.name || req.user.username || 'Staff';
 
     // Calculate expected delivery timestamp
-    const mins = parseInt(delivery_minutes, 10) || 30;
+    const mins = parseInt(delivery_minutes !== undefined ? delivery_minutes : (req.body?.delivery_minutes || 30), 10) || 30;
     const expectedDeliveryAt = new Date(Date.now() + mins * 60 * 1000);
 
     const insertTransferRes = await client.query(`

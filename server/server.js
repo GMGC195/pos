@@ -914,6 +914,10 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_rejection_reason TEXT;
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'Transfer Request';
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'Normal';
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS delivery_day VARCHAR(50) DEFAULT 'Today';
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150);
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
 
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS confirmed_qty NUMERIC(12,3);
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_change_reason TEXT;
@@ -921,6 +925,30 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS price NUMERIC(10,2);
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sku VARCHAR(100);
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100);
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(50) DEFAULT 'Pending';
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_qty NUMERIC(12,2) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_qty NUMERIC(12,2) DEFAULT 0;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS modification_reason TEXT DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal';
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC(12,2) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sent_qty NUMERIC(12,2) DEFAULT 0;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS received_qty NUMERIC(12,2) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_by_name VARCHAR(150) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS pending_receive_qty NUMERIC(12,2) DEFAULT 0;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS pending_dispatch_qty NUMERIC(12,2) DEFAULT 0;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_receive_qty NUMERIC(12,2) DEFAULT 0;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejection_reason TEXT DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejected_by_name VARCHAR(150) DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejected_at TIMESTAMPTZ DEFAULT NULL;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS is_additional BOOLEAN DEFAULT FALSE;
+        ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS remarks TEXT;
 
         CREATE TABLE IF NOT EXISTS internal_branch_activity_logs (
           id SERIAL PRIMARY KEY,
