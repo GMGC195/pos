@@ -863,13 +863,14 @@ async function recalculateTransferStatus(client, transferId) {
       await client.query(`UPDATE internal_branch_transfers SET status = 'Rejected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
       return 'Rejected';
     }
-    const allAcceptedDispatched = items.filter(it => it.item_status === 'Accepted').length === 0;
-    const finalDispStatus = allAcceptedDispatched ? 'Dispatched' : 'Partially Dispatched';
+    const allReadyDispatched = items.filter(it => it.item_status === 'Ready to Process' || it.item_status === 'Accepted').length === 0;
+    const finalDispStatus = allReadyDispatched ? 'Dispatched' : 'Partially Dispatched';
     await client.query(`UPDATE internal_branch_transfers SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [finalDispStatus, transferId]);
     return finalDispStatus;
   }
 
-  // Pre-dispatch stage: Acceptance / Rejection
+  // Pre-dispatch stage: Acceptance / Ready to Process / Rejection
+  const readyItems = items.filter(it => it.item_status === 'Ready to Process');
   const acceptedItems = items.filter(it => it.item_status === 'Accepted' || it.item_status === 'Preparing');
   const rejectedItems = items.filter(it => it.item_status === 'Rejected');
   const pendingItems = items.filter(it => !it.item_status || it.item_status === 'Pending');
@@ -877,9 +878,13 @@ async function recalculateTransferStatus(client, transferId) {
   let newStatus = 'Pending';
   if (rejectedItems.length === items.length) {
     newStatus = 'Rejected';
-  } else if (acceptedItems.length === items.length) {
-    newStatus = (currentStatus === 'In Progress' || currentStatus === 'Preparing') ? currentStatus : 'Accepted';
-  } else if (acceptedItems.length > 0 || rejectedItems.length > 0) {
+  } else if (readyItems.length > 0 && (readyItems.length + rejectedItems.length === items.length)) {
+    newStatus = 'Ready to Process';
+  } else if (acceptedItems.length > 0 && (acceptedItems.length + rejectedItems.length === items.length)) {
+    newStatus = 'Accepted';
+  } else if (readyItems.length > 0) {
+    newStatus = 'Partially Ready';
+  } else if (acceptedItems.length > 0) {
     newStatus = 'Partially Accepted';
   } else {
     newStatus = 'Pending';
@@ -2157,6 +2162,192 @@ router.put('/transfers/:id/modify-quantities', authenticateToken, async (req, re
   }
 });
 
+// PUT /api/internal-branch/transfers/:id/ready-to-process - Mark accepted items as Ready to Process
+router.put('/transfers/:id/ready-to-process', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { item_ids } = req.body;
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only supplying branch "${transfer.to_branch}" can mark items Ready to Process.` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+
+    let updateQuery;
+    let queryParams;
+    if (item_ids && Array.isArray(item_ids) && item_ids.length > 0) {
+      updateQuery = `
+        UPDATE internal_branch_transfer_items
+        SET item_status = 'Ready to Process'
+        WHERE transfer_id = $1 AND id = ANY($2::int[]) AND (item_status = 'Accepted' OR item_status = 'Pending')
+        RETURNING *
+      `;
+      queryParams = [transfer.id, item_ids];
+    } else {
+      updateQuery = `
+        UPDATE internal_branch_transfer_items
+        SET item_status = 'Ready to Process'
+        WHERE transfer_id = $1 AND item_status = 'Accepted'
+        RETURNING *
+      `;
+      queryParams = [transfer.id];
+    }
+
+    const updatedItemsRes = await client.query(updateQuery, queryParams);
+    if (updatedItemsRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No eligible Accepted items found to mark as Ready to Process.' });
+    }
+
+    const overallStatus = await recalculateTransferStatus(client, transfer.id);
+    const itemNames = updatedItemsRes.rows.map(r => r.dish_name).join(', ');
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'READY_TO_PROCESS',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: overallStatus,
+      details: `Items marked Ready to Process by ${userName}: ${itemNames}. Request status is now "${overallStatus}".`
+    });
+
+    await client.query('COMMIT');
+
+    const fullItems = await pool.query(`
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.barcode, '') as barcode,
+        COALESCE(i.short_code, '') as short_code,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price
+      FROM internal_branch_transfer_items ti
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
+    `, [id]);
+    const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
+
+    const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
+    if (req.io) {
+      req.io.emit('internal_transfer_updated', payload);
+      req.io.emit('internal_transfer_ready', payload);
+    }
+
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error marking items ready to process:', err);
+    res.status(500).json({ error: err.message || 'Failed to mark items ready to process' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/items/:itemId/ready-to-process - Mark individual item as Ready to Process
+router.put('/transfers/:id/items/:itemId/ready-to-process', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, itemId } = req.params;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.to_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only supplying branch "${transfer.to_branch}" can mark items Ready to Process.` });
+    }
+
+    const itemRes = await client.query(`SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE`, [itemId, id]);
+    if (itemRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    const item = itemRes.rows[0];
+    if (item.item_status !== 'Accepted') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Item "${item.dish_name}" must be in Accepted status before marking Ready to Process (current: ${item.item_status}).` });
+    }
+
+    const userName = req.user.name || req.user.username || 'Kitchen Staff';
+
+    await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET item_status = 'Ready to Process'
+      WHERE id = $1 AND transfer_id = $2
+    `, [itemId, id]);
+
+    const overallStatus = await recalculateTransferStatus(client, transfer.id);
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'ITEM_READY_TO_PROCESS',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: 'Accepted',
+      newValue: 'Ready to Process',
+      details: `Item "${item.dish_name}" marked Ready to Process by ${userName}. Request status is now "${overallStatus}".`
+    });
+
+    await client.query('COMMIT');
+
+    const fullItems = await pool.query(`
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.barcode, '') as barcode,
+        COALESCE(i.short_code, '') as short_code,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price
+      FROM internal_branch_transfer_items ti
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
+    `, [id]);
+    const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
+
+    const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
+    if (req.io) {
+      req.io.emit('internal_transfer_updated', payload);
+      req.io.emit('internal_transfer_ready', payload);
+    }
+
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error marking item ready to process:', err);
+    res.status(500).json({ error: err.message || 'Failed to mark item ready to process' });
+  } finally {
+    client.release();
+  }
+});
+
 // PUT /api/internal-branch/transfers/:id/mark-ready - Supplying branch marks as Ready for Dispatch
 router.put('/transfers/:id/mark-ready', authenticateToken, async (req, res) => {
   const client = await pool.connect();
@@ -2285,8 +2476,8 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
         if (itemRowRes.rows.length === 0) continue;
         const currentItem = itemRowRes.rows[0];
 
-        // Do not dispatch rejected items
-        if (currentItem.item_status === 'Rejected') {
+        // Only items marked Ready to Process or Partially Dispatched are eligible for dispatch
+        if (currentItem.item_status !== 'Ready to Process' && currentItem.item_status !== 'Partially Dispatched') {
           continue;
         }
 

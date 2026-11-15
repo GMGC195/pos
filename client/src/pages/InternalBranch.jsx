@@ -2623,11 +2623,43 @@ export default function InternalBranch() {
     }
   };
 
-  // 4. Mark Ready for Dispatch (In Progress -> Ready for Dispatch)
+  // 4. Ready to Process Actions (Stage 2: Accepted -> Ready to Process)
+  const handleBulkReadyToProcess = async (t) => {
+    const acceptedItems = (t.items || []).filter(it => it.item_status === 'Accepted');
+    if (acceptedItems.length === 0) {
+      return toast.error('No Accepted items to mark as Ready to Process.');
+    }
+    try {
+      const res = await axios.put(`/api/internal-branch/transfers/${t.id}/ready-to-process`, {
+        item_ids: acceptedItems.map(it => it.id)
+      });
+      toast.success(`${acceptedItems.length} item(s) marked as Ready to Process!`);
+      setTransfers(prev => prev.map(x => String(x.id) === String(t.id) ? { ...x, ...res.data } : x));
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error marking items ready to process:', err);
+      toast.error(err.response?.data?.error || 'Failed to mark items ready to process');
+    }
+  };
+
+  const handleItemReadyToProcess = async (transferId, item) => {
+    try {
+      const res = await axios.put(`/api/internal-branch/transfers/${transferId}/items/${item.id}/ready-to-process`);
+      toast.success(`"${item.dish_name}" is now Ready to Process!`);
+      setTransfers(prev => prev.map(x => String(x.id) === String(transferId) ? { ...x, ...res.data } : x));
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error marking item ready to process:', err);
+      toast.error(err.response?.data?.error || 'Failed to mark item ready to process');
+    }
+  };
+
   const handleMarkReady = async (transferId, trfCode) => {
     try {
-      await axios.put(`/api/internal-branch/transfers/${transferId}/mark-ready`);
-      toast.success(`Transfer ${trfCode} marked as Ready for Dispatch!`);
+      await axios.put(`/api/internal-branch/transfers/${transferId}/ready-to-process`);
+      toast.success(`Transfer ${trfCode} marked as Ready to Process!`);
       fetchStats();
       fetchTransfers();
     } catch (err) {
@@ -2636,13 +2668,12 @@ export default function InternalBranch() {
     }
   };
 
-  // 5. Open Dispatch & Handover Modal
+  // 5. Open Dispatch & Handover Modal (Stage 3: Ready to Process -> Dispatch)
   const openDispatchModal = (t) => {
     if (dispatching || isDispatchingRef.current) return;
-    const pendingItems = (t.items || []).filter(it => it.item_status === 'Pending' || !it.item_status);
-    if (pendingItems.length > 0) {
-      const names = pendingItems.map(p => p.dish_name).join(', ');
-      return toast.error(`Cannot dispatch order while items remain Pending. Please Accept or Reject all items first (${names}).`);
+    const readyItems = (t.items || []).filter(it => it.item_status === 'Ready to Process');
+    if (readyItems.length === 0) {
+      return toast.error("Only items marked 'Ready to Process' can be dispatched. Please mark items Ready to Process first.");
     }
     setDispatchModalTransfer(t);
     setHandoverByName(user?.name || user?.username || 'Kitchen Staff');
@@ -2652,7 +2683,8 @@ export default function InternalBranch() {
     const initRemarks = {};
     const initSelected = {};
     (t.items || []).forEach(item => {
-      initSelected[item.id] = (item.item_status !== 'Rejected' && item.item_status !== 'Cancelled');
+      const isReady = item.item_status === 'Ready to Process';
+      initSelected[item.id] = isReady;
       initQtys[item.id] = item.sent_qty !== null && item.sent_qty !== undefined 
         ? item.sent_qty 
         : (item.accepted_qty !== null && item.accepted_qty !== undefined ? item.accepted_qty : (item.confirmed_qty ?? item.requested_qty));
@@ -2671,7 +2703,8 @@ export default function InternalBranch() {
       return toast.error('Please specify Handover To (Driver / Branch Representative Name).');
     }
 
-    const itemsPayload = (dispatchModalTransfer.items || []).map(item => {
+    const readyItems = (dispatchModalTransfer.items || []).filter(item => item.item_status === 'Ready to Process');
+    const itemsPayload = readyItems.map(item => {
       const isSelected = dispatchSelectedItems[item.id] !== undefined ? dispatchSelectedItems[item.id] : true;
       return {
         id: item.id,
@@ -3423,6 +3456,7 @@ export default function InternalBranch() {
   const renderTransferCardRow = (t, isIncoming, isReceival = false) => {
     const hasUnacceptedItems = (t.items || []).some(it => it.item_status === 'Pending' || !it.item_status);
     const hasAcceptedItems = (t.items || []).some(it => it.item_status === 'Accepted');
+    const hasReadyItems = (t.items || []).some(it => it.item_status === 'Ready to Process');
     const canModify = !isReceival && ['Pending', 'In Progress', 'Partially Accepted'].includes(t.status) && hasUnacceptedItems;
     const canAcceptReject = !isReceival && (isSuperUser || isIncoming || (user?.branch === t.to_branch));
     const items = t.items || [];
@@ -3659,29 +3693,6 @@ export default function InternalBranch() {
                   </>
                 )}
 
-                {/* If incoming and pending, allow Start Processing */}
-                {isIncoming && t.status === 'Pending' && (
-                  <button
-                    type="button"
-                    onClick={() => handleStartProcessing(t.id, t.transfer_id)}
-                    style={{
-                      padding: '6px 12px',
-                      background: '#2563eb',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    <Play size={13} /> Start Processing
-                  </button>
-                )}
-
                 {/* Modify Request */}
                 {canModify ? (
                   <button
@@ -3789,30 +3800,6 @@ export default function InternalBranch() {
                   </button>
                 )}
 
-                {/* If incoming and in progress / ready / partially accepted / accepted, allow Dispatch - PLACED ON RIGHT */}
-                {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && (
-                  <button
-                    type="button"
-                    onClick={() => openDispatchModal(t)}
-                    style={{
-                      padding: '6px 14px',
-                      background: '#16a34a',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
-                    }}
-                    title="Open dispatch details modal and handover order"
-                  >
-                    <Truck size={14} /> Dispatch Order
-                  </button>
-                )}
               </>
             )}
           </div>
@@ -3882,22 +3869,25 @@ export default function InternalBranch() {
               ) : (
                 items.map((it, idx) => {
                   const itemStatus = it.item_status || 'Pending';
+                  const isItemPending = itemStatus === 'Pending' || !it.item_status;
                   const isAccepted = itemStatus === 'Accepted';
-                  const isRejected = itemStatus === 'Rejected';
-                  const isItemPending = !isAccepted && !isRejected;
+                  const isReadyToProcess = itemStatus === 'Ready to Process';
                   const reqQty = parseFloat(it.requested_qty || 0);
                   const accQty = it.accepted_qty !== null && it.accepted_qty !== undefined ? parseFloat(it.accepted_qty) : (it.confirmed_qty !== null && it.confirmed_qty !== undefined ? parseFloat(it.confirmed_qty) : null);
                   const dispQty = it.sent_qty !== null && it.sent_qty !== undefined ? parseFloat(it.sent_qty) : (it.dispatched_qty !== null && it.dispatched_qty !== undefined ? parseFloat(it.dispatched_qty) : 0);
                   const recQty = it.received_qty !== null && it.received_qty !== undefined ? parseFloat(it.received_qty) : 0;
                   const remQty = isReceival ? (dispQty > 0 ? Math.max(0, dispQty - recQty) : 0) : Math.max(0, (accQty !== null ? accQty : reqQty) - recQty);
-                  const isQtyModified = (isAccepted && accQty !== null && Math.abs(accQty - reqQty) > 0.0001) || (it.modification_reason && it.modification_reason.trim() !== '');
+                  const isDispatched = itemStatus === 'Dispatched' || (dispQty > 0 && itemStatus !== 'Received' && itemStatus !== 'Fully Received');
+                  const isReceived = itemStatus === 'Received' || itemStatus === 'Fully Received' || (recQty > 0 && recQty >= dispQty && dispQty > 0);
+                  const isRejected = itemStatus === 'Rejected';
+                  const isQtyModified = (accQty !== null && Math.abs(accQty - reqQty) > 0.0001) || (it.modification_reason && it.modification_reason.trim() !== '') || (it.quantity_change_reason && it.quantity_change_reason.trim() !== '');
 
                   return (
                     <tr
                       key={`item-${t.id}-${it.id || idx}`}
                       style={{
                         borderBottom: '1px solid #f1f5f9',
-                        background: isRejected ? '#fef2f2' : (isAccepted ? '#f0fdf4' : (idx % 2 === 0 ? '#fff' : '#fafafa'))
+                        background: isRejected ? '#fef2f2' : (isReadyToProcess ? '#f5f3ff' : (isAccepted ? '#f0fdf4' : (idx % 2 === 0 ? '#fff' : '#fafafa')))
                       }}
                     >
                       <td style={{ padding: '10px 12px', color: '#94a3b8', fontWeight: 600 }}>{idx + 1}</td>
@@ -3957,7 +3947,22 @@ export default function InternalBranch() {
                         {it.needed_by_date && <div style={{ fontSize: 10, color: '#64748b' }}>{it.needed_by_date}</div>}
                       </td>
                       <td style={{ padding: '10px 10px', textAlign: 'center' }}>
-                        {isAccepted && (
+                        {isReceived && (
+                          <span title="Received" style={{ background: '#ecfdf5', color: '#047857', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #a7f3d0', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <CheckCheck size={12} /> Rec
+                          </span>
+                        )}
+                        {isDispatched && !isReceived && (
+                          <span title="Dispatched" style={{ background: '#eff6ff', color: '#1d4ed8', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #bfdbfe', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <Truck size={12} /> Disp
+                          </span>
+                        )}
+                        {isReadyToProcess && (
+                          <span title="Ready to Process" style={{ background: '#f5f3ff', color: '#6d28d9', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #ddd6fe', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <Play size={12} /> Ready
+                          </span>
+                        )}
+                        {isAccepted && !isReadyToProcess && !isDispatched && (
                           <span title="Accepted" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #bbf7d0', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                             <CheckCircle2 size={12} /> Acc
                           </span>
@@ -3973,9 +3978,46 @@ export default function InternalBranch() {
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#475569' }}>
-                        {it.remarks ? (
-                          <div style={{ color: '#64748b' }}>{it.remarks}</div>
+                      <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#475569', minWidth: 140 }}>
+                        {isRejected ? (
+                          <div>
+                            {it.rejection_reason ? (
+                              <div style={{ color: '#b91c1c', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <AlertTriangle size={11} /> Rej: "{it.rejection_reason}"
+                              </div>
+                            ) : (
+                              <div style={{ color: '#b91c1c', fontWeight: 600 }}>Item Rejected</div>
+                            )}
+                            {it.rejected_by_name && (
+                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                                By {it.rejected_by_name} {it.rejected_at ? `(${new Date(it.rejected_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                              </div>
+                            )}
+                          </div>
+                        ) : isQtyModified || (it.modification_reason && it.modification_reason.trim()) || (it.quantity_change_reason && it.quantity_change_reason.trim()) ? (
+                          <div>
+                            <div style={{ color: '#1d4ed8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <Edit3 size={11} /> Mod: "{it.modification_reason || it.quantity_change_reason || 'Qty Modified'}"
+                            </div>
+                            {it.accepted_by_name && (
+                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                                By {it.accepted_by_name} {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                              </div>
+                            )}
+                          </div>
+                        ) : it.remarks ? (
+                          <div>
+                            <div style={{ color: '#334155', fontWeight: 500 }}>{it.remarks}</div>
+                            {it.accepted_by_name && (
+                              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                                Acc by {it.accepted_by_name} {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                              </div>
+                            )}
+                          </div>
+                        ) : it.accepted_by_name ? (
+                          <div style={{ fontSize: 10.5, color: '#64748b' }}>
+                            Acc by <strong>{it.accepted_by_name}</strong> {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                          </div>
                         ) : (
                           <span style={{ color: '#cbd5e1' }}>—</span>
                         )}
@@ -3985,8 +4027,8 @@ export default function InternalBranch() {
                           // RECEIVALS VIEW: Show item receiving status / Receive button
                           dispQty > 0 ? (
                             recQty >= dispQty ? (
-                              <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a' }}>
-                                ✓ Received
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                <CheckCheck size={12} /> Received
                               </span>
                             ) : (
                               <button
@@ -4014,10 +4056,54 @@ export default function InternalBranch() {
                             <span style={{ fontSize: 11, color: '#94a3b8' }}>Not Dispatched</span>
                           )
                         ) : !isIncoming ? (
-                          // SENDING BRANCH VIEW (Transfer Requests): NO Accept/Reject!
-                          // Show actual processing status and locked indicator if accepted!
+                          // SENDING BRANCH VIEW (Transfer Requests):
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                            {isAccepted ? (
+                            {isReceived ? (
+                              <span style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                background: '#ecfdf5',
+                                color: '#047857',
+                                border: '1px solid #a7f3d0',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3
+                              }}>
+                                <CheckCheck size={11} /> Received
+                              </span>
+                            ) : isDispatched ? (
+                              <span style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3
+                              }}>
+                                <Truck size={11} /> Dispatched
+                              </span>
+                            ) : isReadyToProcess ? (
+                              <span style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                background: '#f5f3ff',
+                                color: '#6d28d9',
+                                border: '1px solid #ddd6fe',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3
+                              }}>
+                                <Play size={11} /> Ready to Process
+                              </span>
+                            ) : isAccepted ? (
                               <span style={{
                                 fontSize: 11,
                                 fontWeight: 700,
@@ -4083,7 +4169,7 @@ export default function InternalBranch() {
                             )}
                           </div>
                         ) : (
-                          // INCOMING REQUEST: Accept & Reject buttons for supplying branch!
+                          // INCOMING REQUEST: Accept & Reject / Ready to Process buttons for supplying branch!
                           isItemPending ? (
                             canAcceptReject ? (
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -4146,9 +4232,50 @@ export default function InternalBranch() {
                             ) : (
                               <span style={{ fontSize: 11, color: '#94a3b8' }}>Awaiting Supply Branch</span>
                             )
+                          ) : isAccepted ? (
+                            // STAGE 2 ACTION: Mark individual accepted item as Ready to Process!
+                            canAcceptReject ? (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleItemReadyToProcess(t.id, it)}
+                                  style={{
+                                    background: '#7c3aed',
+                                    color: '#fff',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    padding: '4px 9px',
+                                    borderRadius: 5,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    boxShadow: '0 1px 2px rgba(124, 58, 237, 0.2)'
+                                  }}
+                                  title="Mark this accepted item as Ready to Process"
+                                >
+                                  <Play size={12} /> Ready to Process
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a' }}>Accepted</span>
+                            )
+                          ) : isReadyToProcess ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <CheckCircle2 size={12} /> Ready for Dispatch
+                            </span>
+                          ) : isDispatched ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <Truck size={12} /> Dispatched
+                            </span>
+                          ) : isReceived ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <CheckCheck size={12} /> Received
+                            </span>
                           ) : (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: isAccepted ? '#16a34a' : '#dc2626' }}>
-                              {isAccepted ? 'Action Completed' : 'Item Rejected'}
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <XCircle size={12} /> Item Rejected
                             </span>
                           )
                         )}
@@ -4295,14 +4422,22 @@ export default function InternalBranch() {
               {(() => {
                 const totalItems = items.length;
                 const acceptedCount = items.filter(it => it.item_status === 'Accepted').length;
+                const readyCount = items.filter(it => it.item_status === 'Ready to Process').length;
                 const rejectedCount = items.filter(it => it.item_status === 'Rejected').length;
                 const pendingCount = items.filter(it => it.item_status === 'Pending' || !it.item_status).length;
                 return (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 700, color: '#334155' }}>Review Summary:</span>
-                    <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                      {acceptedCount} Accepted
-                    </span>
+                    {acceptedCount > 0 && (
+                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                        {acceptedCount} Accepted
+                      </span>
+                    )}
+                    {readyCount > 0 && (
+                      <span style={{ background: '#f5f3ff', color: '#6d28d9', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                        {readyCount} Ready to Process
+                      </span>
+                    )}
                     {rejectedCount > 0 && (
                       <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
                         {rejectedCount} Rejected
@@ -4322,7 +4457,7 @@ export default function InternalBranch() {
               })()}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               {/* Print Accepted Slip */}
               <button
                 type="button"
@@ -4345,7 +4480,7 @@ export default function InternalBranch() {
                 <Printer size={14} /> Print Accepted Slip
               </button>
 
-              {/* Accept and Done */}
+              {/* Accept and Done (visible while unaccepted items exist) */}
               {items.some(it => it.item_status === 'Pending' || !it.item_status) && (
                 <button
                   type="button"
@@ -4364,32 +4499,64 @@ export default function InternalBranch() {
                     gap: 5,
                     boxShadow: '0 1px 2px rgba(22, 163, 74, 0.2)'
                   }}
-                  title="Open detailed confirmation modal to review and process items"
+                  title="Open detailed confirmation modal to review and accept all pending items"
                 >
                   <CheckCheck size={14} /> Accept and Done
                 </button>
               )}
 
-              {/* Dispatch Order (Visible on the right when items are accepted and status is ready to dispatch) */}
-              {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && hasAcceptedItems && (
+              {/* Ready to Process (Stage 2: Bulk Action) */}
+              {(hasAcceptedItems || hasReadyItems) && (
                 <button
                   type="button"
-                  onClick={() => openDispatchModal(t)}
+                  onClick={() => handleBulkReadyToProcess(t)}
+                  disabled={!hasAcceptedItems}
                   style={{
                     padding: '7px 15px',
-                    background: '#16a34a',
+                    background: hasAcceptedItems ? '#7c3aed' : '#cbd5e1',
                     color: '#fff',
                     border: 'none',
                     borderRadius: 6,
                     fontSize: 12,
                     fontWeight: 700,
-                    cursor: 'pointer',
+                    cursor: hasAcceptedItems ? 'pointer' : 'not-allowed',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 5,
-                    boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
+                    boxShadow: hasAcceptedItems ? '0 1px 3px rgba(124, 58, 237, 0.25)' : 'none'
                   }}
-                  title="Open dispatch details modal and handover order"
+                  title={hasAcceptedItems ? "Mark all accepted items as Ready to Process" : "All eligible items are already Ready to Process"}
+                >
+                  <Play size={14} /> Ready to Process
+                </button>
+              )}
+
+              {/* Dispatch Order (Stage 3: Dispatch only Ready to Process items) */}
+              {(hasAcceptedItems || hasReadyItems) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!hasReadyItems) {
+                      return toast.error("Please click 'Ready to Process' before dispatching.");
+                    }
+                    openDispatchModal(t);
+                  }}
+                  disabled={dispatching || !hasReadyItems}
+                  style={{
+                    padding: '7px 15px',
+                    background: hasReadyItems ? '#16a34a' : '#94a3b8',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: (dispatching || !hasReadyItems) ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    boxShadow: hasReadyItems ? '0 1px 3px rgba(22, 163, 74, 0.25)' : 'none'
+                  }}
+                  title={hasReadyItems ? "Open dispatch details modal and handover order" : "Mark items as 'Ready to Process' before dispatching"}
                 >
                   <Truck size={14} /> Dispatch Order
                 </button>
@@ -6330,85 +6497,95 @@ export default function InternalBranch() {
               </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {(dispatchModalTransfer.items || []).map((it) => {
-                  const isChecked = dispatchSelectedItems[it.id] !== undefined ? dispatchSelectedItems[it.id] : true;
-                  return (
-                    <div
-                      key={it.id}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '28px 2fr 1fr 1fr',
-                        gap: 10,
-                        alignItems: 'center',
-                        background: isChecked ? '#f8fafc' : '#f1f5f9',
-                        opacity: isChecked ? 1 : 0.6,
-                        padding: '10px 12px',
-                        borderRadius: 8,
-                        border: isChecked ? '1px solid #e2e8f0' : '1px dashed #cbd5e1'
-                      }}
-                    >
-                      <div>
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={e => setDispatchSelectedItems({ ...dispatchSelectedItems, [it.id]: e.target.checked })}
-                          style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#d97706' }}
-                          title={isChecked ? 'Uncheck to leave pending' : 'Check to dispatch'}
-                        />
+                {(() => {
+                  const readyItems = (dispatchModalTransfer.items || []).filter(it => it.item_status === 'Ready to Process');
+                  if (readyItems.length === 0) {
+                    return (
+                      <div style={{ padding: 20, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8, border: '1px dashed #cbd5e1' }}>
+                        No items currently marked as 'Ready to Process'. Please mark accepted items as Ready to Process first.
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                          {it.image_url ? (
-                            <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
-                          ) : (
-                            <Utensils size={16} color="#94a3b8" />
-                          )}
-                        </div>
+                    );
+                  }
+                  return readyItems.map((it) => {
+                    const isChecked = dispatchSelectedItems[it.id] !== undefined ? dispatchSelectedItems[it.id] : true;
+                    return (
+                      <div
+                        key={it.id}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '28px 2fr 1fr 1fr',
+                          gap: 10,
+                          alignItems: 'center',
+                          background: isChecked ? '#f8fafc' : '#f1f5f9',
+                          opacity: isChecked ? 1 : 0.6,
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: isChecked ? '1px solid #e2e8f0' : '1px dashed #cbd5e1'
+                        }}
+                      >
                         <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{it.dish_name}</strong>
-                            {!isChecked && (
-                              <span style={{ fontSize: 10, background: '#e2e8f0', color: '#64748b', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
-                                Will stay Pending
-                              </span>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => setDispatchSelectedItems({ ...dispatchSelectedItems, [it.id]: e.target.checked })}
+                            style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#d97706' }}
+                            title={isChecked ? 'Uncheck to leave pending' : 'Check to dispatch'}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                            {it.image_url ? (
+                              <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                            ) : (
+                              <Utensils size={16} color="#94a3b8" />
                             )}
                           </div>
-                          <span style={{ fontSize: 11.5, color: '#64748b' }}>
-                            Req: <strong>{it.requested_qty} {it.uom}</strong>
-                            {it.accepted_qty !== null && it.accepted_qty !== undefined && it.accepted_qty !== it.requested_qty && (
-                              <span style={{ color: '#d97706', marginLeft: 4 }}>(Acc: {it.accepted_qty})</span>
-                            )}
-                          </span>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{it.dish_name}</strong>
+                              {!isChecked && (
+                                <span style={{ fontSize: 10, background: '#e2e8f0', color: '#64748b', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
+                                  Will stay Pending
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: 11.5, color: '#64748b' }}>
+                              Req: <strong>{it.requested_qty} {it.uom}</strong>
+                              {it.accepted_qty !== null && it.accepted_qty !== undefined && it.accepted_qty !== it.requested_qty && (
+                                <span style={{ color: '#d97706', marginLeft: 4 }}>(Acc: {it.accepted_qty})</span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Sent Qty</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            disabled={!isChecked}
+                            value={dispatchItemQuantities[it.id] ?? (it.accepted_qty ?? (it.confirmed_qty ?? it.requested_qty))}
+                            onChange={e => setDispatchItemQuantities({ ...dispatchItemQuantities, [it.id]: e.target.value })}
+                            style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700, background: isChecked ? '#fff' : '#e2e8f0' }}
+                          />
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
+                          <input
+                            type="text"
+                            placeholder="e.g. 2 thermal crates"
+                            disabled={!isChecked}
+                            value={dispatchItemRemarks[it.id] ?? ''}
+                            onChange={e => setDispatchItemRemarks({ ...dispatchItemRemarks, [it.id]: e.target.value })}
+                            style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, background: isChecked ? '#fff' : '#e2e8f0' }}
+                          />
                         </div>
                       </div>
-
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Sent Qty</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          disabled={!isChecked}
-                          value={dispatchItemQuantities[it.id] ?? (it.accepted_qty ?? (it.confirmed_qty ?? it.requested_qty))}
-                          onChange={e => setDispatchItemQuantities({ ...dispatchItemQuantities, [it.id]: e.target.value })}
-                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 700, background: isChecked ? '#fff' : '#e2e8f0' }}
-                        />
-                      </div>
-
-                      <div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 2 }}>Item Remarks</span>
-                        <input
-                          type="text"
-                          placeholder="e.g. 2 thermal crates"
-                          disabled={!isChecked}
-                          value={dispatchItemRemarks[it.id] ?? ''}
-                          onChange={e => setDispatchItemRemarks({ ...dispatchItemRemarks, [it.id]: e.target.value })}
-                          style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, background: isChecked ? '#fff' : '#e2e8f0' }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
 
               {/* General Dispatch Notes */}
