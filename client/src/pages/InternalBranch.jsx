@@ -239,11 +239,11 @@ function printTransferSlip(t) {
 
   const itemsHtml = (t.items || []).map((it, idx) => `
     <tr>
-      <td style="padding: 5px 3px; font-weight: normal; border-bottom: 1px dashed #cbd5e1;">${idx + 1}. ${it.dish_name}</td>
-      <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
-      <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.requested_qty}</td>
-      <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : '-'}</td>
-      <td style="padding: 5px 3px; text-align: right; border-bottom: 1px dashed #cbd5e1;">${it.received_qty !== null && it.received_qty !== undefined ? it.received_qty : '-'}</td>
+      <td style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word;">${idx + 1}. ${it.dish_name}</td>
+      <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
+      <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: 600;">${it.requested_qty}</td>
+      <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : '-'}</td>
+      <td style="width: 14%; padding: 4px 2px; text-align: right; border-bottom: 1px dashed #cbd5e1;">${it.received_qty !== null && it.received_qty !== undefined ? it.received_qty : '-'}</td>
     </tr>
   `).join('');
 
@@ -253,51 +253,151 @@ function printTransferSlip(t) {
       <head>
         <title>Transfer Slip - ${t.transfer_id}</title>
         <style>
-          @page { size: 80mm auto; margin: 1mm 2mm; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            font-size: 11.5px;
-            color: #000;
+          @page {
+            size: 80mm auto;
             margin: 0;
-            padding: 2px 4px;
-            line-height: 1.3;
           }
-          .header { text-align: center; border-bottom: 1.5px dashed #000; padding-bottom: 5px; margin-bottom: 5px; }
-          .header h2 { margin: 0 0 2px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
-          .header h3 { margin: 2px 0 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-          .header p { margin: 2px 0; font-size: 11px; }
-          .meta-table { width: 100%; font-size: 11px; margin-bottom: 5px; border-collapse: collapse; }
-          .meta-table td { padding: 1.5px 0; }
-          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
-          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 3px 2px; text-align: left; }
-          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 4px; font-size: 10.5px; text-align: center; }
-          .sign-area { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 4px; }
-          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 9.5px; padding-top: 2px; }
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+          }
+          body {
+            width: 100%;
+            max-width: 72mm;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 11px;
+            color: #000;
+            background: #fff;
+            margin: 0;
+            padding: 3px 20px 8px 4px;
+            line-height: 1.28;
+            text-rendering: geometricPrecision;
+            overflow-x: hidden;
+            word-break: break-word;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 1.5px dashed #000;
+            padding-bottom: 4px;
+            margin-bottom: 5px;
+          }
+          .header h2 {
+            margin: 0 0 2px;
+            font-size: 14px;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+          }
+          .header .header-sub {
+            margin: 1px 0 2px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #334155;
+          }
+          .header .header-title {
+            margin: 2px 0 1px;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            word-break: break-word;
+          }
+          .header .header-route {
+            margin: 1px 0 2px;
+            font-size: 11.5px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            word-break: break-word;
+          }
+          .meta-table {
+            width: 100%;
+            table-layout: fixed;
+            font-size: 10.5px;
+            margin-bottom: 5px;
+            border-collapse: collapse;
+          }
+          .meta-table td {
+            padding: 1.5px 0;
+            word-break: break-word;
+          }
+          .items-table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+            font-size: 10.5px;
+            margin: 5px 0;
+          }
+          .items-table th {
+            border-bottom: 1.5px solid #000;
+            border-top: 1.5px solid #000;
+            padding: 3px 2px;
+            font-weight: 700;
+            font-size: 10.5px;
+          }
+          .footer {
+            margin-top: 8px;
+            border-top: 1px dashed #000;
+            padding-top: 4px;
+            font-size: 9.5px;
+            text-align: center;
+          }
+          .sign-area {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 12px;
+            padding-top: 2px;
+          }
+          .sign-box {
+            border-top: 1px solid #000;
+            width: 44%;
+            text-align: center;
+            font-size: 9px;
+            padding-top: 2px;
+            font-weight: 600;
+          }
         </style>
       </head>
       <body>
         <div class="header">
           <h2>AL RAWAQ RESTAURANT</h2>
-          <h3 style="color: #000;">DEMAND FROM: ${(t.from_branch || 'BRANCH').toUpperCase()}</h3>
-          <p style="font-size: 13px; font-weight: bold; margin-top: 4px;">ID: ${t.transfer_id}</p>
+          <div class="header-sub">TRANSFER DEMAND VOUCHER</div>
+          <div class="header-title"><strong>${t.transfer_id} | INTERNAL BRANCH TRANSFER</strong></div>
+          <div class="header-route"><strong>${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</strong></div>
         </div>
 
         <table class="meta-table">
-          <tr><td><strong>Date:</strong> ${reqDate} ${reqTime}</td><td style="text-align: right;"><strong>Status:</strong> ${t.status}</td></tr>
-          <tr><td><strong>From:</strong> ${t.from_branch} (${getShortBranchName(t.from_branch)})</td><td style="text-align: right;"><strong>To:</strong> ${t.to_branch} (${getShortBranchName(t.to_branch)})</td></tr>
-          <tr><td><strong>Needed By:</strong> ${t.needed_by_time || 'ASAP'}</td><td style="text-align: right;"><strong>Req By:</strong> ${t.requested_by_name || 'Staff'}</td></tr>
-          ${t.dispatched_by_name ? `<tr><td><strong>Dispatched:</strong> ${dispTime}</td><td style="text-align: right;"><strong>By:</strong> ${t.dispatched_by_name}</td></tr>` : ''}
-          ${t.received_by_name ? `<tr><td><strong>Received:</strong> ${recTime}</td><td style="text-align: right;"><strong>By:</strong> ${t.received_by_name}</td></tr>` : ''}
+          <tr>
+            <td style="width: 52%;"><strong>Date:</strong> ${reqDate} ${reqTime}</td>
+            <td style="width: 48%; text-align: right;"><strong>Status:</strong> ${t.status}</td>
+          </tr>
+          <tr>
+            <td style="width: 52%;"><strong>Day:</strong> ${t.delivery_day || 'Today'}</td>
+            <td style="width: 48%; text-align: right;"><strong>Needed By:</strong> ${t.needed_by_time || 'ASAP'}</td>
+          </tr>
+          <tr>
+            <td style="width: 52%;"><strong>Req By:</strong> ${t.requested_by_name || 'Staff'}</td>
+            <td style="width: 48%; text-align: right;">${t.dispatched_at ? `<strong>Dispatched:</strong> ${dispTime}` : ''}</td>
+          </tr>
+          ${t.dispatched_by_name ? `<tr><td style="width: 52%;"><strong>Disp By:</strong> ${t.dispatched_by_name}</td><td style="width: 48%; text-align: right;">${t.received_by_name ? `<strong>Rec By:</strong> ${t.received_by_name}` : ''}</td></tr>` : ''}
         </table>
 
         <table class="items-table">
           <thead>
             <tr>
-              <th>Dish</th>
-              <th style="text-align: center;">Unit</th>
-              <th style="text-align: center;">Req</th>
-              <th style="text-align: center;">Sent</th>
-              <th style="text-align: right;">Rec</th>
+              <th style="width: 44%; text-align: left;">Dish</th>
+              <th style="width: 14%; text-align: center;">Unit</th>
+              <th style="width: 14%; text-align: center;">Req</th>
+              <th style="width: 14%; text-align: center;">Sent</th>
+              <th style="width: 14%; text-align: right;">Rec</th>
             </tr>
           </thead>
           <tbody>
@@ -305,7 +405,7 @@ function printTransferSlip(t) {
           </tbody>
         </table>
 
-        ${t.notes ? `<div style="font-size: 10.5px; margin-top: 6px; padding: 4px 6px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;"><strong>Notes:</strong> ${t.notes}</div>` : ''}
+        ${t.notes ? `<div style="font-size: 10px; margin-top: 5px; padding: 4px 5px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; word-break: break-word;"><strong>Notes:</strong> ${t.notes}</div>` : ''}
 
         <div class="sign-area">
           <div class="sign-box">Dispatcher Signature</div>
@@ -314,7 +414,7 @@ function printTransferSlip(t) {
 
         <div class="footer">
           <p style="margin: 0; font-weight: 600;">Verified via Electronic POS System</p>
-          <p style="margin: 2px 0 0; font-size: 9.5px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 2px 0 0; font-size: 9px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
@@ -349,15 +449,15 @@ function printAcceptedItemsSlip(t) {
 
     return `
       <tr>
-        <td style="padding: 5px 3px; font-weight: normal; border-bottom: 1px dashed #cbd5e1;">
+        <td style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word;">
           ${idx + 1}. ${it.dish_name}
         </td>
-        <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
-        <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${reqQ}</td>
-        <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#000')}">
+        <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
+        <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: 600;">${reqQ}</td>
+        <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#000')}">
           ${isAcc ? accQ : (isRej ? '0' : '-')}
         </td>
-        <td style="padding: 5px 3px; text-align: right; border-bottom: 1px dashed #cbd5e1; font-size: 11px; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#d97706')}">
+        <td style="width: 14%; padding: 4px 2px; text-align: right; border-bottom: 1px dashed #cbd5e1; font-size: 10.5px; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#d97706')}">
           ${statusCol}
         </td>
       </tr>
@@ -370,50 +470,146 @@ function printAcceptedItemsSlip(t) {
       <head>
         <title>Accepted Items Slip - ${t.transfer_id}</title>
         <style>
-          @page { size: 80mm auto; margin: 1mm 2mm; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            font-size: 11.5px;
-            color: #000;
+          @page {
+            size: 80mm auto;
             margin: 0;
-            padding: 2px 4px;
-            line-height: 1.3;
           }
-          .header { text-align: center; border-bottom: 1.5px dashed #000; padding-bottom: 5px; margin-bottom: 5px; }
-          .header h2 { margin: 0 0 2px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
-          .header h3 { margin: 2px 0 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-          .meta-table { width: 100%; font-size: 11px; margin-bottom: 5px; border-collapse: collapse; }
-          .meta-table td { padding: 1.5px 0; }
-          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
-          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 3px 2px; text-align: left; }
-          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 4px; font-size: 10.5px; text-align: center; }
-          .sign-area { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 4px; }
-          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 9.5px; padding-top: 2px; }
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+          }
+          body {
+            width: 100%;
+            max-width: 72mm;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 11px;
+            color: #000;
+            background: #fff;
+            margin: 0;
+            padding: 3px 20px 8px 4px;
+            line-height: 1.28;
+            text-rendering: geometricPrecision;
+            overflow-x: hidden;
+            word-break: break-word;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 1.5px dashed #000;
+            padding-bottom: 4px;
+            margin-bottom: 5px;
+          }
+          .header h2 {
+            margin: 0 0 2px;
+            font-size: 14px;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+          }
+          .header .header-sub {
+            margin: 1px 0 2px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #334155;
+          }
+          .header .header-title {
+            margin: 2px 0 1px;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            word-break: break-word;
+          }
+          .header .header-route {
+            margin: 1px 0 2px;
+            font-size: 11.5px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            word-break: break-word;
+          }
+          .meta-table {
+            width: 100%;
+            table-layout: fixed;
+            font-size: 10.5px;
+            margin-bottom: 5px;
+            border-collapse: collapse;
+          }
+          .meta-table td {
+            padding: 1.5px 0;
+            word-break: break-word;
+          }
+          .items-table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+            font-size: 10.5px;
+            margin: 5px 0;
+          }
+          .items-table th {
+            border-bottom: 1.5px solid #000;
+            border-top: 1.5px solid #000;
+            padding: 3px 2px;
+            font-weight: 700;
+            font-size: 10.5px;
+          }
+          .footer {
+            margin-top: 8px;
+            border-top: 1px dashed #000;
+            padding-top: 4px;
+            font-size: 9.5px;
+            text-align: center;
+          }
+          .sign-area {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 12px;
+            padding-top: 2px;
+          }
+          .sign-box {
+            border-top: 1px solid #000;
+            width: 44%;
+            text-align: center;
+            font-size: 9px;
+            padding-top: 2px;
+            font-weight: 600;
+          }
         </style>
       </head>
       <body>
         <div class="header">
           <h2>AL RAWAQ RESTAURANT</h2>
-          <h3 style="color: #000;">ACCEPTED ITEMS VOUCHER</h3>
-          <p style="font-size: 11.5px; font-weight: bold; margin: 2px 0;">ID: ${t.transfer_id}</p>
-          <p style="font-size: 11px; margin: 2px 0 0; color: #000;">
-            Internal Branch Transfer: <strong>${getShortBranchName(t.from_branch)} to ${getShortBranchName(t.to_branch)}</strong>
-          </p>
+          <div class="header-sub">ACCEPTED ITEMS VOUCHER</div>
+          <div class="header-title"><strong>${t.transfer_id} | INTERNAL BRANCH TRANSFER</strong></div>
+          <div class="header-route"><strong>${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</strong></div>
         </div>
 
         <table class="meta-table">
-          <tr><td><strong>Day:</strong> ${t.delivery_day || 'Today'}</td><td style="text-align: right;"><strong>Status:</strong> ${t.status}</td></tr>
-          <tr><td><strong>Needed By:</strong> ${t.needed_by_time || 'ASAP'}</td><td style="text-align: right;"><strong>Requested By:</strong> ${t.requested_by_name || 'Staff'}</td></tr>
+          <tr>
+            <td style="width: 50%;"><strong>Day:</strong> ${t.delivery_day || 'Today'}</td>
+            <td style="width: 50%; text-align: right;"><strong>Status:</strong> ${t.status}</td>
+          </tr>
+          <tr>
+            <td style="width: 50%;"><strong>Needed By:</strong> ${t.needed_by_time || 'ASAP'}</td>
+            <td style="width: 50%; text-align: right;"><strong>Requested By:</strong> ${t.requested_by_name || 'Staff'}</td>
+          </tr>
         </table>
 
         <table class="items-table">
           <thead>
             <tr>
-              <th>Dish</th>
-              <th style="text-align: center;">Unit</th>
-              <th style="text-align: center;">Req</th>
-              <th style="text-align: center;">Acc</th>
-              <th style="text-align: right;">Status</th>
+              <th style="width: 44%; text-align: left;">Dish</th>
+              <th style="width: 14%; text-align: center;">Unit</th>
+              <th style="width: 14%; text-align: center;">Req</th>
+              <th style="width: 14%; text-align: center;">Acc</th>
+              <th style="width: 14%; text-align: right;">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -428,7 +624,7 @@ function printAcceptedItemsSlip(t) {
 
         <div class="footer">
           <p style="margin: 0; font-weight: 600;">Verified Accepted Goods</p>
-          <p style="margin: 2px 0 0; font-size: 9.5px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 2px 0 0; font-size: 9px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
@@ -462,10 +658,10 @@ function printDispatchedItemsSlip(t) {
     const recQ = it.received_qty !== null && it.received_qty !== undefined ? parseFloat(it.received_qty) : '-';
     return `
       <tr>
-        <td style="padding: 5px 3px; font-weight: normal; border-bottom: 1px dashed #cbd5e1;">${idx + 1}. ${it.dish_name}</td>
-        <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
-        <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: bold; color: #16a34a;">${sentQ}</td>
-        <td style="padding: 5px 3px; text-align: right; border-bottom: 1px dashed #cbd5e1;">${recQ}</td>
+        <td style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word;">${idx + 1}. ${it.dish_name}</td>
+        <td style="width: 16%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
+        <td style="width: 20%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: bold; color: #16a34a;">${sentQ}</td>
+        <td style="width: 20%; padding: 4px 2px; text-align: right; border-bottom: 1px dashed #cbd5e1;">${recQ}</td>
       </tr>
     `;
   }).join('');
@@ -476,47 +672,146 @@ function printDispatchedItemsSlip(t) {
       <head>
         <title>Dispatched Goods - ${t.transfer_id}</title>
         <style>
-          @page { size: 80mm auto; margin: 1mm 2mm; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            font-size: 11.5px;
-            color: #000;
+          @page {
+            size: 80mm auto;
             margin: 0;
-            padding: 2px 4px;
-            line-height: 1.3;
           }
-          .header { text-align: center; border-bottom: 1.5px dashed #000; padding-bottom: 5px; margin-bottom: 5px; }
-          .header h2 { margin: 0 0 2px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
-          .header h3 { margin: 2px 0 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-          .meta-table { width: 100%; font-size: 11px; margin-bottom: 5px; border-collapse: collapse; }
-          .meta-table td { padding: 1.5px 0; }
-          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
-          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 3px 2px; text-align: left; }
-          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 4px; font-size: 10.5px; text-align: center; }
-          .sign-area { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 4px; }
-          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 9.5px; padding-top: 2px; }
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+          }
+          body {
+            width: 100%;
+            max-width: 72mm;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 11px;
+            color: #000;
+            background: #fff;
+            margin: 0;
+            padding: 3px 20px 8px 4px;
+            line-height: 1.28;
+            text-rendering: geometricPrecision;
+            overflow-x: hidden;
+            word-break: break-word;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 1.5px dashed #000;
+            padding-bottom: 4px;
+            margin-bottom: 5px;
+          }
+          .header h2 {
+            margin: 0 0 2px;
+            font-size: 14px;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+          }
+          .header .header-sub {
+            margin: 1px 0 2px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #334155;
+          }
+          .header .header-title {
+            margin: 2px 0 1px;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            word-break: break-word;
+          }
+          .header .header-route {
+            margin: 1px 0 2px;
+            font-size: 11.5px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            word-break: break-word;
+          }
+          .meta-table {
+            width: 100%;
+            table-layout: fixed;
+            font-size: 10.5px;
+            margin-bottom: 5px;
+            border-collapse: collapse;
+          }
+          .meta-table td {
+            padding: 1.5px 0;
+            word-break: break-word;
+          }
+          .items-table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+            font-size: 10.5px;
+            margin: 5px 0;
+          }
+          .items-table th {
+            border-bottom: 1.5px solid #000;
+            border-top: 1.5px solid #000;
+            padding: 3px 2px;
+            font-weight: 700;
+            font-size: 10.5px;
+          }
+          .footer {
+            margin-top: 8px;
+            border-top: 1px dashed #000;
+            padding-top: 4px;
+            font-size: 9.5px;
+            text-align: center;
+          }
+          .sign-area {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 12px;
+            padding-top: 2px;
+          }
+          .sign-box {
+            border-top: 1px solid #000;
+            width: 44%;
+            text-align: center;
+            font-size: 9px;
+            padding-top: 2px;
+            font-weight: 600;
+          }
         </style>
       </head>
       <body>
         <div class="header">
           <h2>AL RAWAQ RESTAURANT</h2>
-          <h3 style="color: #000;">DISPATCHED GOODS VOUCHER</h3>
-          <p style="font-size: 12px; font-weight: bold; margin: 2px 0;">ID: ${t.transfer_id}</p>
+          <div class="header-sub">DISPATCHED GOODS VOUCHER</div>
+          <div class="header-title"><strong>${t.transfer_id} | INTERNAL BRANCH TRANSFER</strong></div>
+          <div class="header-route"><strong>${(t.from_branch || 'BRANCH 1').toUpperCase()} → TO → ${(t.to_branch || 'BRANCH 2').toUpperCase()}</strong></div>
         </div>
 
         <table class="meta-table">
-          <tr><td><strong>From:</strong> ${t.from_branch}</td><td style="text-align: right;"><strong>Dispatched By:</strong> ${t.to_branch}</td></tr>
-          <tr><td><strong>Day:</strong> ${t.delivery_day || 'Today'}</td><td style="text-align: right;"><strong>Status:</strong> ${t.status}</td></tr>
-          <tr><td><strong>Handover By:</strong> ${t.handover_by_name || t.dispatched_by_name || 'Staff'}</td><td style="text-align: right;"><strong>Handover To:</strong> ${t.handover_to_name || 'Driver'}</td></tr>
+          <tr>
+            <td style="width: 50%;"><strong>Day:</strong> ${t.delivery_day || 'Today'}</td>
+            <td style="width: 50%; text-align: right;"><strong>Status:</strong> ${t.status}</td>
+          </tr>
+          <tr>
+            <td style="width: 50%;"><strong>Dispatched:</strong> ${t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}</td>
+            <td style="width: 50%; text-align: right;"><strong>Disp By:</strong> ${t.dispatched_by_name || 'Kitchen Staff'}</td>
+          </tr>
+          ${t.handover_to_name ? `<tr><td colspan="2"><strong>Driver / Rep:</strong> ${t.handover_to_name}</td></tr>` : ''}
         </table>
 
         <table class="items-table">
           <thead>
             <tr>
-              <th>Dish</th>
-              <th style="text-align: center;">Unit</th>
-              <th style="text-align: center;">Dispatched</th>
-              <th style="text-align: right;">Received</th>
+              <th style="width: 44%; text-align: left;">Dish</th>
+              <th style="width: 16%; text-align: center;">Unit</th>
+              <th style="width: 20%; text-align: center;">Dispatched</th>
+              <th style="width: 20%; text-align: right;">Received</th>
             </tr>
           </thead>
           <tbody>
@@ -531,7 +826,7 @@ function printDispatchedItemsSlip(t) {
 
         <div class="footer">
           <p style="margin: 0; font-weight: 600;">Dispatched Shipment Verification</p>
-          <p style="margin: 2px 0 0; font-size: 9.5px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 2px 0 0; font-size: 9px; color: #475569;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
