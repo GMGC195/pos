@@ -2317,6 +2317,7 @@ export default function InternalBranch() {
     setDispatchItemQuantities(initQtys);
     setDispatchItemRemarks(initRemarks);
   };
+  const handleOpenDispatchModal = openDispatchModal;
 
   // Submit Dispatch & Handover
   const handleConfirmDispatch = async () => {
@@ -3171,29 +3172,6 @@ export default function InternalBranch() {
               </button>
             )}
 
-            {/* If incoming and in progress / ready / partially accepted / accepted, allow Dispatch */}
-            {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && (
-              <button
-                type="button"
-                onClick={() => handleOpenDispatchModal(t)}
-                style={{
-                  padding: '6px 12px',
-                  background: '#16a34a',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <Truck size={13} /> Dispatch Order
-              </button>
-            )}
-
             {/* Modify Request */}
             {canModify ? (
               <button
@@ -3298,6 +3276,31 @@ export default function InternalBranch() {
                 title="Cancel Transfer Request"
               >
                 <Trash2 size={13} />
+              </button>
+            )}
+
+            {/* If incoming and in progress / ready / partially accepted / accepted, allow Dispatch - PLACED ON RIGHT */}
+            {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && (
+              <button
+                type="button"
+                onClick={() => openDispatchModal(t)}
+                style={{
+                  padding: '6px 14px',
+                  background: '#16a34a',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
+                }}
+                title="Open dispatch details modal and handover order"
+              >
+                <Truck size={14} /> Dispatch Order
               </button>
             )}
           </div>
@@ -3702,6 +3705,31 @@ export default function InternalBranch() {
                   title="Open detailed confirmation modal to review and process items"
                 >
                   <CheckCheck size={14} /> Accept and Done
+                </button>
+              )}
+
+              {/* Dispatch Order (Visible on the right when items are accepted and status is ready to dispatch) */}
+              {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && hasAcceptedItems && (
+                <button
+                  type="button"
+                  onClick={() => openDispatchModal(t)}
+                  style={{
+                    padding: '7px 15px',
+                    background: '#16a34a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
+                  }}
+                  title="Open dispatch details modal and handover order"
+                >
+                  <Truck size={14} /> Dispatch Order
                 </button>
               )}
             </div>
