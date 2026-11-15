@@ -23,7 +23,16 @@ router.use(blockSalaryPayOperator);
       ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal',
       ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC(12,2) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS received_qty NUMERIC(12,2) DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS received_qty NUMERIC(12,2) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS rejected_by_name VARCHAR(150) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS pending_receive_qty NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS pending_dispatch_qty NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS rejected_receive_qty NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS receive_rejection_reason TEXT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS receive_rejected_by_name VARCHAR(150) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS receive_rejected_at TIMESTAMP DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS is_additional BOOLEAN DEFAULT FALSE;
 
       ALTER TABLE internal_branch_transfers
       ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT NULL,

@@ -62,7 +62,16 @@ async function migrate() {
       ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal',
       ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC DEFAULT 0,
       ADD COLUMN IF NOT EXISTS received_qty NUMERIC DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]'::jsonb;
+      ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS rejected_by_name VARCHAR(255) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS pending_receive_qty NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS pending_dispatch_qty NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS rejected_receive_qty NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS receive_rejection_reason TEXT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS receive_rejected_by_name VARCHAR(255) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS receive_rejected_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS is_additional BOOLEAN DEFAULT FALSE;
     `);
 
     // 3. internal_branch_transfers (cancellation tracking)
