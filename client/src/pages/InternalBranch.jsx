@@ -300,7 +300,7 @@ function printTransferSlip(t) {
           .header .header-title {
             margin: 1px 0;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             color: #000;
@@ -314,14 +314,14 @@ function printTransferSlip(t) {
           .header .header-demand {
             margin: 1px 0;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 600;
             text-transform: uppercase;
             color: #000;
           }
           .header .header-route {
             margin: 1px 0 2px;
             font-size: 12px;
-            font-weight: 900;
+            font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             word-break: break-word;
@@ -376,7 +376,7 @@ function printTransferSlip(t) {
             text-align: center;
             font-size: 9px;
             padding-top: 2px;
-            font-weight: 600;
+            font-weight: normal;
             color: #000;
           }
         </style>
@@ -429,8 +429,8 @@ function printTransferSlip(t) {
         </div>
 
         <div class="footer">
-          <p style="margin: 0; font-weight: 700; color: #000;">Verified via Electronic POS System</p>
-          <p style="margin: 2px 0 0; font-size: 11px; font-weight: 700; color: #000;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 0; font-weight: normal; color: #000;">Verified via Electronic POS System</p>
+          <p style="margin: 2px 0 0; font-size: 11px; font-weight: normal; color: #000;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
@@ -533,7 +533,7 @@ function printAcceptedItemsSlip(t) {
           .header .header-title {
             margin: 1px 0;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             color: #000;
@@ -547,14 +547,14 @@ function printAcceptedItemsSlip(t) {
           .header .header-demand {
             margin: 1px 0;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 600;
             text-transform: uppercase;
             color: #000;
           }
           .header .header-route {
             margin: 1px 0 2px;
             font-size: 12px;
-            font-weight: 900;
+            font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             word-break: break-word;
@@ -609,7 +609,7 @@ function printAcceptedItemsSlip(t) {
             text-align: center;
             font-size: 9px;
             padding-top: 2px;
-            font-weight: 600;
+            font-weight: normal;
             color: #000;
           }
         </style>
@@ -655,8 +655,8 @@ function printAcceptedItemsSlip(t) {
         </div>
 
         <div class="footer">
-          <p style="margin: 0; font-weight: 700; color: #000;">Verified Accepted Goods</p>
-          <p style="margin: 2px 0 0; font-size: 11px; font-weight: 700; color: #000;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 0; font-weight: normal; color: #000;">Verified Accepted Goods</p>
+          <p style="margin: 2px 0 0; font-size: 11px; font-weight: normal; color: #000;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
@@ -751,7 +751,7 @@ function printDispatchedItemsSlip(t) {
           .header .header-title {
             margin: 1px 0;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             color: #000;
@@ -765,14 +765,14 @@ function printDispatchedItemsSlip(t) {
           .header .header-demand {
             margin: 1px 0;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 600;
             text-transform: uppercase;
             color: #000;
           }
           .header .header-route {
             margin: 1px 0 2px;
             font-size: 12px;
-            font-weight: 900;
+            font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.3px;
             word-break: break-word;
@@ -827,7 +827,7 @@ function printDispatchedItemsSlip(t) {
             text-align: center;
             font-size: 9px;
             padding-top: 2px;
-            font-weight: 600;
+            font-weight: normal;
             color: #000;
           }
         </style>
@@ -873,8 +873,8 @@ function printDispatchedItemsSlip(t) {
         </div>
 
         <div class="footer">
-          <p style="margin: 0; font-weight: 700; color: #000;">Dispatched Shipment Verification</p>
-          <p style="margin: 2px 0 0; font-size: 11px; font-weight: 700; color: #000;">Printed: ${new Date().toLocaleString()}</p>
+          <p style="margin: 0; font-weight: normal; color: #000;">Dispatched Shipment Verification</p>
+          <p style="margin: 2px 0 0; font-size: 11px; font-weight: normal; color: #000;">Printed: ${new Date().toLocaleString()}</p>
         </div>
 
         <script>
