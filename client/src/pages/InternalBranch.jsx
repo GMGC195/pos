@@ -253,31 +253,31 @@ function printTransferSlip(t) {
       <head>
         <title>Transfer Slip - ${t.transfer_id}</title>
         <style>
-          @page { size: 80mm auto; margin: 4mm; }
+          @page { size: 80mm auto; margin: 1mm 2mm; }
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            font-size: 12px;
+            font-size: 11.5px;
             color: #000;
             margin: 0;
-            padding: 8px;
-            line-height: 1.35;
+            padding: 2px 4px;
+            line-height: 1.3;
           }
-          .header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 8px; margin-bottom: 8px; }
-          .header h2 { margin: 0 0 3px; font-size: 18px; text-transform: uppercase; font-weight: 900; letter-spacing: 1px; }
-          .header h3 { margin: 4px 0 2px; font-size: 14px; font-weight: 800; text-transform: uppercase; }
+          .header { text-align: center; border-bottom: 1.5px dashed #000; padding-bottom: 5px; margin-bottom: 5px; }
+          .header h2 { margin: 0 0 2px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+          .header h3 { margin: 2px 0 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
           .header p { margin: 2px 0; font-size: 11px; }
-          .meta-table { width: 100%; font-size: 11px; margin-bottom: 8px; border-collapse: collapse; }
-          .meta-table td { padding: 2.5px 0; }
-          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 8px 0; }
-          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 4px 2px; text-align: left; }
-          .footer { margin-top: 14px; border-top: 1.5px dashed #000; padding-top: 8px; font-size: 11px; text-align: center; }
-          .sign-area { display: flex; justify-content: space-between; margin-top: 24px; padding-top: 6px; }
-          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 10px; padding-top: 2px; }
+          .meta-table { width: 100%; font-size: 11px; margin-bottom: 5px; border-collapse: collapse; }
+          .meta-table td { padding: 1.5px 0; }
+          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
+          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 3px 2px; text-align: left; }
+          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 4px; font-size: 10.5px; text-align: center; }
+          .sign-area { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 4px; }
+          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 9.5px; padding-top: 2px; }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2>AL RAWAQ</h2>
+          <h2>AL RAWAQ RESTAURANT</h2>
           <h3 style="color: #000;">DEMAND FROM: ${(t.from_branch || 'BRANCH').toUpperCase()}</h3>
           <p style="font-size: 13px; font-weight: bold; margin-top: 4px;">ID: ${t.transfer_id}</p>
         </div>
@@ -370,36 +370,38 @@ function printAcceptedItemsSlip(t) {
       <head>
         <title>Accepted Items Slip - ${t.transfer_id}</title>
         <style>
-          @page { size: 80mm auto; margin: 4mm; }
+          @page { size: 80mm auto; margin: 1mm 2mm; }
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            font-size: 12px;
+            font-size: 11.5px;
             color: #000;
             margin: 0;
-            padding: 8px;
-            line-height: 1.35;
+            padding: 2px 4px;
+            line-height: 1.3;
           }
-          .header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 8px; margin-bottom: 8px; }
-          .header h2 { margin: 0 0 3px; font-size: 17px; text-transform: uppercase; font-weight: 900; letter-spacing: 0.5px; }
-          .header h3 { margin: 4px 0 2px; font-size: 13px; font-weight: 800; text-transform: uppercase; }
-          .meta-table { width: 100%; font-size: 11px; margin-bottom: 8px; border-collapse: collapse; }
-          .meta-table td { padding: 2.5px 0; }
-          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 8px 0; }
-          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 4px 2px; text-align: left; }
-          .footer { margin-top: 14px; border-top: 1.5px dashed #000; padding-top: 8px; font-size: 11px; text-align: center; }
-          .sign-area { display: flex; justify-content: space-between; margin-top: 24px; padding-top: 6px; }
-          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 10px; padding-top: 2px; }
+          .header { text-align: center; border-bottom: 1.5px dashed #000; padding-bottom: 5px; margin-bottom: 5px; }
+          .header h2 { margin: 0 0 2px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+          .header h3 { margin: 2px 0 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+          .meta-table { width: 100%; font-size: 11px; margin-bottom: 5px; border-collapse: collapse; }
+          .meta-table td { padding: 1.5px 0; }
+          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
+          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 3px 2px; text-align: left; }
+          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 4px; font-size: 10.5px; text-align: center; }
+          .sign-area { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 4px; }
+          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 9.5px; padding-top: 2px; }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2>AL RAWAQ</h2>
+          <h2>AL RAWAQ RESTAURANT</h2>
           <h3 style="color: #000;">ACCEPTED ITEMS VOUCHER</h3>
-          <p style="font-size: 12px; font-weight: bold; margin: 2px 0;">ID: ${t.transfer_id}</p>
+          <p style="font-size: 11.5px; font-weight: bold; margin: 2px 0;">ID: ${t.transfer_id}</p>
+          <p style="font-size: 11px; margin: 2px 0 0; color: #000;">
+            Internal Branch Transfer: <strong>${getShortBranchName(t.from_branch)} to ${getShortBranchName(t.to_branch)}</strong>
+          </p>
         </div>
 
         <table class="meta-table">
-          <tr><td><strong>From:</strong> ${t.from_branch}</td><td style="text-align: right;"><strong>To:</strong> ${t.to_branch}</td></tr>
           <tr><td><strong>Day:</strong> ${t.delivery_day || 'Today'}</td><td style="text-align: right;"><strong>Status:</strong> ${t.status}</td></tr>
           <tr><td><strong>Needed By:</strong> ${t.needed_by_time || 'ASAP'}</td><td style="text-align: right;"><strong>Requested By:</strong> ${t.requested_by_name || 'Staff'}</td></tr>
         </table>
@@ -474,30 +476,30 @@ function printDispatchedItemsSlip(t) {
       <head>
         <title>Dispatched Goods - ${t.transfer_id}</title>
         <style>
-          @page { size: 80mm auto; margin: 4mm; }
+          @page { size: 80mm auto; margin: 1mm 2mm; }
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            font-size: 12px;
+            font-size: 11.5px;
             color: #000;
             margin: 0;
-            padding: 8px;
-            line-height: 1.35;
+            padding: 2px 4px;
+            line-height: 1.3;
           }
-          .header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 8px; margin-bottom: 8px; }
-          .header h2 { margin: 0 0 3px; font-size: 17px; text-transform: uppercase; font-weight: 900; letter-spacing: 0.5px; }
-          .header h3 { margin: 4px 0 2px; font-size: 13px; font-weight: 800; text-transform: uppercase; }
-          .meta-table { width: 100%; font-size: 11px; margin-bottom: 8px; border-collapse: collapse; }
-          .meta-table td { padding: 2.5px 0; }
-          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 8px 0; }
-          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 4px 2px; text-align: left; }
-          .footer { margin-top: 14px; border-top: 1.5px dashed #000; padding-top: 8px; font-size: 11px; text-align: center; }
-          .sign-area { display: flex; justify-content: space-between; margin-top: 24px; padding-top: 6px; }
-          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 10px; padding-top: 2px; }
+          .header { text-align: center; border-bottom: 1.5px dashed #000; padding-bottom: 5px; margin-bottom: 5px; }
+          .header h2 { margin: 0 0 2px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+          .header h3 { margin: 2px 0 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+          .meta-table { width: 100%; font-size: 11px; margin-bottom: 5px; border-collapse: collapse; }
+          .meta-table td { padding: 1.5px 0; }
+          .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 5px 0; }
+          .items-table th { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 3px 2px; text-align: left; }
+          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 4px; font-size: 10.5px; text-align: center; }
+          .sign-area { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 4px; }
+          .sign-box { border-top: 1px solid #000; width: 45%; text-align: center; font-size: 9.5px; padding-top: 2px; }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2>AL RAWAQ</h2>
+          <h2>AL RAWAQ RESTAURANT</h2>
           <h3 style="color: #000;">DISPATCHED GOODS VOUCHER</h3>
           <p style="font-size: 12px; font-weight: bold; margin: 2px 0;">ID: ${t.transfer_id}</p>
         </div>
