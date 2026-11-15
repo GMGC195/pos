@@ -6,6 +6,35 @@ const { authenticateToken, blockSalaryPayOperator } = require('../middleware/aut
 // Security Guard: Salary Pay Operator is strictly blocked from Internal Branch
 router.use(blockSalaryPayOperator);
 
+// Auto-verify and ensure required columns exist to protect against missing-column errors
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE internal_branch_transfer_items
+      ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]',
+      ADD COLUMN IF NOT EXISTS item_status VARCHAR(50) DEFAULT 'Pending',
+      ADD COLUMN IF NOT EXISTS accepted_qty NUMERIC(12,2) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS rejected_qty NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS modification_reason TEXT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal',
+      ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC(12,2) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS received_qty NUMERIC(12,2) DEFAULT NULL;
+
+      ALTER TABLE internal_branch_transfers
+      ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP DEFAULT NULL;
+    `);
+  } catch (err) {
+    console.warn('Auto-verify schema note:', err.message);
+  }
+})();
+
 // Default standard branches including Central Kitchen and Other
 const STANDARD_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen', 'Other'];
 
