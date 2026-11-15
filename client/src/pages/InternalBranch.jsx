@@ -2986,16 +2986,16 @@ export default function InternalBranch() {
   };
 
   // Two-Level Row Layout: Row 1 = Common Transfer Summary, Row 2 = Dish Items Table
-  const renderTransferCardRow = (t, isIncoming) => {
+  const renderTransferCardRow = (t, isIncoming, isReceival = false) => {
     const hasUnacceptedItems = (t.items || []).some(it => it.item_status === 'Pending' || !it.item_status);
     const hasAcceptedItems = (t.items || []).some(it => it.item_status === 'Accepted');
-    const canModify = ['Pending', 'In Progress', 'Partially Accepted'].includes(t.status) && hasUnacceptedItems;
-    const canAcceptReject = isSuperUser || isIncoming || (user?.branch === t.to_branch);
+    const canModify = !isReceival && ['Pending', 'In Progress', 'Partially Accepted'].includes(t.status) && hasUnacceptedItems;
+    const canAcceptReject = !isReceival && (isSuperUser || isIncoming || (user?.branch === t.to_branch));
     const items = t.items || [];
 
     return (
       <div
-        key={`trf-row-${t.id}-${isIncoming ? 'inc' : 'sent'}`}
+        key={`trf-row-${t.id}-${isReceival ? 'rec' : (isIncoming ? 'inc' : 'sent')}`}
         style={{
           background: '#fff',
           borderRadius: 12,
@@ -3037,11 +3037,11 @@ export default function InternalBranch() {
                 borderRadius: 12,
                 fontSize: 11.5,
                 fontWeight: 700,
-                background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'Partially Accepted' ? '#fef9c3' : (t.status === 'In Progress' ? '#dbeafe' : (t.status === 'Ready for Dispatch' ? '#f3e8ff' : '#dcfce7'))),
-                color: t.status === 'Pending' ? '#92400e' : (t.status === 'Partially Accepted' ? '#854d0e' : (t.status === 'In Progress' ? '#1e40af' : (t.status === 'Ready for Dispatch' ? '#6b21a8' : '#166534'))),
-                border: '1px solid ' + (t.status === 'Pending' ? '#fde68a' : (t.status === 'Partially Accepted' ? '#fde047' : (t.status === 'In Progress' ? '#bfdbfe' : (t.status === 'Ready for Dispatch' ? '#e9d5ff' : '#bbf7d0'))))
+                background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'Partially Accepted' ? '#fef9c3' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#dbeafe' : (t.status === 'Ready for Dispatch' ? '#f3e8ff' : '#dcfce7'))),
+                color: t.status === 'Pending' ? '#92400e' : (t.status === 'Partially Accepted' ? '#854d0e' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#1e40af' : (t.status === 'Ready for Dispatch' ? '#6b21a8' : '#166534'))),
+                border: '1px solid ' + (t.status === 'Pending' ? '#fde68a' : (t.status === 'Partially Accepted' ? '#fde047' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#bfdbfe' : (t.status === 'Ready for Dispatch' ? '#e9d5ff' : '#bbf7d0'))))
               }}>
-                {t.status}
+                {t.status === 'Dispatched' ? 'In-Transit' : t.status}
               </span>
             </div>
 
@@ -3081,18 +3081,65 @@ export default function InternalBranch() {
                 {t.delivery_day || 'Today'}
               </span>
             </div>
+
+            {/* Dispatched Time (if dispatched) */}
+            {t.dispatched_at && (
+              <div style={{ fontSize: 12, color: '#2563eb', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700 }}>
+                <Truck size={13} color="#2563eb" />
+                <span>Dispatched: {new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+            )}
           </div>
 
           {/* Right Action buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {/* Bulk Actions for Incoming Requests */}
-            {isIncoming && canAcceptReject && (['Pending', 'Partially Accepted', 'In Progress'].includes(t.status)) && (
+            {isReceival ? (
               <>
                 <button
                   type="button"
-                  onClick={() => handleOpenAcceptAndDoneModal(t)}
+                  onClick={() => handleOpenDetailModal(t)}
                   style={{
                     padding: '6px 12px',
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#334155',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="View full transfer details & timeline"
+                >
+                  <ClipboardList size={13} /> Details
+                </button>
+                <button
+                  type="button"
+                  onClick={() => printDispatchedItemsSlip(t)}
+                  style={{
+                    padding: '6px 10px',
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#475569',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  title="Print 80mm Dispatched Voucher"
+                >
+                  <Printer size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openReceiveModal(t)}
+                  style={{
+                    padding: '6px 14px',
                     background: '#16a34a',
                     color: '#fff',
                     border: 'none',
@@ -3102,208 +3149,237 @@ export default function InternalBranch() {
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 4
+                    gap: 5,
+                    boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
                   }}
-                  title="Open detailed confirmation modal to review and process items"
+                  title="Verify and confirm receiving goods"
                 >
-                  <CheckCheck size={13} /> Accept and Done
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleAcceptAllClick(t)}
-                  style={{
-                    padding: '6px 12px',
-                    background: '#15803d',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4
-                  }}
-                  title="Accept all pending items in this transfer request"
-                >
-                  <CheckCircle2 size={13} /> Accept All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRejectAllModal({ transfer: t, reason: '', saving: false })}
-                  style={{
-                    padding: '6px 12px',
-                    background: '#dc2626',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4
-                  }}
-                  title="Reject all pending items in this transfer request (requires reason)"
-                >
-                  <XCircle size={13} /> Reject All
+                  <PackageCheck size={14} /> Verify & Receive
                 </button>
               </>
-            )}
+            ) : (
+              <>
+                {/* Bulk Actions for Incoming Requests */}
+                {isIncoming && canAcceptReject && (['Pending', 'Partially Accepted', 'In Progress'].includes(t.status)) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAcceptAndDoneModal(t)}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#16a34a',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                      title="Open detailed confirmation modal to review and process items"
+                    >
+                      <CheckCheck size={13} /> Accept and Done
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAcceptAllClick(t)}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#15803d',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                      title="Accept all pending items in this transfer request"
+                    >
+                      <CheckCircle2 size={13} /> Accept All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRejectAllModal({ transfer: t, reason: '', saving: false })}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#dc2626',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                      title="Reject all pending items in this transfer request (requires reason)"
+                    >
+                      <XCircle size={13} /> Reject All
+                    </button>
+                  </>
+                )}
 
-            {/* If incoming and pending, allow Start Processing */}
-            {isIncoming && t.status === 'Pending' && (
-              <button
-                type="button"
-                onClick={() => handleStartProcessing(t.id, t.transfer_id)}
-                style={{
-                  padding: '6px 12px',
-                  background: '#2563eb',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <Play size={13} /> Start Processing
-              </button>
-            )}
+                {/* If incoming and pending, allow Start Processing */}
+                {isIncoming && t.status === 'Pending' && (
+                  <button
+                    type="button"
+                    onClick={() => handleStartProcessing(t.id, t.transfer_id)}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#2563eb',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <Play size={13} /> Start Processing
+                  </button>
+                )}
 
-            {/* Modify Request */}
-            {canModify ? (
-              <button
-                type="button"
-                onClick={() => handleOpenEditRequestModal(t)}
-                style={{
-                  padding: '6px 12px',
-                  background: '#fff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: '#2563eb',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-                title="Modify unaccepted requested dishes or quantities"
-              >
-                <Edit size={13} /> Modify
-              </button>
-            ) : (!isIncoming && hasAcceptedItems && ['Pending', 'In Progress'].includes(t.status)) ? (
-              <span style={{
-                fontSize: 11.5,
-                fontWeight: 700,
-                padding: '4px 10px',
-                borderRadius: 6,
-                background: '#dcfce7',
-                color: '#166534',
-                border: '1px solid #bbf7d0',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4
-              }}>
-                <Lock size={12} /> Accepted - Locked
-              </span>
-            ) : null}
+                {/* Modify Request */}
+                {canModify ? (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditRequestModal(t)}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#fff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: '#2563eb',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                    title="Modify unaccepted requested dishes or quantities"
+                  >
+                    <Edit size={13} /> Modify
+                  </button>
+                ) : (!isIncoming && hasAcceptedItems && ['Pending', 'In Progress'].includes(t.status)) ? (
+                  <span style={{
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    background: '#dcfce7',
+                    color: '#166534',
+                    border: '1px solid #bbf7d0',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}>
+                    <Lock size={12} /> Accepted - Locked
+                  </span>
+                ) : null}
 
-            {/* Detail View */}
-            <button
-              type="button"
-              onClick={() => handleOpenDetailModal(t)}
-              style={{
-                padding: '6px 12px',
-                background: '#fff',
-                border: '1px solid #cbd5e1',
-                borderRadius: 6,
-                fontSize: 12,
-                fontWeight: 600,
-                color: '#334155',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4
-              }}
-              title="View full transfer details & timeline"
-            >
-              <ClipboardList size={13} /> Details
-            </button>
+                {/* Detail View */}
+                <button
+                  type="button"
+                  onClick={() => handleOpenDetailModal(t)}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#334155',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="View full transfer details & timeline"
+                >
+                  <ClipboardList size={13} /> Details
+                </button>
 
-            {/* Print Slip */}
-            <button
-              type="button"
-              onClick={() => printTransferSlip(t)}
-              style={{
-                padding: '6px 10px',
-                background: '#fff',
-                border: '1px solid #cbd5e1',
-                borderRadius: 6,
-                fontSize: 12,
-                fontWeight: 600,
-                color: '#475569',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-              title="Print 80mm Transfer Voucher"
-            >
-              <Printer size={13} />
-            </button>
+                {/* Print Slip */}
+                <button
+                  type="button"
+                  onClick={() => printTransferSlip(t)}
+                  style={{
+                    padding: '6px 10px',
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#475569',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  title="Print 80mm Transfer Voucher"
+                >
+                  <Printer size={13} />
+                </button>
 
-            {/* Cancel (for sent pending requests) */}
-            {!isIncoming && canModify && (
-              <button
-                type="button"
-                onClick={() => handleCancelTransfer(t.id, t.transfer_id)}
-                style={{
-                  padding: '6px 10px',
-                  background: '#fef2f2',
-                  border: '1px solid #fecaca',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: '#dc2626',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                title="Cancel Transfer Request"
-              >
-                <Trash2 size={13} />
-              </button>
-            )}
+                {/* Cancel (for sent pending requests) */}
+                {!isIncoming && canModify && (
+                  <button
+                    type="button"
+                    onClick={() => handleCancelTransfer(t.id, t.transfer_id)}
+                    style={{
+                      padding: '6px 10px',
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: '#dc2626',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Cancel Transfer Request"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
 
-            {/* If incoming and in progress / ready / partially accepted / accepted, allow Dispatch - PLACED ON RIGHT */}
-            {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && (
-              <button
-                type="button"
-                onClick={() => openDispatchModal(t)}
-                style={{
-                  padding: '6px 14px',
-                  background: '#16a34a',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
-                }}
-                title="Open dispatch details modal and handover order"
-              >
-                <Truck size={14} /> Dispatch Order
-              </button>
+                {/* If incoming and in progress / ready / partially accepted / accepted, allow Dispatch - PLACED ON RIGHT */}
+                {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && (
+                  <button
+                    type="button"
+                    onClick={() => openDispatchModal(t)}
+                    style={{
+                      padding: '6px 14px',
+                      background: '#16a34a',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
+                    }}
+                    title="Open dispatch details modal and handover order"
+                  >
+                    <Truck size={14} /> Dispatch Order
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -3379,7 +3455,7 @@ export default function InternalBranch() {
                   const accQty = it.accepted_qty !== null && it.accepted_qty !== undefined ? parseFloat(it.accepted_qty) : (it.confirmed_qty !== null && it.confirmed_qty !== undefined ? parseFloat(it.confirmed_qty) : null);
                   const dispQty = it.sent_qty !== null && it.sent_qty !== undefined ? parseFloat(it.sent_qty) : (it.dispatched_qty !== null && it.dispatched_qty !== undefined ? parseFloat(it.dispatched_qty) : 0);
                   const recQty = it.received_qty !== null && it.received_qty !== undefined ? parseFloat(it.received_qty) : 0;
-                  const remQty = Math.max(0, reqQty - recQty);
+                  const remQty = isReceival ? (dispQty > 0 ? Math.max(0, dispQty - recQty) : 0) : Math.max(0, (accQty !== null ? accQty : reqQty) - recQty);
                   const isQtyModified = (isAccepted && accQty !== null && Math.abs(accQty - reqQty) > 0.0001) || (it.modification_reason && it.modification_reason.trim() !== '');
 
                   return (
@@ -3471,7 +3547,39 @@ export default function InternalBranch() {
                         )}
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        {!isIncoming ? (
+                        {isReceival ? (
+                          // RECEIVALS VIEW: Show item receiving status / Receive button
+                          dispQty > 0 ? (
+                            recQty >= dispQty ? (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a' }}>
+                                ✓ Received
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openReceiveModal(t)}
+                                style={{
+                                  background: '#16a34a',
+                                  color: '#fff',
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: '4px 10px',
+                                  borderRadius: 5,
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}
+                                title="Open Receiving modal to inspect and receive this item"
+                              >
+                                <PackageCheck size={12} /> Receive
+                              </button>
+                            )
+                          ) : (
+                            <span style={{ fontSize: 11, color: '#94a3b8' }}>Not Dispatched</span>
+                          )
+                        ) : !isIncoming ? (
                           // SENDING BRANCH VIEW (Transfer Requests): NO Accept/Reject!
                           // Show actual processing status and locked indicator if accepted!
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -3619,8 +3727,79 @@ export default function InternalBranch() {
           </table>
         </div>
 
-        {/* ROW 3: Incoming Requests Bottom Action Bar: Accept and Done & Print Accepted Slip */}
-        {isIncoming && canAcceptReject && (
+        {/* ROW 3: Bottom Action Bar */}
+        {isReceival ? (
+          <div style={{
+            padding: '12px 18px',
+            background: '#f8fafc',
+            borderTop: '1px solid #e2e8f0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: '#475569', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, color: '#334155' }}>Dispatched Shipment:</span>
+              <span>{t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}</span>
+              <span>·</span>
+              <span>Supplied By: <strong>{t.to_branch}</strong></span>
+              <span>·</span>
+              <span>Dispatched By: <strong>{t.dispatched_by_name || 'Kitchen Staff'}</strong></span>
+              {t.handover_to_name && (
+                <>
+                  <span>·</span>
+                  <span>Driver / Rep: <strong>{t.handover_to_name}</strong></span>
+                </>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => printDispatchedItemsSlip(t)}
+                style={{
+                  padding: '7px 12px',
+                  background: '#fff',
+                  border: '1.5px solid #cbd5e1',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: '#334155',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5
+                }}
+                title="Print dispatched shipment slip"
+              >
+                <Printer size={14} /> Print Slip
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openReceiveModal(t)}
+                style={{
+                  padding: '7px 16px',
+                  background: '#16a34a',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
+                }}
+                title="Verify and confirm received shipment"
+              >
+                <PackageCheck size={15} /> Verify & Confirm Receiving
+              </button>
+            </div>
+          </div>
+        ) : isIncoming && canAcceptReject ? (
           <div style={{
             padding: '12px 18px',
             background: '#f8fafc',
@@ -3736,7 +3915,7 @@ export default function InternalBranch() {
               )}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     );
   };
@@ -5052,165 +5231,8 @@ export default function InternalBranch() {
               </p>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
-              {transfers.map(t => (
-                <div
-                  key={t.id}
-                  style={{
-                    background: '#fff',
-                    borderRadius: 12,
-                    border: '2px solid #2563eb',
-                    padding: 18,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between'
-                  }}
-                >
-                  <div>
-                    {/* Header */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>{t.transfer_id}</span>
-                          <span style={{
-                            fontSize: 10.5,
-                            fontWeight: 700,
-                            padding: '1.5px 6px',
-                            borderRadius: 4,
-                            background: t.request_type === 'New Request' ? '#f0fdf4' : '#eff6ff',
-                            color: t.request_type === 'New Request' ? '#15803d' : '#1d4ed8',
-                            border: t.request_type === 'New Request' ? '1px solid #bbf7d0' : '1px solid #bfdbfe'
-                          }}>
-                            {t.request_type || 'Transfer Request'}
-                          </span>
-                          <PriorityBadge priority={t.priority} />
-                        </div>
-                        <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
-                          Dispatched: {t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
-                        </span>
-                      </div>
-                      <span style={{
-                        padding: '3px 9px',
-                        borderRadius: 12,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        background: '#dbeafe',
-                        color: '#1e40af'
-                      }}>
-                        In-Transit
-                      </span>
-                    </div>
-
-                    {/* Route Details */}
-                    <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 8, marginBottom: 14, fontSize: 12.5 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'center' }}>
-                        <span style={{ color: '#64748b' }}>Supplied By:</span>
-                        <BranchBadge branch={t.to_branch} isExternal={t.is_external} />
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span style={{ color: '#64748b' }}>Dispatched By:</span>
-                        <span>{t.dispatched_by_name || 'Kitchen Staff'}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: '#64748b' }}>Day:</span>
-                        <strong style={{ color: '#0f172a' }}>{t.delivery_day || 'Today'}</strong>
-                      </div>
-                    </div>
-
-                    {/* Dispatched Items */}
-                    {(() => {
-                      const dispatchedOnly = (t.items || []).filter(it => {
-                        const sentQ = parseFloat(it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : (it.dispatched_qty ?? 0));
-                        return sentQ > 0;
-                      });
-
-                      return (
-                        <div style={{ marginBottom: 14 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 6 }}>
-                            Dispatched Checklist ({dispatchedOnly.length} items):
-                          </span>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {dispatchedOnly.length === 0 ? (
-                              <div style={{ padding: '6px 8px', background: '#f8fafc', borderRadius: 4, fontSize: 12, color: '#94a3b8' }}>
-                                No dispatched items recorded yet.
-                              </div>
-                            ) : (
-                              dispatchedOnly.map(it => {
-                                const sentQ = parseFloat(it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : (it.dispatched_qty ?? 0));
-                                return (
-                                  <div key={it.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5, padding: '4px 8px', background: '#eff6ff', borderRadius: 4 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <div style={{ width: 22, height: 22, borderRadius: 3, background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                                        {it.image_url ? (
-                                          <img src={it.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
-                                        ) : (
-                                          <Utensils size={12} color="#1d4ed8" />
-                                        )}
-                                      </div>
-                                      <span>{it.dish_name}</span>
-                                    </div>
-                                    <strong>
-                                      Sent: {sentQ} {it.uom}
-                                    </strong>
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12, display: 'flex', gap: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => printDispatchedItemsSlip(t)}
-                      style={{
-                        padding: '10px 12px',
-                        background: '#fff',
-                        color: '#334155',
-                        border: '1.5px solid #cbd5e1',
-                        borderRadius: 6,
-                        fontSize: 12.5,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 5
-                      }}
-                      title="Print dispatched shipment slip"
-                    >
-                      <Printer size={15} /> Print Slip
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openReceiveModal(t)}
-                      style={{
-                        flex: 1,
-                        padding: '10px 14px',
-                        background: '#16a34a',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 6,
-                        fontSize: 13,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 6
-                      }}
-                    >
-                      <PackageCheck size={16} /> Verify & Confirm Receiving
-                    </button>
-                  </div>
-
-                </div>
-              ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {transfers.map(t => renderTransferCardRow(t, false, true))}
             </div>
           )}
         </div>
