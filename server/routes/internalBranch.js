@@ -536,14 +536,14 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       // Incoming Requests: Only requests destined for the active branch and NOT sent by the active branch itself
       if (targetBranch) {
         params.push(targetBranch);
-        query += ` AND t.to_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.to_branch)) = LOWER(TRIM($${params.length}))`;
         params.push(targetBranch);
-        query += ` AND t.from_branch != $${params.length}`;
+        query += ` AND LOWER(TRIM(t.from_branch)) != LOWER(TRIM($${params.length}))`;
       } else if (!superUser && userBranch && userBranch !== 'All') {
         params.push(userBranch);
-        query += ` AND t.to_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.to_branch)) = LOWER(TRIM($${params.length}))`;
         params.push(userBranch);
-        query += ` AND t.from_branch != $${params.length}`;
+        query += ` AND LOWER(TRIM(t.from_branch)) != LOWER(TRIM($${params.length}))`;
       }
 
       // Origin filter (Sent By)
@@ -554,11 +554,11 @@ router.get('/transfers', authenticateToken, async (req, res) => {
             params.push(`%${req.query.sent_by_custom.trim()}%`);
             query += ` AND t.from_branch ILIKE $${params.length}`;
           } else {
-            query += ` AND t.from_branch NOT IN ('Branch 1', 'Branch 2', 'Branch 3', 'Central Kitchen')`;
+            query += ` AND LOWER(TRIM(t.from_branch)) NOT IN ('branch 1', 'branch 2', 'branch 3', 'central kitchen')`;
           }
         } else {
           params.push(originBranch);
-          query += ` AND t.from_branch = $${params.length}`;
+          query += ` AND LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length}))`;
         }
       }
 
@@ -570,17 +570,17 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       // Pending Receivals: Dedicated section for the requesting branch awaiting dispatched goods
       if (targetBranch) {
         params.push(targetBranch);
-        query += ` AND t.from_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length}))`;
       } else if (!superUser && userBranch && userBranch !== 'All') {
         params.push(userBranch);
-        query += ` AND t.from_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length}))`;
       }
 
       // Supplying branch filter
       const supplyingBranch = received_by || to_branch;
       if (supplyingBranch && supplyingBranch !== 'All') {
         params.push(supplyingBranch);
-        query += ` AND t.to_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.to_branch)) = LOWER(TRIM($${params.length}))`;
       }
 
       // Only in-transit / dispatched awaiting receival confirmation
@@ -591,17 +591,17 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       // Sent Requests: Dedicated section for the requesting branch tracking its sent requests until completed
       if (targetBranch) {
         params.push(targetBranch);
-        query += ` AND t.from_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length}))`;
       } else if (!superUser && userBranch && userBranch !== 'All') {
         params.push(userBranch);
-        query += ` AND t.from_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length}))`;
       }
 
       // Supplying branch filter (To Branch)
       const supplyingBranch = received_by || to_branch;
       if (supplyingBranch && supplyingBranch !== 'All') {
         params.push(supplyingBranch);
-        query += ` AND t.to_branch = $${params.length}`;
+        query += ` AND LOWER(TRIM(t.to_branch)) = LOWER(TRIM($${params.length}))`;
       }
 
       // Active / in-progress until receiving completed:
@@ -613,7 +613,7 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       if (!superUser && userBranch && userBranch !== 'All') {
         params.push(userBranch);
         params.push(userBranch);
-        query += ` AND (t.from_branch = $${params.length - 1} OR t.to_branch = $${params.length})`;
+        query += ` AND (LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length - 1})) OR LOWER(TRIM(t.to_branch)) = LOWER(TRIM($${params.length})))`;
       }
 
       // Branch Switcher + Direction filter
@@ -622,14 +622,14 @@ router.get('/transfers', authenticateToken, async (req, res) => {
         const direction = (branch_direction || 'all').toLowerCase();
         if (direction === 'sent') {
           params.push(selectedBranch);
-          query += ` AND t.from_branch = $${params.length}`;
+          query += ` AND LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length}))`;
         } else if (direction === 'received') {
           params.push(selectedBranch);
-          query += ` AND t.to_branch = $${params.length}`;
+          query += ` AND LOWER(TRIM(t.to_branch)) = LOWER(TRIM($${params.length}))`;
         } else {
           params.push(selectedBranch);
           params.push(selectedBranch);
-          query += ` AND (t.from_branch = $${params.length - 1} OR t.to_branch = $${params.length})`;
+          query += ` AND (LOWER(TRIM(t.from_branch)) = LOWER(TRIM($${params.length - 1})) OR LOWER(TRIM(t.to_branch)) = LOWER(TRIM($${params.length})))`;
         }
       }
 
@@ -3237,7 +3237,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     if (targetBranch) {
       params.push(targetBranch);
       params.push(targetBranch);
-      branchClause = ` AND (from_branch = $1 OR to_branch = $2)`;
+      branchClause = ` AND (LOWER(TRIM(from_branch)) = LOWER(TRIM($1)) OR LOWER(TRIM(to_branch)) = LOWER(TRIM($2)))`;
     }
 
     const countsRes = await pool.query(`
@@ -3259,7 +3259,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     if (targetBranch) {
       const incRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE to_branch = $1 AND from_branch != $1 AND status NOT IN ('Received', 'Fully Received', 'Completed', 'Complete', 'Cancelled')
+        WHERE LOWER(TRIM(to_branch)) = LOWER(TRIM($1)) AND LOWER(TRIM(from_branch)) != LOWER(TRIM($1)) AND status NOT IN ('Received', 'Fully Received', 'Completed', 'Complete', 'Cancelled')
       `, [targetBranch]);
       incomingPendingCount = parseInt(incRes.rows[0]?.count || 0, 10);
     } else {
@@ -3275,7 +3275,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     if (targetBranch) {
       const recRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE from_branch = $1 AND status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')
+        WHERE LOWER(TRIM(from_branch)) = LOWER(TRIM($1)) AND status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')
       `, [targetBranch]);
       pendingReceivalsCount = parseInt(recRes.rows[0]?.count || 0, 10);
     } else {
@@ -3287,7 +3287,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     if (targetBranch) {
       const sentRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE from_branch = $1 AND status NOT IN ('Completed', 'Cancelled')
+        WHERE LOWER(TRIM(from_branch)) = LOWER(TRIM($1)) AND status NOT IN ('Completed', 'Cancelled')
       `, [targetBranch]);
       sentActiveCount = parseInt(sentRes.rows[0]?.count || 0, 10);
     } else {

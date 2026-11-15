@@ -1792,7 +1792,7 @@ export default function InternalBranch() {
   }, [isSuperUser, adminSelectedBranch]);
 
   // Fetch transfers based on active tab and filters
-  const fetchTransfers = useCallback(() => {
+  const fetchTransfers = useCallback((tabOverride) => {
     setLoadingTransfers(true);
     const params = {};
 
@@ -1802,20 +1802,22 @@ export default function InternalBranch() {
       params.branch_direction = adminDirection;
     }
 
-    if (activeTab === 'incoming') {
+    const currentTab = tabOverride || activeTab;
+
+    if (currentTab === 'incoming') {
       params.tab = 'incoming';
       if (filterFromBranch !== 'All') params.sent_by = filterFromBranch;
       if (filterStatus !== 'All') params.status = filterStatus;
       if (filterRequestType !== 'All') params.request_type = filterRequestType;
       if (filterPriority !== 'All') params.priority = filterPriority;
       if (searchQuery) params.search = searchQuery;
-    } else if (activeTab === 'receivals') {
+    } else if (currentTab === 'receivals') {
       params.tab = 'pending_receivals';
       if (filterToBranch !== 'All') params.received_by = filterToBranch;
       if (filterRequestType !== 'All') params.request_type = filterRequestType;
       if (filterPriority !== 'All') params.priority = filterPriority;
       if (searchQuery) params.search = searchQuery;
-    } else if (activeTab === 'transfer_request') {
+    } else if (currentTab === 'transfer_request' || currentTab === 'new') {
       // Sent Requests: Orders requested by this branch until completed
       params.tab = 'sent_requests';
       if (filterToBranch !== 'All') params.to_branch = filterToBranch;
@@ -1895,6 +1897,15 @@ export default function InternalBranch() {
     };
 
     const handleTransferCreated = (data) => {
+      if (data && (data.id || data.transfer_id)) {
+        setTransfers(prev => {
+          const exists = prev.some(x => (data.id && x.id === data.id) || (data.transfer_id && x.transfer_id === data.transfer_id));
+          if (exists) {
+            return prev.map(x => ((data.id && x.id === data.id) || (data.transfer_id && x.transfer_id === data.transfer_id)) ? { ...x, ...data } : x);
+          }
+          return [data, ...prev];
+        });
+      }
       fetchStats();
       fetchTransfers();
 
@@ -1931,7 +1942,18 @@ export default function InternalBranch() {
       }
     };
 
+    const handleTransferUpdated = (data) => {
+      if (data && (data.id || data.transfer_id)) {
+        setTransfers(prev => prev.map(x => ((data.id && x.id === data.id) || (data.transfer_id && x.transfer_id === data.transfer_id)) ? { ...x, ...data } : x));
+      }
+      fetchStats();
+      fetchTransfers();
+    };
+
     const handleTransferDispatched = (data) => {
+      if (data && (data.id || data.transfer_id)) {
+        setTransfers(prev => prev.map(x => ((data.id && x.id === data.id) || (data.transfer_id && x.transfer_id === data.transfer_id)) ? { ...x, ...data } : x));
+      }
       fetchStats();
       fetchTransfers();
 
@@ -1949,6 +1971,9 @@ export default function InternalBranch() {
     };
 
     const handleTransferReceived = (data) => {
+      if (data && (data.id || data.transfer_id)) {
+        setTransfers(prev => prev.map(x => ((data.id && x.id === data.id) || (data.transfer_id && x.transfer_id === data.transfer_id)) ? { ...x, ...data } : x));
+      }
       fetchStats();
       fetchTransfers();
 
@@ -1966,6 +1991,9 @@ export default function InternalBranch() {
     };
 
     const handleTransferCancelled = (data) => {
+      if (data && (data.id || data.transfer_id)) {
+        setTransfers(prev => prev.map(x => ((data.id && x.id === data.id) || (data.transfer_id && x.transfer_id === data.transfer_id)) ? { ...x, ...data, status: 'Cancelled' } : x));
+      }
       fetchStats();
       fetchTransfers();
 
@@ -2049,7 +2077,11 @@ export default function InternalBranch() {
     socket.on('internal_transfer_extension_rejected', handleExtensionRejected);
     socket.on('internal_transfer_extension_modified', handleExtensionModified);
     socket.on('internal_transfer_request_modified', handleRequestModified);
-    socket.on('internal_transfer_updated', fetchTransfers);
+    socket.on('internal_transfer_updated', handleTransferUpdated);
+    socket.on('internal_transfer_ready', handleTransferUpdated);
+    socket.on('internal_transfer_item_accepted', handleTransferUpdated);
+    socket.on('internal_transfer_item_rejected', handleTransferUpdated);
+    socket.on('internal_transfers_refresh', fetchTransfers);
 
     return () => {
       socket.off('internal_transfer_created', handleTransferCreated);
@@ -2061,7 +2093,11 @@ export default function InternalBranch() {
       socket.off('internal_transfer_extension_rejected', handleExtensionRejected);
       socket.off('internal_transfer_extension_modified', handleExtensionModified);
       socket.off('internal_transfer_request_modified', handleRequestModified);
-      socket.off('internal_transfer_updated', fetchTransfers);
+      socket.off('internal_transfer_updated', handleTransferUpdated);
+      socket.off('internal_transfer_ready', handleTransferUpdated);
+      socket.off('internal_transfer_item_accepted', handleTransferUpdated);
+      socket.off('internal_transfer_item_rejected', handleTransferUpdated);
+      socket.off('internal_transfers_refresh', fetchTransfers);
     };
   }, [user, isSuperUser, audioEnabled, fetchStats, fetchTransfers]);
 
@@ -2295,6 +2331,9 @@ export default function InternalBranch() {
       }
 
       toast.success(`Transfer Request ${res.data?.transfer_id || ''} created successfully! Destination branch (${toB}) notified.`);
+      if (res.data?.id || res.data?.transfer_id) {
+        setTransfers(prev => [res.data, ...prev.filter(x => x.id !== res.data.id && x.transfer_id !== res.data.transfer_id)]);
+      }
       setActiveTab('transfer_request');
 
       // Reset form
@@ -2307,7 +2346,7 @@ export default function InternalBranch() {
       setTrfDayOption('Today');
       setTrfCustomDayDate(new Date().toISOString().slice(0, 10));
       fetchStats();
-      fetchTransfers();
+      fetchTransfers('transfer_request');
       // Keep on transfer_request tab so the user immediately sees the sent order in active sent list!
     } catch (err) {
       console.error('Error submitting transfer request:', err);
@@ -2395,6 +2434,10 @@ export default function InternalBranch() {
       }
 
       toast.success(`Transfer request ${res.data.transfer_id} created successfully! Destination branch notified.`);
+      if (res.data?.id || res.data?.transfer_id) {
+        setTransfers(prev => [res.data, ...prev.filter(x => x.id !== res.data.id && x.transfer_id !== res.data.transfer_id)]);
+      }
+      setActiveTab('transfer_request');
       
       // Reset form
       setNewDishRows([{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
@@ -2405,9 +2448,7 @@ export default function InternalBranch() {
       setNewDeliveryMinutes(30);
       setCustomDeliveryMinutes('');
       fetchStats();
-      
-      // Switch to master logs
-      setActiveTab('logs');
+      fetchTransfers('transfer_request');
     } catch (err) {
       console.error('Error submitting request:', err);
       const msg = err.response?.data?.error || err.message || 'Failed to submit transfer request.';
