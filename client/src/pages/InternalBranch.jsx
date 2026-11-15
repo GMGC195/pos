@@ -50,7 +50,8 @@ import {
   History,
   Timer,
   Lock,
-  CheckCheck
+  CheckCheck,
+  Save
 } from 'lucide-react';
 
 const STANDARD_BRANCH_NAMES = ['branch 1', 'branch 2', 'branch 3', 'central kitchen'];
@@ -1166,6 +1167,8 @@ export default function InternalBranch() {
   // 9. Bulk Actions Modals
   const [acceptAllConfirmModal, setAcceptAllConfirmModal] = useState(null); // { transfer, items, saving }
   const [rejectAllModal, setRejectAllModal] = useState(null); // { transfer, reason, saving }
+  // 9b. Detailed Accept and Done Modal (Batch item-by-item decisions)
+  const [acceptAndDoneModal, setAcceptAndDoneModal] = useState(null); // { transfer, items, saving }
   // 10. Clear All Active Requests Modal
   const [clearAllModalOpen, setClearAllModalOpen] = useState(false);
   const [clearAllReason, setClearAllReason] = useState('');
@@ -2667,31 +2670,92 @@ export default function InternalBranch() {
     }
   };
 
-  // Accept and Done Handler: Automatically accepts all remaining pending items preserving already accepted/rejected items
-  const handleAcceptAndDone = async (transfer) => {
-    const pendingItems = (transfer.items || []).filter(it => it.item_status === 'Pending' || !it.item_status);
-    if (pendingItems.length === 0) {
-      return toast.info('All items in this request have already been processed.');
+  // Accept and Done Detailed Modal Handlers: Open confirmation modal with independent item actions
+  const handleOpenAcceptAndDoneModal = (transfer) => {
+    const rawItems = transfer.items || [];
+    const initialItems = rawItems.map(it => {
+      const curStatus = it.item_status || 'Pending';
+      const isAlreadyAccepted = curStatus === 'Accepted';
+      const isAlreadyRejected = curStatus === 'Rejected';
+      const defaultQty = it.accepted_qty !== null && it.accepted_qty !== undefined
+        ? parseFloat(it.accepted_qty)
+        : (itemAcceptedQtys[it.id] !== undefined ? parseFloat(itemAcceptedQtys[it.id]) : parseFloat(it.requested_qty || 0));
+
+      return {
+        id: it.id,
+        item_id: it.item_id,
+        dish_name: it.dish_name,
+        uom: it.uom || 'Pices',
+        requested_qty: parseFloat(it.requested_qty || 0),
+        current_status: curStatus,
+        // Default action: preserve existing status or default pending to Accept
+        action: isAlreadyAccepted ? 'Accept' : (isAlreadyRejected ? 'Reject' : 'Accept'),
+        accepted_qty: defaultQty,
+        modification_reason: it.modification_reason || '',
+        rejection_reason: it.rejection_reason || '',
+        sku: it.sku || (it.item_id ? `SKU-${it.item_id}` : ''),
+        image_url: it.image_url || ''
+      };
+    });
+
+    setAcceptAndDoneModal({
+      transfer,
+      items: initialItems,
+      saving: false
+    });
+  };
+
+  const handleSaveAcceptAndDoneModal = async () => {
+    if (!acceptAndDoneModal) return;
+    const { transfer, items } = acceptAndDoneModal;
+
+    // Validation
+    for (const it of items) {
+      if (it.action === 'Reject') {
+        if (!it.rejection_reason || !it.rejection_reason.trim()) {
+          return toast.error(`Please provide a rejection reason for "${it.dish_name}".`);
+        }
+      }
+      if (it.action === 'Accept') {
+        const accQ = parseFloat(it.accepted_qty);
+        if (isNaN(accQ) || accQ < 0) {
+          return toast.error(`Please enter a valid accepted quantity for "${it.dish_name}".`);
+        }
+        if (Math.abs(accQ - it.requested_qty) > 0.0001) {
+          if (!it.modification_reason || !it.modification_reason.trim()) {
+            return toast.error(`Please provide a reason for modifying quantity for "${it.dish_name}" (from ${it.requested_qty} to ${accQ} ${it.uom}).`);
+          }
+        }
+      }
     }
 
     try {
-      const res = await axios.put(`/api/internal-branch/transfers/${transfer.id}/accept-all`, {
-        items: pendingItems.map(it => ({
-          id: it.id,
-          accepted_qty: itemAcceptedQtys[it.id] !== undefined ? parseFloat(itemAcceptedQtys[it.id]) : parseFloat(it.requested_qty)
+      setAcceptAndDoneModal(prev => ({ ...prev, saving: true }));
+
+      const payload = {
+        decisions: items.map(it => ({
+          item_id: it.id,
+          action: it.action,
+          accepted_qty: it.action === 'Accept' ? parseFloat(it.accepted_qty) : null,
+          modification_reason: it.action === 'Accept' ? (it.modification_reason || '').trim() : null,
+          rejection_reason: it.action === 'Reject' ? (it.rejection_reason || '').trim() : null
         }))
-      });
+      };
+
+      const res = await axios.put(`/api/internal-branch/transfers/${transfer.id}/batch-process-items`, payload);
 
       setTransfers(prev => prev.map(t => String(t.id) === String(transfer.id) ? { ...t, ...res.data } : t));
-      toast.success(`All remaining items accepted for transfer #${transfer.transfer_id}!`);
+      toast.success(`Decisions saved successfully for Transfer #${transfer.transfer_id}!`);
+      setAcceptAndDoneModal(null);
       fetchTransfers();
       fetchStats();
       if (detailModalTransfer && String(detailModalTransfer.id) === String(transfer.id)) {
         setDetailModalTransfer(res.data);
       }
     } catch (err) {
-      console.error('Error in Accept and Done:', err);
-      toast.error(err.response?.data?.error || 'Failed to accept all remaining items');
+      console.error('Failed to save Accept and Done changes:', err);
+      toast.error(err.response?.data?.error || 'Failed to save item changes');
+      setAcceptAndDoneModal(prev => ({ ...prev, saving: false }));
     }
   };
 
@@ -2927,7 +2991,7 @@ export default function InternalBranch() {
   const renderTransferCardRow = (t, isIncoming) => {
     const hasUnacceptedItems = (t.items || []).some(it => it.item_status === 'Pending' || !it.item_status);
     const hasAcceptedItems = (t.items || []).some(it => it.item_status === 'Accepted');
-    const canModify = ['Pending', 'In Progress'].includes(t.status) && hasUnacceptedItems;
+    const canModify = ['Pending', 'In Progress', 'Partially Accepted'].includes(t.status) && hasUnacceptedItems;
     const canAcceptReject = isSuperUser || isIncoming || (user?.branch === t.to_branch);
     const items = t.items || [];
 
@@ -2975,9 +3039,9 @@ export default function InternalBranch() {
                 borderRadius: 12,
                 fontSize: 11.5,
                 fontWeight: 700,
-                background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'In Progress' ? '#dbeafe' : (t.status === 'Ready for Dispatch' ? '#f3e8ff' : '#dcfce7')),
-                color: t.status === 'Pending' ? '#92400e' : (t.status === 'In Progress' ? '#1e40af' : (t.status === 'Ready for Dispatch' ? '#6b21a8' : '#166534')),
-                border: '1px solid ' + (t.status === 'Pending' ? '#fde68a' : (t.status === 'In Progress' ? '#bfdbfe' : (t.status === 'Ready for Dispatch' ? '#e9d5ff' : '#bbf7d0')))
+                background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'Partially Accepted' ? '#fef9c3' : (t.status === 'In Progress' ? '#dbeafe' : (t.status === 'Ready for Dispatch' ? '#f3e8ff' : '#dcfce7'))),
+                color: t.status === 'Pending' ? '#92400e' : (t.status === 'Partially Accepted' ? '#854d0e' : (t.status === 'In Progress' ? '#1e40af' : (t.status === 'Ready for Dispatch' ? '#6b21a8' : '#166534'))),
+                border: '1px solid ' + (t.status === 'Pending' ? '#fde68a' : (t.status === 'Partially Accepted' ? '#fde047' : (t.status === 'In Progress' ? '#bfdbfe' : (t.status === 'Ready for Dispatch' ? '#e9d5ff' : '#bbf7d0'))))
               }}>
                 {t.status}
               </span>
@@ -3024,14 +3088,34 @@ export default function InternalBranch() {
           {/* Right Action buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             {/* Bulk Actions for Incoming Requests */}
-            {isIncoming && canAcceptReject && (t.status === 'Pending' || t.status === 'In Progress') && (
+            {isIncoming && canAcceptReject && (['Pending', 'Partially Accepted', 'In Progress'].includes(t.status)) && (
               <>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAcceptAndDoneModal(t)}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#16a34a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="Open detailed confirmation modal to review and process items"
+                >
+                  <CheckCheck size={13} /> Accept and Done
+                </button>
                 <button
                   type="button"
                   onClick={() => handleAcceptAllClick(t)}
                   style={{
                     padding: '6px 12px',
-                    background: '#16a34a',
+                    background: '#15803d',
                     color: '#fff',
                     border: 'none',
                     borderRadius: 6,
@@ -3092,8 +3176,8 @@ export default function InternalBranch() {
               </button>
             )}
 
-            {/* If incoming and in progress / ready, allow Dispatch */}
-            {isIncoming && (t.status === 'In Progress' || t.status === 'Ready for Dispatch') && (
+            {/* If incoming and in progress / ready / partially accepted / accepted, allow Dispatch */}
+            {isIncoming && (['In Progress', 'Ready for Dispatch', 'Accepted', 'Partially Accepted'].includes(t.status)) && (
               <button
                 type="button"
                 onClick={() => handleOpenDispatchModal(t)}
@@ -3648,7 +3732,7 @@ export default function InternalBranch() {
               {items.some(it => it.item_status === 'Pending' || !it.item_status) && (
                 <button
                   type="button"
-                  onClick={() => handleAcceptAndDone(t)}
+                  onClick={() => handleOpenAcceptAndDoneModal(t)}
                   style={{
                     padding: '7px 14px',
                     background: '#16a34a',
@@ -3663,7 +3747,7 @@ export default function InternalBranch() {
                     gap: 5,
                     boxShadow: '0 1px 2px rgba(22, 163, 74, 0.2)'
                   }}
-                  title="Automatically accept all remaining pending items and finalize acceptance"
+                  title="Open detailed confirmation modal to review and process items"
                 >
                   <CheckCheck size={14} /> Accept and Done
                 </button>
@@ -4934,7 +5018,7 @@ export default function InternalBranch() {
               </p>
             </div>
             <span style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '4px 10px', borderRadius: 6, fontWeight: 700 }}>
-              {transfers.filter(t => t.status === 'Pending').length} Pending Dispatch
+              {transfers.filter(t => ['Pending', 'Partially Accepted', 'Accepted'].includes(t.status)).length} Pending Dispatch
             </span>
           </div>
 
@@ -8486,6 +8570,483 @@ export default function InternalBranch() {
                 <Trash2 size={15} />
                 {clearingAll ? 'Clearing...' : 'Confirm Clear All Active'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL: ACCEPT AND DONE – BATCH ITEM-LEVEL DECISION MODAL
+      ───────────────────────────────────────────────────────────── */}
+      {acceptAndDoneModal && (
+        <div
+          className="modal-overlay"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 9999,
+            background: 'rgba(15, 23, 42, 0.7)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16
+          }}
+          onClick={e => {
+            if (e.target.classList.contains('modal-overlay') && !acceptAndDoneModal.saving) {
+              setAcceptAndDoneModal(null);
+            }
+          }}
+        >
+          <div
+            className="modal"
+            style={{
+              maxWidth: 940,
+              width: '100%',
+              maxHeight: '90vh',
+              background: '#fff',
+              borderRadius: 14,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              background: 'linear-gradient(135deg, #15803d 0%, #16a34a 100%)',
+              padding: '16px 22px',
+              color: '#fff',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <CheckCheck size={20} color="#fff" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#fff' }}>
+                    Accept and Done – Transfer #{acceptAndDoneModal.transfer.transfer_id}
+                  </h3>
+                  <div style={{ fontSize: 12, opacity: 0.9, marginTop: 2 }}>
+                    From: <strong>{acceptAndDoneModal.transfer.from_branch}</strong> → To: <strong>{acceptAndDoneModal.transfer.to_branch}</strong> · Day: <strong>{acceptAndDoneModal.transfer.delivery_day || 'Today'}</strong> · {acceptAndDoneModal.items.length} Dishes
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={acceptAndDoneModal.saving}
+                onClick={() => setAcceptAndDoneModal(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', opacity: 0.8 }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Instructions & Quick Action Toolbar */}
+            <div style={{
+              padding: '12px 22px',
+              background: '#f8fafc',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 10,
+              flexShrink: 0
+            }}>
+              <div style={{ fontSize: 12.5, color: '#475569' }}>
+                Select an independent action for every item. Only items with <strong>Accept</strong> or <strong>Reject</strong> will be processed when you click <strong>Save Changes</strong>.
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAcceptAndDoneModal(prev => ({
+                      ...prev,
+                      items: prev.items.map(it => ({
+                        ...it,
+                        action: it.current_status === 'Accepted' ? 'Accept' : (it.current_status === 'Rejected' ? 'Reject' : 'Accept')
+                      }))
+                    }));
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    background: '#dcfce7',
+                    color: '#166534',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: 6,
+                    cursor: 'pointer'
+                  }}
+                >
+                  ✓ Set All Pending to Accept
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAcceptAndDoneModal(prev => ({
+                      ...prev,
+                      items: prev.items.map(it => ({
+                        ...it,
+                        action: it.current_status === 'Accepted' ? 'Accept' : (it.current_status === 'Rejected' ? 'Reject' : 'Pending')
+                      }))
+                    }));
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    background: '#f1f5f9',
+                    color: '#475569',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Items Table */}
+            <div style={{ padding: '16px 22px', overflowY: 'auto', flex: 1 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1' }}>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', width: 36, color: '#64748b' }}>#</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569', fontWeight: 700 }}>Dish Name</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center', width: 60, color: '#475569', fontWeight: 700 }}>Unit</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'right', width: 80, color: '#475569', fontWeight: 700 }}>Requested</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'center', width: 230, color: '#475569', fontWeight: 700 }}>Action</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569', fontWeight: 700 }}>Accepted Qty & Reason</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'center', width: 150, color: '#475569', fontWeight: 700 }}>Final Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {acceptAndDoneModal.items.map((it, idx) => {
+                    const isAccepted = it.action === 'Accept';
+                    const isRejected = it.action === 'Reject';
+                    const isPending = it.action === 'Pending';
+                    const isQtyMod = isAccepted && Math.abs(parseFloat(it.accepted_qty || 0) - it.requested_qty) > 0.0001;
+
+                    return (
+                      <tr
+                        key={`done-item-${it.id}`}
+                        style={{
+                          borderBottom: '1px solid #e2e8f0',
+                          background: isRejected ? '#fef2f2' : (isAccepted ? '#f0fdf4' : (idx % 2 === 0 ? '#fff' : '#f8fafc'))
+                        }}
+                      >
+                        <td style={{ padding: '10px', textAlign: 'center', color: '#94a3b8', fontWeight: 600 }}>{idx + 1}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>{it.dish_name}</div>
+                          {it.sku && <div style={{ fontSize: 10.5, color: '#64748b', fontFamily: 'monospace' }}>SKU: {it.sku}</div>}
+                          {it.current_status !== 'Pending' && (
+                            <div style={{ fontSize: 10, color: it.current_status === 'Accepted' ? '#166534' : '#991b1b', marginTop: 2 }}>
+                              Current status: <strong>{it.current_status}</strong>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'center', fontWeight: 600, color: '#475569' }}>
+                          {it.uom}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>
+                          {it.requested_qty}
+                        </td>
+
+                        {/* Action Selector: 3 Toggle Pills */}
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: 8, padding: 2, gap: 2 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAcceptAndDoneModal(prev => ({
+                                  ...prev,
+                                  items: prev.items.map(x => x.id === it.id ? { ...x, action: 'Accept' } : x)
+                                }));
+                              }}
+                              style={{
+                                padding: '4px 10px',
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                borderRadius: 6,
+                                border: 'none',
+                                cursor: 'pointer',
+                                background: isAccepted ? '#16a34a' : 'transparent',
+                                color: isAccepted ? '#fff' : '#475569',
+                                boxShadow: isAccepted ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                              }}
+                            >
+                              ✓ Accept
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAcceptAndDoneModal(prev => ({
+                                  ...prev,
+                                  items: prev.items.map(x => x.id === it.id ? { ...x, action: 'Reject' } : x)
+                                }));
+                              }}
+                              style={{
+                                padding: '4px 10px',
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                borderRadius: 6,
+                                border: 'none',
+                                cursor: 'pointer',
+                                background: isRejected ? '#dc2626' : 'transparent',
+                                color: isRejected ? '#fff' : '#475569',
+                                boxShadow: isRejected ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                              }}
+                            >
+                              ✕ Reject
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAcceptAndDoneModal(prev => ({
+                                  ...prev,
+                                  items: prev.items.map(x => x.id === it.id ? { ...x, action: 'Pending' } : x)
+                                }));
+                              }}
+                              style={{
+                                padding: '4px 10px',
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                borderRadius: 6,
+                                border: 'none',
+                                cursor: 'pointer',
+                                background: isPending ? '#f59e0b' : 'transparent',
+                                color: isPending ? '#fff' : '#475569',
+                                boxShadow: isPending ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                              }}
+                            >
+                              ⏳ Pending
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Quantity & Reason Details */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {isAccepted && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 11.5, color: '#64748b' }}>Qty:</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={it.accepted_qty}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setAcceptAndDoneModal(prev => ({
+                                      ...prev,
+                                      items: prev.items.map(x => x.id === it.id ? { ...x, accepted_qty: val } : x)
+                                    }));
+                                  }}
+                                  style={{
+                                    width: 75,
+                                    padding: '4px 6px',
+                                    textAlign: 'right',
+                                    borderRadius: 5,
+                                    border: isQtyMod ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                                    fontSize: 12,
+                                    fontWeight: 700
+                                  }}
+                                />
+                                <span style={{ fontSize: 11.5, color: '#64748b' }}>{it.uom}</span>
+                                {isQtyMod && (
+                                  <span style={{ fontSize: 10.5, color: '#2563eb', fontWeight: 700, background: '#eff6ff', padding: '2px 6px', borderRadius: 4, border: '1px solid #bfdbfe' }}>
+                                    Orig: {it.requested_qty} → Mod: {it.accepted_qty}
+                                  </span>
+                                )}
+                              </div>
+                              {isQtyMod && (
+                                <input
+                                  type="text"
+                                  placeholder="Reason for modifying quantity * (Mandatory)"
+                                  value={it.modification_reason}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setAcceptAndDoneModal(prev => ({
+                                      ...prev,
+                                      items: prev.items.map(x => x.id === it.id ? { ...x, modification_reason: val } : x)
+                                    }));
+                                  }}
+                                  style={{
+                                    width: '100%',
+                                    padding: '4px 8px',
+                                    borderRadius: 5,
+                                    border: !it.modification_reason.trim() ? '1.5px solid #dc2626' : '1px solid #2563eb',
+                                    fontSize: 11.5
+                                  }}
+                                />
+                              )}
+                            </div>
+                          )}
+
+                          {isRejected && (
+                            <input
+                              type="text"
+                              placeholder="Reason for rejecting this item * (Mandatory)"
+                              value={it.rejection_reason}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setAcceptAndDoneModal(prev => ({
+                                  ...prev,
+                                  items: prev.items.map(x => x.id === it.id ? { ...x, rejection_reason: val } : x)
+                                }));
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '4px 8px',
+                                borderRadius: 5,
+                                border: !it.rejection_reason.trim() ? '1.5px solid #dc2626' : '1px solid #cbd5e1',
+                                fontSize: 11.5
+                              }}
+                            />
+                          )}
+
+                          {isPending && (
+                            <span style={{ fontSize: 11.5, color: '#94a3b8', fontStyle: 'italic' }}>
+                              No action will be applied to this item (remains Pending).
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Result Status Live Badge */}
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          {isAccepted && (
+                            <span style={{
+                              background: '#dcfce7',
+                              color: '#166534',
+                              fontWeight: 700,
+                              padding: '4px 9px',
+                              borderRadius: 6,
+                              fontSize: 11.5,
+                              border: '1px solid #bbf7d0',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}>
+                              <CheckCircle2 size={12} /> Accepted ({it.accepted_qty} {it.uom})
+                            </span>
+                          )}
+                          {isRejected && (
+                            <span style={{
+                              background: '#fee2e2',
+                              color: '#991b1b',
+                              fontWeight: 700,
+                              padding: '4px 9px',
+                              borderRadius: 6,
+                              fontSize: 11.5,
+                              border: '1px solid #fca5a5',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}>
+                              <XCircle size={12} /> Rejected
+                            </span>
+                          )}
+                          {isPending && (
+                            <span style={{
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              fontWeight: 700,
+                              padding: '4px 9px',
+                              borderRadius: 6,
+                              fontSize: 11.5,
+                              border: '1px solid #fde68a',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}>
+                              ⏳ Pending
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '14px 22px',
+              background: '#f8fafc',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              flexShrink: 0
+            }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: '#475569' }}>
+                Decisions Summary: <strong style={{ color: '#16a34a' }}>{acceptAndDoneModal.items.filter(x => x.action === 'Accept').length} to Accept</strong>, <strong style={{ color: '#dc2626' }}>{acceptAndDoneModal.items.filter(x => x.action === 'Reject').length} to Reject</strong>, <strong style={{ color: '#d97706' }}>{acceptAndDoneModal.items.filter(x => x.action === 'Pending').length} Pending</strong>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={acceptAndDoneModal.saving}
+                  onClick={() => setAcceptAndDoneModal(null)}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    background: '#fff',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#475569',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={acceptAndDoneModal.saving}
+                  onClick={handleSaveAcceptAndDoneModal}
+                  style={{
+                    padding: '8px 22px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: '#16a34a',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    cursor: acceptAndDoneModal.saving ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    boxShadow: '0 1px 3px rgba(22, 163, 74, 0.3)'
+                  }}
+                >
+                  {acceptAndDoneModal.saving ? (
+                    <>Saving Changes...</>
+                  ) : (
+                    <><Save size={15} /> Save Changes</>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
