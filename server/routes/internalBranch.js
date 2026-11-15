@@ -476,46 +476,52 @@ router.get('/transfers', authenticateToken, async (req, res) => {
 
     let query = `
       SELECT t.*,
-        json_agg(
-          json_build_object(
-            'id', ti.id,
-            'item_id', ti.item_id,
-            'dish_name', ti.dish_name,
-            'uom', ti.uom,
-            'requested_qty', ti.requested_qty,
-            'confirmed_qty', ti.confirmed_qty,
-            'accepted_qty', ti.accepted_qty,
-            'rejected_qty', ti.rejected_qty,
-            'sent_qty', ti.sent_qty,
-            'dispatched_qty', ti.dispatched_qty,
-            'received_qty', ti.received_qty,
-            'pending_receive_qty', ti.pending_receive_qty,
-            'variance_qty', ti.variance_qty,
-            'item_status', COALESCE(ti.item_status, 'Pending'),
-            'rejection_reason', ti.rejection_reason,
-            'modification_reason', ti.modification_reason,
-            'quantity_history', COALESCE(ti.quantity_history, '[]'::jsonb),
-            'accepted_by_name', ti.accepted_by_name,
-            'accepted_at', ti.accepted_at,
-            'rejected_by_name', ti.rejected_by_name,
-            'rejected_at', ti.rejected_at,
-            'needed_by_time', ti.needed_by_time,
-            'needed_by_date', ti.needed_by_date,
-            'priority', COALESCE(ti.priority, 'Normal'),
-            'remarks', ti.remarks,
-            'quantity_change_reason', ti.quantity_change_reason,
-            'is_additional', COALESCE(ti.is_additional, false),
-            'sku', COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)),
-            'barcode', COALESCE(ti.barcode, ''),
-            'short_code', COALESCE(i.short_code, ''),
-            'image_url', COALESCE(ti.image_url, i.image_url),
-            'price', COALESCE(ti.price, i.price)
-          ) ORDER BY ti.id ASC
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', ti.id,
+                'item_id', ti.item_id,
+                'dish_name', ti.dish_name,
+                'uom', ti.uom,
+                'requested_qty', ti.requested_qty,
+                'confirmed_qty', ti.confirmed_qty,
+                'accepted_qty', ti.accepted_qty,
+                'rejected_qty', ti.rejected_qty,
+                'sent_qty', ti.sent_qty,
+                'dispatched_qty', ti.dispatched_qty,
+                'received_qty', ti.received_qty,
+                'pending_receive_qty', ti.pending_receive_qty,
+                'variance_qty', ti.variance_qty,
+                'item_status', COALESCE(ti.item_status, 'Pending'),
+                'rejection_reason', ti.rejection_reason,
+                'modification_reason', ti.modification_reason,
+                'quantity_history', COALESCE(ti.quantity_history, '[]'::jsonb),
+                'accepted_by_name', ti.accepted_by_name,
+                'accepted_at', ti.accepted_at,
+                'rejected_by_name', ti.rejected_by_name,
+                'rejected_at', ti.rejected_at,
+                'needed_by_time', ti.needed_by_time,
+                'needed_by_date', ti.needed_by_date,
+                'priority', COALESCE(ti.priority, 'Normal'),
+                'remarks', ti.remarks,
+                'quantity_change_reason', ti.quantity_change_reason,
+                'is_additional', COALESCE(ti.is_additional, false),
+                'sku', COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)),
+                'barcode', COALESCE(ti.barcode, ''),
+                'short_code', COALESCE(i.short_code, ''),
+                'image_url', COALESCE(ti.image_url, i.image_url),
+                'price', COALESCE(ti.price, i.price)
+              ) ORDER BY ti.id ASC
+            )
+            FROM internal_branch_transfer_items ti
+            LEFT JOIN items i ON ti.item_id = i.id
+            WHERE ti.transfer_id = t.id
+          ),
+          '[]'::json
         ) as items,
-        COUNT(ti.id) as item_count
+        (SELECT COUNT(*) FROM internal_branch_transfer_items ti WHERE ti.transfer_id = t.id) as item_count
       FROM internal_branch_transfers t
-      LEFT JOIN internal_branch_transfer_items ti ON t.id = ti.transfer_id
-      LEFT JOIN items i ON ti.item_id = i.id
       WHERE 1=1
     `;
     const params = [];
@@ -556,9 +562,9 @@ router.get('/transfers', authenticateToken, async (req, res) => {
         }
       }
 
-      // Destination branch processes active requests only
+      // Incoming Requests: Active requests until receiving is fully completed
       if (!status || status === 'All') {
-        query += ` AND t.status IN ('Pending', 'Partially Accepted', 'Accepted', 'In Progress', 'Preparing', 'Ready for Dispatch', 'Partially Dispatched')`;
+        query += ` AND t.status NOT IN ('Received', 'Fully Received', 'Completed', 'Complete', 'Cancelled')`;
       }
     } else if (tab === 'pending_receivals' || tab === 'receivals') {
       // Pending Receivals: Dedicated section for the requesting branch awaiting dispatched goods
@@ -579,7 +585,7 @@ router.get('/transfers', authenticateToken, async (req, res) => {
 
       // Only in-transit / dispatched awaiting receival confirmation
       if (!status || status === 'All') {
-        query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Partially Received')`;
+        query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Partially Received', 'Partially Dispatched')`;
       }
     } else if (tab === 'sent_requests' || tab === 'sent') {
       // Sent Requests: Dedicated section for the requesting branch tracking its sent requests until completed
@@ -2194,7 +2200,7 @@ router.put('/transfers/:id/ready-to-process', authenticateToken, async (req, res
       updateQuery = `
         UPDATE internal_branch_transfer_items
         SET item_status = 'Ready to Process'
-        WHERE transfer_id = $1 AND id = ANY($2::int[]) AND (item_status = 'Accepted' OR item_status = 'Pending')
+        WHERE transfer_id = $1 AND id = ANY($2::int[]) AND item_status = 'Accepted'
         RETURNING *
       `;
       queryParams = [transfer.id, item_ids];
@@ -3248,18 +3254,18 @@ router.get('/stats', authenticateToken, async (req, res) => {
       WHERE 1=1 ${branchClause}
     `, params);
 
-    // Incoming active count for badge (Pending + Partially Accepted + Accepted + In Progress + Ready for Dispatch where to_branch = targetBranch and from_branch != targetBranch)
+    // Incoming active count for badge (Active incoming requests until receiving is fully completed)
     let incomingPendingCount = 0;
     if (targetBranch) {
       const incRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE to_branch = $1 AND from_branch != $1 AND status IN ('Pending', 'Partially Accepted', 'Accepted', 'In Progress', 'Preparing', 'Ready for Dispatch', 'Partially Dispatched')
+        WHERE to_branch = $1 AND from_branch != $1 AND status NOT IN ('Received', 'Fully Received', 'Completed', 'Complete', 'Cancelled')
       `, [targetBranch]);
       incomingPendingCount = parseInt(incRes.rows[0]?.count || 0, 10);
     } else {
       const incRes = await pool.query(`
         SELECT COUNT(*) as count FROM internal_branch_transfers
-        WHERE status IN ('Pending', 'Partially Accepted', 'Accepted', 'In Progress', 'Preparing', 'Ready for Dispatch', 'Partially Dispatched')
+        WHERE status NOT IN ('Received', 'Fully Received', 'Completed', 'Complete', 'Cancelled')
       `);
       incomingPendingCount = parseInt(incRes.rows[0]?.count || 0, 10);
     }

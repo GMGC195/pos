@@ -2669,7 +2669,7 @@ export default function InternalBranch() {
   };
 
   // 5. Open Dispatch & Handover Modal (Stage 3: Ready to Process -> Dispatch)
-  const openDispatchModal = (t) => {
+  const openDispatchModal = (t, targetItemId = null) => {
     if (dispatching || isDispatchingRef.current) return;
     const readyItems = (t.items || []).filter(it => it.item_status === 'Ready to Process');
     if (readyItems.length === 0) {
@@ -2684,7 +2684,7 @@ export default function InternalBranch() {
     const initSelected = {};
     (t.items || []).forEach(item => {
       const isReady = item.item_status === 'Ready to Process';
-      initSelected[item.id] = isReady;
+      initSelected[item.id] = targetItemId ? (String(item.id) === String(targetItemId) && isReady) : isReady;
       initQtys[item.id] = item.sent_qty !== null && item.sent_qty !== undefined 
         ? item.sent_qty 
         : (item.accepted_qty !== null && item.accepted_qty !== undefined ? item.accepted_qty : (item.confirmed_qty ?? item.requested_qty));
@@ -3454,12 +3454,26 @@ export default function InternalBranch() {
 
   // Two-Level Row Layout: Row 1 = Common Transfer Summary, Row 2 = Dish Items Table
   const renderTransferCardRow = (t, isIncoming, isReceival = false) => {
-    const hasUnacceptedItems = (t.items || []).some(it => it.item_status === 'Pending' || !it.item_status);
-    const hasAcceptedItems = (t.items || []).some(it => it.item_status === 'Accepted');
-    const hasReadyItems = (t.items || []).some(it => it.item_status === 'Ready to Process');
+    const rawItems = (t.items || []).filter(it => it && (it.dish_name || it.id));
+    const seenItemKeys = new Set();
+    let cleanItems = rawItems.filter(it => {
+      const key = it.id ? `id_${it.id}` : `name_${it.dish_name}_${it.requested_qty}_${it.uom}`;
+      if (seenItemKeys.has(key)) return false;
+      seenItemKeys.add(key);
+      return true;
+    });
+    if (isReceival) {
+      cleanItems = cleanItems.filter(it => {
+        const dispQ = it.sent_qty !== null && it.sent_qty !== undefined ? parseFloat(it.sent_qty) : (it.dispatched_qty !== null && it.dispatched_qty !== undefined ? parseFloat(it.dispatched_qty) : 0);
+        return dispQ > 0 || it.item_status === 'Dispatched' || it.item_status === 'Partially Dispatched' || it.item_status === 'Received' || it.item_status === 'Pending Receive';
+      });
+    }
+    const items = cleanItems;
+    const hasUnacceptedItems = items.some(it => it.item_status === 'Pending' || !it.item_status);
+    const hasAcceptedItems = items.some(it => it.item_status === 'Accepted');
+    const hasReadyItems = items.some(it => it.item_status === 'Ready to Process');
     const canModify = !isReceival && ['Pending', 'In Progress', 'Partially Accepted'].includes(t.status) && hasUnacceptedItems;
     const canAcceptReject = !isReceival && (isSuperUser || isIncoming || (user?.branch === t.to_branch));
-    const items = t.items || [];
 
     return (
       <div
@@ -3505,9 +3519,9 @@ export default function InternalBranch() {
                 borderRadius: 12,
                 fontSize: 11.5,
                 fontWeight: 700,
-                background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'Partially Accepted' ? '#fef9c3' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#dbeafe' : (t.status === 'Ready for Dispatch' ? '#f3e8ff' : '#dcfce7'))),
-                color: t.status === 'Pending' ? '#92400e' : (t.status === 'Partially Accepted' ? '#854d0e' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#1e40af' : (t.status === 'Ready for Dispatch' ? '#6b21a8' : '#166534'))),
-                border: '1px solid ' + (t.status === 'Pending' ? '#fde68a' : (t.status === 'Partially Accepted' ? '#fde047' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#bfdbfe' : (t.status === 'Ready for Dispatch' ? '#e9d5ff' : '#bbf7d0'))))
+                background: t.status === 'Pending' ? '#fef3c7' : (t.status === 'Partially Accepted' ? '#fef9c3' : (['Ready to Process', 'Partially Ready', 'Ready for Dispatch'].includes(t.status) ? '#f5f3ff' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#dbeafe' : '#dcfce7'))),
+                color: t.status === 'Pending' ? '#92400e' : (t.status === 'Partially Accepted' ? '#854d0e' : (['Ready to Process', 'Partially Ready', 'Ready for Dispatch'].includes(t.status) ? '#6d28d9' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#1e40af' : '#166534'))),
+                border: '1px solid ' + (t.status === 'Pending' ? '#fde68a' : (t.status === 'Partially Accepted' ? '#fde047' : (['Ready to Process', 'Partially Ready', 'Ready for Dispatch'].includes(t.status) ? '#ddd6fe' : (['In Progress', 'Dispatched', 'In-Transit', 'Partially Dispatched'].includes(t.status) ? '#bfdbfe' : '#bbf7d0'))))
               }}>
                 {t.status === 'Dispatched' ? 'In-Transit' : t.status}
               </span>
@@ -4262,9 +4276,35 @@ export default function InternalBranch() {
                               <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a' }}>Accepted</span>
                             )
                           ) : isReadyToProcess ? (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                              <CheckCircle2 size={12} /> Ready for Dispatch
-                            </span>
+                            // STAGE 3 ACTION: Item is Ready to Process -> Action button changes to "Dispatch"!
+                            canAcceptReject ? (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => openDispatchModal(t, it.id)}
+                                  disabled={dispatching}
+                                  style={{
+                                    background: '#16a34a',
+                                    color: '#fff',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    padding: '4px 10px',
+                                    borderRadius: 5,
+                                    border: 'none',
+                                    cursor: dispatching ? 'not-allowed' : 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    boxShadow: '0 1px 2px rgba(22, 163, 74, 0.25)'
+                                  }}
+                                  title="Dispatch this ready item"
+                                >
+                                  <Truck size={12} /> Dispatch
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9' }}>Ready to Process</span>
+                            )
                           ) : isDispatched ? (
                             <span style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                               <Truck size={12} /> Dispatched
@@ -4505,58 +4545,52 @@ export default function InternalBranch() {
                 </button>
               )}
 
-              {/* Ready to Process (Stage 2: Bulk Action) */}
-              {(hasAcceptedItems || hasReadyItems) && (
+              {/* Ready to Process (Stage 2: Bulk Action - shown when accepted items need processing) */}
+              {hasAcceptedItems && (
                 <button
                   type="button"
                   onClick={() => handleBulkReadyToProcess(t)}
-                  disabled={!hasAcceptedItems}
                   style={{
                     padding: '7px 15px',
-                    background: hasAcceptedItems ? '#7c3aed' : '#cbd5e1',
+                    background: '#7c3aed',
                     color: '#fff',
                     border: 'none',
                     borderRadius: 6,
                     fontSize: 12,
                     fontWeight: 700,
-                    cursor: hasAcceptedItems ? 'pointer' : 'not-allowed',
+                    cursor: 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 5,
-                    boxShadow: hasAcceptedItems ? '0 1px 3px rgba(124, 58, 237, 0.25)' : 'none'
+                    boxShadow: '0 1px 3px rgba(124, 58, 237, 0.25)'
                   }}
-                  title={hasAcceptedItems ? "Mark all accepted items as Ready to Process" : "All eligible items are already Ready to Process"}
+                  title="Mark all accepted items as Ready to Process"
                 >
                   <Play size={14} /> Ready to Process
                 </button>
               )}
 
               {/* Dispatch Order (Stage 3: Dispatch only Ready to Process items) */}
-              {(hasAcceptedItems || hasReadyItems) && (
+              {hasReadyItems && (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!hasReadyItems) {
-                      return toast.error("Please click 'Ready to Process' before dispatching.");
-                    }
-                    openDispatchModal(t);
-                  }}
-                  disabled={dispatching || !hasReadyItems}
+                  onClick={() => openDispatchModal(t)}
+                  disabled={dispatching}
                   style={{
                     padding: '7px 15px',
-                    background: hasReadyItems ? '#16a34a' : '#94a3b8',
+                    background: dispatching ? '#94a3b8' : '#16a34a',
                     color: '#fff',
                     border: 'none',
                     borderRadius: 6,
                     fontSize: 12,
                     fontWeight: 700,
-                    cursor: (dispatching || !hasReadyItems) ? 'not-allowed' : 'pointer',
+                    cursor: dispatching ? 'not-allowed' : 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 5,
-                    boxShadow: hasReadyItems ? '0 1px 3px rgba(22, 163, 74, 0.25)' : 'none'
+                    boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
                   }}
-                  title={hasReadyItems ? "Open dispatch details modal and handover order" : "Mark items as 'Ready to Process' before dispatching"}
+                  title="Open dispatch details modal and handover order"
                 >
                   <Truck size={14} /> Dispatch Order
                 </button>
@@ -5806,7 +5840,15 @@ export default function InternalBranch() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {filteredSentTransfers.map(t => renderTransferCardRow(t, false))}
+              {(() => {
+                const seenIds = new Set();
+                const uniqueSent = filteredSentTransfers.filter(t => {
+                  if (!t || !t.id || seenIds.has(t.id)) return false;
+                  seenIds.add(t.id);
+                  return true;
+                });
+                return uniqueSent.map(t => renderTransferCardRow(t, false));
+              })()}
             </div>
           )}
         </div>
@@ -5827,7 +5869,14 @@ export default function InternalBranch() {
               </p>
             </div>
             <span style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '4px 10px', borderRadius: 6, fontWeight: 700 }}>
-              {transfers.filter(t => ['Pending', 'Partially Accepted', 'Accepted'].includes(t.status)).length} Pending Dispatch
+              {(() => {
+                const seenIds = new Set();
+                return transfers.filter(t => {
+                  if (!t || !t.id || seenIds.has(t.id)) return false;
+                  seenIds.add(t.id);
+                  return !['Received', 'Fully Received', 'Completed', 'Cancelled'].includes(t.status);
+                }).length;
+              })()} Active Incoming
             </span>
           </div>
 
@@ -5843,7 +5892,15 @@ export default function InternalBranch() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {transfers.map(t => renderTransferCardRow(t, true))}
+              {(() => {
+                const seenIds = new Set();
+                const uniqueIncoming = transfers.filter(t => {
+                  if (!t || !t.id || seenIds.has(t.id)) return false;
+                  seenIds.add(t.id);
+                  return true;
+                });
+                return uniqueIncoming.map(t => renderTransferCardRow(t, true));
+              })()}
             </div>
           )}
         </div>
@@ -5864,7 +5921,14 @@ export default function InternalBranch() {
               </p>
             </div>
             <span style={{ fontSize: 12, background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe', padding: '4px 10px', borderRadius: 6, fontWeight: 700 }}>
-              {transfers.length} In-Transit Shipments
+              {(() => {
+                const seenIds = new Set();
+                return transfers.filter(t => {
+                  if (!t || !t.id || seenIds.has(t.id)) return false;
+                  seenIds.add(t.id);
+                  return true;
+                }).length;
+              })()} In-Transit Shipments
             </span>
           </div>
 
@@ -5880,7 +5944,15 @@ export default function InternalBranch() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {transfers.map(t => renderTransferCardRow(t, false, true))}
+              {(() => {
+                const seenIds = new Set();
+                const uniqueReceivals = transfers.filter(t => {
+                  if (!t || !t.id || seenIds.has(t.id)) return false;
+                  seenIds.add(t.id);
+                  return true;
+                });
+                return uniqueReceivals.map(t => renderTransferCardRow(t, false, true));
+              })()}
             </div>
           )}
         </div>
