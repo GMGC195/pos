@@ -74,13 +74,14 @@ async function migrate() {
       ADD COLUMN IF NOT EXISTS is_additional BOOLEAN DEFAULT FALSE;
     `);
 
-    // 3. internal_branch_transfers (cancellation tracking)
+    // 3. internal_branch_transfers (cancellation tracking & required delivery day)
     console.log('📦 Updating internal_branch_transfers schema...');
     await client.query(`
       ALTER TABLE internal_branch_transfers
       ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(255) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS delivery_day VARCHAR(50) DEFAULT 'Today';
     `);
 
     // Backfill item_status based on transfer status if item_status is null

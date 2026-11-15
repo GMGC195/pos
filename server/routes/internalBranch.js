@@ -37,7 +37,8 @@ router.use(blockSalaryPayOperator);
       ALTER TABLE internal_branch_transfers
       ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS delivery_day VARCHAR(50) DEFAULT 'Today';
     `);
   } catch (err) {
     console.warn('Auto-verify schema note:', err.message);
@@ -268,13 +269,14 @@ router.post('/transfers', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const { 
-      to_branch, needed_by_time, delivery_minutes, notes, items, is_external,
+      to_branch, needed_by_time, delivery_day, notes, items, is_external,
       request_type, priority 
     } = req.body;
     let from_branch = req.body.from_branch;
 
     const finalRequestType = (request_type && request_type.trim()) ? request_type.trim() : 'Transfer Request';
     const finalPriority = (priority && priority.trim()) ? priority.trim() : 'Normal';
+    const finalDeliveryDay = (delivery_day && String(delivery_day).trim()) ? String(delivery_day).trim() : 'Today';
 
     // Detect user branch
     const userBranch = req.user.branch;
@@ -345,8 +347,8 @@ router.post('/transfers', authenticateToken, async (req, res) => {
         transfer_id, from_branch, to_branch, requested_by_user_id, requested_by_name,
         request_date, needed_by_time, delivery_minutes, expected_delivery_at, status, notes, is_external,
         original_delivery_minutes, original_needed_by_time, total_extended_minutes, extension_status,
-        request_type, priority
-      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, 'Pending', $9, $10, $7, $6, 0, 'None', $11, $12)
+        request_type, priority, delivery_day
+      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, 'Pending', $9, $10, $7, $6, 0, 'None', $11, $12, $13)
       RETURNING *
     `, [
       transferId,
@@ -354,13 +356,14 @@ router.post('/transfers', authenticateToken, async (req, res) => {
       to_branch,
       req.user.id || null,
       requestedByName,
-      needed_by_time || `${mins} mins`,
+      needed_by_time || 'ASAP',
       mins,
       expectedDeliveryAt,
       notes || null,
       isExternalBranch,
       finalRequestType,
-      finalPriority
+      finalPriority,
+      finalDeliveryDay
     ]);
 
     const createdTransfer = insertTransferRes.rows[0];
@@ -459,11 +462,27 @@ router.get('/transfers', authenticateToken, async (req, res) => {
             'uom', ti.uom,
             'requested_qty', ti.requested_qty,
             'confirmed_qty', ti.confirmed_qty,
+            'accepted_qty', ti.accepted_qty,
+            'rejected_qty', ti.rejected_qty,
             'sent_qty', ti.sent_qty,
+            'dispatched_qty', ti.dispatched_qty,
             'received_qty', ti.received_qty,
+            'pending_receive_qty', ti.pending_receive_qty,
             'variance_qty', ti.variance_qty,
+            'item_status', COALESCE(ti.item_status, 'Pending'),
+            'rejection_reason', ti.rejection_reason,
+            'modification_reason', ti.modification_reason,
+            'quantity_history', COALESCE(ti.quantity_history, '[]'::jsonb),
+            'accepted_by_name', ti.accepted_by_name,
+            'accepted_at', ti.accepted_at,
+            'rejected_by_name', ti.rejected_by_name,
+            'rejected_at', ti.rejected_at,
+            'needed_by_time', ti.needed_by_time,
+            'needed_by_date', ti.needed_by_date,
+            'priority', COALESCE(ti.priority, 'Normal'),
             'remarks', ti.remarks,
             'quantity_change_reason', ti.quantity_change_reason,
+            'is_additional', COALESCE(ti.is_additional, false),
             'sku', COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)),
             'barcode', COALESCE(ti.barcode, ''),
             'short_code', COALESCE(i.short_code, ''),
@@ -538,7 +557,7 @@ router.get('/transfers', authenticateToken, async (req, res) => {
 
       // Only in-transit / dispatched awaiting receival confirmation
       if (!status || status === 'All') {
-        query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Ready for Dispatch')`;
+        query += ` AND t.status IN ('Dispatched', 'In-Transit', 'Partially Received')`;
       }
     } else if (tab === 'sent_requests' || tab === 'sent') {
       // Sent Requests: Dedicated section for the requesting branch tracking its sent requests until completed
@@ -947,7 +966,18 @@ router.put('/transfers/:id/items/:itemId/accept', authenticateToken, async (req,
 
     await client.query('COMMIT');
 
-    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullItems = await pool.query(`
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.barcode, '') as barcode,
+        COALESCE(i.short_code, '') as short_code,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price
+      FROM internal_branch_transfer_items ti
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
+    `, [id]);
     const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
 
     const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
@@ -1038,7 +1068,18 @@ router.put('/transfers/:id/items/:itemId/reject', authenticateToken, async (req,
 
     await client.query('COMMIT');
 
-    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullItems = await pool.query(`
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.barcode, '') as barcode,
+        COALESCE(i.short_code, '') as short_code,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price
+      FROM internal_branch_transfer_items ti
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
+    `, [id]);
     const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
 
     const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
@@ -1242,7 +1283,18 @@ router.put('/transfers/:id/accept-all', authenticateToken, async (req, res) => {
 
     await client.query('COMMIT');
 
-    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullItems = await pool.query(`
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.barcode, '') as barcode,
+        COALESCE(i.short_code, '') as short_code,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price
+      FROM internal_branch_transfer_items ti
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
+    `, [id]);
     const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
 
     const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
@@ -1310,7 +1362,18 @@ router.put('/transfers/:id/reject-all', authenticateToken, async (req, res) => {
 
     await client.query('COMMIT');
 
-    const fullItems = await pool.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [id]);
+    const fullItems = await pool.query(`
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.barcode, '') as barcode,
+        COALESCE(i.short_code, '') as short_code,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price
+      FROM internal_branch_transfer_items ti
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
+    `, [id]);
     const fullTransfer = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
 
     const payload = { ...fullTransfer.rows[0], items: fullItems.rows };
@@ -1995,6 +2058,20 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
     const hOverBy = handover_by_name?.trim() || dispatcherName;
     const hOverTo = handover_to_name?.trim() || 'Driver / Delivery Staff';
 
+    // Validation: Block dispatching if any item remains unprocessed (Pending)
+    const pendingItemsCheck = await client.query(`
+      SELECT id, dish_name FROM internal_branch_transfer_items
+      WHERE transfer_id = $1 AND (item_status = 'Pending' OR item_status IS NULL)
+    `, [transfer.id]);
+
+    if (pendingItemsCheck.rows.length > 0) {
+      await client.query('ROLLBACK');
+      const pendingNames = pendingItemsCheck.rows.map(r => r.dish_name).join(', ');
+      return res.status(400).json({
+        error: `Cannot dispatch transfer while items remain Pending. Please Accept or Reject all items first (${pendingNames}).`
+      });
+    }
+
     let totalDispatchedCount = 0;
     let totalPendingDispatchCount = 0;
 
@@ -2518,7 +2595,7 @@ router.put('/transfers/:id/edit-request', authenticateToken, async (req, res) =>
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { items, priority, delivery_minutes, needed_by_time, notes, reason } = req.body;
+    const { items, priority, delivery_minutes, needed_by_time, notes, reason, delivery_day } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'At least one dish or item is required.' });
@@ -2561,42 +2638,129 @@ router.put('/transfers/:id/edit-request', authenticateToken, async (req, res) =>
       return res.status(403).json({ error: 'Unauthorized. Only the originating requesting branch can modify this request.' });
     }
 
-    // Retrieve previous items for audit log
+    // Retrieve previous items for audit log and acceptance checks
     const prevItemsRes = await client.query(`SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC`, [transfer.id]);
     const prevItems = prevItemsRes.rows;
 
-    // Remove existing items and insert updated items
-    await client.query(`DELETE FROM internal_branch_transfer_items WHERE transfer_id = $1`, [transfer.id]);
+    // RULE: Enforce lock on accepted items
+    const acceptedPrevItems = prevItems.filter(p => p.item_status === 'Accepted');
+    for (const accItem of acceptedPrevItems) {
+      const matchInPayload = items.find(it => String(it.id) === String(accItem.id));
+      if (!matchInPayload) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `Item "${accItem.dish_name}" has already been accepted by receiving branch "${transfer.to_branch}" and cannot be removed.`
+        });
+      }
+      const submittedQty = parseFloat(matchInPayload.requested_qty);
+      const originalQty = parseFloat(accItem.requested_qty);
+      if (Math.abs(submittedQty - originalQty) > 0.0001) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `Item "${accItem.dish_name}" has already been accepted by receiving branch "${transfer.to_branch}" and its quantity cannot be changed.`
+        });
+      }
+    }
 
+    // If every item was already accepted/rejected and none are pending, block full edit
+    const pendingPrevItems = prevItems.filter(p => p.item_status === 'Pending' || !p.item_status);
+    if (prevItems.length > 0 && pendingPrevItems.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'All items in this transfer request have already been accepted or processed and cannot be modified.'
+      });
+    }
+
+    // Delete unaccepted items that were removed in the updated payload
+    const payloadItemIds = new Set(items.filter(it => it.id).map(it => String(it.id)));
+    for (const prev of prevItems) {
+      if (prev.item_status !== 'Accepted') {
+        if (!payloadItemIds.has(String(prev.id))) {
+          await client.query(`DELETE FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2`, [prev.id, transfer.id]);
+        }
+      }
+    }
+
+    // Insert or update items preserving accepted rows
     const insertedItems = [];
     for (const item of items) {
       const itemSku = (item.sku && String(item.sku).trim()) || (item.short_code && String(item.short_code).trim()) || (item.item_id ? `SKU-${item.item_id}` : null);
       const itemBarcode = (item.barcode && String(item.barcode).trim()) || null;
       const reqQty = parseFloat(item.requested_qty);
 
-      const itemRes = await client.query(`
-        INSERT INTO internal_branch_transfer_items (
-          transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING *
-      `, [
-        transfer.id,
-        item.item_id || null,
-        item.dish_name.trim(),
-        item.uom.trim(),
-        reqQty,
-        reqQty,
-        item.remarks ? item.remarks.trim() : null,
-        item.image_url || null,
-        item.price ? parseFloat(item.price) : null,
-        itemSku,
-        itemBarcode
-      ]);
-      insertedItems.push(itemRes.rows[0]);
+      const existing = prevItems.find(p => String(p.id) === String(item.id));
+      if (existing) {
+        if (existing.item_status === 'Accepted') {
+          // Keep accepted items completely intact
+          insertedItems.push(existing);
+        } else {
+          // Update unaccepted item
+          const updateItemRes = await client.query(`
+            UPDATE internal_branch_transfer_items
+            SET item_id = $1,
+                dish_name = $2,
+                uom = $3,
+                requested_qty = $4,
+                confirmed_qty = $4,
+                remarks = $5,
+                image_url = $6,
+                price = $7,
+                sku = $8,
+                barcode = $9,
+                needed_by_time = $10,
+                needed_by_date = $11,
+                priority = $12
+            WHERE id = $13 AND transfer_id = $14
+            RETURNING *
+          `, [
+            item.item_id || null,
+            item.dish_name.trim(),
+            item.uom.trim(),
+            reqQty,
+            item.remarks ? item.remarks.trim() : null,
+            item.image_url || null,
+            item.price ? parseFloat(item.price) : null,
+            itemSku,
+            itemBarcode,
+            item.needed_by_time || null,
+            item.needed_by_date || null,
+            item.priority || 'Normal',
+            existing.id,
+            transfer.id
+          ]);
+          insertedItems.push(updateItemRes.rows[0]);
+        }
+      } else {
+        // Insert newly added dish row
+        const itemRes = await client.query(`
+          INSERT INTO internal_branch_transfer_items (
+            transfer_id, item_id, dish_name, uom, requested_qty, confirmed_qty, remarks, image_url, price, sku, barcode,
+            needed_by_time, needed_by_date, priority, item_status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'Pending')
+          RETURNING *
+        `, [
+          transfer.id,
+          item.item_id || null,
+          item.dish_name.trim(),
+          item.uom.trim(),
+          reqQty,
+          reqQty,
+          item.remarks ? item.remarks.trim() : null,
+          item.image_url || null,
+          item.price ? parseFloat(item.price) : null,
+          itemSku,
+          itemBarcode,
+          item.needed_by_time || null,
+          item.needed_by_date || null,
+          item.priority || 'Normal'
+        ]);
+        insertedItems.push(itemRes.rows[0]);
+      }
     }
 
     // Update transfer metadata
     const finalPriority = priority || transfer.priority || 'Normal';
+    const finalDeliveryDay = (delivery_day && String(delivery_day).trim()) ? String(delivery_day).trim() : (transfer.delivery_day || 'Today');
     const finalDeliveryMins = delivery_minutes !== undefined ? (parseInt(delivery_minutes, 10) || 30) : transfer.delivery_minutes;
     const finalNeededBy = needed_by_time || (delivery_minutes ? `${finalDeliveryMins} mins` : transfer.needed_by_time);
     const finalNotes = notes !== undefined ? notes : transfer.notes;
@@ -2607,10 +2771,11 @@ router.put('/transfers/:id/edit-request', authenticateToken, async (req, res) =>
           delivery_minutes = $2,
           needed_by_time = $3,
           notes = $4,
+          delivery_day = $5,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $5
+      WHERE id = $6
       RETURNING *
-    `, [finalPriority, finalDeliveryMins, finalNeededBy, finalNotes, transfer.id]);
+    `, [finalPriority, finalDeliveryMins, finalNeededBy, finalNotes, finalDeliveryDay, transfer.id]);
 
     const updatedTransfer = updateTransferRes.rows[0];
 
