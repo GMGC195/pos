@@ -344,25 +344,20 @@ function printAcceptedItemsSlip(t) {
     const isRej = it.item_status === 'Rejected';
     const reqQ = parseFloat(it.requested_qty || 0);
     const accQ = it.accepted_qty !== null && it.accepted_qty !== undefined ? parseFloat(it.accepted_qty) : reqQ;
-    const isMod = isAcc && Math.abs(accQ - reqQ) > 0.0001;
 
-    let statusCol = isAcc ? 'Accepted' : (isRej ? 'REJECTED' : 'Pending');
-    let remarks = '';
-    if (isMod) remarks += `(E) Mod: ${reqQ} → ${accQ}. Reason: ${it.modification_reason || 'N/A'}`;
-    if (isRej) remarks += `Rej Reason: ${it.rejection_reason || 'N/A'}`;
+    let statusCol = isAcc ? 'Acc' : (isRej ? 'Rej' : 'Pen');
 
     return `
       <tr>
         <td style="padding: 5px 3px; font-weight: normal; border-bottom: 1px dashed #cbd5e1;">
           ${idx + 1}. ${it.dish_name}
-          ${remarks ? `<div style="font-size: 9.5px; color: ${isRej ? '#dc2626' : '#2563eb'}; margin-top: 2px;">${remarks}</div>` : ''}
         </td>
         <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
         <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${reqQ}</td>
         <td style="padding: 5px 3px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#000')}">
           ${isAcc ? accQ : (isRej ? '0' : '-')}
         </td>
-        <td style="padding: 5px 3px; text-align: right; border-bottom: 1px dashed #cbd5e1; font-size: 10px; font-weight: bold;">
+        <td style="padding: 5px 3px; text-align: right; border-bottom: 1px dashed #cbd5e1; font-size: 11px; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#d97706')}">
           ${statusCol}
         </td>
       </tr>
@@ -3354,7 +3349,7 @@ export default function InternalBranch() {
                 <th style={{ padding: '8px 12px', color: '#475569', fontWeight: 700 }}>Dish Name</th>
                 <th style={{ padding: '8px 12px', width: 65, color: '#475569', fontWeight: 700, textAlign: 'center' }}>Unit</th>
                 <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Requested</th>
-                <th style={{ padding: '8px 10px', width: 110, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Accepted / Mod</th>
+                <th style={{ padding: '8px 10px', width: 90, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Accepted</th>
                 <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Dispatched</th>
                 <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Received</th>
                 <th style={{ padding: '8px 10px', width: 75, color: '#475569', fontWeight: 700, textAlign: 'right' }}>Remaining</th>
@@ -3381,15 +3376,6 @@ export default function InternalBranch() {
                   const recQty = it.received_qty !== null && it.received_qty !== undefined ? parseFloat(it.received_qty) : 0;
                   const remQty = Math.max(0, reqQty - recQty);
                   const isQtyModified = (isAccepted && accQty !== null && Math.abs(accQty - reqQty) > 0.0001) || (it.modification_reason && it.modification_reason.trim() !== '');
-
-                  let historyList = [];
-                  if (it.quantity_history) {
-                    try {
-                      historyList = Array.isArray(it.quantity_history) ? it.quantity_history : JSON.parse(it.quantity_history);
-                    } catch (e) {
-                      historyList = [];
-                    }
-                  }
 
                   return (
                     <tr
@@ -3436,25 +3422,7 @@ export default function InternalBranch() {
                           <div>
                             <span style={{ color: isQtyModified ? '#2563eb' : '#16a34a', fontWeight: 800 }}>
                               {accQty}
-                              {isQtyModified && (
-                                <span style={{ color: '#2563eb', fontWeight: 800, marginLeft: 4 }} title="Modified Quantity">
-                                  (E)
-                                </span>
-                              )}
                             </span>
-                            {/* Chronological Modification History */}
-                            {historyList.length > 0 && (
-                              <div style={{ fontSize: 10, color: '#1e40af', marginTop: 3, textAlign: 'right', background: '#eff6ff', padding: '3px 6px', borderRadius: 4, border: '1px solid #bfdbfe' }}>
-                                <div style={{ fontWeight: 700 }}>
-                                  {historyList.map(h => `${h.prev_qty} → ${h.new_qty}`).join(' → ')}
-                                </div>
-                                {historyList.map((h, hIdx) => (
-                                  <div key={`h-${hIdx}`} style={{ marginTop: 1, fontSize: 9.5, color: '#3b82f6' }}>
-                                    {h.author || 'User'}: "{h.reason || 'Qty modified'}" {h.timestamp ? `(${new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         ) : (
                           <span style={{ color: '#94a3b8' }}>—</span>
@@ -3475,42 +3443,26 @@ export default function InternalBranch() {
                       </td>
                       <td style={{ padding: '10px 10px', textAlign: 'center' }}>
                         {isAccepted && (
-                          <span style={{ background: '#dcfce7', color: '#166534', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #bbf7d0', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <CheckCircle2 size={12} /> Accepted
+                          <span title="Accepted" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #bbf7d0', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <CheckCircle2 size={12} /> Acc
                           </span>
                         )}
                         {isRejected && (
-                          <span style={{ background: '#fee2e2', color: '#991b1b', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #fca5a5', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <XCircle size={12} /> Rejected
+                          <span title={it.rejection_reason ? `Rejected: ${it.rejection_reason}` : 'Rejected'} style={{ background: '#fee2e2', color: '#991b1b', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #fca5a5', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <XCircle size={12} /> Rej
                           </span>
                         )}
                         {isItemPending && (
-                          <span style={{ background: '#fef3c7', color: '#92400e', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #fde68a' }}>
-                            Pending
+                          <span title="Pending" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 700, padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #fde68a' }}>
+                            Pen
                           </span>
                         )}
                       </td>
                       <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#475569' }}>
-                        {it.modification_reason && (
-                          <div style={{ color: '#2563eb', fontWeight: 600 }}>
-                            Mod: "{it.modification_reason}"
-                          </div>
-                        )}
-                        {it.rejection_reason && (
-                          <div style={{ color: '#dc2626', fontWeight: 600 }}>
-                            Rej: "{it.rejection_reason}"
-                          </div>
-                        )}
-                        {it.remarks && !it.modification_reason && !it.rejection_reason && (
+                        {it.remarks ? (
                           <div style={{ color: '#64748b' }}>{it.remarks}</div>
-                        )}
-                        {!it.modification_reason && !it.rejection_reason && !it.remarks && (
+                        ) : (
                           <span style={{ color: '#cbd5e1' }}>—</span>
-                        )}
-                        {it.accepted_by_name && (
-                          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-                            By {it.accepted_by_name} {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
-                          </div>
                         )}
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
@@ -3531,7 +3483,7 @@ export default function InternalBranch() {
                                 alignItems: 'center',
                                 gap: 3
                               }}>
-                                <Lock size={11} /> Accepted - Locked
+                                <Lock size={11} /> Acc - Locked
                               </span>
                             ) : isRejected ? (
                               <span style={{
@@ -3543,7 +3495,7 @@ export default function InternalBranch() {
                                 color: '#991b1b',
                                 border: '1px solid #fca5a5'
                               }}>
-                                Rejected
+                                Rej
                               </span>
                             ) : (
                               <>
@@ -3556,7 +3508,7 @@ export default function InternalBranch() {
                                   color: '#92400e',
                                   border: '1px solid #fde68a'
                                 }}>
-                                  Pending
+                                  Pen
                                 </span>
                                 {canModify && (
                                   <button
@@ -8945,7 +8897,7 @@ export default function InternalBranch() {
                               alignItems: 'center',
                               gap: 4
                             }}>
-                              <CheckCircle2 size={12} /> Accepted ({it.accepted_qty} {it.uom})
+                              <CheckCircle2 size={12} /> Acc ({it.accepted_qty} {it.uom})
                             </span>
                           )}
                           {isRejected && (
@@ -8961,7 +8913,7 @@ export default function InternalBranch() {
                               alignItems: 'center',
                               gap: 4
                             }}>
-                              <XCircle size={12} /> Rejected
+                              <XCircle size={12} /> Rej
                             </span>
                           )}
                           {isPending && (
@@ -8977,7 +8929,7 @@ export default function InternalBranch() {
                               alignItems: 'center',
                               gap: 4
                             }}>
-                              ⏳ Pending
+                              ⏳ Pen
                             </span>
                           )}
                         </td>
