@@ -79,6 +79,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // ── Never intercept Socket.io requests or cross-origin requests ────────────
+  if (url.pathname.includes('/socket.io/') || url.search.includes('EIO=') || url.origin !== self.location.origin) {
+    return;
+  }
+
   // ── Never intercept non-GET API mutations (POST/PUT/PATCH/DELETE) ─────────
   if (event.request.method !== 'GET' && url.pathname.startsWith('/api/')) {
     return;
@@ -152,7 +157,7 @@ self.addEventListener('fetch', (event) => {
         safeCachePut(event.request, networkResponse.clone());
         return networkResponse;
       });
-    }).catch(() => fetch(event.request))
+    }).catch(() => fetch(event.request).catch(() => new Response('', { status: 408, statusText: 'Request timed out or offline' })))
   );
 });
 

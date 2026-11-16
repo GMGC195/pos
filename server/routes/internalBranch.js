@@ -22,6 +22,39 @@ async function ensureInternalBranchSchema() {
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_needed_by_time VARCHAR(50);
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'Transfer Request';
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'Normal';
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_by_user_id INTEGER;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS dispatched_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS dispatched_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS dispatched_by_user_id INTEGER;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS received_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS received_by_user_id INTEGER;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS requested_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS requested_by_user_id INTEGER;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS processing_started_by_user_id INTEGER;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS processing_started_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS ready_for_dispatch_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS ready_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS handover_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS handover_to_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_delivery_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_extended_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_extended_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_extend_reason TEXT;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS discrepancy_reason TEXT;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_status VARCHAR(30) DEFAULT 'None';
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_minutes INTEGER;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_reason TEXT;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_requested_by INTEGER;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_requested_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS pending_extension_requested_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS total_extended_minutes INTEGER DEFAULT 0;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_reviewed_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_reviewed_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_rejection_reason TEXT;
 
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(50) DEFAULT 'Pending';
@@ -51,6 +84,13 @@ async function ensureInternalBranchSchema() {
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS price NUMERIC(10,2);
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sku VARCHAR(100);
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100);
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS confirmed_qty NUMERIC(12,3);
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_change_reason TEXT;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS variance_qty NUMERIC(12,2);
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS received_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS dispatched_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS dispatched_at TIMESTAMPTZ DEFAULT NULL;
     `);
     schemaEnsured = true;
   } catch (err) {
@@ -793,7 +833,7 @@ router.get('/transfers', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching transfers:', err);
-    res.status(500).json({ error: 'Failed to fetch transfers' });
+    res.status(500).json({ error: 'Failed to fetch transfers', details: err.message });
   }
 });
 

@@ -8,6 +8,7 @@ $serverFiles = @(
   "D:\pizza-shop-employe-mangement\server\migrate_complete_system_updates.js",
   "D:\pizza-shop-employe-mangement\server\migrate_internal_branch_schema.js",
   "D:\pizza-shop-employe-mangement\server\run_hostinger_migration.js",
+  "D:\pizza-shop-employe-mangement\server\migrate_last_5_days_schema.js",
   "D:\pizza-shop-employe-mangement\server\middleware",
   "D:\pizza-shop-employe-mangement\server\routes",
   "D:\pizza-shop-employe-mangement\server\cron",
