@@ -433,6 +433,9 @@ async function runMigration() {
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150);
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
+      ALTER TABLE settings ADD COLUMN IF NOT EXISTS report_emails JSONB DEFAULT '[]'::jsonb;
 
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS confirmed_qty NUMERIC(12,3);
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_change_reason TEXT;

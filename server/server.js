@@ -920,6 +920,8 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150);
         ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150);
+        ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
 
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS confirmed_qty NUMERIC(12,3);
         ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_change_reason TEXT;
@@ -989,6 +991,23 @@ const runWithStartupRetry = async (fn, maxRetries = 3) => {
           created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_scal_shift_closing_id ON shift_closing_audit_logs(shift_closing_id);
+
+        CREATE TABLE IF NOT EXISTS salary_payable_permissions (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+          permission_type VARCHAR(20) DEFAULT 'pay_now',
+          allowed_months JSONB DEFAULT '[]'::jsonb,
+          allowed_view_months JSONB DEFAULT '[]'::jsonb,
+          allowed_pay_months JSONB DEFAULT '[]'::jsonb,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_by VARCHAR(100)
+        );
+        CREATE INDEX IF NOT EXISTS idx_spp_user_id ON salary_payable_permissions(user_id);
+        ALTER TABLE salary_payable_permissions ADD COLUMN IF NOT EXISTS allowed_view_months JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE salary_payable_permissions ADD COLUMN IF NOT EXISTS allowed_pay_months JSONB DEFAULT '[]'::jsonb;
+
+        ALTER TABLE settings ADD COLUMN IF NOT EXISTS report_emails JSONB DEFAULT '[]'::jsonb;
       `);
     } catch (tblErr) {
       console.warn('⚠️ Internal Branch / Audit tables verification warning:', tblErr.message);
@@ -1012,33 +1031,45 @@ const server = http.createServer(app);
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:3000',
-  // Production Hostinger & domain deployments
   'https://alrawaq.zivoxtech.com',
   'https://alrawaqrestaurant.zivoxtech.com',
   /https:\/\/.*\.zivoxtech\.com$/,
-  // Vercel deployments
   'https://ddnjj.vercel.app',
   'https://1-mu-pink.vercel.app',
   'https://alrawaq.vercel.app',
-  // Allow any Vercel preview URLs for this project
   /https:\/\/.*\.vercel\.app$/,
-  // Custom FRONTEND_URL from env (if set, supports comma-separated values)
   ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(url => url.trim()) : []),
 ];
 
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.some(o => typeof o === 'string' ? o === origin : (o instanceof RegExp ? o.test(origin) : false))) return true;
+  if (origin.includes('zivoxtech.com') || origin.includes('vercel.app') || origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
+  return false;
+};
+
+// Global CORS headers middleware to guarantee headers on all responses (including 500s and OPTIONS)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-developer-token, Cache-Control, Pragma, Expires, X-Requested-With, Accept, Origin');
+  }
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g. mobile apps, curl, Postman)
-    if (!origin) return callback(null, true);
-    const allowed = ALLOWED_ORIGINS.some(o =>
-      typeof o === 'string' ? o === origin : (o instanceof RegExp ? o.test(origin) : false)
-    ) || origin.includes('zivoxtech.com') || origin.includes('vercel.app') || origin.includes('localhost');
-    if (allowed) return callback(null, true);
-    callback(new Error(`CORS blocked: ${origin}`));
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma', 'Expires'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-developer-token', 'Cache-Control', 'Pragma', 'Expires', 'X-Requested-With', 'Accept', 'Origin'],
 }));
 
 // Handle preflight for all routes
@@ -1061,12 +1092,7 @@ app.use((req, res, next) => {
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const allowed = ALLOWED_ORIGINS.some(o =>
-        typeof o === 'string' ? o === origin : (o instanceof RegExp ? o.test(origin) : false)
-      ) || origin.includes('zivoxtech.com') || origin.includes('vercel.app') || origin.includes('localhost');
-      if (allowed) return callback(null, true);
-      callback(new Error(`Socket.io CORS blocked: ${origin}`));
+      callback(null, true);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']

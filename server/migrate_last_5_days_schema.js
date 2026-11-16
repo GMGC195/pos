@@ -1,25 +1,28 @@
 /**
  * ==============================================================================
- * DATABASE SCHEMA MIGRATION: LAST 5 DAYS (Nov 8 - Nov 13, 2026)
+ * DATABASE SCHEMA MIGRATION: LAST 5 DAYS (Nov 12 - Nov 17, 2026)
  * ==============================================================================
- * Covers only the database schema changes made in the last 5 days:
+ * Covers all database schema changes made in the last 5 days:
  *   1. Credit:
  *      - credit_customers.branch
  *      - credit_transactions.cashier_name
  *      - credit_transactions.payment_method
  *   2. Shift Closings:
- *      - shift_closing_audit_logs table & index
- *   3. Internal Branch Transfers & Activity Logs:
- *      - internal_branch_transfers table, columns & indexes
- *      - internal_branch_transfer_items table, columns & indexes
- *      - internal_branch_activity_logs table, columns & indexes
- *
- * NOTE FOR PAYROLL (Nov 11 - Nov 13):
- *   No database schema changes were required for the latest Payroll /
- *   Salary Pay Dashboard updates (they utilize existing tables).
+ *      - shift_closings columns: closing_card, card_difference, cash_difference, credit_sales
+ *      - shift_closing_audit_logs table & indexes
+ *   3. Settings:
+ *      - settings.report_emails (JSONB)
+ *   4. Internal Branch Transfers & Activity Logs:
+ *      - internal_branch_transfers table & all workflow columns (including accepted_by_name, accepted_at, delivery_day, etc.)
+ *      - internal_branch_transfer_items table & all item-level partial dispatch/receive columns
+ *      - internal_branch_activity_logs table & columns
+ *   5. Salary Payable Permissions:
+ *      - salary_payable_permissions table, allowed_view_months & allowed_pay_months columns
  *
  * Usage on Hostinger SSH/Terminal:
  *   node server/migrate_last_5_days_schema.js
+ * Or from server directory:
+ *   node migrate_last_5_days_schema.js
  * ==============================================================================
  */
 
@@ -32,6 +35,7 @@ const envPath = fs.existsSync(path.join(__dirname, '.env'))
   : path.join(__dirname, '../.env');
 
 require('dotenv').config({ path: envPath });
+require('dotenv').config();
 
 const { Pool } = require('pg');
 
@@ -50,7 +54,7 @@ const pool = new Pool({
 
 async function runMigration() {
   console.log('\x1b[36m%s\x1b[0m', '====================================================');
-  console.log('\x1b[36m%s\x1b[0m', '🚀 STARTING DATABASE MIGRATION (LAST 5 DAYS SCHEMA)');
+  console.log('\x1b[36m%s\x1b[0m', '🚀 STARTING COMPLETE DATABASE MIGRATION (LAST 5 DAYS)');
   console.log('\x1b[36m%s\x1b[0m', '====================================================\n');
 
   const client = await pool.connect();
@@ -61,7 +65,7 @@ async function runMigration() {
     // ──────────────────────────────────────────────────────────────────────────
     // 1. Credit Schema Updates
     // ──────────────────────────────────────────────────────────────────────────
-    console.log('📦 [1/4] Verifying Credit schema updates...');
+    console.log('📦 [1/6] Verifying Credit schema updates...');
     await client.query(`
       ALTER TABLE credit_customers ADD COLUMN IF NOT EXISTS branch VARCHAR(100);
       ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100);
@@ -72,10 +76,15 @@ async function runMigration() {
     console.log('   ✓ credit_customers & credit_transactions updated.');
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 2. Shift Closing Audit Logs
+    // 2. Shift Closings & Audit Logs
     // ──────────────────────────────────────────────────────────────────────────
-    console.log('📦 [2/4] Verifying "shift_closing_audit_logs" table...');
+    console.log('📦 [2/6] Verifying Shift Closings & Audit Logs...');
     await client.query(`
+      ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS closing_card NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS card_difference NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS cash_difference NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE shift_closings ADD COLUMN IF NOT EXISTS credit_sales DECIMAL(10,2) DEFAULT 0;
+
       CREATE TABLE IF NOT EXISTS shift_closing_audit_logs (
         id SERIAL PRIMARY KEY,
         shift_closing_id INTEGER REFERENCES shift_closings(id) ON DELETE CASCADE,
@@ -96,12 +105,21 @@ async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_scal_shift_closing_id ON shift_closing_audit_logs(shift_closing_id);
       CREATE INDEX IF NOT EXISTS idx_scal_branch ON shift_closing_audit_logs(branch);
     `);
-    console.log('   ✓ shift_closing_audit_logs table and indexes verified.');
+    console.log('   ✓ shift_closing_audit_logs and shift_closings columns verified.');
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 3. Internal Branch Transfer Tables & Columns
+    // 3. Settings Table Updates
     // ──────────────────────────────────────────────────────────────────────────
-    console.log('📦 [3/4] Verifying "internal_branch_transfers" & items...');
+    console.log('📦 [3/6] Verifying Settings schema updates...');
+    await client.query(`
+      ALTER TABLE settings ADD COLUMN IF NOT EXISTS report_emails JSONB DEFAULT '[]'::jsonb;
+    `);
+    console.log('   ✓ settings.report_emails verified.');
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 4. Internal Branch Transfers & Transfer Items
+    // ──────────────────────────────────────────────────────────────────────────
+    console.log('📦 [4/6] Verifying Internal Branch Transfers & Transfer Items...');
     await client.query(`
       CREATE TABLE IF NOT EXISTS internal_branch_transfers (
         id SERIAL PRIMARY KEY,
@@ -174,6 +192,12 @@ async function runMigration() {
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS extension_rejection_reason TEXT;
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'Transfer Request';
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'Normal';
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS delivery_day VARCHAR(50) DEFAULT 'Today';
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
 
       CREATE INDEX IF NOT EXISTS idx_ibt_priority ON internal_branch_transfers(priority);
       CREATE INDEX IF NOT EXISTS idx_ibt_request_type ON internal_branch_transfers(request_type);
@@ -185,13 +209,37 @@ async function runMigration() {
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS price NUMERIC(10,2);
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sku VARCHAR(100);
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100);
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS quantity_history JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(50) DEFAULT 'Pending';
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_qty NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS modification_reason TEXT DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal';
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS sent_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS received_qty NUMERIC(12,2) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS pending_receive_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS pending_dispatch_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS rejected_receive_qty NUMERIC(12,2) DEFAULT 0;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejection_reason TEXT DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejected_by_name VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS receive_rejected_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS is_additional BOOLEAN DEFAULT FALSE;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS remarks TEXT;
     `);
     console.log('   ✓ internal_branch_transfers & items verified.');
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 4. Internal Branch Activity Logs
+    // 5. Internal Branch Activity Logs
     // ──────────────────────────────────────────────────────────────────────────
-    console.log('📦 [4/4] Verifying "internal_branch_activity_logs" table...');
+    console.log('📦 [5/6] Verifying "internal_branch_activity_logs" table...');
     await client.query(`
       CREATE TABLE IF NOT EXISTS internal_branch_activity_logs (
         id SERIAL PRIMARY KEY,
@@ -214,10 +262,54 @@ async function runMigration() {
     `);
     console.log('   ✓ internal_branch_activity_logs verified.');
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // 6. Salary Payable Permissions
+    // ──────────────────────────────────────────────────────────────────────────
+    console.log('📦 [6/6] Verifying "salary_payable_permissions" table & columns...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS salary_payable_permissions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+        permission_type VARCHAR(20) DEFAULT 'pay_now',
+        allowed_months JSONB DEFAULT '[]'::jsonb,
+        allowed_view_months JSONB DEFAULT '[]'::jsonb,
+        allowed_pay_months JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_by VARCHAR(100)
+      );
+      CREATE INDEX IF NOT EXISTS idx_spp_user_id ON salary_payable_permissions(user_id);
+
+      ALTER TABLE salary_payable_permissions ADD COLUMN IF NOT EXISTS allowed_view_months JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE salary_payable_permissions ADD COLUMN IF NOT EXISTS allowed_pay_months JSONB DEFAULT '[]'::jsonb;
+
+      UPDATE salary_payable_permissions 
+      SET allowed_view_months = allowed_months 
+      WHERE (allowed_view_months IS NULL OR allowed_view_months = '[]'::jsonb) 
+        AND allowed_months IS NOT NULL AND allowed_months != '[]'::jsonb;
+
+      UPDATE salary_payable_permissions 
+      SET allowed_pay_months = allowed_months 
+      WHERE (allowed_pay_months IS NULL OR allowed_pay_months = '[]'::jsonb) 
+        AND permission_type = 'pay_now' 
+        AND allowed_months IS NOT NULL AND allowed_months != '[]'::jsonb;
+    `);
+
+    // Ensure default rows for salary pay operators
+    const usersRes = await client.query("SELECT id, username FROM users WHERE LOWER(role) = 'salary pay operator'");
+    for (const u of usersRes.rows) {
+      await client.query(`
+        INSERT INTO salary_payable_permissions (user_id, permission_type, allowed_months, allowed_view_months, allowed_pay_months, updated_by)
+        VALUES ($1, 'pay_now', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 'migration_default')
+        ON CONFLICT (user_id) DO NOTHING;
+      `, [u.id]);
+    }
+    console.log('   ✓ salary_payable_permissions verified.');
+
     await client.query('COMMIT');
 
     console.log('\n\x1b[32m%s\x1b[0m', '====================================================');
-    console.log('\x1b[32m%s\x1b[0m', '✅ SUCCESS: MIGRATION COMPLETED SAFELY (0 ERRORS)!');
+    console.log('\x1b[32m%s\x1b[0m', '✅ SUCCESS: LAST 5 DAYS MIGRATION COMPLETED SAFELY!');
     console.log('\x1b[32m%s\x1b[0m', '====================================================');
     process.exit(0);
   } catch (error) {
@@ -231,4 +323,3 @@ async function runMigration() {
 }
 
 runMigration();
-
