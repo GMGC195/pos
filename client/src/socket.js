@@ -6,16 +6,18 @@ const isVercelServerless = typeof URL === 'string' && URL.includes('vercel.app')
 export const socket = io(URL, {
   autoConnect: !isVercelServerless,
   reconnection: !isVercelServerless,
-  reconnectionAttempts: 3,
+  reconnectionAttempts: 1,
   reconnectionDelay: 10000,
   transports: ['websocket', 'polling'],
   withCredentials: true,
   upgrade: true,
-  timeout: 10000,
+  timeout: 8000,
 });
 
-// Suppress unhandled handshake warning and prevent breaking UI if backend/proxy does not support websocket
+// Suppress unhandled handshake warning and stop reconnect loops if Nginx proxy is not yet configured
 socket.on('connect_error', () => {
-  // Silent fallback - React Query background refetching (5 min) keeps data fresh even if socket is disconnected
+  if (socket.io) {
+    socket.io.opts.reconnection = false;
+  }
 });
 
