@@ -52,7 +52,9 @@ import {
   Timer,
   Lock,
   CheckCheck,
-  Save
+  Save,
+  SlidersHorizontal,
+  Loader2
 } from 'lucide-react';
 
 const STANDARD_BRANCH_NAMES = ['branch 1', 'branch 2', 'branch 3', 'central kitchen'];
@@ -1565,6 +1567,7 @@ export default function InternalBranch() {
   const [receiveNotes, setReceiveNotes] = useState('');
   const [discrepancyReason, setDiscrepancyReason] = useState('');
   const [receiving, setReceiving] = useState(false);
+  const [receivingItemIds, setReceivingItemIds] = useState({});
 
   // 5. Transfer Detail with Activity Timeline
   const [detailModalTransfer, setDetailModalTransfer] = useState(null);
@@ -3117,8 +3120,8 @@ export default function InternalBranch() {
     }
   };
 
-  // 6. Open Receive Modal
-  const openReceiveModal = (t) => {
+  // 6. Open Receive Modal (Supports opening for entire transfer or targeting a single item)
+  const openReceiveModal = (t, targetItemId = null) => {
     if (receiving || isReceivingRef.current) return;
     setReceiveModalTransfer(t);
     setDiscrepancyReason('');
@@ -3129,9 +3132,11 @@ export default function InternalBranch() {
     (t.items || []).forEach(item => {
       // Only items that were dispatched (sent_qty > 0 or dispatched_qty > 0) are eligible to be received
       const sentAmount = parseFloat(item.sent_qty !== null && item.sent_qty !== undefined ? item.sent_qty : (item.dispatched_qty ?? 0));
-      const isEligible = sentAmount > 0;
-      initSelected[item.id] = isEligible;
-      initQtys[item.id] = item.received_qty !== null && item.received_qty !== undefined
+      const isAlreadyReceived = item.item_status === 'Received' || item.item_status === 'Fully Received';
+      const isEligible = sentAmount > 0 && !isAlreadyReceived;
+
+      initSelected[item.id] = targetItemId ? (item.id === targetItemId) : isEligible;
+      initQtys[item.id] = item.received_qty !== null && item.received_qty !== undefined && parseFloat(item.received_qty) > 0
         ? item.received_qty
         : (sentAmount > 0 ? sentAmount : (item.confirmed_qty ?? item.requested_qty));
       initRemarks[item.id] = item.remarks || '';
@@ -3145,27 +3150,26 @@ export default function InternalBranch() {
   const handleConfirmReceive = async (autoPrint = false) => {
     if (!receiveModalTransfer || receiving || isReceivingRef.current) return;
 
-    const itemsPayload = (receiveModalTransfer.items || []).map(item => {
-      const isSelected = receiveSelectedItems[item.id] !== undefined ? receiveSelectedItems[item.id] : true;
-      return {
+    // Only send items that are explicitly selected for receiving in this action
+    const itemsPayload = (receiveModalTransfer.items || [])
+      .filter(item => receiveSelectedItems[item.id] === true)
+      .map(item => ({
         id: item.id,
-        is_received: isSelected,
-        mark_pending: !isSelected,
-        received_qty: isSelected ? parseFloat(receiveItemQuantities[item.id] || 0) : 0,
+        is_received: true,
+        mark_pending: false,
+        received_qty: parseFloat(receiveItemQuantities[item.id] !== undefined ? receiveItemQuantities[item.id] : 0),
         remarks: receiveItemRemarks[item.id] || ''
-      };
-    });
+      }));
 
-    const hasAnyReceived = itemsPayload.some(it => it.is_received && it.received_qty > 0);
-    if (!hasAnyReceived) {
+    if (itemsPayload.length === 0) {
       return toast.error('Please select at least one dispatched item with received quantity > 0 to confirm receiving.');
     }
 
     // Check if any discrepancy exists between sent and received for selected items
     let hasVariance = false;
     (receiveModalTransfer.items || []).forEach(it => {
-      if (receiveSelectedItems[it.id] === false) return; // Unchecked items will be received later
-      const sentQ = parseFloat(it.sent_qty !== null ? it.sent_qty : (it.confirmed_qty ?? it.requested_qty));
+      if (receiveSelectedItems[it.id] !== true) return; // Unchecked items will be received later
+      const sentQ = parseFloat(it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : (it.dispatched_qty ?? (it.confirmed_qty ?? it.requested_qty)));
       const recQ = parseFloat(receiveItemQuantities[it.id] ?? sentQ);
       if (Math.abs(recQ - sentQ) > 0.001) {
         hasVariance = true;
@@ -3190,8 +3194,12 @@ export default function InternalBranch() {
       localActionTransferIdsRef.current.set(`received_${receiveModalTransfer.transfer_id}`, Date.now());
       localActionTransferIdsRef.current.set(`received_${receiveModalTransfer.id}`, Date.now());
 
-      const statusRes = res.data?.status || (hasVariance ? 'Partially Received' : 'Fully Received');
+      const statusRes = res.data?.status || (hasVariance ? 'Partially Received' : 'Received');
       toast.success(`Transfer ${receiveModalTransfer.transfer_id} verified: Status is ${statusRes}!`);
+
+      if (res.data) {
+        updateTransferInCache(res.data);
+      }
 
       if (autoPrint) {
         const printPayload = {
@@ -3201,7 +3209,7 @@ export default function InternalBranch() {
           received_at: res.data?.received_at || new Date().toISOString(),
           received_by_name: res.data?.received_by_name || user?.name || user?.username || 'Staff',
           items: res.data?.items || (receiveModalTransfer.items || []).map(it => {
-            const isSelected = receiveSelectedItems[it.id] !== undefined ? receiveSelectedItems[it.id] : true;
+            const isSelected = receiveSelectedItems[it.id] === true;
             const recQ = isSelected ? parseFloat(receiveItemQuantities[it.id] || 0) : (it.received_qty || 0);
             return {
               ...it,
@@ -3223,6 +3231,90 @@ export default function InternalBranch() {
     } finally {
       setReceiving(false);
       isReceivingRef.current = false;
+    }
+  };
+
+  // Individual item-level receiving (independent receiving per dispatched item)
+  const handleItemReceive = async (t, item, autoPrint = false) => {
+    if (!t || !item || receivingItemIds[item.id]) return;
+
+    const baseDispatched = parseFloat(item.dispatched_qty !== null && item.dispatched_qty !== undefined ? item.dispatched_qty : (item.sent_qty || 0));
+    if (baseDispatched <= 0) {
+      return toast.error(`Item "${item.dish_name}" has not been dispatched yet.`);
+    }
+
+    setReceivingItemIds(prev => ({ ...prev, [item.id]: true }));
+
+    const receiverName = user?.name || user?.username || 'Staff Receiver';
+    const nowIso = new Date().toISOString();
+
+    // Check if other dispatched items exist and are not yet received
+    const allDispatched = (t.items || []).filter(it => {
+      const dQ = parseFloat(it.dispatched_qty !== null && it.dispatched_qty !== undefined ? it.dispatched_qty : (it.sent_qty || 0));
+      return dQ > 0;
+    });
+    const allOtherDispatchedReceived = allDispatched.every(it => 
+      it.id === item.id || it.item_status === 'Received' || it.item_status === 'Fully Received' || it.item_status === 'Rejected'
+    );
+    const optimisticStatus = allOtherDispatchedReceived ? 'Received' : 'Partially Received';
+
+    // Optimistically update TanStack cache in place
+    updateTransferItemInCache(t.id, item.id, {
+      item_status: 'Received',
+      received_qty: baseDispatched,
+      pending_receive_qty: 0,
+      variance_qty: 0,
+      received_by_name: receiverName,
+      received_at: nowIso
+    }, {
+      status: optimisticStatus,
+      received_at: nowIso,
+      received_by_name: receiverName
+    });
+
+    try {
+      const res = await axios.put(`/api/internal-branch/transfers/${t.id}/items/${item.id}/receive`, {
+        received_qty: baseDispatched
+      });
+
+      localActionTransferIdsRef.current.set(`received_${t.transfer_id}`, Date.now());
+      localActionTransferIdsRef.current.set(`received_${t.id}`, Date.now());
+
+      const updated = res.data;
+      updateTransferInCache(updated);
+      toast.success(`"${item.dish_name}" (${baseDispatched} ${item.uom}) marked as Received!`);
+
+      if (autoPrint) {
+        const printPayload = {
+          ...t,
+          ...(updated || {}),
+          status: updated?.status || optimisticStatus,
+          received_at: updated?.received_at || nowIso,
+          received_by_name: updated?.received_by_name || receiverName,
+          items: updated?.items || (t.items || []).map(it => it.id === item.id ? {
+            ...it,
+            item_status: 'Received',
+            received_qty: baseDispatched,
+            received_by_name: receiverName,
+            received_at: nowIso
+          } : it)
+        };
+        printTransferSlip(printPayload);
+      }
+
+      fetchStats();
+      fetchTransfers();
+    } catch (err) {
+      console.error('Error receiving item:', err);
+      const msg = err.response?.data?.error || err.message || 'Failed to receive item.';
+      toast.error(msg);
+      fetchTransfers();
+    } finally {
+      setReceivingItemIds(prev => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
     }
   };
 
@@ -4507,33 +4599,81 @@ export default function InternalBranch() {
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                         {isReceival ? (
-                          // RECEIVALS VIEW: Show item receiving status / Receive button
+                          // RECEIVALS VIEW: Show item receiving status / Receive buttons
                           dispQty > 0 ? (
-                            recQty >= dispQty ? (
+                            (recQty >= dispQty || it.item_status === 'Received' || it.item_status === 'Fully Received') ? (
                               <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                                 <CheckCheck size={12} /> Received
                               </span>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => openReceiveModal(t)}
-                                style={{
-                                  background: '#16a34a',
-                                  color: '#fff',
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  padding: '4px 10px',
-                                  borderRadius: 5,
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 4
-                                }}
-                                title="Open Receiving modal to inspect and receive this item"
-                              >
-                                <PackageCheck size={12} /> Receive
-                              </button>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleItemReceive(t, it, false)}
+                                  disabled={Boolean(receivingItemIds[it.id])}
+                                  style={{
+                                    background: '#16a34a',
+                                    color: '#fff',
+                                    fontSize: 10.5,
+                                    fontWeight: 700,
+                                    padding: '3px 8px',
+                                    borderRadius: 4,
+                                    border: 'none',
+                                    cursor: receivingItemIds[it.id] ? 'not-allowed' : 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    whiteSpace: 'nowrap',
+                                    boxShadow: '0 1px 2px rgba(22, 163, 74, 0.25)'
+                                  }}
+                                  title="Receive & Accept this item without printing"
+                                >
+                                  {receivingItemIds[it.id] ? <Loader2 size={11} className="spin" /> : <CheckCheck size={11} />} Receive
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleItemReceive(t, it, true)}
+                                  disabled={Boolean(receivingItemIds[it.id])}
+                                  style={{
+                                    background: '#0284c7',
+                                    color: '#fff',
+                                    fontSize: 10.5,
+                                    fontWeight: 700,
+                                    padding: '3px 8px',
+                                    borderRadius: 4,
+                                    border: 'none',
+                                    cursor: receivingItemIds[it.id] ? 'not-allowed' : 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    whiteSpace: 'nowrap',
+                                    boxShadow: '0 1px 2px rgba(2, 132, 199, 0.25)'
+                                  }}
+                                  title="Receive and print receiving voucher for this item"
+                                >
+                                  <Printer size={11} /> Rec & Print
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openReceiveModal(t, it.id)}
+                                  style={{
+                                    background: '#fff',
+                                    color: '#475569',
+                                    border: '1px solid #cbd5e1',
+                                    fontSize: 10.5,
+                                    fontWeight: 600,
+                                    padding: '3px 6px',
+                                    borderRadius: 4,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 2
+                                  }}
+                                  title="Open inspection modal to enter custom received quantity or discrepancy"
+                                >
+                                  <SlidersHorizontal size={10} />
+                                </button>
+                              </div>
                             )
                           ) : (
                             <span style={{ fontSize: 11, color: '#94a3b8' }}>Not Dispatched</span>
@@ -6326,6 +6466,11 @@ export default function InternalBranch() {
                   if (!t || !t.id || seenIds.has(t.id)) return false;
                   seenIds.add(t.id);
                   return true;
+                }).sort((a, b) => {
+                  const timeA = new Date(a.created_at || a.request_date).getTime() || 0;
+                  const timeB = new Date(b.created_at || b.request_date).getTime() || 0;
+                  if (timeB !== timeA) return timeB - timeA;
+                  return (b.id || 0) - (a.id || 0);
                 });
                 return uniqueSent.map(t => renderTransferCardRow(t, false));
               })()}
@@ -6389,6 +6534,11 @@ export default function InternalBranch() {
                   if (!t || !t.id || seenIds.has(t.id)) return false;
                   seenIds.add(t.id);
                   return true;
+                }).sort((a, b) => {
+                  const timeA = new Date(a.created_at || a.request_date).getTime() || 0;
+                  const timeB = new Date(b.created_at || b.request_date).getTime() || 0;
+                  if (timeB !== timeA) return timeB - timeA;
+                  return (b.id || 0) - (a.id || 0);
                 });
                 return uniqueIncoming.map(t => renderTransferCardRow(t, true));
               })()}
@@ -6452,6 +6602,11 @@ export default function InternalBranch() {
                   if (!t || !t.id || seenIds.has(t.id)) return false;
                   seenIds.add(t.id);
                   return true;
+                }).sort((a, b) => {
+                  const timeA = new Date(a.dispatched_at || a.updated_at || a.created_at || a.request_date).getTime() || 0;
+                  const timeB = new Date(b.dispatched_at || b.updated_at || b.created_at || b.request_date).getTime() || 0;
+                  if (timeB !== timeA) return timeB - timeA;
+                  return (b.id || 0) - (a.id || 0);
                 });
                 return uniqueReceivals.map(t => renderTransferCardRow(t, false, true));
               })()}
@@ -6704,7 +6859,12 @@ export default function InternalBranch() {
                   </tr>
                 </thead>
                 <tbody>
-                  {transfers.map(t => {
+                  {([...transfers].sort((a, b) => {
+                    const timeA = new Date(a.updated_at || a.created_at || a.request_date).getTime() || 0;
+                    const timeB = new Date(b.updated_at || b.created_at || b.request_date).getTime() || 0;
+                    if (timeB !== timeA) return timeB - timeA;
+                    return (b.id || 0) - (a.id || 0);
+                  })).map(t => {
                     const delay = calculateDelay(t.needed_by_time, t.received_at, t.request_date);
                     const totalReq = (t.items || []).reduce((sum, it) => sum + parseFloat(it.requested_qty || 0), 0);
                     const totalSent = (t.items || []).reduce((sum, it) => sum + parseFloat(it.sent_qty !== null ? it.sent_qty : (it.confirmed_qty ?? it.requested_qty)), 0);

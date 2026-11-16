@@ -511,10 +511,10 @@ router.get('/transfers', authenticateToken, async (req, res) => {
                 'accepted_at', COALESCE(ti.accepted_at, t.updated_at),
                 'rejected_by_name', ti.rejected_by_name,
                 'rejected_at', ti.rejected_at,
-                'dispatched_by_name', t.dispatched_by_name,
-                'dispatched_at', t.dispatched_at,
-                'received_by_name', COALESCE(ti.receive_rejected_by_name, t.received_by_name),
-                'received_at', t.received_at,
+                'dispatched_by_name', COALESCE(ti.dispatched_by_name, t.dispatched_by_name),
+                'dispatched_at', COALESCE(ti.dispatched_at, t.dispatched_at),
+                'received_by_name', COALESCE(ti.received_by_name, ti.receive_rejected_by_name, t.received_by_name),
+                'received_at', COALESCE(ti.received_at, t.received_at),
                 'needed_by_time', ti.needed_by_time,
                 'needed_by_date', ti.needed_by_date,
                 'priority', COALESCE(ti.priority, 'Normal'),
@@ -780,9 +780,20 @@ router.get('/transfers', authenticateToken, async (req, res) => {
       )`;
     }
 
+    let orderByClause = 'ORDER BY COALESCE(t.created_at, t.request_date) DESC, t.id DESC';
+    if (tab === 'pending_receivals' || tab === 'receivals') {
+      orderByClause = 'ORDER BY t.dispatched_at DESC NULLS LAST, COALESCE(t.updated_at, t.created_at) DESC, t.id DESC';
+    } else if (tab === 'logs') {
+      orderByClause = 'ORDER BY COALESCE(t.updated_at, t.created_at, t.request_date) DESC, t.id DESC';
+    } else if (tab === 'incoming') {
+      orderByClause = 'ORDER BY COALESCE(t.created_at, t.request_date) DESC, t.id DESC';
+    } else if (tab === 'sent_requests' || tab === 'sent') {
+      orderByClause = 'ORDER BY COALESCE(t.created_at, t.request_date) DESC, t.id DESC';
+    }
+
     query += `
       GROUP BY t.id
-      ORDER BY COALESCE(t.created_at, t.request_date) DESC, t.id DESC
+      ${orderByClause}
       LIMIT 300
     `;
 
@@ -2532,9 +2543,11 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
                 sent_qty = $2,
                 pending_dispatch_qty = $3,
                 pending_receive_qty = $2,
-                remarks = COALESCE($4, remarks)
-            WHERE id = $5 AND transfer_id = $6
-          `, [status, dispatchQty, pendingDisp, item.remarks || null, item.id, transfer.id]);
+                dispatched_by_name = $4,
+                dispatched_at = CURRENT_TIMESTAMP,
+                remarks = COALESCE($5, remarks)
+            WHERE id = $6 AND transfer_id = $7
+          `, [status, dispatchQty, pendingDisp, dispatcherName, item.remarks || null, item.id, transfer.id]);
         }
       }
     }
@@ -2547,9 +2560,9 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
           totalDispatchedCount++;
           await client.query(`
             INSERT INTO internal_branch_transfer_items (
-              transfer_id, item_id, dish_name, uom, requested_qty, accepted_qty, dispatched_qty, sent_qty, pending_receive_qty, item_status, is_additional, price, remarks, created_at
+              transfer_id, item_id, dish_name, uom, requested_qty, accepted_qty, dispatched_qty, sent_qty, pending_receive_qty, item_status, is_additional, price, remarks, dispatched_by_name, dispatched_at, created_at
             ) VALUES (
-              $1, $2, $3, $4, $5, $5, $5, $5, $5, 'Dispatched', TRUE, $6, $7, CURRENT_TIMESTAMP
+              $1, $2, $3, $4, $5, $5, $5, $5, $5, 'Dispatched', TRUE, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             )
           `, [
             transfer.id,
@@ -2558,7 +2571,8 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
             extra.uom || 'Piece',
             extraQty,
             extra.price ? parseFloat(extra.price) : null,
-            extra.remarks || 'Additional item added during dispatch'
+            extra.remarks || 'Additional item added during dispatch',
+            dispatcherName
           ]);
         }
       }
@@ -2794,9 +2808,11 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
               received_qty = $2,
               variance_qty = $3,
               pending_receive_qty = $4,
-              remarks = COALESCE($5, remarks)
-          WHERE id = $6 AND transfer_id = $7
-        `, [itemStatus, recQty, variance, pendingQty, item.remarks || null, item.id, transfer.id]);
+              received_by_name = $5,
+              received_at = CURRENT_TIMESTAMP,
+              remarks = COALESCE($6, remarks)
+          WHERE id = $7 AND transfer_id = $8
+        `, [itemStatus, recQty, variance, pendingQty, receiverName, item.remarks || null, item.id, transfer.id]);
       }
     }
 
@@ -2805,15 +2821,20 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Discrepancy or rejection detected. A clear reason for the variance is mandatory.' });
     }
 
-    // Determine final transfer status by checking ALL items in the transfer
+    // Determine final transfer status by checking ALL dispatched items in the transfer
     const allTransferItemsRes = await client.query(`
-      SELECT id, item_status, requested_qty, accepted_qty, dispatched_qty, received_qty 
+      SELECT id, item_status, requested_qty, accepted_qty, dispatched_qty, sent_qty, received_qty 
       FROM internal_branch_transfer_items 
       WHERE transfer_id = $1
     `, [transfer.id]);
     const allTransferItems = allTransferItemsRes.rows;
 
-    const remainingUnfinishedItems = allTransferItems.filter(it => 
+    const dispatchedItemsList = allTransferItems.filter(it => {
+      const dQ = parseFloat(it.dispatched_qty !== null && it.dispatched_qty !== undefined ? it.dispatched_qty : (it.sent_qty || 0));
+      return dQ > 0;
+    });
+
+    const unreceivedDispatchedItems = dispatchedItemsList.filter(it => 
       !['Received', 'Fully Received', 'Rejected'].includes(it.item_status)
     );
     const allItemsRejected = allTransferItems.every(it => it.item_status === 'Rejected');
@@ -2821,7 +2842,7 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     let finalTransferStatus = 'Received';
     if (allItemsRejected) {
       finalTransferStatus = 'Rejected';
-    } else if (remainingUnfinishedItems.length > 0 || anyPending || !allReceived || hasDiscrepancy) {
+    } else if (unreceivedDispatchedItems.length > 0 || anyPending || !allReceived || hasDiscrepancy) {
       finalTransferStatus = 'Partially Received';
     } else {
       finalTransferStatus = 'Received';
@@ -2835,9 +2856,9 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       UPDATE internal_branch_transfers
       SET status = $1,
           received_at = CURRENT_TIMESTAMP,
-          received_by_user_id = $2,
-          received_by_name = $3,
-          discrepancy_reason = $4,
+          received_by_user_id = COALESCE(received_by_user_id, $2),
+          received_by_name = COALESCE(received_by_name, $3),
+          discrepancy_reason = COALESCE($4, discrepancy_reason),
           notes = $5,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $6
@@ -2880,7 +2901,19 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     await client.query('COMMIT');
 
     const updatedItems = await pool.query(`
-      SELECT * FROM internal_branch_transfer_items WHERE transfer_id = $1 ORDER BY id ASC
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price,
+        COALESCE(ti.received_by_name, t.received_by_name) as received_by_name,
+        COALESCE(ti.received_at, t.received_at) as received_at,
+        COALESCE(ti.dispatched_by_name, t.dispatched_by_name) as dispatched_by_name,
+        COALESCE(ti.dispatched_at, t.dispatched_at) as dispatched_at
+      FROM internal_branch_transfer_items ti
+      JOIN internal_branch_transfers t ON t.id = ti.transfer_id
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
     `, [transfer.id]);
 
     const payload = {
@@ -2898,6 +2931,194 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error receiving transfer:', err);
     res.status(500).json({ error: err.message || 'Failed to receive transfer' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/items/:itemId/receive - Receive individual dispatched item independently
+router.put('/transfers/:id/items/:itemId/receive', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, itemId } = req.params;
+    const { received_qty, discrepancy_reason, remarks, is_rejected, rejection_reason } = req.body;
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = tRes.rows[0];
+    const superUser = isSuperUser(req.user);
+    const userBranch = req.user.branch;
+
+    if (!superUser && userBranch && userBranch !== 'All' && userBranch !== transfer.from_branch) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: `Unauthorized. Only staff from requesting branch "${transfer.from_branch}" can receive this item.` });
+    }
+
+    const itemRes = await client.query(`
+      SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE
+    `, [itemId, transfer.id]);
+
+    if (itemRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer item not found' });
+    }
+
+    const currentItem = itemRes.rows[0];
+    const baseDispatched = parseFloat(currentItem.dispatched_qty !== null && currentItem.dispatched_qty !== undefined ? currentItem.dispatched_qty : (currentItem.sent_qty || 0));
+
+    if (baseDispatched <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Item "${currentItem.dish_name}" has not been dispatched yet and cannot be received.` });
+    }
+
+    const receiverName = req.user.name || req.user.username || 'Staff Receiver';
+    let itemStatus = 'Received';
+    let finalRecQty = baseDispatched;
+    let hasVariance = false;
+    let variance = 0;
+
+    if (is_rejected) {
+      itemStatus = 'Rejected';
+      finalRecQty = 0;
+      const rejReason = rejection_reason?.trim() || discrepancy_reason?.trim() || 'Item rejected at receiving';
+      await client.query(`
+        UPDATE internal_branch_transfer_items
+        SET item_status = 'Rejected',
+            rejected_receive_qty = $1,
+            received_qty = 0,
+            pending_receive_qty = 0,
+            variance_qty = -$1,
+            receive_rejection_reason = $2,
+            receive_rejected_by_name = $3,
+            receive_rejected_at = CURRENT_TIMESTAMP,
+            remarks = COALESCE($4, remarks)
+        WHERE id = $5 AND transfer_id = $6
+      `, [baseDispatched, rejReason, receiverName, remarks || null, currentItem.id, transfer.id]);
+    } else {
+      finalRecQty = received_qty !== undefined && received_qty !== null ? parseFloat(received_qty) : baseDispatched;
+      if (isNaN(finalRecQty) || finalRecQty < 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Received quantity must be a non-negative number.' });
+      }
+
+      variance = finalRecQty - baseDispatched;
+      hasVariance = Math.abs(variance) > 0.0001;
+
+      if (hasVariance && (!discrepancy_reason || !discrepancy_reason.trim())) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Discrepancy detected for "${currentItem.dish_name}". A clear discrepancy reason is required.` });
+      }
+
+      const isFullyRec = finalRecQty >= baseDispatched;
+      itemStatus = isFullyRec ? 'Received' : (finalRecQty > 0 ? 'Partially Received' : 'Pending Receive');
+      const pendingQty = Math.max(0, baseDispatched - finalRecQty);
+
+      await client.query(`
+        UPDATE internal_branch_transfer_items
+        SET item_status = $1,
+            received_qty = $2,
+            pending_receive_qty = $3,
+            variance_qty = $4,
+            received_by_name = $5,
+            received_at = CURRENT_TIMESTAMP,
+            remarks = COALESCE($6, remarks)
+        WHERE id = $7 AND transfer_id = $8
+      `, [itemStatus, finalRecQty, pendingQty, variance, receiverName, remarks || null, currentItem.id, transfer.id]);
+    }
+
+    // Recalculate parent transfer status based on all dispatched items
+    const allItemsRes = await client.query(`
+      SELECT id, item_status, requested_qty, accepted_qty, sent_qty, dispatched_qty, received_qty 
+      FROM internal_branch_transfer_items 
+      WHERE transfer_id = $1
+    `, [transfer.id]);
+    const allItems = allItemsRes.rows;
+
+    const dispatchedItemsList = allItems.filter(it => {
+      const dQ = parseFloat(it.dispatched_qty !== null && it.dispatched_qty !== undefined ? it.dispatched_qty : (it.sent_qty || 0));
+      return dQ > 0;
+    });
+
+    const unreceivedDispatched = dispatchedItemsList.filter(it => 
+      !['Received', 'Fully Received', 'Rejected'].includes(it.item_status)
+    );
+    const allRejected = allItems.every(it => it.item_status === 'Rejected');
+
+    let newTransferStatus = 'Received';
+    if (allRejected) {
+      newTransferStatus = 'Rejected';
+    } else if (unreceivedDispatched.length > 0) {
+      newTransferStatus = 'Partially Received';
+    } else {
+      newTransferStatus = 'Received';
+    }
+
+    const updateRes = await client.query(`
+      UPDATE internal_branch_transfers
+      SET status = $1,
+          received_at = CURRENT_TIMESTAMP,
+          received_by_user_id = COALESCE(received_by_user_id, $2),
+          received_by_name = COALESCE(received_by_name, $3),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+      RETURNING *
+    `, [newTransferStatus, req.user.id || null, receiverName, transfer.id]);
+
+    const updatedTransfer = updateRes.rows[0];
+
+    await logTransferActivity(client, {
+      transferId: transfer.id,
+      action: 'ITEM_RECEIVED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.status,
+      newValue: newTransferStatus,
+      reason: discrepancy_reason || null,
+      details: `Item "${currentItem.dish_name}" received (${finalRecQty} ${currentItem.uom}) by ${receiverName}. Overall Transfer Status: ${newTransferStatus}.`,
+      metadata: { itemId: currentItem.id, dish_name: currentItem.dish_name, received_qty: finalRecQty, status: newTransferStatus }
+    });
+
+    await client.query('COMMIT');
+
+    const updatedItems = await pool.query(`
+      SELECT ti.*,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.image_url, i.image_url) as image_url,
+        COALESCE(ti.price, i.price) as price,
+        COALESCE(ti.received_by_name, t.received_by_name) as received_by_name,
+        COALESCE(ti.received_at, t.received_at) as received_at,
+        COALESCE(ti.dispatched_by_name, t.dispatched_by_name) as dispatched_by_name,
+        COALESCE(ti.dispatched_at, t.dispatched_at) as dispatched_at
+      FROM internal_branch_transfer_items ti
+      JOIN internal_branch_transfers t ON t.id = ti.transfer_id
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1
+      ORDER BY ti.id ASC
+    `, [transfer.id]);
+
+    const payload = {
+      ...updatedTransfer,
+      items: updatedItems.rows
+    };
+
+    if (req.io) {
+      req.io.emit('internal_transfer_received', payload);
+      req.io.emit('internal_transfer_updated', payload);
+    }
+
+    res.json(payload);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error receiving individual item:', err);
+    res.status(500).json({ error: err.message || 'Failed to receive item' });
   } finally {
     client.release();
   }
