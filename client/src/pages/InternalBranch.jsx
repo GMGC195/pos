@@ -1025,7 +1025,7 @@ function PriorityBadge({ priority }) {
 }
 
 // Clean Searchable Dish Dropdown with Smart Popularity Ranking, Image Thumbnail & Ultra-High Z-Index
-function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSelect, onOpenChange }) {
+function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSelect, onOpenChange, excludedDishIds = [], excludedDishNames = [] }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState(value || '');
   const containerRef = useRef(null);
@@ -1053,6 +1053,14 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
 
   const safeDishes = Array.isArray(dishes) ? dishes : [];
 
+  const excludedIdSet = useMemo(() => {
+    return new Set((excludedDishIds || []).filter(Boolean).map(id => String(id)));
+  }, [excludedDishIds]);
+
+  const excludedNameSet = useMemo(() => {
+    return new Set((excludedDishNames || []).filter(Boolean).map(n => String(n).trim().toLowerCase()));
+  }, [excludedDishNames]);
+
   const filteredDishes = useMemo(() => {
     const term = (searchTerm || '').trim().toLowerCase();
 
@@ -1071,15 +1079,18 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
       };
     }).filter(Boolean);
 
-    // Filter by query
-    const matching = !term
-      ? enriched
-      : enriched.filter(d => {
-          const name = String(d.name || d.dish_name || '').toLowerCase();
-          const sku = String(d.sku || d.short_code || '').toLowerCase();
-          const barcode = String(d.barcode || '').toLowerCase();
-          return name.includes(term) || (sku && sku.includes(term)) || (barcode && barcode.includes(term));
-        });
+    // Filter by query and exclude already added dishes from selectable list
+    const matching = enriched.filter(d => {
+      // Exclude items already added to other rows in this request
+      if (d.id && excludedIdSet.has(String(d.id))) return false;
+      const cleanName = String(d.name || d.dish_name || '').trim().toLowerCase();
+      if (cleanName && excludedNameSet.has(cleanName)) return false;
+
+      if (!term) return true;
+      const sku = String(d.sku || d.short_code || '').toLowerCase();
+      const barcode = String(d.barcode || '').toLowerCase();
+      return cleanName.includes(term) || (sku && sku.includes(term)) || (barcode && barcode.includes(term));
+    });
 
     // Intelligent sorting:
     // 1. Exact name match
@@ -1111,7 +1122,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
 
       return nameA.localeCompare(nameB);
     }).slice(0, 80);
-  }, [safeDishes, searchTerm, popularityMap]);
+  }, [safeDishes, searchTerm, popularityMap, excludedIdSet, excludedNameSet]);
 
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%', zIndex: isOpen ? 999999 : 'auto' }}>
@@ -1157,14 +1168,41 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
               const val = e.target.value;
               setSearchTerm(val);
               setOpenState(true);
+              const trimmedVal = val.trim().toLowerCase();
+              if (!trimmedVal) {
+                onSelect({ name: '', id: null, image_url: null, price: null, size_options: [] });
+                return;
+              }
               const found = safeDishes.find(d => {
-                const name = String(d?.name || d?.dish_name || '').toLowerCase();
-                return name === val.toLowerCase();
+                const name = String(d?.name || d?.dish_name || '').trim().toLowerCase();
+                return name === trimmedVal;
               });
               if (found) {
+                const isDupId = found.id && excludedIdSet.has(String(found.id));
+                const isDupName = excludedNameSet.has(String(found.name || found.dish_name || '').trim().toLowerCase());
+                if (isDupId || isDupName) {
+                  toast.error("This menu item is already added. Duplicate items are not allowed.");
+                  setSearchTerm('');
+                  onSelect({ name: '', id: null, image_url: null, price: null, size_options: [] });
+                  return;
+                }
                 onSelect(found);
               } else {
+                if (excludedNameSet.has(trimmedVal)) {
+                  toast.error("This menu item is already added. Duplicate items are not allowed.");
+                  setSearchTerm('');
+                  onSelect({ name: '', id: null, image_url: null, price: null, size_options: [] });
+                  return;
+                }
                 onSelect({ name: val, id: null, image_url: null, price: null, size_options: [] });
+              }
+            }}
+            onBlur={() => {
+              const trimmed = (searchTerm || '').trim().toLowerCase();
+              if (trimmed && excludedNameSet.has(trimmed)) {
+                toast.error("This menu item is already added. Duplicate items are not allowed.");
+                setSearchTerm('');
+                onSelect({ name: '', id: null, image_url: null, price: null, size_options: [] });
               }
             }}
             style={{
@@ -1208,6 +1246,13 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
               <div
                 key={dish.id || dish.name}
                 onMouseDown={() => {
+                  const isDupId = dish.id && excludedIdSet.has(String(dish.id));
+                  const isDupName = excludedNameSet.has(String(dish.name || dish.dish_name || '').trim().toLowerCase());
+                  if (isDupId || isDupName) {
+                    toast.error("This menu item is already added. Duplicate items are not allowed.");
+                    setOpenState(false);
+                    return;
+                  }
                   setSearchTerm(dish.name);
                   onSelect(dish);
                   setOpenState(false);
@@ -1625,14 +1670,31 @@ export default function InternalBranch() {
   }, [dishes, posItems, menuBrowserSearch, menuBrowserCategory, popularityMap]);
 
   const handleAddDishFromBrowser = (dish) => {
+    if (!dish) return;
+    const isEdit = Boolean(editTransferModal);
+    const targetRows = isEdit ? editDishRows : (activeTab === 'transfer_request' ? trfDishRows : newDishRows);
+
+    const cleanName = String(dish.name || dish.dish_name || '').trim().toLowerCase();
+    const dishIdStr = dish.id ? String(dish.id) : null;
+
+    // Check if dish already exists in any row of the current request
+    const existing = targetRows.find(r => {
+      if (dishIdStr && r.item_id && String(r.item_id) === dishIdStr) return true;
+      if (cleanName && r.dish_name && String(r.dish_name).trim().toLowerCase() === cleanName) return true;
+      return false;
+    });
+
+    if (existing) {
+      toast.error("This menu item is already added. Duplicate items are not allowed.");
+      return;
+    }
+
     shouldScrollToNewRowRef.current = true;
     const units = getItemUnits(dish);
-    const defaultUom = units[0] || 'Piece';
+    const defaultUom = units[0] || (activeTab === 'transfer_request' ? 'KG' : 'Piece');
     const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
     const dishBarcode = dish.barcode || '';
-
-    const isEdit = Boolean(editTransferModal);
-    const setRows = isEdit ? setEditDishRows : setTrfDishRows;
+    const setRows = isEdit ? setEditDishRows : (activeTab === 'transfer_request' ? setTrfDishRows : setNewDishRows);
 
     setRows(prev => {
       if (prev.length === 1 && (!prev[0].dish_name || !prev[0].dish_name.trim())) {
@@ -1644,15 +1706,11 @@ export default function InternalBranch() {
           barcode: dishBarcode,
           uom: defaultUom,
           available_units: units,
-          requested_qty: 1,
+          requested_qty: prev[0].requested_qty || '1',
           image_url: dish.image_url || null,
           price: dish.price || null,
-          remarks: ''
+          remarks: prev[0].remarks || ''
         }];
-      }
-      const existing = prev.find(r => r.item_id === dish.id || (r.dish_name && r.dish_name.toLowerCase() === dish.name.toLowerCase()));
-      if (existing) {
-        return prev.map(r => r.id === existing.id ? { ...r, requested_qty: (parseFloat(r.requested_qty) || 0) + 1 } : r);
       }
       return [
         ...prev,
@@ -1664,7 +1722,7 @@ export default function InternalBranch() {
           barcode: dishBarcode,
           uom: defaultUom,
           available_units: units,
-          requested_qty: 1,
+          requested_qty: '1',
           image_url: dish.image_url || null,
           price: dish.price || null,
           remarks: ''
@@ -2161,6 +2219,24 @@ export default function InternalBranch() {
   // Dedicated Transfer Request Handlers
   const handleSelectDishTrf = (rowId, dish) => {
     if (!dish) return;
+    const cleanName = String(dish.name || dish.dish_name || '').trim().toLowerCase();
+    const dishIdStr = dish.id ? String(dish.id) : null;
+
+    if (cleanName || dishIdStr) {
+      const isDuplicate = trfDishRows.some(r => {
+        if (r.id === rowId) return false;
+        if (dishIdStr && r.item_id && String(r.item_id) === dishIdStr) return true;
+        if (cleanName && r.dish_name && String(r.dish_name).trim().toLowerCase() === cleanName) return true;
+        return false;
+      });
+
+      if (isDuplicate) {
+        toast.error("This menu item is already added. Duplicate items are not allowed.");
+        setTrfDishRows(prev => prev.map(r => r.id === rowId ? { ...r, dish_name: '', item_id: null, image_url: null, sku: '', barcode: '' } : r));
+        return;
+      }
+    }
+
     const units = getItemUnits(dish);
     const defaultUom = units[0] || 'KG';
     const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
@@ -2183,27 +2259,51 @@ export default function InternalBranch() {
   };
 
   const handleDishRowChangeTrf = (rowId, field, value) => {
-    setTrfDishRows(prev => prev.map(r => {
-      if (r.id !== rowId) return r;
-      if (field === 'dish_name') {
-        const foundItem = dishes.find(d => d.name.toLowerCase() === value.toLowerCase());
-        const units = foundItem ? getItemUnits(foundItem) : ['KG'];
-        const dishSku = foundItem ? (foundItem.short_code || foundItem.sku || `SKU-${foundItem.id}`) : r.sku;
-        const dishBarcode = foundItem ? (foundItem.barcode || '') : r.barcode;
+    if (field === 'dish_name') {
+      const cleanVal = (value || '').trim().toLowerCase();
+      if (cleanVal) {
+        const isDuplicate = trfDishRows.some(r => {
+          if (r.id === rowId) return false;
+          if (r.dish_name && String(r.dish_name).trim().toLowerCase() === cleanVal) return true;
+          return false;
+        });
+        if (isDuplicate) {
+          toast.error("This menu item is already added. Duplicate items are not allowed.");
+          return;
+        }
+      }
+      const foundItem = dishes.find(d => d.name.toLowerCase() === value.toLowerCase());
+      if (foundItem) {
+        const isDupFound = trfDishRows.some(r => {
+          if (r.id === rowId) return false;
+          if (foundItem.id && r.item_id && String(r.item_id) === String(foundItem.id)) return true;
+          return false;
+        });
+        if (isDupFound) {
+          toast.error("This menu item is already added. Duplicate items are not allowed.");
+          return;
+        }
+      }
+      const units = foundItem ? getItemUnits(foundItem) : ['KG'];
+      const dishSku = foundItem ? (foundItem.short_code || foundItem.sku || `SKU-${foundItem.id}`) : '';
+      const dishBarcode = foundItem ? (foundItem.barcode || '') : '';
+      setTrfDishRows(prev => prev.map(r => {
+        if (r.id !== rowId) return r;
         return {
           ...r,
           dish_name: value,
           item_id: foundItem ? foundItem.id : r.item_id,
-          sku: dishSku,
-          barcode: dishBarcode,
+          sku: dishSku || r.sku,
+          barcode: dishBarcode || r.barcode,
           image_url: foundItem ? foundItem.image_url : r.image_url,
           price: foundItem ? foundItem.price : r.price,
           available_units: units,
           uom: r.uom || units[0] || 'KG'
         };
-      }
-      return { ...r, [field]: value };
-    }));
+      }));
+      return;
+    }
+    setTrfDishRows(prev => prev.map(r => r.id === rowId ? { ...r, [field]: value } : r));
   };
 
   const handleAddTrfDishRow = () => {
@@ -2263,6 +2363,19 @@ export default function InternalBranch() {
     const validRows = trfDishRows.filter(r => r.dish_name && r.dish_name.trim());
     if (validRows.length === 0) {
       return toast.error('Please add at least one item to transfer.');
+    }
+
+    // Duplicate menu item validation
+    const seenTrfIds = new Set();
+    const seenTrfNames = new Set();
+    for (const r of validRows) {
+      const cleanName = r.dish_name.trim().toLowerCase();
+      const idStr = r.item_id ? String(r.item_id) : null;
+      if ((idStr && seenTrfIds.has(idStr)) || seenTrfNames.has(cleanName)) {
+        return toast.error("This menu item is already added. Duplicate items are not allowed.");
+      }
+      if (idStr) seenTrfIds.add(idStr);
+      seenTrfNames.add(cleanName);
     }
 
     for (const [idx, r] of validRows.entries()) {
@@ -2378,10 +2491,20 @@ export default function InternalBranch() {
     }
 
     // Validate rows
+    const seenNewIds = new Set();
+    const seenNewNames = new Set();
     for (const [idx, r] of newDishRows.entries()) {
       if (!r.dish_name.trim()) {
         return toast.error(`Please select or enter dish name for row #${idx + 1}.`);
       }
+      const cleanName = r.dish_name.trim().toLowerCase();
+      const idStr = r.item_id ? String(r.item_id) : null;
+      if ((idStr && seenNewIds.has(idStr)) || seenNewNames.has(cleanName)) {
+        return toast.error("This menu item is already added. Duplicate items are not allowed.");
+      }
+      if (idStr) seenNewIds.add(idStr);
+      seenNewNames.add(cleanName);
+
       const qty = parseFloat(r.requested_qty);
       if (isNaN(qty) || qty <= 0) {
         return toast.error(`Requested quantity for row #${idx + 1} (${r.dish_name}) must be greater than 0.`);
@@ -3083,10 +3206,43 @@ export default function InternalBranch() {
   };
 
   const handleEditDishRowChange = (id, field, value) => {
+    if (field === 'dish_name') {
+      const cleanVal = (value || '').trim().toLowerCase();
+      if (cleanVal) {
+        const isDuplicate = editDishRows.some(r => {
+          if (r.id === id) return false;
+          if (r.dish_name && String(r.dish_name).trim().toLowerCase() === cleanVal) return true;
+          return false;
+        });
+        if (isDuplicate) {
+          toast.error("This menu item is already added. Duplicate items are not allowed.");
+          return;
+        }
+      }
+    }
     setEditDishRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
   const handleSelectDishEdit = (rowId, dish) => {
+    if (!dish) return;
+    const cleanName = String(dish.name || dish.dish_name || '').trim().toLowerCase();
+    const dishIdStr = dish.id ? String(dish.id) : null;
+
+    if (cleanName || dishIdStr) {
+      const isDuplicate = editDishRows.some(r => {
+        if (r.id === rowId) return false;
+        if (dishIdStr && r.item_id && String(r.item_id) === dishIdStr) return true;
+        if (cleanName && r.dish_name && String(r.dish_name).trim().toLowerCase() === cleanName) return true;
+        return false;
+      });
+
+      if (isDuplicate) {
+        toast.error("This menu item is already added. Duplicate items are not allowed.");
+        setEditDishRows(prev => prev.map(r => r.id === rowId ? { ...r, dish_name: '', item_id: null, image_url: null, sku: '', barcode: '' } : r));
+        return;
+      }
+    }
+
     const units = getItemUnits(dish);
     const defaultUom = units[0] || 'Piece';
     const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
@@ -3137,6 +3293,20 @@ export default function InternalBranch() {
     if (validItems.length === 0) {
       toast.error('Please add at least one valid item with dish name.');
       return;
+    }
+
+    // Check duplicate items
+    const seenEditIds = new Set();
+    const seenEditNames = new Set();
+    for (const item of validItems) {
+      const cleanName = item.dish_name.trim().toLowerCase();
+      const idStr = item.item_id ? String(item.item_id) : null;
+      if ((idStr && seenEditIds.has(idStr)) || seenEditNames.has(cleanName)) {
+        toast.error("This menu item is already added. Duplicate items are not allowed.");
+        return;
+      }
+      if (idStr) seenEditIds.add(idStr);
+      seenEditNames.add(cleanName);
     }
 
     for (const [idx, item] of validItems.entries()) {
@@ -5430,6 +5600,8 @@ export default function InternalBranch() {
                                 imageUrl={row.image_url}
                                 dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
                                 popularityMap={popularityMap}
+                                excludedDishIds={trfDishRows.filter(r => r.id !== row.id && r.item_id).map(r => r.item_id)}
+                                excludedDishNames={trfDishRows.filter(r => r.id !== row.id && r.dish_name).map(r => r.dish_name)}
                                 onSelect={(dish) => handleSelectDishTrf(row.id, dish)}
                                 onOpenChange={(open) => setOpenDropdownRowId(open ? row.id : null)}
                               />
@@ -8303,6 +8475,9 @@ export default function InternalBranch() {
                               value={row.dish_name}
                               imageUrl={row.image_url}
                               dishes={Array.isArray(dishes) && dishes.length > 0 ? dishes : (Array.isArray(posItems) ? posItems : [])}
+                              popularityMap={popularityMap}
+                              excludedDishIds={editDishRows.filter(r => r.id !== row.id && r.item_id).map(r => r.item_id)}
+                              excludedDishNames={editDishRows.filter(r => r.id !== row.id && r.dish_name).map(r => r.dish_name)}
                               onSelect={(dish) => handleSelectDishEdit(row.id, dish)}
                             />
                           )}

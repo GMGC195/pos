@@ -320,11 +320,21 @@ router.post('/transfers', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'At least one dish row is required.' });
     }
 
-    // Validate dish rows
+    // Validate dish rows & check for duplicates
+    const seenItemIds = new Set();
+    const seenNames = new Set();
     for (const [idx, item] of items.entries()) {
       if (!item.dish_name || !item.dish_name.trim()) {
         return res.status(400).json({ error: `Dish name is required for row #${idx + 1}.` });
       }
+      const cleanName = item.dish_name.trim().toLowerCase();
+      const itemIdStr = item.item_id ? String(item.item_id) : null;
+      if ((itemIdStr && seenItemIds.has(itemIdStr)) || seenNames.has(cleanName)) {
+        return res.status(400).json({ error: 'This menu item is already added. Duplicate items are not allowed.' });
+      }
+      if (itemIdStr) seenItemIds.add(itemIdStr);
+      seenNames.add(cleanName);
+
       const qty = parseFloat(item.requested_qty);
       if (isNaN(qty) || qty <= 0) {
         return res.status(400).json({ error: `Requested quantity for "${item.dish_name}" must be a positive number.` });
@@ -3006,11 +3016,21 @@ router.put('/transfers/:id/edit-request', authenticateToken, async (req, res) =>
       return res.status(400).json({ error: 'At least one dish or item is required.' });
     }
 
-    // Validate items
+    // Validate items & check for duplicates
+    const seenItemIds = new Set();
+    const seenNames = new Set();
     for (const [idx, item] of items.entries()) {
       if (!item.dish_name || !item.dish_name.trim()) {
         return res.status(400).json({ error: `Dish name is required for row #${idx + 1}.` });
       }
+      const cleanName = item.dish_name.trim().toLowerCase();
+      const itemIdStr = item.item_id ? String(item.item_id) : null;
+      if ((itemIdStr && seenItemIds.has(itemIdStr)) || seenNames.has(cleanName)) {
+        return res.status(400).json({ error: 'This menu item is already added. Duplicate items are not allowed.' });
+      }
+      if (itemIdStr) seenItemIds.add(itemIdStr);
+      seenNames.add(cleanName);
+
       const qty = parseFloat(item.requested_qty);
       if (isNaN(qty) || qty <= 0) {
         return res.status(400).json({ error: `Quantity for "${item.dish_name}" must be a positive number.` });
