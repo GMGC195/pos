@@ -3487,6 +3487,9 @@ tbody tr:hover td {
   .page-content:has(.payroll-page) {
     padding: 8px 6px 16px 6px !important;
   }
+  .page-content:has(.settings-container) {
+    padding: 8px 6px 24px 6px !important;
+  }
   .payroll-page {
     padding: 6px 4px !important;
   }

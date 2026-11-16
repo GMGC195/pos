@@ -750,7 +750,7 @@ export default function Settings() {
                     </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(110px, 1fr) auto', gap: '12px', alignItems: 'end' }}>
+                  <div className="printer-ip-grid">
                     <div>
                       <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #475569)', display: 'block', marginBottom: '6px' }}>
                         Printer IP Address
@@ -886,7 +886,7 @@ export default function Settings() {
                     </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+                  <div className="salary-slip-prefs-grid">
                     {/* Salary Slip Print Routing */}
                     <div>
                       <label style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}>
@@ -1203,7 +1203,7 @@ export default function Settings() {
                   )}
                 </div>
 
-                <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                <div className="pos-save-bar">
                   <button type="button" className="btn-save" onClick={saveSettings} disabled={savingSettings}>
                     {savingSettings ? 'Saving...' : <><CheckCircle2 size={18} /> Save Global Settings</>}
                   </button>
@@ -1395,7 +1395,7 @@ export default function Settings() {
                 )}
 
                 {/* Manual Save Confirmation Button */}
-                <div style={{ marginTop: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <div className="report-emails-save-bar">
                   <button 
                     type="button" 
                     className="btn-save" 
@@ -1496,7 +1496,7 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: 32 }}>
+                <div className="account-save-bar">
                   <button type="submit" className="btn-save" disabled={loading}>
                     {loading ? 'Saving...' : <><CheckCircle2 size={18} /> Save Changes</>}
                   </button>
@@ -1589,7 +1589,7 @@ export default function Settings() {
                         </div>
                       )}
                                             {userForm.role === 'Employee' && (
-                        <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                        <div className="form-group full-width-field">
                           <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: 700 }}>
                             <span>Linked Employee Record *</span>
                             {userForm.employee_id && (
@@ -1765,15 +1765,15 @@ export default function Settings() {
                           {showBranchDropdown && (
                             <div style={{
                               position: 'absolute',
-                              bottom: '100%',
+                              top: '100%',
                               left: 0,
                               right: 0,
-                              marginBottom: '8px',
+                              marginTop: '8px',
                               background: 'white',
                               border: '1px solid var(--surface-2)',
                               borderRadius: '12px',
-                              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-                              zIndex: 100,
+                              boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+                              zIndex: 1000,
                               maxHeight: '220px',
                               overflowY: 'auto',
                               padding: '8px'
@@ -1844,7 +1844,7 @@ export default function Settings() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                    <div className="form-actions-bar">
                       <button type="submit" className="btn-save" disabled={loading}>
                         {loading ? 'Processing...' : editingUser ? 'Update User' : 'Create User'}
                       </button>
@@ -2155,9 +2155,9 @@ export default function Settings() {
                     <p style={{ margin: 0, fontSize: '13px' }}>Create a user with the role "Salary Pay Operator" in User Management to configure permissions.</p>
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '24px', marginTop: '16px' }}>
+                  <div className="salary-perms-grid">
                     {/* User Selection Sidebar */}
-                    <div style={{ borderRight: '1px solid var(--border, #e2e8f0)', paddingRight: '16px' }}>
+                    <div className="salary-perms-sidebar">
                       <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
                         Salary Payable Users ({salaryUsers.length})
                       </label>
@@ -2438,7 +2438,7 @@ export default function Settings() {
                                 <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#334155', marginBottom: '8px' }}>
                                   Configured Monthly Access Summary for @{curUser.username}:
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '8px' }}>
+                                <div className="salary-month-summary-grid">
                                   {availableSalaryMonths.slice(0, 8).map(m => {
                                     const canView = (editingSalaryPerm.allowed_view_months || []).includes(m);
                                     const canPay = (editingSalaryPerm.allowed_pay_months || []).includes(m);
@@ -2482,7 +2482,7 @@ export default function Settings() {
                               </div>
 
                               {/* Custom Month Addition */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div className="custom-month-add-bar">
                                 <label style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Add specific month:</label>
                                 <input
                                   type="month"
@@ -2515,7 +2515,7 @@ export default function Settings() {
                             </div>
 
                             {/* Save Button */}
-                            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                            <div className="salary-perms-save-bar">
                               <button
                                 type="button"
                                 className="btn btn-primary"
@@ -2919,9 +2919,87 @@ export default function Settings() {
           to { opacity: 1; transform: translateY(0); }
         }
 
+        .full-width-field {
+          grid-column: span 2;
+        }
+
+        .printer-ip-grid {
+          display: grid;
+          grid-template-columns: minmax(220px, 2fr) minmax(110px, 1fr) auto;
+          gap: 12px;
+          align-items: end;
+        }
+
+        .salary-slip-prefs-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 16px;
+        }
+
+        .pos-save-bar {
+          margin-top: 24px;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+
+        .form-actions-bar {
+          display: flex;
+          gap: 12px;
+          margin-top: 24px;
+          align-items: center;
+        }
+
+        .salary-perms-grid {
+          display: grid;
+          grid-template-columns: 260px 1fr;
+          gap: 24px;
+          margin-top: 16px;
+        }
+
+        .salary-perms-sidebar {
+          border-right: 1px solid var(--border, #e2e8f0);
+          padding-right: 16px;
+        }
+
+        .salary-month-summary-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: 8px;
+        }
+
+        .custom-month-add-bar {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .salary-perms-save-bar {
+          border-top: 1px solid #e2e8f0;
+          padding-top: 16px;
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+        }
+
+        .report-emails-save-bar {
+          margin-top: 24px;
+          display: flex;
+          gap: 12px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+
+        .account-save-bar {
+          margin-top: 32px;
+        }
+
         @media (max-width: 1000px) {
           .settings-layout {
             grid-template-columns: 1fr;
+            gap: 16px;
           }
           
           .settings-nav {
@@ -2931,15 +3009,35 @@ export default function Settings() {
             padding-bottom: 8px;
             width: 100%;
             -webkit-overflow-scrolling: touch;
+            gap: 6px;
           }
           
           .settings-nav-item {
             flex-shrink: 0;
             white-space: nowrap;
+            padding: 9px 14px;
+            font-size: 13px;
           }
           
           .form-grid {
             grid-template-columns: 1fr;
+          }
+
+          .full-width-field {
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 900px) {
+          .salary-perms-grid {
+            grid-template-columns: 1fr;
+            gap: 16px;
+          }
+          .salary-perms-sidebar {
+            border-right: none;
+            border-bottom: 1px solid var(--border, #e2e8f0);
+            padding-right: 0;
+            padding-bottom: 16px;
           }
         }
 
@@ -2953,7 +3051,7 @@ export default function Settings() {
           .settings-team-header {
             flex-direction: column !important;
             align-items: flex-start !important;
-            gap: 16px !important;
+            gap: 12px !important;
           }
           .settings-team-actions {
             width: 100% !important;
@@ -2961,6 +3059,7 @@ export default function Settings() {
           }
           .settings-team-actions button {
             flex: 1 !important;
+            min-height: 40px !important;
           }
           .settings-content, .settings-card, .settings-form {
             max-width: 100%;
@@ -2970,6 +3069,185 @@ export default function Settings() {
           .settings-container {
             overflow-x: hidden;
             width: 100%;
+            padding: 10px 8px !important;
+          }
+          .settings-header {
+            margin-bottom: 16px;
+          }
+          .settings-header h1 {
+            font-size: 20px;
+          }
+          .settings-card {
+            padding: 16px 12px !important;
+            border-radius: 14px !important;
+          }
+          .card-header {
+            margin-bottom: 16px;
+          }
+          .card-header h2 {
+            font-size: 16px !important;
+          }
+          .form-group input:not([type="radio"]):not([type="checkbox"]),
+          .form-group select {
+            font-size: 14px;
+            min-height: 44px;
+            padding: 10px 14px;
+          }
+          .input-with-icon input {
+            padding: 10px 38px 10px 38px;
+            min-height: 44px;
+          }
+        }
+
+        @media (max-width: 680px) {
+          .printer-ip-grid {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+          .printer-ip-grid button#btn-save-printer-ip {
+            width: 100%;
+            height: 44px;
+            font-size: 14px;
+            margin-top: 4px;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .form-actions-bar {
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            margin-top: 20px;
+            position: sticky;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 12px 0;
+            border-top: 1px solid var(--surface-2);
+            z-index: 50;
+          }
+          .form-actions-bar .btn-save,
+          .form-actions-bar .btn-cancel {
+            width: 100%;
+            min-height: 46px;
+            font-size: 15px;
+            justify-content: center;
+          }
+
+          .pos-save-bar {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+            position: sticky;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 12px 0;
+            margin-top: 16px;
+            border-top: 1px solid var(--surface-2);
+            z-index: 40;
+          }
+          .pos-save-bar .btn-save {
+            width: 100%;
+            min-height: 46px;
+            justify-content: center;
+            font-size: 15px;
+          }
+          .pos-save-bar span {
+            text-align: center;
+          }
+
+          .salary-month-summary-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+          .custom-month-add-bar input[type="month"] {
+            flex: 1;
+            min-height: 38px;
+          }
+          .custom-month-add-bar button {
+            flex: 1;
+            min-height: 38px;
+          }
+          .salary-perms-save-bar {
+            justify-content: stretch;
+            position: sticky;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 12px 0;
+            z-index: 40;
+          }
+          .salary-perms-save-bar button {
+            width: 100%;
+            min-height: 46px;
+            justify-content: center;
+          }
+
+          .report-emails-save-bar {
+            flex-direction: column;
+            align-items: stretch;
+            position: sticky;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 12px 0;
+            z-index: 40;
+            border-top: 1px solid var(--surface-2);
+          }
+          .report-emails-save-bar .btn-save {
+            width: 100%;
+            min-height: 46px;
+            justify-content: center;
+          }
+          .report-emails-save-bar span {
+            text-align: center;
+          }
+
+          .account-save-bar {
+            position: sticky;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 12px 0;
+            z-index: 40;
+            border-top: 1px solid var(--surface-2);
+          }
+          .account-save-bar .btn-save {
+            width: 100%;
+            min-height: 46px;
+            justify-content: center;
+          }
+        }
+
+        @media (max-width: 600px) {
+          .salary-slip-prefs-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .settings-container {
+            padding: 6px 4px !important;
+          }
+          .settings-card {
+            padding: 14px 10px !important;
+            border-radius: 12px !important;
+          }
+          .settings-nav-item {
+            padding: 8px 12px;
+            font-size: 12px;
+          }
+          .btn-save, .btn-cancel {
+            padding: 12px 16px;
+            font-size: 14px;
+          }
+          .salary-month-summary-grid {
+            grid-template-columns: 1fr;
           }
         }
 

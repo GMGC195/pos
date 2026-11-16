@@ -187,7 +187,7 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
 
   return (
     <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={e => { if(e.target.classList.contains('modal-overlay')) onClose() }}>
-      <div className="modal" style={{ maxWidth: 540, width: '92%', borderRadius: 16 }}>
+      <div className="modal" style={{ maxWidth: 540, width: '94%', maxHeight: '92dvh', display: 'flex', flexDirection: 'column', borderRadius: 16, overflow: 'hidden' }}>
         <div className="modal-header" style={{ paddingBottom: 12 }}>
           <div>
             <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
@@ -218,7 +218,7 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
                 className="form-control" 
                 value={newName} 
                 onChange={e => setNewName(e.target.value)} 
-                style={{ marginBottom: 12 }} 
+                style={{ marginBottom: 12, minHeight: 42, fontSize: 14 }} 
                 autoFocus
               />
               
@@ -227,7 +227,7 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
                   <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 6, fontWeight: 600 }}>Available In Branches:</label>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {ALL_BRANCHES.map(b => (
-                      <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', background: 'white', padding: '4px 10px', borderRadius: 6, border: '1px solid var(--surface-2)' }}>
+                      <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', background: 'white', padding: '6px 12px', minHeight: 36, borderRadius: 6, border: '1px solid var(--surface-2)' }}>
                         <input type="checkbox" checked={newBranches.includes(b)} onChange={() => toggleBranch(b)} /> {b}
                       </label>
                     ))}
@@ -236,14 +236,14 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
               )}
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleAdd}>Save Table</button>
-                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setIsAdding(false)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 1, minHeight: 42, fontWeight: 700 }} onClick={handleAdd}>Save Table</button>
+                <button className="btn btn-secondary" style={{ flex: 1, minHeight: 42 }} onClick={() => setIsAdding(false)}>Cancel</button>
               </div>
             </div>
           )}
         </div>
 
-        <div style={{ maxHeight: '55vh', overflowY: 'auto', padding: '14px 16px' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 16px 40px 16px', WebkitOverflowScrolling: 'touch' }}>
           {isAdmin && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 14 }}>
               <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' }}>Filter by Branch:</label>
@@ -302,18 +302,18 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
                             onChange={e => setEditName(e.target.value)} 
                             placeholder="Table Name/Number"
                             className="form-control" 
-                            style={{ padding: '6px 10px', fontSize: 14, flex: 1 }} 
+                            style={{ padding: '8px 12px', fontSize: 14, minHeight: 40, flex: 1 }} 
                             autoFocus 
                             onKeyDown={e => e.key === 'Enter' && handleSaveEdit(t.id)}
                           />
                         </div>
                         
                         {isAdmin && (
-                          <div style={{ background: 'var(--surface-2)', padding: 8, borderRadius: 6 }}>
-                            <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 4, fontWeight: 600 }}>Branches:</label>
+                          <div style={{ background: 'var(--surface-2)', padding: 10, borderRadius: 8 }}>
+                            <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 6, fontWeight: 600 }}>Branches:</label>
                             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                               {ALL_BRANCHES.map(b => (
-                                <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, cursor: 'pointer' }}>
+                                <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', background: 'white', padding: '6px 12px', minHeight: 36, borderRadius: 6, border: '1px solid var(--surface-2)' }}>
                                   <input type="checkbox" checked={editBranches.includes(b)} onChange={() => toggleBranch(b, true)} /> {b}
                                 </label>
                               ))}
@@ -321,9 +321,9 @@ export default function ManageTablesModal({ onClose, onTableChange }) {
                           </div>
                         )}
                         
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                          <button className="btn btn-sm btn-primary" style={{ padding: '6px 16px' }} onClick={() => handleSaveEdit(t.id)}>Save</button>
-                          <button className="btn btn-sm btn-secondary" style={{ padding: '6px 14px' }} onClick={() => setEditingId(null)}>Cancel</button>
+                        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+                          <button className="btn btn-primary" style={{ padding: '8px 22px', minHeight: 40, fontWeight: 700, fontSize: 13 }} onClick={() => handleSaveEdit(t.id)}>Save</button>
+                          <button className="btn btn-secondary" style={{ padding: '8px 16px', minHeight: 40, fontSize: 13 }} onClick={() => setEditingId(null)}>Cancel</button>
                         </div>
                       </div>
                     ) : (
