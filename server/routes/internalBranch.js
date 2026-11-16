@@ -507,10 +507,14 @@ router.get('/transfers', authenticateToken, async (req, res) => {
                 'rejection_reason', ti.rejection_reason,
                 'modification_reason', ti.modification_reason,
                 'quantity_history', COALESCE(ti.quantity_history, '[]'::jsonb),
-                'accepted_by_name', ti.accepted_by_name,
-                'accepted_at', ti.accepted_at,
+                'accepted_by_name', COALESCE(ti.accepted_by_name, t.accepted_by_name),
+                'accepted_at', COALESCE(ti.accepted_at, t.updated_at),
                 'rejected_by_name', ti.rejected_by_name,
                 'rejected_at', ti.rejected_at,
+                'dispatched_by_name', t.dispatched_by_name,
+                'dispatched_at', t.dispatched_at,
+                'received_by_name', COALESCE(ti.receive_rejected_by_name, t.received_by_name),
+                'received_at', t.received_at,
                 'needed_by_time', ti.needed_by_time,
                 'needed_by_date', ti.needed_by_date,
                 'priority', COALESCE(ti.priority, 'Normal'),
@@ -683,8 +687,23 @@ router.get('/transfers', authenticateToken, async (req, res) => {
 
     // Status filter
     if (status && status !== 'All') {
-      params.push(status);
-      query += ` AND t.status = $${params.length}`;
+      if (tab === 'incoming') {
+        if (status === 'Pending') {
+          query += ` AND (t.status = 'Pending' OR EXISTS (SELECT 1 FROM internal_branch_transfer_items ti WHERE ti.transfer_id = t.id AND (ti.item_status = 'Pending' OR ti.item_status IS NULL)))`;
+        } else if (status === 'Accepted') {
+          query += ` AND (t.status = 'Accepted' OR t.status = 'Partially Accepted' OR EXISTS (SELECT 1 FROM internal_branch_transfer_items ti WHERE ti.transfer_id = t.id AND ti.item_status = 'Accepted'))`;
+        } else if (status === 'Ready to Process' || status === 'Ready for Dispatch' || status === 'Ready') {
+          query += ` AND (t.status = 'Ready to Process' OR t.status = 'Partially Ready' OR t.status = 'Ready for Dispatch' OR EXISTS (SELECT 1 FROM internal_branch_transfer_items ti WHERE ti.transfer_id = t.id AND ti.item_status = 'Ready to Process'))`;
+        } else if (status === 'Dispatched') {
+          query += ` AND (t.status = 'Dispatched' OR t.status = 'Partially Dispatched' OR t.status = 'In-Transit')`;
+        } else {
+          params.push(status);
+          query += ` AND t.status = $${params.length}`;
+        }
+      } else {
+        params.push(status);
+        query += ` AND t.status = $${params.length}`;
+      }
     }
 
     // Request Type filter (All Types, Kitchen Request, Other Request, Branch Transfer)

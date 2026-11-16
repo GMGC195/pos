@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from '../api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -1024,6 +1025,115 @@ function PriorityBadge({ priority }) {
   );
 }
 
+// Polished animated Skeleton loader for Transfer Cards
+function TransferCardSkeleton({ count = 3 }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={`skeleton-trf-${idx}`}
+          style={{
+            background: '#fff',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            padding: '16px 18px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+            position: 'relative',
+            overflow: 'hidden'
+          }}
+        >
+          {/* Header Row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 140, height: 20, background: '#e2e8f0', borderRadius: 4, animation: 'trfSkeletonPulse 1.5s infinite' }} />
+              <div style={{ width: 75, height: 20, background: '#f1f5f9', borderRadius: 12, animation: 'trfSkeletonPulse 1.5s infinite' }} />
+              <div style={{ width: 65, height: 20, background: '#f1f5f9', borderRadius: 12, animation: 'trfSkeletonPulse 1.5s infinite' }} />
+            </div>
+            <div style={{ width: 85, height: 28, background: '#f1f5f9', borderRadius: 6, animation: 'trfSkeletonPulse 1.5s infinite' }} />
+          </div>
+
+          {/* Subheader Branch Direction */}
+          <div style={{ width: '40%', minWidth: 200, height: 14, background: '#f1f5f9', borderRadius: 4, marginBottom: 16, animation: 'trfSkeletonPulse 1.5s infinite' }} />
+
+          {/* Table Placeholder */}
+          <div style={{ border: '1px solid #f1f5f9', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ height: 34, background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }} />
+            <div style={{ height: 46, background: '#fff', borderBottom: '1px solid #f8fafc', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 14 }}>
+              <div style={{ width: 24, height: 14, background: '#f1f5f9', borderRadius: 3 }} />
+              <div style={{ width: 160, height: 14, background: '#e2e8f0', borderRadius: 3 }} />
+              <div style={{ width: 50, height: 14, background: '#f1f5f9', borderRadius: 3 }} />
+              <div style={{ width: 50, height: 14, background: '#f1f5f9', borderRadius: 3 }} />
+              <div style={{ flex: 1 }} />
+              <div style={{ width: 100, height: 28, background: '#f1f5f9', borderRadius: 6 }} />
+            </div>
+          </div>
+        </div>
+      ))}
+      <style>{`
+        @keyframes trfSkeletonPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.45; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Error state card with Retry button
+function TransferErrorCard({ title = 'Failed to Load Transfer Requests', error, onRetry }) {
+  return (
+    <div style={{
+      background: '#fff',
+      borderRadius: 12,
+      border: '1.5px solid #fecaca',
+      padding: '36px 24px',
+      textAlign: 'center',
+      boxShadow: '0 2px 8px rgba(220, 38, 38, 0.08)'
+    }}>
+      <div style={{
+        width: 50,
+        height: 50,
+        borderRadius: '50%',
+        background: '#fef2f2',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        margin: '0 auto 12px'
+      }}>
+        <AlertTriangle size={26} color="#dc2626" />
+      </div>
+      <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#991b1b' }}>
+        {title}
+      </h3>
+      <p style={{ margin: '0 auto 16px', maxWidth: 440, fontSize: 13, color: '#b91c1c', lineHeight: 1.5 }}>
+        {error?.response?.data?.error || error?.message || 'Could not connect to server or load requests. Please check connection and retry.'}
+      </p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          style={{
+            padding: '8px 18px',
+            background: '#dc2626',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 7,
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            boxShadow: '0 2px 6px rgba(220, 38, 38, 0.25)'
+          }}
+        >
+          <RefreshCw size={14} /> Retry Loading
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Clean Searchable Dish Dropdown with Smart Popularity Ranking, Image Thumbnail & Ultra-High Z-Index
 function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSelect, onOpenChange, excludedDishIds = [], excludedDishNames = [] }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -1053,21 +1163,23 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
 
   const safeDishes = Array.isArray(dishes) ? dishes : [];
 
+  const normStr = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
   const excludedIdSet = useMemo(() => {
     return new Set((excludedDishIds || []).filter(Boolean).map(id => String(id)));
   }, [excludedDishIds]);
 
   const excludedNameSet = useMemo(() => {
-    return new Set((excludedDishNames || []).filter(Boolean).map(n => String(n).trim().toLowerCase()));
+    return new Set((excludedDishNames || []).filter(Boolean).map(n => normStr(n)));
   }, [excludedDishNames]);
 
   const filteredDishes = useMemo(() => {
-    const term = (searchTerm || '').trim().toLowerCase();
+    const term = normStr(searchTerm);
 
     // Attach popularity counts from dish or external map
     const enriched = safeDishes.map(d => {
       if (!d) return null;
-      const cleanName = String(d.name || d.dish_name || '').trim().toLowerCase();
+      const cleanName = normStr(d.name || d.dish_name);
       const popData = (popularityMap?.by_id && d.id ? popularityMap.by_id[d.id] : null) ||
                       (popularityMap?.by_name ? popularityMap.by_name[cleanName] : null);
       const reqCount = d.request_count !== undefined ? d.request_count : (popData?.request_count || 0);
@@ -1083,7 +1195,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
     const matching = enriched.filter(d => {
       // Exclude items already added to other rows in this request
       if (d.id && excludedIdSet.has(String(d.id))) return false;
-      const cleanName = String(d.name || d.dish_name || '').trim().toLowerCase();
+      const cleanName = normStr(d.name || d.dish_name);
       if (cleanName && excludedNameSet.has(cleanName)) return false;
 
       if (!term) return true;
@@ -1168,18 +1280,18 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
               const val = e.target.value;
               setSearchTerm(val);
               setOpenState(true);
-              const trimmedVal = val.trim().toLowerCase();
+              const trimmedVal = normStr(val);
               if (!trimmedVal) {
                 onSelect({ name: '', id: null, image_url: null, price: null, size_options: [] });
                 return;
               }
               const found = safeDishes.find(d => {
-                const name = String(d?.name || d?.dish_name || '').trim().toLowerCase();
+                const name = normStr(d?.name || d?.dish_name);
                 return name === trimmedVal;
               });
               if (found) {
                 const isDupId = found.id && excludedIdSet.has(String(found.id));
-                const isDupName = excludedNameSet.has(String(found.name || found.dish_name || '').trim().toLowerCase());
+                const isDupName = excludedNameSet.has(normStr(found.name || found.dish_name));
                 if (isDupId || isDupName) {
                   toast.error("This menu item is already added. Duplicate items are not allowed.");
                   setSearchTerm('');
@@ -1198,7 +1310,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
               }
             }}
             onBlur={() => {
-              const trimmed = (searchTerm || '').trim().toLowerCase();
+              const trimmed = normStr(searchTerm);
               if (trimmed && excludedNameSet.has(trimmed)) {
                 toast.error("This menu item is already added. Duplicate items are not allowed.");
                 setSearchTerm('');
@@ -1247,7 +1359,7 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
                 key={dish.id || dish.name}
                 onMouseDown={() => {
                   const isDupId = dish.id && excludedIdSet.has(String(dish.id));
-                  const isDupName = excludedNameSet.has(String(dish.name || dish.dish_name || '').trim().toLowerCase());
+                  const isDupName = excludedNameSet.has(normStr(dish.name || dish.dish_name));
                   if (isDupId || isDupName) {
                     toast.error("This menu item is already added. Duplicate items are not allowed.");
                     setOpenState(false);
@@ -1358,63 +1470,10 @@ export default function InternalBranch() {
       .catch(err => console.warn('Could not load product popularity map:', err));
   }, []);
 
-  // Stats / Badges
-  const [stats, setStats] = useState({
-    pending_count: 0,
-    in_progress_count: 0,
-    ready_count: 0,
-    dispatched_count: 0,
-    partially_received_count: 0,
-    fully_received_count: 0,
-    completed_count: 0,
-    incoming_pending_count: 0,
-    pending_receivals_count: 0,
-    sent_active_count: 0
-  });
-
-  // Transfers List
-  const [transfers, setTransfers] = useState([]);
-  const [loadingTransfers, setLoadingTransfers] = useState(false);
-
   // Fast Filters for Sent Transfer Requests
   const [sentSearchQuery, setSentSearchQuery] = useState('');
   const [sentFilterBranch, setSentFilterBranch] = useState('All');
   const [sentFilterPriority, setSentFilterPriority] = useState('All');
-
-  // Sorted and filtered active sent transfer requests (LATEST REQUESTS FIRST, ACTIVE ONLY)
-  const filteredSentTransfers = useMemo(() => {
-    // Only display active & in-progress requests (Completed and Cancelled move to Transfer Logs)
-    let list = transfers.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled');
-
-    // Always sort latest requests first
-    list.sort((a, b) => {
-      const timeA = new Date(a.created_at || a.request_date).getTime();
-      const timeB = new Date(b.created_at || b.request_date).getTime();
-      if (timeB !== timeA) return timeB - timeA;
-      return (b.id || 0) - (a.id || 0);
-    });
-
-    if (sentFilterBranch !== 'All') {
-      list = list.filter(t => (t.to_branch || '').toLowerCase() === sentFilterBranch.toLowerCase());
-    }
-
-    if (sentFilterPriority !== 'All') {
-      list = list.filter(t => (t.priority || 'Normal').toLowerCase() === sentFilterPriority.toLowerCase());
-    }
-
-    if (sentSearchQuery && sentSearchQuery.trim()) {
-      const q = sentSearchQuery.trim().toLowerCase();
-      list = list.filter(t => {
-        const idMatch = String(t.transfer_id || t.id || '').toLowerCase().includes(q);
-        const toMatch = String(t.to_branch || '').toLowerCase().includes(q);
-        const notesMatch = String(t.notes || '').toLowerCase().includes(q);
-        const itemMatch = (t.items || []).some(it => String(it.dish_name || '').toLowerCase().includes(q));
-        return idMatch || toMatch || notesMatch || itemMatch;
-      });
-    }
-
-    return list;
-  }, [transfers, sentFilterBranch, sentFilterPriority, sentSearchQuery]);
 
   // Admin Branch Switcher & Activity Filter
   const [adminSelectedBranch, setAdminSelectedBranch] = useState('All');
@@ -1672,7 +1731,7 @@ export default function InternalBranch() {
   const handleAddDishFromBrowser = (dish) => {
     if (!dish) return;
     const isEdit = Boolean(editTransferModal);
-    const targetRows = isEdit ? editDishRows : (activeTab === 'transfer_request' ? trfDishRows : newDishRows);
+    const targetRows = isEdit ? editDishRows : trfDishRows;
 
     const cleanName = String(dish.name || dish.dish_name || '').trim().toLowerCase();
     const dishIdStr = dish.id ? String(dish.id) : null;
@@ -1691,10 +1750,10 @@ export default function InternalBranch() {
 
     shouldScrollToNewRowRef.current = true;
     const units = getItemUnits(dish);
-    const defaultUom = units[0] || (activeTab === 'transfer_request' ? 'KG' : 'Piece');
+    const defaultUom = units[0] || 'KG';
     const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
     const dishBarcode = dish.barcode || '';
-    const setRows = isEdit ? setEditDishRows : (activeTab === 'transfer_request' ? setTrfDishRows : setNewDishRows);
+    const setRows = isEdit ? setEditDishRows : setTrfDishRows;
 
     setRows(prev => {
       if (prev.length === 1 && (!prev[0].dish_name || !prev[0].dish_name.trim())) {
@@ -1837,51 +1896,109 @@ export default function InternalBranch() {
     fetchStats();
   }, [defaultFromBranch, fetchDishes]);
 
-  const fetchStats = useCallback((branchToQuery) => {
-    const qBranch = branchToQuery || (isSuperUser && adminSelectedBranch !== 'All' ? adminSelectedBranch : undefined);
-    const params = qBranch ? { branch: qBranch } : {};
-    axios.get('/api/internal-branch/stats', { params })
-      .then(res => setStats(res.data || {}))
-      .catch(err => console.error('Failed to load transfer stats:', err));
-  }, [isSuperUser, adminSelectedBranch]);
+  const queryClient = useQueryClient();
 
-  // Fetch transfers based on active tab and filters
-  const fetchTransfers = useCallback((tabOverride) => {
-    setLoadingTransfers(true);
-    const params = {};
+  // 1. Stats Query with 5-minute background refetching (300,000ms)
+  const statsQuery = useQuery({
+    queryKey: ['transferStats', isSuperUser ? adminSelectedBranch : (user?.branch || 'All')],
+    queryFn: async () => {
+      const qBranch = (isSuperUser && adminSelectedBranch !== 'All') ? adminSelectedBranch : undefined;
+      const params = qBranch ? { branch: qBranch } : {};
+      const res = await axios.get('/api/internal-branch/stats', { params });
+      return res.data || {};
+    },
+    refetchInterval: 300000,
+    staleTime: 30000
+  });
 
-    // Admin branch & direction filtering
-    if (adminSelectedBranch !== 'All') {
-      params.branch = adminSelectedBranch;
-      params.branch_direction = adminDirection;
-    }
+  const stats = statsQuery.data || {
+    pending_count: 0,
+    in_progress_count: 0,
+    ready_count: 0,
+    dispatched_count: 0,
+    partially_received_count: 0,
+    fully_received_count: 0,
+    completed_count: 0,
+    incoming_pending_count: 0,
+    pending_receivals_count: 0,
+    sent_active_count: 0
+  };
 
-    const currentTab = tabOverride || activeTab;
+  const fetchStats = useCallback(() => {
+    statsQuery.refetch();
+  }, [statsQuery]);
 
-    if (currentTab === 'incoming') {
-      params.tab = 'incoming';
+  // 2. Incoming Requests Query (Incoming to this branch)
+  const incomingQuery = useQuery({
+    queryKey: ['transfers', 'incoming', adminSelectedBranch, adminDirection, filterFromBranch, filterStatus, filterRequestType, filterPriority, searchQuery],
+    queryFn: async () => {
+      const params = { tab: 'incoming' };
+      if (adminSelectedBranch !== 'All') {
+        params.branch = adminSelectedBranch;
+        params.branch_direction = adminDirection;
+      }
       if (filterFromBranch !== 'All') params.sent_by = filterFromBranch;
       if (filterStatus !== 'All') params.status = filterStatus;
       if (filterRequestType !== 'All') params.request_type = filterRequestType;
       if (filterPriority !== 'All') params.priority = filterPriority;
       if (searchQuery) params.search = searchQuery;
-    } else if (currentTab === 'receivals') {
-      params.tab = 'pending_receivals';
-      if (filterToBranch !== 'All') params.received_by = filterToBranch;
-      if (filterRequestType !== 'All') params.request_type = filterRequestType;
-      if (filterPriority !== 'All') params.priority = filterPriority;
-      if (searchQuery) params.search = searchQuery;
-    } else if (currentTab === 'transfer_request' || currentTab === 'new') {
-      // Sent Requests: Orders requested by this branch until completed
-      params.tab = 'sent_requests';
+      const res = await axios.get('/api/internal-branch/transfers', { params });
+      return Array.isArray(res.data) ? res.data : [];
+    },
+    refetchInterval: 300000,
+    staleTime: 30000
+  });
+
+  // 3. Sent Transfer Requests Query (Requested by this branch)
+  const sentQuery = useQuery({
+    queryKey: ['transfers', 'sent_requests', adminSelectedBranch, adminDirection, filterToBranch, filterStatus, filterRequestType, filterPriority, searchQuery],
+    queryFn: async () => {
+      const params = { tab: 'sent_requests' };
+      if (adminSelectedBranch !== 'All') {
+        params.branch = adminSelectedBranch;
+        params.branch_direction = adminDirection;
+      }
       if (filterToBranch !== 'All') params.to_branch = filterToBranch;
       if (filterStatus !== 'All') params.status = filterStatus;
       if (filterRequestType !== 'All') params.request_type = filterRequestType;
       if (filterPriority !== 'All') params.priority = filterPriority;
       if (searchQuery) params.search = searchQuery;
-    } else {
-      // Master Logs & Reporting Tab
-      params.tab = 'logs';
+      const res = await axios.get('/api/internal-branch/transfers', { params });
+      return Array.isArray(res.data) ? res.data : [];
+    },
+    refetchInterval: 300000,
+    staleTime: 30000
+  });
+
+  // 4. Receivals Query (Dispatched transfers waiting to be received by this branch)
+  const receivalQuery = useQuery({
+    queryKey: ['transfers', 'receivals', adminSelectedBranch, adminDirection, filterToBranch, filterRequestType, filterPriority, searchQuery],
+    queryFn: async () => {
+      const params = { tab: 'pending_receivals' };
+      if (adminSelectedBranch !== 'All') {
+        params.branch = adminSelectedBranch;
+        params.branch_direction = adminDirection;
+      }
+      if (filterToBranch !== 'All') params.received_by = filterToBranch;
+      if (filterRequestType !== 'All') params.request_type = filterRequestType;
+      if (filterPriority !== 'All') params.priority = filterPriority;
+      if (searchQuery) params.search = searchQuery;
+      const res = await axios.get('/api/internal-branch/transfers', { params });
+      return Array.isArray(res.data) ? res.data : [];
+    },
+    refetchInterval: 300000,
+    staleTime: 30000
+  });
+
+  // 5. Master Logs & History Query
+  const logsQuery = useQuery({
+    queryKey: ['transfers', 'logs', adminSelectedBranch, adminDirection, filterFromBranch, customFilterFromBranch, filterToBranch, customFilterToBranch, filterStatus, filterRequestType, filterPriority, filterPeriod, filterFromDate, filterToDate, filterDishName, searchQuery],
+    queryFn: async () => {
+      const params = { tab: 'logs' };
+      if (adminSelectedBranch !== 'All') {
+        params.branch = adminSelectedBranch;
+        params.branch_direction = adminDirection;
+      }
       if (filterFromBranch !== 'All') {
         params.from_branch = filterFromBranch;
         if (filterFromBranch === 'Other' && customFilterFromBranch.trim()) {
@@ -1902,34 +2019,105 @@ export default function InternalBranch() {
       if (filterToDate) params.to_date = filterToDate;
       if (filterDishName) params.dish_name = filterDishName;
       if (searchQuery) params.search = searchQuery;
+      const res = await axios.get('/api/internal-branch/transfers', { params });
+      return Array.isArray(res.data) ? res.data : [];
+    },
+    refetchInterval: 300000,
+    staleTime: 30000
+  });
+
+  // Universal cache updater: updates any transfer matching id across all active transfer queries
+  const updateTransferInCache = useCallback((updatedTransfer) => {
+    if (!updatedTransfer || (!updatedTransfer.id && !updatedTransfer.transfer_id)) return;
+    queryClient.setQueriesData({ queryKey: ['transfers'] }, (oldData) => {
+      if (!Array.isArray(oldData)) return oldData;
+      return oldData.map(t => {
+        if ((updatedTransfer.id && t.id === updatedTransfer.id) || 
+            (updatedTransfer.transfer_id && t.transfer_id === updatedTransfer.transfer_id)) {
+          return { ...t, ...updatedTransfer };
+        }
+        return t;
+      });
+    });
+  }, [queryClient]);
+
+  // Item-level cache updater: updates a specific item inside a transfer immediately across all queries
+  const updateTransferItemInCache = useCallback((transferId, itemId, itemUpdates, transferUpdates = {}) => {
+    queryClient.setQueriesData({ queryKey: ['transfers'] }, (oldData) => {
+      if (!Array.isArray(oldData)) return oldData;
+      return oldData.map(t => {
+        if (t.id === transferId || t.transfer_id === transferId) {
+          const nextItems = (t.items || []).map(it => {
+            if (it.id === itemId) {
+              return { ...it, ...itemUpdates };
+            }
+            return it;
+          });
+          return {
+            ...t,
+            ...transferUpdates,
+            items: nextItems
+          };
+        }
+        return t;
+      });
+    });
+  }, [queryClient]);
+
+  // Active query derived from activeTab
+  const activeQuery = useMemo(() => {
+    if (activeTab === 'incoming') return incomingQuery;
+    if (activeTab === 'receivals') return receivalQuery;
+    if (activeTab === 'transfer_request' || activeTab === 'new') return sentQuery;
+    return logsQuery;
+  }, [activeTab, incomingQuery, receivalQuery, sentQuery, logsQuery]);
+
+  const transfers = activeQuery.data || [];
+  const loadingTransfers = activeQuery.isLoading;
+  const isFetchingTransfers = activeQuery.isFetching;
+  const isErrorTransfers = activeQuery.isError;
+  const errorTransfers = activeQuery.error;
+  const refetchTransfers = activeQuery.refetch;
+
+  // Filtered Sent Transfers for Sent Requests Tab
+  const filteredSentTransfers = useMemo(() => {
+    const list = sentQuery.data || [];
+    const search = (sentSearchQuery || '').trim().toLowerCase();
+    return list.filter(t => {
+      if (!t) return false;
+      const matchBranch = sentFilterBranch === 'All' || 
+        String(t.to_branch).toLowerCase() === sentFilterBranch.toLowerCase();
+      const matchPriority = sentFilterPriority === 'All' || 
+        String(t.priority).toLowerCase() === sentFilterPriority.toLowerCase();
+      const matchSearch = !search || 
+        String(t.transfer_id || '').toLowerCase().includes(search) ||
+        String(t.from_branch || '').toLowerCase().includes(search) ||
+        String(t.to_branch || '').toLowerCase().includes(search) ||
+        (Array.isArray(t.items) && t.items.some(it => String(it.dish_name || '').toLowerCase().includes(search)));
+      return matchBranch && matchPriority && matchSearch;
+    });
+  }, [sentQuery.data, sentSearchQuery, sentFilterBranch, sentFilterPriority]);
+
+  // setTransfers wrapper for backwards compatibility
+  const setTransfers = useCallback((updater) => {
+    queryClient.setQueriesData({ queryKey: ['transfers'] }, (oldData) => {
+      if (typeof updater === 'function') {
+        return updater(Array.isArray(oldData) ? oldData : []);
+      }
+      return updater;
+    });
+  }, [queryClient]);
+
+  const fetchTransfers = useCallback((tabOverride) => {
+    if (tabOverride) {
+      if (tabOverride === 'incoming') incomingQuery.refetch();
+      else if (tabOverride === 'receivals') receivalQuery.refetch();
+      else if (tabOverride === 'transfer_request') sentQuery.refetch();
+      else logsQuery.refetch();
+    } else {
+      activeQuery.refetch();
     }
-
-    axios.get('/api/internal-branch/transfers', { params })
-      .then(res => setTransfers(res.data || []))
-      .catch(err => console.error('Failed to fetch transfers:', err))
-      .finally(() => setLoadingTransfers(false));
-  }, [
-    activeTab, 
-    adminSelectedBranch,
-    adminDirection,
-    isSuperUser,
-    filterFromBranch, 
-    filterToBranch, 
-    customFilterFromBranch,
-    customFilterToBranch,
-    filterStatus, 
-    filterRequestType,
-    filterPriority,
-    filterPeriod, 
-    filterFromDate, 
-    filterToDate, 
-    filterDishName, 
-    searchQuery
-  ]);
-
-  useEffect(() => {
-    fetchTransfers();
-  }, [fetchTransfers]);
+  }, [incomingQuery, receivalQuery, sentQuery, logsQuery, activeQuery]);
 
   // Real-time WebSockets listeners with event deduplication (prevents double toasts & sounds)
   useEffect(() => {
@@ -2806,15 +2994,22 @@ export default function InternalBranch() {
   };
 
   const handleItemReadyToProcess = async (transferId, item) => {
+    // Instant optimistic update
+    updateTransferItemInCache(transferId, item.id, {
+      item_status: 'Ready to Process'
+    });
     try {
       const res = await axios.put(`/api/internal-branch/transfers/${transferId}/items/${item.id}/ready-to-process`);
       toast.success(`"${item.dish_name}" is now Ready to Process!`);
-      setTransfers(prev => prev.map(x => String(x.id) === String(transferId) ? { ...x, ...res.data } : x));
+      updateTransferInCache(res.data);
       fetchStats();
-      fetchTransfers();
+      if (detailModalTransfer && String(detailModalTransfer.id) === String(transferId)) {
+        setDetailModalTransfer(res.data);
+      }
     } catch (err) {
       console.error('Error marking item ready to process:', err);
       toast.error(err.response?.data?.error || 'Failed to mark item ready to process');
+      fetchTransfers();
     }
   };
 
@@ -3470,6 +3665,16 @@ export default function InternalBranch() {
       return toast.error('A reason is mandatory when modifying the requested quantity.');
     }
 
+    // Instant optimistic update
+    updateTransferItemInCache(transferId, item.id, {
+      item_status: 'Accepted',
+      accepted_qty: numQty,
+      confirmed_qty: numQty,
+      modification_reason: reason.trim(),
+      accepted_by_name: user?.name || user?.username || 'Kitchen Staff',
+      accepted_at: new Date().toISOString()
+    });
+
     try {
       setAcceptItemModal(prev => ({ ...prev, saving: true }));
       const res = await axios.put(`/api/internal-branch/transfers/${transferId}/items/${item.id}/accept`, {
@@ -3477,11 +3682,9 @@ export default function InternalBranch() {
         modification_reason: reason.trim()
       });
 
-      // Update local transfers list immediately for real-time reactivity
-      setTransfers(prev => prev.map(t => String(t.id) === String(transferId) ? { ...t, ...res.data } : t));
+      updateTransferInCache(res.data);
       toast.success(`Item "${item.dish_name}" accepted (${numQty} ${item.uom})`);
       setAcceptItemModal(null);
-      fetchTransfers();
       fetchStats();
       if (detailModalTransfer && String(detailModalTransfer.id) === String(transferId)) {
         setDetailModalTransfer(res.data);
@@ -3489,6 +3692,7 @@ export default function InternalBranch() {
     } catch (err) {
       console.error('Failed to accept item:', err);
       toast.error(err.response?.data?.error || 'Failed to accept item');
+      fetchTransfers();
       setAcceptItemModal(prev => ({ ...prev, saving: false }));
     }
   };
@@ -3509,17 +3713,23 @@ export default function InternalBranch() {
       return toast.error('A rejection reason is mandatory before rejecting an item.');
     }
 
+    // Instant optimistic update
+    updateTransferItemInCache(transferId, item.id, {
+      item_status: 'Rejected',
+      rejection_reason: reason.trim(),
+      rejected_by_name: user?.name || user?.username || 'Kitchen Staff',
+      rejected_at: new Date().toISOString()
+    });
+
     try {
       setRejectItemModal(prev => ({ ...prev, saving: true }));
       const res = await axios.put(`/api/internal-branch/transfers/${transferId}/items/${item.id}/reject`, {
         rejection_reason: reason.trim()
       });
 
-      // Update local transfers list immediately for real-time reactivity
-      setTransfers(prev => prev.map(t => String(t.id) === String(transferId) ? { ...t, ...res.data } : t));
+      updateTransferInCache(res.data);
       toast.success(`Item "${item.dish_name}" rejected`);
       setRejectItemModal(null);
-      fetchTransfers();
       fetchStats();
       if (detailModalTransfer && String(detailModalTransfer.id) === String(transferId)) {
         setDetailModalTransfer(res.data);
@@ -3527,20 +3737,29 @@ export default function InternalBranch() {
     } catch (err) {
       console.error('Failed to reject item:', err);
       toast.error(err.response?.data?.error || 'Failed to reject item');
+      fetchTransfers();
       setRejectItemModal(prev => ({ ...prev, saving: false }));
     }
   };
 
   // Fast Accept Handler (No confirmation modal if quantity unchanged)
   const handleFastAcceptItem = async (transferId, item, acceptedQty) => {
+    // Instant optimistic update
+    updateTransferItemInCache(transferId, item.id, {
+      item_status: 'Accepted',
+      accepted_qty: acceptedQty,
+      confirmed_qty: acceptedQty,
+      accepted_by_name: user?.name || user?.username || 'Kitchen Staff',
+      accepted_at: new Date().toISOString()
+    });
+
     try {
       const res = await axios.put(`/api/internal-branch/transfers/${transferId}/items/${item.id}/accept`, {
         accepted_qty: acceptedQty,
         modification_reason: ''
       });
-      setTransfers(prev => prev.map(t => String(t.id) === String(transferId) ? { ...t, ...res.data } : t));
+      updateTransferInCache(res.data);
       toast.success(`Item "${item.dish_name}" accepted (${acceptedQty} ${item.uom})`);
-      fetchTransfers();
       fetchStats();
       if (detailModalTransfer && String(detailModalTransfer.id) === String(transferId)) {
         setDetailModalTransfer(res.data);
@@ -3548,6 +3767,7 @@ export default function InternalBranch() {
     } catch (err) {
       console.error('Failed to fast accept item:', err);
       toast.error(err.response?.data?.error || 'Failed to accept item');
+      fetchTransfers();
     }
   };
 
@@ -4213,49 +4433,77 @@ export default function InternalBranch() {
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#475569', minWidth: 140 }}>
-                        {isRejected ? (
-                          <div>
-                            {it.rejection_reason ? (
-                              <div style={{ color: '#b91c1c', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <AlertTriangle size={11} /> Rej: "{it.rejection_reason}"
-                              </div>
-                            ) : (
-                              <div style={{ color: '#b91c1c', fontWeight: 600 }}>Item Rejected</div>
-                            )}
-                            {it.rejected_by_name && (
-                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                                By {it.rejected_by_name} {it.rejected_at ? `(${new Date(it.rejected_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
-                              </div>
-                            )}
-                          </div>
-                        ) : isQtyModified || (it.modification_reason && it.modification_reason.trim()) || (it.quantity_change_reason && it.quantity_change_reason.trim()) ? (
-                          <div>
-                            <div style={{ color: '#1d4ed8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <Edit3 size={11} /> Mod: "{it.modification_reason || it.quantity_change_reason || 'Qty Modified'}"
+                      <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#475569', minWidth: 155 }}>
+                        {(() => {
+                          const acceptedUser = it.accepted_by_name || t.accepted_by_name;
+                          const rejectedUser = it.rejected_by_name || t.rejected_by_name;
+                          const dispatchedUser = it.dispatched_by_name || t.dispatched_by_name;
+                          const receivedUser = it.received_by_name || t.received_by_name;
+                          const requestedUser = t.requested_by_name || t.created_by_name;
+                          const hasContent = isRejected || isQtyModified || it.remarks || acceptedUser || requestedUser;
+
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3.5 }}>
+                              {/* 1. Item-specific Remarks */}
+                              {it.remarks && (
+                                <div style={{ color: '#0f172a', fontWeight: 600 }}>
+                                  "{it.remarks}"
+                                </div>
+                              )}
+
+                              {/* 2. Rejection info */}
+                              {isRejected && (
+                                <div>
+                                  <div style={{ color: '#b91c1c', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <AlertTriangle size={11} /> Rej: "{it.rejection_reason || 'Item Rejected'}"
+                                  </div>
+                                  {rejectedUser && (
+                                    <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>
+                                      By <strong>{rejectedUser}</strong> {it.rejected_at ? `(${new Date(it.rejected_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* 3. Modification Reason */}
+                              {!isRejected && isQtyModified && (
+                                <div>
+                                  <div style={{ color: '#1d4ed8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <Edit3 size={11} /> Mod: "{it.modification_reason || it.quantity_change_reason || `Qty: ${reqQty} → ${accQty}`}"
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 4. Action User attribution */}
+                              {isReceived ? (
+                                <div style={{ fontSize: 10.5, color: '#047857' }}>
+                                  Rec by <strong>{receivedUser || acceptedUser || 'Staff'}</strong> {it.received_at ? `(${new Date(it.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                                </div>
+                              ) : isDispatched ? (
+                                <div style={{ fontSize: 10.5, color: '#1d4ed8' }}>
+                                  Disp by <strong>{dispatchedUser || acceptedUser || 'Staff'}</strong> {it.dispatched_at ? `(${new Date(it.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                                </div>
+                              ) : (isAccepted || isReadyToProcess) ? (
+                                <div style={{ fontSize: 10.5, color: '#166534' }}>
+                                  Acc by <strong>{acceptedUser || 'Staff'}</strong> {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                                </div>
+                              ) : isItemPending && requestedUser ? (
+                                <div style={{ fontSize: 10, color: '#64748b' }}>
+                                  Req by <strong>{requestedUser}</strong>
+                                </div>
+                              ) : null}
+
+                              {/* 5. Transfer-level notes fallback if no item remarks */}
+                              {!it.remarks && t.notes && t.notes !== '[Purpose: Stock Replenishment]' && !isRejected && !isQtyModified && (
+                                <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>
+                                  {t.notes}
+                                </div>
+                              )}
+
+                              {!hasContent && <span style={{ color: '#cbd5e1' }}>—</span>}
                             </div>
-                            {it.accepted_by_name && (
-                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                                By {it.accepted_by_name} {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
-                              </div>
-                            )}
-                          </div>
-                        ) : it.remarks ? (
-                          <div>
-                            <div style={{ color: '#334155', fontWeight: 500 }}>{it.remarks}</div>
-                            {it.accepted_by_name && (
-                              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-                                Acc by {it.accepted_by_name} {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
-                              </div>
-                            )}
-                          </div>
-                        ) : it.accepted_by_name ? (
-                          <div style={{ fontSize: 10.5, color: '#64748b' }}>
-                            Acc by <strong>{it.accepted_by_name}</strong> {it.accepted_at ? `(${new Date(it.accepted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
-                          </div>
-                        ) : (
-                          <span style={{ color: '#cbd5e1' }}>—</span>
-                        )}
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                         {isReceival ? (
@@ -6041,11 +6289,14 @@ export default function InternalBranch() {
           </div>
 
           {/* Transfer Requests List (Strictly Latest First) */}
-          {loadingTransfers ? (
-            <div style={{ textAlign: 'center', padding: 50, color: '#64748b', background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-              <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 8px', display: 'block', color: '#2563eb' }} />
-              Loading sent transfer requests...
-            </div>
+          {sentQuery.isLoading ? (
+            <TransferCardSkeleton count={3} />
+          ) : sentQuery.isError ? (
+            <TransferErrorCard
+              title="Failed to Load Transfer Requests"
+              message={sentQuery.error?.message || "An unexpected error occurred while fetching your sent transfer requests."}
+              onRetry={() => sentQuery.refetch()}
+            />
           ) : filteredSentTransfers.length === 0 ? (
             <div style={{ background: '#fff', borderRadius: 12, border: '1px dashed #cbd5e1', padding: 44, textAlign: 'center', color: '#64748b' }}>
               <CheckCircle2 size={40} color="#10b981" style={{ margin: '0 auto 10px' }} />
@@ -6064,6 +6315,11 @@ export default function InternalBranch() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {sentQuery.isFetching && !sentQuery.isLoading && (
+                <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', background: '#eff6ff', borderRadius: 6, alignSelf: 'flex-start' }}>
+                  <RefreshCw size={12} className="spin" /> Updating requests in background...
+                </div>
+              )}
               {(() => {
                 const seenIds = new Set();
                 const uniqueSent = filteredSentTransfers.filter(t => {
@@ -6104,8 +6360,14 @@ export default function InternalBranch() {
             </span>
           </div>
 
-          {loadingTransfers ? (
-            <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>Loading incoming transfer requests...</div>
+          {incomingQuery.isLoading ? (
+            <TransferCardSkeleton count={3} />
+          ) : incomingQuery.isError ? (
+            <TransferErrorCard
+              title="Failed to Load Incoming Requests"
+              message={incomingQuery.error?.message || "An error occurred while loading incoming requests for your branch."}
+              onRetry={() => incomingQuery.refetch()}
+            />
           ) : transfers.length === 0 ? (
             <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: 50, textAlign: 'center', color: '#64748b' }}>
               <Truck size={42} color="#94a3b8" style={{ margin: '0 auto 12px' }} />
@@ -6116,6 +6378,11 @@ export default function InternalBranch() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {incomingQuery.isFetching && !incomingQuery.isLoading && (
+                <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', background: '#eff6ff', borderRadius: 6, alignSelf: 'flex-start' }}>
+                  <RefreshCw size={12} className="spin" /> Checking for incoming requests...
+                </div>
+              )}
               {(() => {
                 const seenIds = new Set();
                 const uniqueIncoming = transfers.filter(t => {
@@ -6156,8 +6423,14 @@ export default function InternalBranch() {
             </span>
           </div>
 
-          {loadingTransfers ? (
-            <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>Loading pending receivals...</div>
+          {receivalQuery.isLoading ? (
+            <TransferCardSkeleton count={3} />
+          ) : receivalQuery.isError ? (
+            <TransferErrorCard
+              title="Failed to Load In-Transit Receivals"
+              message={receivalQuery.error?.message || "An error occurred while fetching shipments in transit."}
+              onRetry={() => receivalQuery.refetch()}
+            />
           ) : transfers.length === 0 ? (
             <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: 50, textAlign: 'center', color: '#64748b' }}>
               <PackageCheck size={42} color="#94a3b8" style={{ margin: '0 auto 12px' }} />
@@ -6168,6 +6441,11 @@ export default function InternalBranch() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {receivalQuery.isFetching && !receivalQuery.isLoading && (
+                <div style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', background: '#eff6ff', borderRadius: 6, alignSelf: 'flex-start' }}>
+                  <RefreshCw size={12} className="spin" /> Checking shipment updates...
+                </div>
+              )}
               {(() => {
                 const seenIds = new Set();
                 const uniqueReceivals = transfers.filter(t => {
@@ -6394,8 +6672,16 @@ export default function InternalBranch() {
           </div>
 
           {/* Master Logs Table */}
-          {loadingTransfers ? (
-            <div style={{ textAlign: 'center', padding: 50, color: '#64748b' }}>Loading logs...</div>
+          {logsQuery.isLoading ? (
+            <div style={{ padding: 20 }}>
+              <TransferCardSkeleton count={3} />
+            </div>
+          ) : logsQuery.isError ? (
+            <TransferErrorCard
+              title="Failed to Load Transfer Logs"
+              message={logsQuery.error?.message || "Could not retrieve transfer logs."}
+              onRetry={() => logsQuery.refetch()}
+            />
           ) : transfers.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>No transfers matching filters.</div>
           ) : (
@@ -8795,8 +9081,8 @@ export default function InternalBranch() {
                   gap: 14
                 }}>
                   {filteredBrowserDishes.map(d => {
-                    const targetRows = editTransferModal ? editDishRows : (activeTab === 'transfer_request' ? trfDishRows : newDishRows);
-                    const existingRow = targetRows.find(r => r.item_id === d.id || (r.dish_name && r.dish_name.toLowerCase() === d.name.toLowerCase()));
+                    const targetRows = editTransferModal ? editDishRows : trfDishRows;
+                    const existingRow = targetRows.find(r => (d.id && r.item_id && String(r.item_id) === String(d.id)) || (r.dish_name && r.dish_name.trim().toLowerCase() === d.name.trim().toLowerCase()));
                     const isAdded = Boolean(existingRow && existingRow.dish_name);
 
                     return (
@@ -8924,7 +9210,7 @@ export default function InternalBranch() {
             {/* Footer */}
             <div style={{ padding: '14px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', flexWrap: 'wrap', gap: 10 }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                <strong>{(editTransferModal ? editDishRows : (activeTab === 'transfer_request' ? trfDishRows : newDishRows)).filter(r => r.dish_name && r.dish_name.trim()).length}</strong> dishes currently in transfer request
+                <strong>{(editTransferModal ? editDishRows : trfDishRows).filter(r => r.dish_name && r.dish_name.trim()).length}</strong> dishes currently in transfer request
               </span>
               <button
                 type="button"

@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from './queryClient'
 import { AuthProvider } from './contexts/AuthContext'
 import { POSProvider } from './contexts/POSContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -56,8 +58,9 @@ function PageLoader() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <POSProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <POSProvider>
         <Toaster
           position="top-right"
           toastOptions={{ style: { fontSize: '14px', borderRadius: '8px' } }}
@@ -115,5 +118,6 @@ export default function App() {
         </BrowserRouter>
       </POSProvider>
     </AuthProvider>
+    </QueryClientProvider>
   )
 }
