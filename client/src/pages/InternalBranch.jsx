@@ -1251,29 +1251,11 @@ function DishSearchDropdown({ value, imageUrl, dishes, popularityMap = {}, onSel
                   )}
                 </div>
 
-                {/* Dish Name + Popularity Badge */}
+                {/* Dish Name */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, minWidth: 0, gap: 8 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {dish.name}
                   </span>
-                  {dish.request_count > 0 && (
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: '#b45309',
-                      background: '#fffbeb',
-                      border: '1px solid #fef3c7',
-                      padding: '1.5px 6px',
-                      borderRadius: 10,
-                      whiteSpace: 'nowrap',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 3,
-                      flexShrink: 0
-                    }}>
-                      🔥 {dish.request_count}x requested
-                    </span>
-                  )}
                 </div>
               </div>
             ))
@@ -1524,6 +1506,8 @@ export default function InternalBranch() {
   const isReceivingRef = useRef(false);
   const processedEventKeysRef = useRef(new Set());
   const localActionTransferIdsRef = useRef(new Map());
+  const lastAddedRowRef = useRef(null);
+  const shouldScrollToNewRowRef = useRef(false);
 
   // New Request Form State
   const defaultFromBranch = normalizeBranchName(user?.branch && user.branch !== 'All' ? user.branch : 'Branch 1');
@@ -1641,6 +1625,7 @@ export default function InternalBranch() {
   }, [dishes, posItems, menuBrowserSearch, menuBrowserCategory, popularityMap]);
 
   const handleAddDishFromBrowser = (dish) => {
+    shouldScrollToNewRowRef.current = true;
     const units = getItemUnits(dish);
     const defaultUom = units[0] || 'Piece';
     const dishSku = dish.short_code || dish.sku || (dish.id ? `SKU-${dish.id}` : '');
@@ -1706,6 +1691,17 @@ export default function InternalBranch() {
       return prev.map(r => r.id === existing.id ? { ...r, requested_qty: newQty } : r);
     });
   };
+
+  // Auto-scroll to newly added dish row in Menu Request section
+  useEffect(() => {
+    if (shouldScrollToNewRowRef.current && lastAddedRowRef.current) {
+      const timer = setTimeout(() => {
+        lastAddedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+      shouldScrollToNewRowRef.current = false;
+      return () => clearTimeout(timer);
+    }
+  }, [trfDishRows.length, editDishRows.length, newDishRows.length]);
 
   // Audio test state
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -2103,6 +2099,7 @@ export default function InternalBranch() {
 
   // Form row handlers
   const handleAddDishRow = () => {
+    shouldScrollToNewRowRef.current = true;
     setNewDishRows(prev => [
       ...prev,
       { id: Date.now(), dish_name: '', item_id: null, uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'] }
@@ -2210,6 +2207,7 @@ export default function InternalBranch() {
   };
 
   const handleAddTrfDishRow = () => {
+    shouldScrollToNewRowRef.current = true;
     setTrfDishRows(prev => {
       const prevItem = prev.length > 0 ? prev[prev.length - 1] : null;
       const inheritedDate = (prevItem && prevItem.needed_by_date) ? prevItem.needed_by_date : new Date().toISOString().split('T')[0];
@@ -2745,32 +2743,43 @@ export default function InternalBranch() {
     }
 
     const readyItems = (dispatchModalTransfer.items || []).filter(item => item.item_status === 'Ready to Process');
-    const itemsPayload = readyItems.map(item => {
-      const isSelected = dispatchSelectedItems[item.id] !== undefined ? dispatchSelectedItems[item.id] : true;
+    const selectedReadyItems = readyItems.filter(item => {
+      return dispatchSelectedItems[item.id] !== undefined ? dispatchSelectedItems[item.id] : true;
+    });
+
+    if (selectedReadyItems.length === 0) {
+      return toast.error('Please check at least one item to dispatch.');
+    }
+
+    const itemsPayload = selectedReadyItems.map(item => {
+      const q = parseFloat(dispatchItemQuantities[item.id] !== undefined ? dispatchItemQuantities[item.id] : (item.sent_qty ?? item.accepted_qty ?? item.requested_qty ?? 0));
       return {
         id: item.id,
-        is_dispatched: isSelected,
-        mark_pending: !isSelected,
-        sent_qty: isSelected ? parseFloat(dispatchItemQuantities[item.id] || 0) : 0,
+        is_dispatched: true,
+        sent_qty: isNaN(q) || q <= 0 ? (parseFloat(item.accepted_qty ?? item.requested_qty ?? 0)) : q,
         remarks: dispatchItemRemarks[item.id] || ''
       };
     });
 
-    const hasAnyDispatched = itemsPayload.some(it => it.is_dispatched && it.sent_qty > 0);
+    const hasAnyDispatched = itemsPayload.some(it => it.sent_qty > 0);
     if (!hasAnyDispatched) {
-      return toast.error('Please check at least one item with quantity > 0 to dispatch.');
+      return toast.error('Please enter a dispatch quantity greater than 0 for selected items.');
     }
 
     try {
       isDispatchingRef.current = true;
       setDispatching(true);
 
-      await axios.put(`/api/internal-branch/transfers/${dispatchModalTransfer.id}/dispatch`, {
+      const res = await axios.put(`/api/internal-branch/transfers/${dispatchModalTransfer.id}/dispatch`, {
         handover_by_name: handoverByName.trim(),
         handover_to_name: handoverToName.trim(),
         notes: dispatchNotes.trim(),
         items: itemsPayload
       });
+
+      if (res.data?.id) {
+        setTransfers(prev => prev.map(x => (x.id === res.data.id || x.transfer_id === res.data.transfer_id) ? { ...x, ...res.data } : x));
+      }
 
       // Record local action to avoid duplicate socket toast
       localActionTransferIdsRef.current.set(`dispatched_${dispatchModalTransfer.transfer_id}`, Date.now());
@@ -3100,6 +3109,7 @@ export default function InternalBranch() {
   };
 
   const handleAddEditDishRow = () => {
+    shouldScrollToNewRowRef.current = true;
     setEditDishRows(prev => [
       ...prev,
       { id: Date.now() + Math.random(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'], item_status: 'Pending', isLocked: false }
@@ -5363,6 +5373,7 @@ export default function InternalBranch() {
                   return (
                     <div
                       key={row.id}
+                      ref={idx === trfDishRows.length - 1 ? lastAddedRowRef : null}
                       style={{
                         background: '#ffffff',
                         padding: '10px 12px',
@@ -5604,7 +5615,7 @@ export default function InternalBranch() {
                   onMouseEnter={e => { e.currentTarget.style.background = '#dbeafe'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff'; }}
                 >
-                  <PlusCircle size={16} /> + Add Another Item
+                  <PlusCircle size={16} /> + Add New Menu Item
                 </button>
               </div>
 
@@ -6657,8 +6668,8 @@ export default function InternalBranch() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{it.dish_name}</strong>
                               {!isChecked && (
-                                <span style={{ fontSize: 10, background: '#e2e8f0', color: '#64748b', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
-                                  Will stay Pending
+                                <span style={{ fontSize: 10, background: '#f5f3ff', color: '#6d28d9', padding: '1px 5px', borderRadius: 3, fontWeight: 700, border: '1px solid #ddd6fe' }}>
+                                  Will stay in Ready status
                                 </span>
                               )}
                             </div>
@@ -8259,6 +8270,7 @@ export default function InternalBranch() {
                     return (
                       <div
                         key={row.id}
+                        ref={idx === editDishRows.length - 1 ? lastAddedRowRef : null}
                         style={{
                           display: 'grid',
                           gridTemplateColumns: 'minmax(260px, 3.2fr) minmax(110px, 1.2fr) minmax(90px, 1fr) minmax(130px, 1.4fr) 36px',

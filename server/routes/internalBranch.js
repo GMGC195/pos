@@ -851,25 +851,30 @@ async function recalculateTransferStatus(client, transferId) {
 
   // Check receiving status first if items were dispatched
   const dispatchedItems = items.filter(it => (parseFloat(it.dispatched_qty || it.sent_qty || 0) > 0));
+  const hasRemainingUnfinishedItems = items.some(it => !['Received', 'Fully Received', 'Rejected'].includes(it.item_status));
+  const allItemsRejected = items.every(it => it.item_status === 'Rejected');
+
   if (dispatchedItems.length > 0) {
     const allDispatchedReceived = dispatchedItems.every(it => it.item_status === 'Fully Received' || it.item_status === 'Received');
     const anyDispatchedReceived = dispatchedItems.some(it => parseFloat(it.received_qty || 0) > 0);
     const anyPendingReceive = dispatchedItems.some(it => it.item_status === 'Pending Receive' || parseFloat(it.pending_receive_qty || 0) > 0);
-    const allDispatchedRejected = dispatchedItems.every(it => it.item_status === 'Rejected');
 
-    if (allDispatchedReceived && !anyPendingReceive) {
-      await client.query(`UPDATE internal_branch_transfers SET status = 'Received', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
-      return 'Received';
-    }
-    if (anyDispatchedReceived || anyPendingReceive) {
-      await client.query(`UPDATE internal_branch_transfers SET status = 'Partially Received', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
-      return 'Partially Received';
-    }
-    if (allDispatchedRejected) {
+    if (allItemsRejected) {
       await client.query(`UPDATE internal_branch_transfers SET status = 'Rejected', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
       return 'Rejected';
     }
-    const allReadyDispatched = items.filter(it => it.item_status === 'Ready to Process' || it.item_status === 'Accepted').length === 0;
+
+    // Only mark overall transfer as Received if ALL items in the entire transfer are received/rejected
+    if (allDispatchedReceived && !anyPendingReceive && !hasRemainingUnfinishedItems) {
+      await client.query(`UPDATE internal_branch_transfers SET status = 'Received', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
+      return 'Received';
+    }
+    if (anyDispatchedReceived || anyPendingReceive || (allDispatchedReceived && hasRemainingUnfinishedItems)) {
+      await client.query(`UPDATE internal_branch_transfers SET status = 'Partially Received', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [transferId]);
+      return 'Partially Received';
+    }
+
+    const allReadyDispatched = items.filter(it => !['Dispatched', 'Partially Dispatched', 'Received', 'Fully Received', 'Rejected'].includes(it.item_status)).length === 0;
     const finalDispStatus = allReadyDispatched ? 'Dispatched' : 'Partially Dispatched';
     await client.query(`UPDATE internal_branch_transfers SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [finalDispStatus, transferId]);
     return finalDispStatus;
@@ -2455,20 +2460,6 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
     const hOverBy = handover_by_name?.trim() || dispatcherName;
     const hOverTo = handover_to_name?.trim() || 'Driver / Delivery Staff';
 
-    // Validation: Block dispatching if any item remains unprocessed (Pending)
-    const pendingItemsCheck = await client.query(`
-      SELECT id, dish_name FROM internal_branch_transfer_items
-      WHERE transfer_id = $1 AND (item_status = 'Pending' OR item_status IS NULL)
-    `, [transfer.id]);
-
-    if (pendingItemsCheck.rows.length > 0) {
-      await client.query('ROLLBACK');
-      const pendingNames = pendingItemsCheck.rows.map(r => r.dish_name).join(', ');
-      return res.status(400).json({
-        error: `Cannot dispatch transfer while items remain Pending. Please Accept or Reject all items first (${pendingNames}).`
-      });
-    }
-
     let totalDispatchedCount = 0;
     let totalPendingDispatchCount = 0;
 
@@ -2491,18 +2482,8 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
         const dispatchQty = parseFloat(item.dispatch_qty !== undefined ? item.dispatch_qty : (item.sent_qty !== undefined ? item.sent_qty : acceptedQty));
 
         if (item.mark_pending || item.is_dispatched === false || isNaN(dispatchQty) || dispatchQty <= 0) {
-          // Item marked as Pending Dispatch / Not Available
-          totalPendingDispatchCount++;
-          await client.query(`
-            UPDATE internal_branch_transfer_items
-            SET item_status = 'Pending Dispatch',
-                dispatched_qty = 0,
-                sent_qty = 0,
-                pending_dispatch_qty = $1,
-                pending_receive_qty = 0,
-                remarks = COALESCE($2, remarks)
-            WHERE id = $3 AND transfer_id = $4
-          `, [acceptedQty, item.remarks || null, item.id, transfer.id]);
+          // If unselected or skipped for this shipment, keep its existing status (e.g. Ready to Process)
+          continue;
         } else {
           // Validate dispatch quantity cannot exceed accepted quantity
           if (dispatchQty > acceptedQty && !superUser) {
@@ -2554,11 +2535,26 @@ router.put('/transfers/:id/dispatch', authenticateToken, async (req, res) => {
       }
     }
 
-    // 3. Determine Overall Transfer Status
+    // 3. Determine Overall Transfer Status based on ALL items
+    const allTransferItemsRes = await client.query(`
+      SELECT id, item_status, requested_qty, accepted_qty, dispatched_qty, sent_qty 
+      FROM internal_branch_transfer_items 
+      WHERE transfer_id = $1
+    `, [transfer.id]);
+    const allItems = allTransferItemsRes.rows;
+
+    const hasUndispatchedItems = allItems.some(it => 
+      !['Dispatched', 'Partially Dispatched', 'Received', 'Fully Received', 'Rejected'].includes(it.item_status)
+    );
+    const hasAnyDispatched = allItems.some(it => 
+      ['Dispatched', 'Partially Dispatched', 'Received', 'Fully Received'].includes(it.item_status) ||
+      parseFloat(it.dispatched_qty || it.sent_qty || 0) > 0
+    );
+
     let finalTransferStatus = 'Dispatched';
-    if (totalDispatchedCount === 0) {
-      finalTransferStatus = 'In Progress';
-    } else if (totalPendingDispatchCount > 0) {
+    if (!hasAnyDispatched) {
+      finalTransferStatus = transfer.status || 'In Progress';
+    } else if (hasUndispatchedItems || totalPendingDispatchCount > 0) {
       finalTransferStatus = 'Partially Dispatched';
     } else {
       finalTransferStatus = 'Dispatched';
@@ -2780,11 +2776,23 @@ router.put('/transfers/:id/receive', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Discrepancy or rejection detected. A clear reason for the variance is mandatory.' });
     }
 
-    // Determine final transfer status
+    // Determine final transfer status by checking ALL items in the transfer
+    const allTransferItemsRes = await client.query(`
+      SELECT id, item_status, requested_qty, accepted_qty, dispatched_qty, received_qty 
+      FROM internal_branch_transfer_items 
+      WHERE transfer_id = $1
+    `, [transfer.id]);
+    const allTransferItems = allTransferItemsRes.rows;
+
+    const remainingUnfinishedItems = allTransferItems.filter(it => 
+      !['Received', 'Fully Received', 'Rejected'].includes(it.item_status)
+    );
+    const allItemsRejected = allTransferItems.every(it => it.item_status === 'Rejected');
+
     let finalTransferStatus = 'Received';
-    if (allRejected) {
+    if (allItemsRejected) {
       finalTransferStatus = 'Rejected';
-    } else if (anyPending || !allReceived || hasDiscrepancy) {
+    } else if (remainingUnfinishedItems.length > 0 || anyPending || !allReceived || hasDiscrepancy) {
       finalTransferStatus = 'Partially Received';
     } else {
       finalTransferStatus = 'Received';
