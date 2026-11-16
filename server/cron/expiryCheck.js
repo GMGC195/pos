@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const pool = require('../db');
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
+const { dispatchEmail } = require('../utils/emailService');
 
 // Helper to send email to admins and/or employees
 async function sendExpiryEmail(employeeName, documentName, expiryDateStr, diffDays, recipients) {
@@ -56,49 +57,19 @@ async function sendExpiryEmail(employeeName, documentName, expiryDateStr, diffDa
     </div>
   `;
 
-  // 1. Try Resend first if credentials exist
-  if (process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL) {
-    try {
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      await resend.emails.send({
-        from: `Employee Document Expire <${process.env.RESEND_FROM_EMAIL}>`,
-        to: validRecipients,
-        subject: subject,
-        html: html
-      });
-      console.log(`✅ [Resend] Expiry email sent to [${validRecipients.join(', ')}] for ${employeeName} - ${documentName}`);
-      return;
-    } catch (resendErr) {
-      console.warn(`⚠️ [Resend] Failed, falling back to Nodemailer:`, resendErr.message);
+  try {
+    const result = await dispatchEmail({
+      to: validRecipients,
+      subject: subject,
+      html: html
+    });
+    if (result.success) {
+      console.log(`✅ [${result.provider}] Expiry email sent to [${validRecipients.join(', ')}] for ${employeeName} - ${documentName}`);
+    } else {
+      console.error('❌ Failed to send expiry email:', result.error);
     }
-  }
-
-  // 2. Fallback to Nodemailer
-  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-    try {
-      const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.GMAIL_USER,
-          pass: process.env.GMAIL_APP_PASSWORD,
-        },
-        tls: { rejectUnauthorized: false }
-      });
-
-      await transporter.sendMail({
-        from: `"Employee Document Expire" <${process.env.GMAIL_USER}>`,
-        to: validRecipients.join(', '),
-        subject: subject,
-        html: html
-      });
-      console.log(`✅ [Nodemailer] Expiry email sent to [${validRecipients.join(', ')}] for ${employeeName} - ${documentName}`);
-    } catch (nodemailerErr) {
-      console.error('❌ Failed to send expiry email via Nodemailer:', nodemailerErr.message);
-    }
-  } else {
-    console.log('No email service available to send expiry email.');
+  } catch (err) {
+    console.error('❌ Unexpected error sending expiry email:', err.message);
   }
 }
 

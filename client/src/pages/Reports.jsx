@@ -1216,7 +1216,11 @@ export default function Reports({ isTodaySales = false }) {
         card_difference: cardDiff,
         difference_reason: closingDifferenceReason.trim()
       })
-      toast.success(`${closingType} closing complete!`)
+      if (res.data?.emailSent) {
+        toast.success(`${closingType} closing complete & report email sent!`)
+      } else {
+        toast.success(`${closingType} closing complete!`)
+      }
       sessionStorage.removeItem('just_closed_shift_' + targetBranch)
       setShowClosingModal(false)
       setClosingType(null)

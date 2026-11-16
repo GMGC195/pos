@@ -135,7 +135,13 @@ export default function EditShiftClosingModal({
         dev_token: devToken
       }, { headers });
 
-      toast.success('Shift closing amounts updated and developer audit log recorded!');
+      if (res.data?.emailSent) {
+        toast.success('Shift closing updated & notification email sent!');
+      } else if (res.data?.emailError) {
+        toast.success(`Shift closing updated! (Note: Email delivery failed: ${res.data.emailError})`);
+      } else {
+        toast.success('Shift closing amounts updated and developer audit log recorded!');
+      }
       setShowConfirmModal(false);
       if (onSuccess) {
         onSuccess(res.data?.closing || res.data);

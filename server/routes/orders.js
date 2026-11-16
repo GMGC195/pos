@@ -7,6 +7,7 @@ router.use(blockSalaryPayOperator);
 const { Resend } = require('resend');
 const Pusher = require('pusher');
 const { recordActivityLog } = require('./activityLogs');
+const { sendClosingEmail } = require('../utils/emailService');
 
 function cleanEnglishOnly(str) {
   if (!str) return '';
@@ -744,6 +745,27 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
 
     await client.query('COMMIT');
 
+    // Send email report for the edited shift closing with revision details
+    let emailResult = { success: false };
+    try {
+      emailResult = await sendClosingEmail(updatedRecord, 'Shift', {
+        isEdited: true,
+        editorName: authorName,
+        editorRole: authorRole,
+        editorId: authorizerInfo.id || req.user.id,
+        reason: reason.trim(),
+        previousCash: prevCash,
+        newCash: newCash,
+        previousCard: prevCard,
+        newCard: newCard,
+        previousDiff: prevDifference,
+        newDiff: newDiff
+      });
+    } catch (mailErr) {
+      console.error('[Orders Route] Error triggering edited closing email:', mailErr.message);
+      emailResult = { success: false, error: mailErr.message };
+    }
+
     // Record activity log
     try {
       recordActivityLog({
@@ -764,7 +786,9 @@ router.put('/closings/:id', authenticateToken, isAdmin, async (req, res) => {
 
     res.json({
       message: 'Shift closing updated successfully',
-      closing: updatedRecord
+      closing: updatedRecord,
+      emailSent: emailResult.success,
+      emailError: emailResult.success ? undefined : emailResult.error
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1457,513 +1481,8 @@ router.patch('/:id/handle-cancel-request', authenticateToken, isAdminOrCashier, 
   }
 });
 
-async function sendClosingEmail(report, closingType) {
-  try {
-    const apiKey = process.env.RESEND_API_KEY;
-    const fromEmail = process.env.RESEND_FROM_EMAIL;
-    
-    if (!apiKey || !fromEmail) {
-      console.log(`[Email System] Skipping: Missing Resend API key or From email in .env`);
-      return;
-    }
-
-    // Load recipient emails from database settings
-    let toEmails = [];
-    try {
-      const settingsRes = await pool.query('SELECT report_emails FROM settings ORDER BY id ASC LIMIT 1');
-      if (settingsRes.rows.length > 0 && settingsRes.rows[0].report_emails) {
-        const dbEmails = settingsRes.rows[0].report_emails;
-        if (Array.isArray(dbEmails)) {
-          toEmails = dbEmails.map(e => (typeof e === 'string' ? e.trim() : '')).filter(Boolean);
-        } else if (typeof dbEmails === 'string') {
-          try {
-            const parsed = JSON.parse(dbEmails);
-            if (Array.isArray(parsed)) {
-              toEmails = parsed.map(e => (typeof e === 'string' ? e.trim() : '')).filter(Boolean);
-            }
-          } catch (pe) {
-            toEmails = dbEmails.split(',').map(e => e.trim()).filter(Boolean);
-          }
-        }
-      }
-    } catch (dbErr) {
-      console.warn('[Email System] Could not load report_emails from settings table:', dbErr.message);
-    }
-
-    // Fallback to process.env.REPORT_TO_EMAILS if DB has no emails configured
-    if (!toEmails || toEmails.length === 0) {
-      const toEmailsStr = process.env.REPORT_TO_EMAILS;
-      if (toEmailsStr) {
-        toEmails = toEmailsStr.split(',').map(e => e.trim()).filter(Boolean);
-      }
-    }
-
-    if (!toEmails || toEmails.length === 0) {
-      console.log(`[Email System] Skipping: No recipient emails configured in Settings or .env`);
-      return;
-    }
-
-    console.log(`[Email System] Preparing to send ${closingType} report from ${fromEmail} to:`, toEmails);
-    const resend = new Resend(apiKey);
-    
-    let itemsHtml = '';
-    let topSellingHtml = '';
-    let twoHourlyHtml = '';
-    
-    try {
-      let items = [];
-      if (typeof report.items_summary === 'string') {
-        if (report.items_summary === '[object Object]') {
-          console.warn('[Email System] items_summary is "[object Object]", defaulting to empty array.');
-        } else {
-          try {
-            items = JSON.parse(report.items_summary);
-          } catch(parseErr) {
-            console.error('[Email System] Failed to parse items_summary string:', parseErr.message);
-          }
-        }
-      } else if (Array.isArray(report.items_summary)) {
-        items = report.items_summary;
-      } else if (report.items_summary) {
-        items = [report.items_summary];
-      }
-
-      // Collect all flat items to calculate top selling
-      let allFlatItems = [];
-
-      itemsHtml = items.map(cat => {
-        let catHtml = `<div style="margin-bottom: 20px; background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
-          <div style="background: #f8f9fa; font-weight: bold; font-size: 16px; color: #111; padding: 10px 15px; border-bottom: 1px solid #eee;">
-            ${cat.category} <span style="float: right; color: #E31837; font-size: 14px;">SAR ${parseFloat(cat.amount).toFixed(2)} (${cat.qty} items)</span>
-          </div>
-          <div style="padding: 0 10px; overflow-x: auto;">
-            <table style="width: 100%; min-width: 250px; border-collapse: collapse; margin: 10px 0; font-size: 13px; color: #555; table-layout: fixed; word-wrap: break-word;">
-              <thead>
-                <tr style="border-bottom: 1px solid #eee; text-align: left;">
-                  <th style="padding: 8px 4px; width: 40%;">Item</th>
-                  <th style="padding: 8px 4px; text-align: center; width: 15%;">Qty</th>
-                  <th style="padding: 8px 4px; text-align: right; width: 22%;">Price</th>
-                  <th style="padding: 8px 4px; text-align: right; width: 23%;">Total</th>
-                </tr>
-              </thead>
-              <tbody>`;
-        
-        if (cat.items && Array.isArray(cat.items)) {
-          cat.items.forEach(item => {
-            const unitPrice = parseFloat(item.amount / item.qty).toFixed(2);
-            const totalPrice = parseFloat(item.amount).toFixed(2);
-            
-            allFlatItems.push({
-              name: item.name,
-              qty: parseInt(item.qty, 10) || 0,
-              totalPrice: parseFloat(item.amount) || 0
-            });
-
-            catHtml += `<tr style="border-bottom: 1px dashed #f0f0f0;">
-              <td style="padding: 6px 4px;">${item.name}</td>
-              <td style="padding: 6px 4px; text-align: center;"><strong>${item.qty}</strong></td>
-              <td style="padding: 6px 4px; text-align: right;">SAR ${unitPrice}</td>
-              <td style="padding: 6px 4px; text-align: right;">SAR ${totalPrice}</td>
-            </tr>`;
-          });
-        }
-        
-        catHtml += `</tbody></table></div></div>`;
-        return catHtml;
-      }).join('');
-      
-      // Calculate top 5 selling items
-      if (allFlatItems.length > 0) {
-        const groupedItems = {};
-        allFlatItems.forEach(i => {
-          if (!groupedItems[i.name]) groupedItems[i.name] = { name: i.name, qty: 0, totalPrice: 0 };
-          groupedItems[i.name].qty += i.qty;
-          groupedItems[i.name].totalPrice += i.totalPrice;
-        });
-        
-        const sortedTopItems = Object.values(groupedItems).sort((a, b) => b.qty - a.qty).slice(0, 5);
-        
-        if (sortedTopItems.length > 0) {
-          topSellingHtml = `
-            <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top 5 Selling Items</h3>
-            <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow-x: auto;">
-              <table style="width: 100%; min-width: 250px; border-collapse: collapse; font-size: 13px; color: #555; table-layout: fixed; word-wrap: break-word;">
-                <thead>
-                  <tr style="background: #fff3f4; border-bottom: 1px solid #ffccd0; text-align: left; color: #E31837;">
-                    <th style="padding: 10px 8px; width: 15%;">#</th>
-                    <th style="padding: 10px 8px; width: 45%;">Item</th>
-                    <th style="padding: 10px 8px; text-align: center; width: 15%;">Qty</th>
-                    <th style="padding: 10px 8px; text-align: right; width: 25%;">Rev</th>
-                  </tr>
-                </thead>
-                <tbody>
-          `;
-          
-          sortedTopItems.forEach((item, index) => {
-            topSellingHtml += `
-                  <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 8px 15px; font-weight: bold;">#${index + 1}</td>
-                    <td style="padding: 8px 15px;">${item.name}</td>
-                    <td style="padding: 8px 15px; text-align: center;"><strong>${item.qty}</strong></td>
-                    <td style="padding: 8px 15px; text-align: right;">SAR ${item.totalPrice.toFixed(2)}</td>
-                  </tr>
-            `;
-          });
-          
-          topSellingHtml += `</tbody></table></div>`;
-        }
-      }
-      
-      let intervalItemsObj = report.interval_items || {};
-      if (typeof intervalItemsObj === 'string') {
-        try { intervalItemsObj = JSON.parse(intervalItemsObj); } catch(e) { intervalItemsObj = {}; }
-      }
-
-      twoHourlyHtml = '';
-      if (intervalItemsObj && Object.keys(intervalItemsObj).length > 0) {
-        twoHourlyHtml = `
-          <h3 style="margin-top: 30px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Top Items by 2-Hour Intervals</h3>
-          <div style="background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow-x: auto;">
-            <table style="width: 100%; min-width: 250px; border-collapse: collapse; font-size: 13px; color: #555; table-layout: fixed; word-wrap: break-word;">
-              <thead>
-                <tr style="background: #f8f9fa; border-bottom: 1px solid #eee; text-align: left; color: #111;">
-                  <th style="padding: 10px 8px; width: 35%;">Time</th>
-                  <th style="padding: 10px 8px; width: 65%;">Top Items (Qty)</th>
-                </tr>
-              </thead>
-              <tbody>
-        `;
-        
-        const loginDate = new Date(report.login_time);
-        let maxIndex = 0;
-        for (const key of Object.keys(intervalItemsObj)) {
-          if (parseInt(key) > maxIndex) maxIndex = parseInt(key);
-        }
-        
-        for (let i = 0; i <= maxIndex; i++) {
-          const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000);
-          const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000);
-          
-          const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          const itemsInBlock = intervalItemsObj[i] || [];
-          
-          let itemsList = '-';
-          if (itemsInBlock.length > 0) {
-            itemsList = itemsInBlock.map(item => `<div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px dashed #f0f0f0;">${item.name} <strong>(${item.qty})</strong></div>`).join('');
-          }
-          
-          twoHourlyHtml += `
-            <tr style="border-bottom: 1px solid #eee;">
-              <td style="padding: 8px 15px; font-weight: bold; border-right: 1px solid #eee;">${startTimeStr} - ${endTimeStr}</td>
-              <td style="padding: 8px 15px;">${itemsList}</td>
-            </tr>
-          `;
-        }
-        
-        twoHourlyHtml += `</tbody></table></div>`;
-      }
-      
-      
-    } catch(e) {
-      console.error('Error parsing items summary for email:', e);
-    }
-
-    const diffVal = parseFloat(report.difference || 0);
-    const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01;
-    let differenceHtml = '';
-    if (hasDiff) {
-      const diffSign = diffVal < 0 ? '-' : '+';
-      const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ';
-      differenceHtml = `
-        <div style="background-color: #ffffff; border: 2px solid #dc2626; color: #111827; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; text-align: center;">
-          <div style="font-size: 20px; font-weight: 900; letter-spacing: 0.5px; color: #dc2626;">
-            DIFFERENCE: ${diffSign}SAR ${Math.abs(diffVal).toFixed(2)} (${diffLabel})
-          </div>
-          ${report.difference_reason ? `
-            <div style="margin-top: 10px; font-size: 14px; border-top: 1px dashed #d1d5db; padding-top: 8px; color: #374151; text-align: left; line-height: 1.4;">
-              <strong style="color: #111827;">Reason:</strong> ${report.difference_reason}
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }
-
-    let shiftsHtml = '';
-    if (closingType === 'Daily') {
-      let shiftsArr = [];
-      if (typeof report.shifts_summary === 'string') {
-        try { shiftsArr = JSON.parse(report.shifts_summary); } catch (e) { shiftsArr = []; }
-      } else if (Array.isArray(report.shifts_summary)) {
-        shiftsArr = report.shifts_summary;
-      }
-
-      const totalDailySysCash = parseFloat(report.cash_sales || 0);
-      const totalDailySysCard = parseFloat(report.card_sales || 0);
-      const totalDailySysCredit = parseFloat(report.credit_sales || 0);
-      const totalDailySysMajor = parseFloat(report.major_payments || 0);
-
-      const night = shiftsArr && shiftsArr.length > 0 ? shiftsArr[0] : null;
-      const dayFromShifts = shiftsArr && shiftsArr.length > 1 ? shiftsArr[1] : null;
-
-      const nightCashier = night?.cashier_name || '';
-      let dayCashier = dayFromShifts?.cashier_name || '';
-      if (!dayCashier) {
-        if (!night) {
-          dayCashier = report.cashier_name || '';
-        } else if (shiftsArr.length === 1 && !nightCashier.toLowerCase().includes((report.cashier_name || '').toLowerCase())) {
-          dayCashier = report.cashier_name || '';
-        }
-      }
-
-      const nightSysCash = parseFloat(night?.cash_sales || 0);
-      const nightActCash = night?.closing_cash !== null && night?.closing_cash !== undefined 
-        ? parseFloat(night.closing_cash) 
-        : (night ? nightSysCash : 0);
-
-      const nightSysCard = parseFloat(night?.card_sales || 0);
-      const nightActCard = night?.closing_card !== null && night?.closing_card !== undefined 
-        ? parseFloat(night.closing_card) 
-        : (night ? nightSysCard : 0);
-
-      const nightSysCredit = parseFloat(night?.credit_sales || 0);
-      const nightActCredit = nightSysCredit;
-
-      const nightSysMajor = parseFloat(night?.major_payments || 0);
-      const nightActMajor = nightSysMajor;
-
-      const nightCashDiff = nightActCash - nightSysCash;
-      const nightCardDiff = nightActCard - nightSysCard;
-      const nightDiff = night ? (night.difference !== null && night.difference !== undefined ? parseFloat(night.difference) : (nightCashDiff + nightCardDiff)) : 0;
-
-      // Day
-      const daySysCash = dayFromShifts 
-        ? parseFloat(dayFromShifts.cash_sales || 0) 
-        : Math.max(0, totalDailySysCash - nightSysCash);
-
-      const daySysCard = dayFromShifts 
-        ? parseFloat(dayFromShifts.card_sales || 0) 
-        : Math.max(0, totalDailySysCard - nightSysCard);
-
-      let daySysCredit = dayFromShifts 
-        ? parseFloat(dayFromShifts.credit_sales || 0) 
-        : Math.max(0, totalDailySysCredit - nightSysCredit);
-      if (daySysCredit === 0 || (nightSysCredit + daySysCredit) < totalDailySysCredit) {
-        daySysCredit = Math.max(daySysCredit, totalDailySysCredit - nightSysCredit);
-      }
-      const dayActCredit = daySysCredit;
-
-      let daySysMajor = dayFromShifts 
-        ? parseFloat(dayFromShifts.major_payments || 0) 
-        : Math.max(0, totalDailySysMajor - nightSysMajor);
-      if (daySysMajor === 0 || (nightSysMajor + daySysMajor) < totalDailySysMajor) {
-        daySysMajor = Math.max(daySysMajor, totalDailySysMajor - nightSysMajor);
-      }
-      const dayActMajor = daySysMajor;
-
-      let dayActCash = 0;
-      let dayActCard = 0;
-      if (dayFromShifts && dayFromShifts.closing_cash !== null && dayFromShifts.closing_cash !== undefined) {
-        dayActCash = parseFloat(dayFromShifts.closing_cash);
-        dayActCard = parseFloat(dayFromShifts.closing_card !== null && dayFromShifts.closing_card !== undefined ? dayFromShifts.closing_card : (dayFromShifts.card_sales || 0));
-      } else if (report.closing_cash !== null && report.closing_cash !== undefined) {
-        const repClosingCash = parseFloat(report.closing_cash || 0);
-        dayActCash = Math.abs(repClosingCash - (nightActCash + daySysCash)) < Math.abs(repClosingCash - daySysCash)
-          ? Math.max(0, repClosingCash - nightActCash)
-          : repClosingCash;
-        const repClosingCard = parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0));
-        dayActCard = Math.abs(repClosingCard - (nightActCard + daySysCard)) < Math.abs(repClosingCard - daySysCard)
-          ? Math.max(0, repClosingCard - nightActCard)
-          : repClosingCard;
-      } else {
-        dayActCash = daySysCash;
-        dayActCard = daySysCard;
-      }
-
-      const dayCashDiff = dayActCash - daySysCash;
-      const dayCardDiff = dayActCard - daySysCard;
-      const dayDiff = dayFromShifts 
-        ? (dayFromShifts.difference !== null && dayFromShifts.difference !== undefined ? parseFloat(dayFromShifts.difference) : (dayCashDiff + dayCardDiff)) 
-        : (dayCashDiff + dayCardDiff);
-
-      // Totals
-      const totalSysCash = Math.max(totalDailySysCash, nightSysCash + daySysCash);
-      let totalActCash = nightActCash + dayActCash;
-      if (report.closing_cash !== null && report.closing_cash !== undefined) {
-        totalActCash = parseFloat(report.closing_cash || 0);
-      }
-
-      const totalSysCard = Math.max(totalDailySysCard, nightSysCard + daySysCard);
-      let totalActCard = nightActCard + dayActCard;
-      if (report.closing_card !== null && report.closing_card !== undefined) {
-        totalActCard = parseFloat(report.closing_card || 0);
-      }
-
-      const totalSysCredit = Math.max(totalDailySysCredit, nightSysCredit + daySysCredit);
-      const totalActCredit = totalSysCredit;
-
-      const totalSysMajor = Math.max(totalDailySysMajor, nightSysMajor + daySysMajor);
-      const totalActMajor = totalSysMajor;
-
-      const totalCashDiff = totalActCash - totalSysCash;
-      const totalCardDiff = totalActCard - totalSysCard;
-      const totalDiffVal = report.difference !== null && report.difference !== undefined 
-        ? parseFloat(report.difference) 
-        : (totalCashDiff + totalCardDiff);
-
-      const fmtDiff = (d) => {
-        if (d === null || d === undefined || isNaN(d) || Math.abs(d) < 0.005) return '0.00';
-        return d > 0 ? `+${d.toFixed(2)}` : d.toFixed(2);
-      };
-
-      shiftsHtml = `
-        <div style="margin-bottom: 24px;">
-          <h3 style="margin: 0 0 10px 0; font-size: 15px; font-weight: 800; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 6px;">
-            Daily summary: day + night
-          </h3>
-          <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; overflow-x: auto;">
-            <table style="width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-              <thead>
-                <tr style="background: #f8fafc; border-bottom: 1.5px solid #cbd5e1;">
-                  <th style="padding: 10px 12px; text-align: left; font-weight: 700; color: #475569;"></th>
-                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
-                    Night<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">System</span>
-                    ${nightCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${nightCashier}</div>` : ''}
-                  </th>
-                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
-                    Night<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">Actual</span>
-                    ${nightCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${nightCashier}</div>` : ''}
-                  </th>
-                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
-                    Day<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">System</span>
-                    ${dayCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${dayCashier}</div>` : ''}
-                  </th>
-                  <th style="padding: 10px 10px; text-align: right; font-weight: 800; color: #0f172a;">
-                    Day<br><span style="font-weight: 600; font-size: 11px; color: #64748b;">Actual</span>
-                    ${dayCashier ? `<div style="font-size: 10px; font-weight: normal; color: #94a3b8;">${dayCashier}</div>` : ''}
-                  </th>
-                  <th style="padding: 10px 12px; text-align: right; font-weight: 900; color: #0f172a; font-size: 13.5px;">
-                    Total<br><span style="font-weight: 700; font-size: 11px; color: #64748b;">System</span>
-                  </th>
-                  <th style="padding: 10px 12px; text-align: right; font-weight: 900; color: #0f172a; font-size: 13.5px;">
-                    Total<br><span style="font-weight: 700; font-size: 11px; color: #64748b;">Actual</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Cash sale</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysCash.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${nightActCash.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysCash.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${dayActCash.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysCash.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActCash.toFixed(2)}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Card / Bank sale</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysCard.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${nightActCard.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysCard.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155; font-weight: 600;">${dayActCard.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysCard.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActCard.toFixed(2)}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Credit sale</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysCredit.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightActCredit.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysCredit.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${dayActCredit.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysCredit.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActCredit.toFixed(2)}</td>
-                </tr>
-                <tr style="border-bottom: 1.5px solid #cbd5e1;">
-                  <td style="padding: 8px 12px; font-weight: 600; color: #1e293b;">Major Payments</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightSysMajor.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${nightActMajor.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${daySysMajor.toFixed(2)}</td>
-                  <td style="padding: 8px 10px; text-align: right; color: #334155;">${dayActMajor.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #0f172a;">${totalSysMajor.toFixed(2)}</td>
-                  <td style="padding: 8px 12px; text-align: right; font-weight: 900; color: #0f172a;">${totalActMajor.toFixed(2)}</td>
-                </tr>
-                <tr style="background: #f8fafc; font-weight: 800;">
-                  <td style="padding: 10px 12px; color: #0f172a;">Difference</td>
-                  <td style="padding: 10px 10px; text-align: right;"></td>
-                  <td style="padding: 10px 10px; text-align: right; color: ${nightDiff < 0 ? '#b91c1c' : (nightDiff > 0 ? '#15803d' : '#0f172a')};">
-                    ${fmtDiff(nightDiff)}
-                  </td>
-                  <td style="padding: 10px 10px; text-align: right;"></td>
-                  <td style="padding: 10px 10px; text-align: right; color: ${dayDiff < 0 ? '#b91c1c' : (dayDiff > 0 ? '#15803d' : '#0f172a')};">
-                    ${fmtDiff(dayDiff)}
-                  </td>
-                  <td style="padding: 10px 12px; text-align: right;"></td>
-                  <td style="padding: 10px 12px; text-align: right; font-size: 14px; color: ${totalDiffVal < 0 ? '#b91c1c' : (totalDiffVal > 0 ? '#15803d' : '#0f172a')};">
-                    ${fmtDiff(totalDiffVal)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div style="margin-top: 6px; font-size: 11.5px; color: #64748b; font-weight: 600; text-align: right;">
-            Cash Diff: <strong style="color: ${totalCashDiff < 0 ? '#b91c1c' : '#047857'}">${fmtDiff(totalCashDiff)}</strong> &nbsp;|&nbsp; 
-            Card Diff: <strong style="color: ${totalCardDiff < 0 ? '#b91c1c' : '#2563eb'}">${fmtDiff(totalCardDiff)}</strong> &nbsp;|&nbsp; 
-            Total Diff: <strong style="color: ${totalDiffVal < 0 ? '#b91c1c' : '#0f172a'}">${fmtDiff(totalDiffVal)}</strong>
-          </div>
-        </div>
-      `;
-    }
-
-    const htmlContent = `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; width: 100%; max-width: 600px; margin: 0 auto; border: 1px solid #eaeaea; border-radius: 8px; overflow: hidden; background: #fafafa; box-sizing: border-box;">
-        <div style="background-color: #E31837; padding: 20px; border-bottom: 1px solid #eaeaea; text-align: center; color: white;">
-          <h2 style="margin: 0; font-size: 22px;">${closingType} Closing Report</h2>
-          <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">${report.branch}</p>
-        </div>
-        <div style="padding: 24px;">
-          ${differenceHtml}
-          ${shiftsHtml}
-          <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #eaeaea; margin-bottom: 20px;">
-            <p style="margin: 4px 0;"><strong>Cashier:</strong> ${report.cashier_name}</p>
-            <p style="margin: 4px 0;"><strong>Total Orders:</strong> ${report.total_orders}</p>
-            <p style="margin: 4px 0;"><strong>Total Sales:</strong> SAR ${parseFloat(report.total_sales).toFixed(2)}</p>
-            <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Cash Sales: SAR ${parseFloat(report.cash_sales || 0).toFixed(2)}</p>
-            <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Card Sales: SAR ${parseFloat(report.card_sales || 0).toFixed(2)}</p>
-            <p style="margin: 4px 0; padding-left: 10px; font-size: 13px; color: #555;">↳ Credit Sales: SAR ${parseFloat(report.credit_sales || 0).toFixed(2)}</p>
-            <p style="margin: 4px 0;"><strong>Major Payments Received:</strong> SAR ${parseFloat(report.major_payments || 0).toFixed(2)}</p>
-            <p style="margin: 4px 0; font-weight: bold; color: #059669;"><strong>Total Amount Received:</strong> SAR ${(parseFloat(report.cash_sales || 0) + parseFloat(report.card_sales || 0) + parseFloat(report.major_payments || 0)).toFixed(2)}</p>
-            ${parseFloat(report.opening_cash || 0) > 0 ? `<p style="margin: 4px 0;"><strong>Opening Drawer Cash:</strong> SAR ${parseFloat(report.opening_cash).toFixed(2)}</p>` : ''}
-            <p style="margin: 4px 0; color: #047857;"><strong>Cash Counted:</strong> SAR ${parseFloat(report.closing_cash || 0).toFixed(2)}</p>
-            <p style="margin: 4px 0; color: #2563eb;"><strong>Card Counted:</strong> SAR ${parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0)).toFixed(2)}</p>
-            <p style="margin: 4px 0; font-weight: bold;"><strong>Total Counted:</strong> SAR ${(parseFloat(report.closing_cash || 0) + parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0))).toFixed(2)}</p>
-            ${hasDiff ? `<p style="margin: 4px 0; color: #dc2626; font-weight: bold;"><strong>Difference:</strong> ${diffVal < 0 ? '-' : '+'}SAR ${Math.abs(diffVal).toFixed(2)}</p>` : ''}
-            ${report.cash_difference !== null && report.cash_difference !== undefined ? `<p style="margin: 2px 0 2px 10px; font-size: 12px; color: ${parseFloat(report.cash_difference) < 0 ? '#dc2626' : '#047857'};">↳ Cash Diff: ${parseFloat(report.cash_difference) < 0 ? '-' : '+'}SAR ${Math.abs(parseFloat(report.cash_difference)).toFixed(2)}</p>` : ''}
-            ${report.card_difference !== null && report.card_difference !== undefined ? `<p style="margin: 2px 0 2px 10px; font-size: 12px; color: ${parseFloat(report.card_difference) < 0 ? '#dc2626' : '#2563eb'};">↳ Card Diff: ${parseFloat(report.card_difference) < 0 ? '-' : '+'}SAR ${Math.abs(parseFloat(report.card_difference)).toFixed(2)}</p>` : ''}
-            ${hasDiff && report.difference_reason ? `<p style="margin: 4px 0; color: #374151;"><strong>Diff Reason:</strong> ${report.difference_reason}</p>` : ''}
-            <p style="margin: 4px 0;"><strong>Active Time:</strong> ${report.total_active_time}</p>
-            <p style="margin: 4px 0; font-size: 12px; color: #777;">${new Date(report.login_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} - ${new Date(report.logout_time).toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} (KSA)</p>
-          </div>
-          
-          <h3 style="margin-top: 24px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; color: #333;">Items Sold by Category</h3>
-          <div>${itemsHtml || '<p style="text-align:center; color:#999; padding: 20px;">No items sold</p>'}</div>
-          
-          ${twoHourlyHtml}
-          ${topSellingHtml}
-        </div>
-      </div>
-    `;
-
-    await resend.emails.send({
-      from: `Reports <${fromEmail}>`,
-      to: toEmails,
-      subject: `${closingType} Closing Report - ${report.branch}`,
-      html: htmlContent
-    });
-    console.log('Closing email sent successfully.');
-  } catch(err) {
-    console.error('Error sending closing email:', err);
-  }
-}
+// Note: sendClosingEmail implementation has been moved to server/utils/emailService.js
+// for centralized multi-provider support (Zoho Mail, generic SMTP, Gmail, Resend) and anti-spam deduplication.
 
 // GET active cashier shift
 router.get('/cashier-shift/active', authenticateToken, async (req, res) => {
@@ -2297,11 +1816,24 @@ router.post('/shift-close', authenticateToken, isAdminOrCashier, async (req, res
       );
     }
     
-    // Send email report asynchronously
-    sendClosingEmail(insertRes.rows[0], 'Shift');
-    
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Shift closing complete.', report: insertRes.rows[0] });
+    
+    // Send email report asynchronously
+    let emailResult = { success: false };
+    try {
+      emailResult = await sendClosingEmail(insertRes.rows[0], 'Shift');
+    } catch (mailErr) {
+      console.error('[Orders Route] Error sending shift closing email:', mailErr.message);
+      emailResult = { success: false, error: mailErr.message };
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Shift closing complete.', 
+      report: insertRes.rows[0],
+      emailSent: emailResult.success,
+      emailError: emailResult.success ? undefined : emailResult.error
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -2602,11 +2134,24 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
       [branch, closingCash]
     );
     
-    // Send email report asynchronously
-    sendClosingEmail(insertRes.rows[0], 'Daily');
-    
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Daily closing complete.', report: insertRes.rows[0] });
+    
+    // Send email report asynchronously
+    let emailResult = { success: false };
+    try {
+      emailResult = await sendClosingEmail(insertRes.rows[0], 'Daily');
+    } catch (mailErr) {
+      console.error('[Orders Route] Error sending daily closing email:', mailErr.message);
+      emailResult = { success: false, error: mailErr.message };
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Daily closing complete.', 
+      report: insertRes.rows[0],
+      emailSent: emailResult.success,
+      emailError: emailResult.success ? undefined : emailResult.error
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

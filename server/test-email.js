@@ -1,48 +1,39 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
-const nodemailer = require('nodemailer');
+
+const { sendClosingEmail, getRecipientEmails, getSmtpConfig, dispatchEmail } = require('./utils/emailService');
 
 async function testEmail() {
-  console.log('--- Email Diagnostic Test ---');
-  console.log('GMAIL_USER:', process.env.GMAIL_USER);
-  console.log('SUPPORT_EMAIL:', process.env.SUPPORT_EMAIL);
-  console.log('App Password length:', process.env.GMAIL_APP_PASSWORD ? process.env.GMAIL_APP_PASSWORD.length : 0);
+  console.log('=== 🍕 Pizza Shop Email Diagnostic Tool ===');
+  console.log('Node Environment Check:');
+  console.log('- RESEND_API_KEY:', process.env.RESEND_API_KEY ? `Configured (starts with ${process.env.RESEND_API_KEY.slice(0, 7)}...)` : 'Not set');
+  console.log('- RESEND_FROM_EMAIL:', process.env.RESEND_FROM_EMAIL || 'Not set');
+  console.log('- REPORT_TO_EMAILS:', process.env.REPORT_TO_EMAILS || 'Not set');
+  console.log('- ZOHO_USER:', process.env.ZOHO_USER || 'Not set');
+  console.log('- SMTP_HOST:', process.env.SMTP_HOST || 'Not set');
+  console.log('- GMAIL_USER:', process.env.GMAIL_USER || 'Not set');
 
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD || !process.env.SUPPORT_EMAIL) {
-    console.error('❌ Missing environment variables!');
-    return;
-  }
+  const recipients = await getRecipientEmails();
+  console.log('\nResolved Recipients (DB + .env):', recipients);
 
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false, // true for 465, false for 587
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
+  const smtpConfig = getSmtpConfig();
+  console.log('Active SMTP Provider:', smtpConfig ? smtpConfig.provider : 'None configured');
 
-  try {
-    console.log('Verifying transporter...');
-    await transporter.verify();
-    console.log('✅ Transporter is ready to take our messages');
+  console.log('\nTesting Dispatch...');
+  const testPayload = {
+    to: recipients.length > 0 ? recipients : ['test@example.com'],
+    subject: '🍕 Diagnostic Test: Email Service Verification',
+    html: '<p>This is a verification email from Pizza Shop Employee Management System.</p>',
+    text: 'This is a verification email from Pizza Shop Employee Management System.'
+  };
 
-    console.log('Sending test email...');
-    const info = await transporter.sendMail({
-      from: process.env.GMAIL_USER,
-      to: process.env.SUPPORT_EMAIL,
-      subject: '🍕 Pizza Shop: Diagnostic Test',
-      text: 'This is a test email to verify nodemailer configuration.',
-    });
-    console.log('✅ Test email sent:', info.messageId);
-  } catch (error) {
-    console.error('❌ Diagnostic Failed:');
-    console.error('Error Name:', error.name);
-    console.error('Error Code:', error.code);
-    console.error('Error Command:', error.command);
-    console.error('Error Response:', error.response);
-    console.error('Full Error:', error);
-  }
+  const result = await dispatchEmail(testPayload);
+  console.log('\nDispatch Result:', result);
+  process.exit(0);
 }
 
-testEmail();
+testEmail().catch(err => {
+  console.error('Fatal test error:', err);
+  process.exit(1);
+});
