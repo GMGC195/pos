@@ -504,6 +504,46 @@ async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_scal_shift_closing_id ON shift_closing_audit_logs(shift_closing_id);
     `);
 
+    // 14. Salary Payable Permissions Table & Multi-Month Columns
+    console.log('📌 [14/14] Migrating salary_payable_permissions and independent view/pay months...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS salary_payable_permissions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+        permission_type VARCHAR(20) DEFAULT 'pay_now',
+        allowed_months JSONB DEFAULT '[]'::jsonb,
+        allowed_view_months JSONB DEFAULT '[]'::jsonb,
+        allowed_pay_months JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_by VARCHAR(100)
+      );
+      CREATE INDEX IF NOT EXISTS idx_spp_user_id ON salary_payable_permissions(user_id);
+
+      ALTER TABLE salary_payable_permissions ADD COLUMN IF NOT EXISTS allowed_view_months JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE salary_payable_permissions ADD COLUMN IF NOT EXISTS allowed_pay_months JSONB DEFAULT '[]'::jsonb;
+
+      UPDATE salary_payable_permissions 
+      SET allowed_view_months = allowed_months 
+      WHERE (allowed_view_months IS NULL OR allowed_view_months = '[]'::jsonb) 
+        AND allowed_months IS NOT NULL AND allowed_months != '[]'::jsonb;
+
+      UPDATE salary_payable_permissions 
+      SET allowed_pay_months = allowed_months 
+      WHERE (allowed_pay_months IS NULL OR allowed_pay_months = '[]'::jsonb) 
+        AND permission_type = 'pay_now' 
+        AND allowed_months IS NOT NULL AND allowed_months != '[]'::jsonb;
+    `);
+
+    const usersRes = await client.query("SELECT id, username FROM users WHERE LOWER(role) = 'salary pay operator'");
+    for (const u of usersRes.rows) {
+      await client.query(`
+        INSERT INTO salary_payable_permissions (user_id, permission_type, allowed_months, allowed_view_months, allowed_pay_months, updated_by)
+        VALUES ($1, 'pay_now', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 'migration_default')
+        ON CONFLICT (user_id) DO NOTHING;
+      `, [u.id]);
+    }
+
     await client.query('COMMIT');
     console.log('\x1b[32m%s\x1b[0m', '==================================================');
     console.log('\x1b[32m%s\x1b[0m', '✅ SUCCESS: ALL DATABASE MIGRATIONS COMPLETED!');
