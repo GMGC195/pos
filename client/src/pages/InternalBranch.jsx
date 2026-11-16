@@ -1081,8 +1081,173 @@ function TransferCardSkeleton({ count = 3 }) {
   );
 }
 
+// 15-Minute Increment Time Selector component
+function TimeIncrementSelector({ value = '15m', onChange }) {
+  const [isCustomMode, setIsCustomMode] = useState(() => {
+    if (!value) return false;
+    return /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value.trim());
+  });
+
+  const isClock = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test((value || '').trim());
+
+  // Handle +15 mins increment per click (15m -> 30m -> 45m -> 60m...)
+  const handleAdd15 = () => {
+    const curVal = (value || '').trim();
+    if (isCustomMode || isClock) {
+      // Clock format HH:mm -> add 15 minutes
+      let [hStr, mStr] = (curVal || '12:00').split(':');
+      let hours = parseInt(hStr, 10);
+      let minutes = parseInt(mStr, 10);
+      if (isNaN(hours)) hours = 12;
+      if (isNaN(minutes)) minutes = 0;
+      minutes += 15;
+      if (minutes >= 60) {
+        hours = (hours + Math.floor(minutes / 60)) % 24;
+        minutes = minutes % 60;
+      }
+      const newTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+      onChange(newTime);
+    } else {
+      // Minute increment: 15m -> 30m -> 45m -> 60m...
+      const match = curVal.match(/^(\d+)/);
+      let mins = match ? parseInt(match[1], 10) : 0;
+      mins += 15;
+      onChange(`${mins}m`);
+    }
+  };
+
+  const handleDropdownChange = (e) => {
+    const sel = e.target.value;
+    if (sel === 'custom') {
+      setIsCustomMode(true);
+      if (!isClock) {
+        const d = new Date(Date.now() + 15 * 60 * 1000);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        onChange(`${hh}:${mm}`);
+      }
+    } else {
+      setIsCustomMode(false);
+      onChange(sel);
+    }
+  };
+
+  const PRESETS = ['15m', '30m', '45m', '60m', '90m', '120m'];
+  const curMinsMatch = (!isCustomMode && !isClock) ? (value || '').match(/^(\d+)m?$/i) : null;
+  const currentMinsStr = curMinsMatch ? `${curMinsMatch[1]}m` : null;
+  const isKnownPreset = currentMinsStr ? PRESETS.includes(currentMinsStr) : false;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: 38, width: '100%' }}>
+      {isCustomMode || isClock ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+          <input
+            type="time"
+            value={value || ''}
+            onChange={e => onChange(e.target.value)}
+            onClick={e => { try { e.target.showPicker && e.target.showPicker(); } catch (err) {} }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '6px 6px',
+              borderRadius: 6,
+              border: '1.5px solid #2563eb',
+              fontSize: 12,
+              fontWeight: 700,
+              height: 38,
+              background: '#fff',
+              cursor: 'pointer'
+            }}
+            title="Custom clock time"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setIsCustomMode(false);
+              onChange('15m');
+            }}
+            style={{
+              padding: '4px 6px',
+              borderRadius: 5,
+              border: '1px solid #cbd5e1',
+              background: '#f8fafc',
+              fontSize: 10,
+              fontWeight: 700,
+              color: '#475569',
+              cursor: 'pointer',
+              height: 38,
+              whiteSpace: 'nowrap'
+            }}
+            title="Switch back to quick minutes presets"
+          >
+            Presets
+          </button>
+        </div>
+      ) : (
+        <select
+          value={isKnownPreset ? currentMinsStr : (currentMinsStr ? currentMinsStr : 'custom')}
+          onChange={handleDropdownChange}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: '6px 6px',
+            borderRadius: 6,
+            border: '1px solid #cbd5e1',
+            fontSize: 11.5,
+            fontWeight: 700,
+            background: '#fff',
+            height: 38,
+            color: '#0f172a'
+          }}
+        >
+          {PRESETS.map(p => (
+            <option key={p} value={p}>
+              {p} {p === '60m' ? '(1h)' : p === '90m' ? '(1.5h)' : p === '120m' ? '(2h)' : ''}
+            </option>
+          ))}
+          {!isKnownPreset && currentMinsStr && (
+            <option value={currentMinsStr}>
+              {currentMinsStr}
+            </option>
+          )}
+          <option value="custom">⏰ Custom Time...</option>
+        </select>
+      )}
+
+      {/* Prominent +15m increment button */}
+      <button
+        type="button"
+        onClick={handleAdd15}
+        style={{
+          height: 38,
+          padding: '0 8px',
+          borderRadius: 6,
+          border: '1.5px solid #2563eb',
+          background: '#2563eb',
+          color: '#fff',
+          fontSize: 11.5,
+          fontWeight: 800,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 2,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 1px 2px rgba(37,99,235,0.2)',
+          transition: 'all 0.1s ease',
+          flexShrink: 0
+        }}
+        title="Add 15 minutes per click (15m → 30m → 45m → 60m...)"
+      >
+        <span style={{ fontSize: 13, fontWeight: 900 }}>+</span>15m
+      </button>
+    </div>
+  );
+}
+
 // Error state card with Retry button
-function TransferErrorCard({ title = 'Failed to Load Transfer Requests', error, onRetry }) {
+function TransferErrorCard({ title = 'Failed to Load Transfer Requests', error, message, onRetry }) {
+  const displayMsg = message || error?.response?.data?.error || error?.message || 'Could not connect to server or load requests. Please check connection and retry.';
   return (
     <div style={{
       background: '#fff',
@@ -1107,8 +1272,8 @@ function TransferErrorCard({ title = 'Failed to Load Transfer Requests', error, 
       <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#991b1b' }}>
         {title}
       </h3>
-      <p style={{ margin: '0 auto 16px', maxWidth: 440, fontSize: 13, color: '#b91c1c', lineHeight: 1.5 }}>
-        {error?.response?.data?.error || error?.message || 'Could not connect to server or load requests. Please check connection and retry.'}
+      <p style={{ margin: '0 auto 16px', maxWidth: 480, fontSize: 13, color: '#b91c1c', lineHeight: 1.5 }}>
+        {displayMsg}
       </p>
       {onRetry && (
         <button
@@ -1517,7 +1682,7 @@ export default function InternalBranch() {
       uom: 'KG', 
       requested_qty: '', 
       needed_by_date: new Date().toISOString().split('T')[0],
-      needed_by_time: '', 
+      needed_by_time: '15m', 
       priority: 'Normal', 
       remarks: '', 
       image_url: null, 
@@ -1900,10 +2065,11 @@ export default function InternalBranch() {
   }, [defaultFromBranch, fetchDishes]);
 
   const queryClient = useQueryClient();
+  const effectiveBranchKey = isSuperUser ? adminSelectedBranch : (user?.branch || 'Branch 1');
 
-  // 1. Stats Query with 5-minute background refetching (300,000ms)
+  // 1. Stats Query with 5-minute background refetching (300,000ms), 3 retries & placeholderData
   const statsQuery = useQuery({
-    queryKey: ['transferStats', isSuperUser ? adminSelectedBranch : (user?.branch || 'All')],
+    queryKey: ['transferStats', effectiveBranchKey],
     queryFn: async () => {
       const qBranch = (isSuperUser && adminSelectedBranch !== 'All') ? adminSelectedBranch : undefined;
       const params = qBranch ? { branch: qBranch } : {};
@@ -1911,7 +2077,10 @@ export default function InternalBranch() {
       return res.data || {};
     },
     refetchInterval: 300000,
-    staleTime: 30000
+    staleTime: 30000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    placeholderData: (previousData) => previousData
   });
 
   const stats = statsQuery.data || {
@@ -1933,10 +2102,10 @@ export default function InternalBranch() {
 
   // 2. Incoming Requests Query (Incoming to this branch)
   const incomingQuery = useQuery({
-    queryKey: ['transfers', 'incoming', adminSelectedBranch, adminDirection, filterFromBranch, filterStatus, filterRequestType, filterPriority, searchQuery],
+    queryKey: ['transfers', 'incoming', effectiveBranchKey, adminDirection, filterFromBranch, filterStatus, filterRequestType, filterPriority, searchQuery],
     queryFn: async () => {
       const params = { tab: 'incoming' };
-      if (adminSelectedBranch !== 'All') {
+      if (isSuperUser && adminSelectedBranch !== 'All') {
         params.branch = adminSelectedBranch;
         params.branch_direction = adminDirection;
       }
@@ -1949,15 +2118,18 @@ export default function InternalBranch() {
       return Array.isArray(res.data) ? res.data : [];
     },
     refetchInterval: 300000,
-    staleTime: 30000
+    staleTime: 30000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    placeholderData: (previousData) => previousData
   });
 
   // 3. Sent Transfer Requests Query (Requested by this branch)
   const sentQuery = useQuery({
-    queryKey: ['transfers', 'sent_requests', adminSelectedBranch, adminDirection, filterToBranch, filterStatus, filterRequestType, filterPriority, searchQuery],
+    queryKey: ['transfers', 'sent_requests', effectiveBranchKey, adminDirection, filterToBranch, filterStatus, filterRequestType, filterPriority, searchQuery],
     queryFn: async () => {
       const params = { tab: 'sent_requests' };
-      if (adminSelectedBranch !== 'All') {
+      if (isSuperUser && adminSelectedBranch !== 'All') {
         params.branch = adminSelectedBranch;
         params.branch_direction = adminDirection;
       }
@@ -1970,15 +2142,18 @@ export default function InternalBranch() {
       return Array.isArray(res.data) ? res.data : [];
     },
     refetchInterval: 300000,
-    staleTime: 30000
+    staleTime: 30000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    placeholderData: (previousData) => previousData
   });
 
   // 4. Receivals Query (Dispatched transfers waiting to be received by this branch)
   const receivalQuery = useQuery({
-    queryKey: ['transfers', 'receivals', adminSelectedBranch, adminDirection, filterToBranch, filterRequestType, filterPriority, searchQuery],
+    queryKey: ['transfers', 'receivals', effectiveBranchKey, adminDirection, filterToBranch, filterRequestType, filterPriority, searchQuery],
     queryFn: async () => {
       const params = { tab: 'pending_receivals' };
-      if (adminSelectedBranch !== 'All') {
+      if (isSuperUser && adminSelectedBranch !== 'All') {
         params.branch = adminSelectedBranch;
         params.branch_direction = adminDirection;
       }
@@ -1990,15 +2165,18 @@ export default function InternalBranch() {
       return Array.isArray(res.data) ? res.data : [];
     },
     refetchInterval: 300000,
-    staleTime: 30000
+    staleTime: 30000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    placeholderData: (previousData) => previousData
   });
 
   // 5. Master Logs & History Query
   const logsQuery = useQuery({
-    queryKey: ['transfers', 'logs', adminSelectedBranch, adminDirection, filterFromBranch, customFilterFromBranch, filterToBranch, customFilterToBranch, filterStatus, filterRequestType, filterPriority, filterPeriod, filterFromDate, filterToDate, filterDishName, searchQuery],
+    queryKey: ['transfers', 'logs', effectiveBranchKey, adminDirection, filterFromBranch, customFilterFromBranch, filterToBranch, customFilterToBranch, filterStatus, filterRequestType, filterPriority, filterPeriod, filterFromDate, filterToDate, filterDishName, searchQuery],
     queryFn: async () => {
       const params = { tab: 'logs' };
-      if (adminSelectedBranch !== 'All') {
+      if (isSuperUser && adminSelectedBranch !== 'All') {
         params.branch = adminSelectedBranch;
         params.branch_direction = adminDirection;
       }
@@ -2026,7 +2204,10 @@ export default function InternalBranch() {
       return Array.isArray(res.data) ? res.data : [];
     },
     refetchInterval: 300000,
-    staleTime: 30000
+    staleTime: 30000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    placeholderData: (previousData) => previousData
   });
 
   // Universal cache updater: updates any transfer matching id across all active transfer queries
@@ -2502,7 +2683,7 @@ export default function InternalBranch() {
     setTrfDishRows(prev => {
       const prevItem = prev.length > 0 ? prev[prev.length - 1] : null;
       const inheritedDate = (prevItem && prevItem.needed_by_date) ? prevItem.needed_by_date : new Date().toISOString().split('T')[0];
-      const inheritedTime = (prevItem && prevItem.needed_by_time) ? prevItem.needed_by_time : '';
+      const inheritedTime = (prevItem && prevItem.needed_by_time) ? prevItem.needed_by_time : '15m';
       return [
         ...prev,
         {
@@ -2515,7 +2696,7 @@ export default function InternalBranch() {
           requested_qty: '',
           needed_by_date: inheritedDate,
           needed_by_time: inheritedTime,
-          priority: prevItem?.priority || 'Normal',
+          priority: 'Normal',
           remarks: '',
           image_url: null,
           price: null,
@@ -2579,31 +2760,15 @@ export default function InternalBranch() {
       }
     }
 
-    let finalDeliveryDay = 'Today';
-    if (trfDayOption === 'Custom Date') {
-      if (!trfCustomDayDate || !trfCustomDayDate.trim()) {
-        return toast.error('Please select a valid date for Custom Date.');
-      }
-      finalDeliveryDay = trfCustomDayDate.trim();
-    } else if (trfDayOption === 'Tomorrow') {
-      finalDeliveryDay = 'Tomorrow';
-    } else {
-      finalDeliveryDay = 'Today';
-    }
-
-    const combinedNotes = [
-      trfPurpose ? `[Purpose: ${trfPurpose === 'Other' ? trfCustomPurpose : trfPurpose}]` : '',
-      trfNotes ? trfNotes.trim() : ''
-    ].filter(Boolean).join(' ');
-
     const payload = {
       request_type: 'Transfer Request',
-      priority: trfPriority,
+      priority: 'Normal',
       from_branch: fromB,
       to_branch: toB,
       is_external: trfToBranch === 'Other' || trfFromBranch === 'Other',
-      delivery_day: finalDeliveryDay,
-      notes: combinedNotes,
+      delivery_day: 'Today',
+      needed_by_time: validRows[0]?.needed_by_time || '15m',
+      notes: trfNotes ? trfNotes.trim() : null,
       items: validRows.map(r => ({
         item_id: r.item_id || null,
         dish_name: r.dish_name.trim(),
@@ -2614,9 +2779,9 @@ export default function InternalBranch() {
         remarks: r.remarks ? r.remarks.trim() : null,
         image_url: r.image_url || null,
         price: r.price ? parseFloat(r.price) : null,
-        needed_by_time: r.needed_by_time ? r.needed_by_time.trim() : null,
-        needed_by_date: r.needed_by_date ? r.needed_by_date.trim() : finalDeliveryDay,
-        priority: r.priority || trfPriority || 'Normal'
+        needed_by_time: r.needed_by_time ? r.needed_by_time.trim() : '15m',
+        needed_by_date: r.needed_by_date ? r.needed_by_date.trim() : new Date().toISOString().slice(0, 10),
+        priority: 'Normal'
       }))
     };
 
@@ -2633,23 +2798,25 @@ export default function InternalBranch() {
       }
 
       toast.success(`Transfer Request ${res.data?.transfer_id || ''} created successfully! Destination branch (${toB}) notified.`);
+      
+      // Invalidate queries & refetch so transfer appears instantly without page refresh
+      queryClient.invalidateQueries({ queryKey: ['transfers'] });
+      queryClient.invalidateQueries({ queryKey: ['transferStats'] });
+      sentQuery.refetch();
+      statsQuery.refetch();
+
       if (res.data?.id || res.data?.transfer_id) {
         setTransfers(prev => [res.data, ...prev.filter(x => x.id !== res.data.id && x.transfer_id !== res.data.transfer_id)]);
       }
       setActiveTab('transfer_request');
 
       // Reset form
-      setTrfDishRows([{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', needed_by_date: new Date().toISOString().split('T')[0], needed_by_time: '', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
+      setTrfDishRows([{ id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'KG', requested_qty: '', needed_by_date: new Date().toISOString().split('T')[0], needed_by_time: '15m', remarks: '', image_url: null, price: null, available_units: [...STANDARD_TOP_UNITS] }]);
       setTrfCustomFromBranch('');
       setTrfCustomToBranch('');
       setTrfNotes('');
-      setTrfPriority('Normal');
-      setTrfPurpose('Stock Replenishment');
-      setTrfDayOption('Today');
-      setTrfCustomDayDate(new Date().toISOString().slice(0, 10));
       fetchStats();
       fetchTransfers('transfer_request');
-      // Keep on transfer_request tab so the user immediately sees the sent order in active sent list!
     } catch (err) {
       console.error('Error submitting transfer request:', err);
       const msg = err.response?.data?.error || err.message || 'Failed to submit transfer request.';
@@ -5403,42 +5570,59 @@ export default function InternalBranch() {
         border: '1px solid #e2e8f0',
         borderRadius: 8
       }}>
-        {/* Branch Pills: All Branches, B1, B2, B3, Kitchen, Other */}
+        {/* Branch: All | B1 | B2 | B3 for Admin, or Assigned Branch Badge for Cashier */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Store size={14} /> Branch:
           </span>
-          {[
-            { id: 'All', label: 'All' },
-            { id: 'Branch 1', label: 'B1' },
-            { id: 'Branch 2', label: 'B2' },
-            { id: 'Branch 3', label: 'B3' },
-          ].map(b => {
-            const isSelected = adminSelectedBranch === b.id;
-            return (
-              <button
-                key={`bar-branch-${b.id}`}
-                type="button"
-                onClick={() => {
-                  setAdminSelectedBranch(b.id);
-                  if (b.id === 'All') setAdminDirection('all');
-                }}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  border: isSelected ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                  background: isSelected ? '#2563eb' : '#fff',
-                  color: isSelected ? '#fff' : '#475569',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                {b.label}
-              </button>
-            );
-          })}
+          {isSuperUser ? (
+            [
+              { id: 'All', label: 'All' },
+              { id: 'Branch 1', label: 'B1' },
+              { id: 'Branch 2', label: 'B2' },
+              { id: 'Branch 3', label: 'B3' },
+            ].map(b => {
+              const isSelected = adminSelectedBranch === b.id;
+              return (
+                <button
+                  key={`bar-branch-${b.id}`}
+                  type="button"
+                  onClick={() => {
+                    setAdminSelectedBranch(b.id);
+                    if (b.id === 'All') setAdminDirection('all');
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: isSelected ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                    background: isSelected ? '#2563eb' : '#fff',
+                    color: isSelected ? '#fff' : '#475569',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {b.label}
+                </button>
+              );
+            })
+          ) : (
+            <span style={{
+              padding: '4px 12px',
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 700,
+              background: '#eff6ff',
+              color: '#1d4ed8',
+              border: '1px solid #bfdbfe',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4
+            }}>
+              {user?.branch || 'Branch 1'}
+            </span>
+          )}
         </div>
 
         {/* Request Type, Request Status, Audio Alerts, Refresh, and Optional Back */}
@@ -5732,183 +5916,66 @@ export default function InternalBranch() {
       {activeTab === 'new' && (
         <div style={{ background: '#fff', borderRadius: 12, border: '1.5px solid #2563eb', padding: '16px 20px', boxShadow: '0 2px 8px rgba(37,99,235,0.06)', marginBottom: 16 }}>
           
-          {/* Header Title (Priority removed from here and moved into main Row 1) */}
-          <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 10, marginBottom: 12 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <PlusCircle size={18} color="var(--primary)" />
-              Create Inter-Branch Transfer Request
-            </h2>
-            <p style={{ margin: '3px 0 0', fontSize: 12, color: '#64748b' }}>
-              Submit branch-to-branch transfer request. Destination branch processes it directly in Incoming Requests.
-            </p>
-          </div>
+          {/* Header Title & Branch Selection */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid #f1f5f9',
+            paddingBottom: 12,
+            marginBottom: 16,
+            flexWrap: 'wrap',
+            gap: 12
+          }}>
+            <div>
+              <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <PlusCircle size={18} color="var(--primary)" />
+                Create Inter-Branch Transfer Request
+              </h2>
+              <p style={{ margin: '3px 0 0', fontSize: 12, color: '#64748b' }}>
+                Submit branch-to-branch transfer request. Destination branch processes it directly in Incoming Requests.
+              </p>
+            </div>
 
-          <form onSubmit={handleSubmitTrfRequest}>
-            
-            {/* ── ROW 1: Request Information (Origin, Destination, Purpose, Delivery Window, Priority) ── */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-              gap: 12,
-              marginBottom: 12,
-              alignItems: 'start'
-            }}>
-              
-              {/* 1. Origin Branch (Request From) - Shown only for Admin and Developer; automatically set and hidden for Cashier */}
+            {/* Destination Branch (and Origin Branch if SuperUser) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               {isSuperUser && (
-                <div>
-                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
-                    Origin Branch (From) <span style={{ color: '#dc2626' }}>*</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                    Original Branch: <span style={{ color: '#dc2626' }}>*</span>
                   </label>
                   <select
                     value={trfFromBranch}
                     onChange={e => setTrfFromBranch(e.target.value)}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1.5px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff', height: 38 }}
+                    style={{ minWidth: 130, padding: '6px 10px', borderRadius: 7, border: '1.5px solid #cbd5e1', fontSize: 12, fontWeight: 700, background: '#fff', height: 36 }}
                   >
                     {branches.map(b => (
                       <option key={`trf-from-${b}`} value={b}>{b}</option>
                     ))}
                   </select>
-                  {trfFromBranch === 'Other' && (
-                    <input
-                      type="text"
-                      required
-                      placeholder="Enter manual origin branch..."
-                      value={trfCustomFromBranch}
-                      onChange={e => setTrfCustomFromBranch(e.target.value)}
-                      style={{ width: '100%', marginTop: 5, padding: '6px 8px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12, background: '#fffbeb' }}
-                    />
-                  )}
-                  <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
-                    Origin sending branch
-                  </span>
                 </div>
               )}
 
-              {/* 2. Destination Branch (Transfer To) - Compact */}
-              <div>
-                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
-                  Destination Branch (To) <span style={{ color: '#dc2626' }}>*</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                  Request To: <span style={{ color: '#dc2626' }}>*</span>
                 </label>
                 <select
                   required
                   value={trfToBranch}
                   onChange={e => setTrfToBranch(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1.5px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff', height: 38 }}
+                  style={{ minWidth: 150, padding: '6px 10px', borderRadius: 7, border: '1.5px solid #2563eb', fontSize: 12.5, fontWeight: 700, background: '#fff', height: 36, color: '#0f172a' }}
                 >
                   <option value="">Select Destination...</option>
-                  {branches.filter(b => b !== trfFromBranch).map(b => (
+                  {branches.filter(b => b !== (isSuperUser ? trfFromBranch : (user?.branch || 'Branch 1'))).map(b => (
                     <option key={`trf-to-${b}`} value={b}>{b}</option>
                   ))}
                 </select>
-                {trfToBranch === 'Other' && (
-                  <input
-                    type="text"
-                    required
-                    placeholder="Enter manual destination branch..."
-                    value={trfCustomToBranch}
-                    onChange={e => setTrfCustomToBranch(e.target.value)}
-                    style={{ width: '100%', marginTop: 5, padding: '6px 8px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12, background: '#fffbeb' }}
-                  />
-                )}
-                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
-                  Receiving branch
-                </span>
               </div>
-
-              {/* 3. Transfer Purpose / Reason */}
-              <div>
-                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
-                  Transfer Purpose / Reason
-                </label>
-                <select
-                  value={trfPurpose}
-                  onChange={e => setTrfPurpose(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: '#fff', height: 38 }}
-                >
-                  <option value="Stock Replenishment">Stock Replenishment</option>
-                  <option value="Urgent Customer Demand">Urgent Customer Demand</option>
-                  <option value="Preparation Shortage">Preparation Shortage</option>
-                  <option value="Central Kitchen Stocking">Central Kitchen Stocking</option>
-                  <option value="Raw Materials / Ingredients">Raw Materials / Ingredients</option>
-                  <option value="Other">Other (Specify)</option>
-                </select>
-                {trfPurpose === 'Other' && (
-                  <input
-                    type="text"
-                    required
-                    placeholder="Specify purpose..."
-                    value={trfCustomPurpose}
-                    onChange={e => setTrfCustomPurpose(e.target.value)}
-                    style={{ width: '100%', marginTop: 5, padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12 }}
-                  />
-                )}
-                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
-                  Dispatch rationale
-                </span>
-              </div>
-
-              {/* 4. Required Day Selection (Today, Tomorrow, Custom Date) */}
-              <div>
-                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
-                  Day <span style={{ color: '#dc2626' }}>*</span>
-                </label>
-                <select
-                  value={trfDayOption}
-                  onChange={e => setTrfDayOption(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1.5px solid #cbd5e1', fontSize: 12.5, fontWeight: 700, background: '#fff', height: 38 }}
-                >
-                  <option value="Today">Today</option>
-                  <option value="Tomorrow">Tomorrow</option>
-                  <option value="Custom Date">Custom Date (Pick Date)</option>
-                </select>
-                {trfDayOption === 'Custom Date' && (
-                  <div style={{ marginTop: 6 }}>
-                    <input
-                      type="date"
-                      required
-                      value={trfCustomDayDate}
-                      min={new Date().toISOString().slice(0, 10)}
-                      onChange={e => setTrfCustomDayDate(e.target.value)}
-                      style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1.5px solid #3b82f6', fontSize: 12, background: '#fff', height: 34 }}
-                    />
-                  </div>
-                )}
-                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
-                  Target delivery day
-                </span>
-              </div>
-
-              {/* 5. Transfer Priority Dropdown (Normal, High, Urgent) */}
-              <div>
-                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#0f172a', marginBottom: 5 }}>
-                  Transfer Priority
-                </label>
-                <select
-                  value={trfPriority}
-                  onChange={e => setTrfPriority(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: 7,
-                    border: '1.5px solid #cbd5e1',
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    background: '#fff',
-                    height: 38,
-                    color: trfPriority === 'Urgent' ? '#dc2626' : (trfPriority === 'High' ? '#d97706' : '#0f172a')
-                  }}
-                >
-                  <option value="Normal">Normal</option>
-                  <option value="High">⚡ High Priority</option>
-                  <option value="Urgent">🚨 Urgent Rush</option>
-                </select>
-                <span style={{ fontSize: 10.5, color: '#64748b', marginTop: 3, display: 'block' }}>
-                  Request urgency level
-                </span>
-              </div>
-
             </div>
+          </div>
+
+          <form onSubmit={handleSubmitTrfRequest}>
 
             {/* ── ROW 2: Item Entry Section (Heading & Description Removed) ── */}
             <div style={{
@@ -5959,17 +6026,16 @@ export default function InternalBranch() {
 
                       {/* Responsive Grid Row:
                           1. Dish Search + Open Menu Items (prominent)
-                          2. Unit (exact order: ['KG', 'Pices', 'Liters', 'Pantry', 'Parcel', 'Packet', 'Box'])
-                          3. Quantity (numeric input)
-                          4. Need By Date & Time
-                          5. Priority (Normal, High, Urgent)
-                          6. Remarks
-                          7. Delete Button
+                          2. Unit (width: 72px)
+                          3. Quantity (width: 68px)
+                          4. Need By (Date & 15-Minute Increment Time)
+                          5. Remarks
+                          6. Delete Button (36px)
                       */}
                       <div
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: 'minmax(200px, 2.2fr) minmax(90px, 0.8fr) minmax(75px, 0.7fr) minmax(185px, 1.6fr) minmax(100px, 0.9fr) minmax(120px, 1fr) 36px',
+                          gridTemplateColumns: 'minmax(210px, 2.3fr) 72px 68px minmax(260px, 2fr) minmax(130px, 1.2fr) 36px',
                           gap: 10,
                           alignItems: 'end',
                           position: 'relative',
@@ -6022,15 +6088,15 @@ export default function InternalBranch() {
                           </div>
                         </div>
 
-                        {/* 2. Unit (UOM) - Exact required order: ['KG', 'Pices', 'Liters', 'Pantry', 'Parcel', 'Packet', 'Box'] */}
-                        <div>
+                        {/* 2. Unit (UOM) */}
+                        <div style={{ width: 72 }}>
                           <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
                             Unit <span style={{ color: '#dc2626' }}>*</span>
                           </label>
                           <select
                             value={row.uom || STANDARD_TOP_UNITS[0]}
                             onChange={e => handleDishRowChangeTrf(row.id, 'uom', e.target.value)}
-                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, fontWeight: 600, background: '#fff', height: 38 }}
+                            style={{ width: '100%', padding: '8px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11.5, fontWeight: 600, background: '#fff', height: 38 }}
                           >
                             {STANDARD_TOP_UNITS.map((u) => (
                               <option key={`trf-uom-${row.id}-${u}`} value={u}>{u}</option>
@@ -6039,7 +6105,7 @@ export default function InternalBranch() {
                         </div>
 
                         {/* 3. Transfer Qty */}
-                        <div>
+                        <div style={{ width: 68 }}>
                           <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
                             Quantity <span style={{ color: '#dc2626' }}>*</span>
                           </label>
@@ -6051,52 +6117,35 @@ export default function InternalBranch() {
                             required
                             value={row.requested_qty}
                             onChange={e => handleDishRowChangeTrf(row.id, 'requested_qty', e.target.value)}
-                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 700, textAlign: 'center', height: 38 }}
+                            style={{ width: '100%', padding: '8px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 700, textAlign: 'center', height: 38 }}
                           />
                         </div>
 
-                        {/* 4. Need By Date & Time */}
+                        {/* 4. Need By Date & Time (15-Minute Increment System) */}
                         <div>
                           <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
                             Need By (Date & Time)
                           </label>
-                          <div style={{ display: 'flex', gap: 4 }}>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                             <input
                               type="date"
                               value={row.needed_by_date || ''}
+                              min={new Date().toISOString().slice(0, 10)}
                               onChange={e => handleDishRowChangeTrf(row.id, 'needed_by_date', e.target.value)}
                               onClick={e => { try { e.target.showPicker && e.target.showPicker(); } catch (err) {} }}
-                              style={{ width: '56%', padding: '7px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11, height: 38, cursor: 'pointer' }}
+                              style={{ width: 110, padding: '7px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11, height: 38, cursor: 'pointer', flexShrink: 0 }}
                               title="Click to select date"
                             />
-                            <input
-                              type="time"
-                              value={row.needed_by_time || ''}
-                              onChange={e => handleDishRowChangeTrf(row.id, 'needed_by_time', e.target.value)}
-                              onClick={e => { try { e.target.showPicker && e.target.showPicker(); } catch (err) {} }}
-                              style={{ width: '44%', padding: '7px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11, height: 38, cursor: 'pointer' }}
-                              title="Click to select time"
-                            />
+                            <div style={{ flex: 1, minWidth: 140 }}>
+                              <TimeIncrementSelector
+                                value={row.needed_by_time || '15m'}
+                                onChange={(val) => handleDishRowChangeTrf(row.id, 'needed_by_time', val)}
+                              />
+                            </div>
                           </div>
                         </div>
 
-                        {/* 5. Priority */}
-                        <div>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
-                            Priority
-                          </label>
-                          <select
-                            value={row.priority || 'Normal'}
-                            onChange={e => handleDishRowChangeTrf(row.id, 'priority', e.target.value)}
-                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, fontWeight: 600, background: '#fff', height: 38 }}
-                          >
-                            <option value="Normal">Normal</option>
-                            <option value="High">⚡ High</option>
-                            <option value="Urgent">🚨 Urgent</option>
-                          </select>
-                        </div>
-
-                        {/* 6. Remarks */}
+                        {/* 5. Remarks */}
                         <div>
                           <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
                             Remarks
@@ -6110,7 +6159,7 @@ export default function InternalBranch() {
                           />
                         </div>
 
-                        {/* 7. Delete Row Button */}
+                        {/* 6. Delete Row Button */}
                         <div>
                           <button
                             type="button"
@@ -6434,7 +6483,8 @@ export default function InternalBranch() {
           ) : sentQuery.isError ? (
             <TransferErrorCard
               title="Failed to Load Transfer Requests"
-              message={sentQuery.error?.message || "An unexpected error occurred while fetching your sent transfer requests."}
+              error={sentQuery.error}
+              message={sentQuery.error?.response?.data?.error || sentQuery.error?.message || "An unexpected error occurred while fetching your sent transfer requests."}
               onRetry={() => sentQuery.refetch()}
             />
           ) : filteredSentTransfers.length === 0 ? (
@@ -6510,7 +6560,8 @@ export default function InternalBranch() {
           ) : incomingQuery.isError ? (
             <TransferErrorCard
               title="Failed to Load Incoming Requests"
-              message={incomingQuery.error?.message || "An error occurred while loading incoming requests for your branch."}
+              error={incomingQuery.error}
+              message={incomingQuery.error?.response?.data?.error || incomingQuery.error?.message || "An error occurred while loading incoming requests for your branch."}
               onRetry={() => incomingQuery.refetch()}
             />
           ) : transfers.length === 0 ? (
@@ -6578,7 +6629,8 @@ export default function InternalBranch() {
           ) : receivalQuery.isError ? (
             <TransferErrorCard
               title="Failed to Load In-Transit Receivals"
-              message={receivalQuery.error?.message || "An error occurred while fetching shipments in transit."}
+              error={receivalQuery.error}
+              message={receivalQuery.error?.response?.data?.error || receivalQuery.error?.message || "An error occurred while fetching shipments in transit."}
               onRetry={() => receivalQuery.refetch()}
             />
           ) : transfers.length === 0 ? (
@@ -6834,7 +6886,8 @@ export default function InternalBranch() {
           ) : logsQuery.isError ? (
             <TransferErrorCard
               title="Failed to Load Transfer Logs"
-              message={logsQuery.error?.message || "Could not retrieve transfer logs."}
+              error={logsQuery.error}
+              message={logsQuery.error?.response?.data?.error || logsQuery.error?.message || "Could not retrieve transfer logs."}
               onRetry={() => logsQuery.refetch()}
             />
           ) : transfers.length === 0 ? (
