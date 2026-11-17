@@ -1,6 +1,8 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { useStore } from '../contexts/StoreContext'
+import { formatBranchLabel } from '../pages/StoreManagement/storeUtils'
 import axios from '../api'
 import toast from 'react-hot-toast'
 import StartShiftModal from './StartShiftModal'
@@ -43,7 +45,8 @@ import {
   Bike,
   UserCheck,
   History,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Store
 } from 'lucide-react'
 
 const navGroups = [
@@ -65,6 +68,12 @@ const navGroups = [
     items: [
       { to: '/sales-item', icon: <ClipboardList size={18} strokeWidth={2.2} />, label: 'Sales Item & Revenue', roles: ['Developer', 'Admin', 'Management'] },
       { to: '/reports', icon: <TrendingUp size={18} strokeWidth={2.2} />, label: 'Reports', roles: ['Developer', 'Admin', 'Management'] },
+    ]
+  },
+  {
+    title: 'Store Management',
+    items: [
+      { to: '/store', icon: <Store size={18} strokeWidth={2.2} />, label: 'Store Management', roles: ['Developer', 'Admin', 'Management', 'Operator', 'Store Keeper', 'Store Manager'] },
     ]
   },
   {
@@ -92,6 +101,15 @@ const navGroups = [
 
 export default function Layout() {
   const { user, logout, updateUser } = useAuth()
+  const {
+    branches: storeBranches,
+    selectedBranch: storeSelectedBranch,
+    setSelectedBranch: setStoreSelectedBranch,
+    locations: storeLocations,
+    selectedStoreId,
+    setSelectedStoreId,
+    isBranchLocked: storeIsBranchLocked
+  } = useStore()
   const navigate = useNavigate()
   const [alerts, setAlerts] = useState([])
   const [isNotifOpen, setIsNotifOpen] = useState(false)
@@ -458,7 +476,8 @@ export default function Layout() {
     '/settings': 'System Settings',
     '/help-support': 'Help & Support Center',
     '/edited-logs': 'Edit Attendance Audit Logs',
-    '/internal-branch': 'Internal Branch'
+    '/internal-branch': 'Internal Branch',
+    '/store': 'Store Management'
   }[location.pathname] || `${BRAND_NAME} Pro`
 
   if (location.pathname === '/pos' && ['cashier', 'order taker'].includes(user?.role?.trim().toLowerCase()) && user?.branch) {
@@ -805,7 +824,17 @@ export default function Layout() {
             <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <div className="page-title">{currentTitle}</div>
               <div className="page-subtitle">
-                {location.pathname === '/internal-branch' ? (
+                {location.pathname === '/store' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--primary)' }}>Store Management</span>
+                    <span style={{ opacity: 0.5 }}>•</span>
+                    <div className="topbar-date-desktop" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                      <span>{new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                      <span style={{ opacity: 0.5 }}>•</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>KSA {liveKsaTime}</span>
+                    </div>
+                  </div>
+                ) : location.pathname === '/internal-branch' ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600, color: 'var(--primary)' }}>Internal Branch Transfer Management</span>
                     <span style={{ opacity: 0.5 }}>•</span>
@@ -933,6 +962,108 @@ export default function Layout() {
               >
                 <LogOut size={12} /> Logout Now
               </button>
+            </div>
+          )}
+
+          {/* Topbar Middle / Store Controls: Branch & Store Location Selectors when on /store */}
+          {location.pathname === '/store' && (
+            <div className="store-topbar-controls" style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              margin: '0 auto',
+              background: 'var(--surface-2)',
+              padding: '4px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--border)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Branch:</span>
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  background: 'var(--surface)',
+                  padding: 2,
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  gap: 2
+                }}>
+                  {!storeIsBranchLocked && (
+                    <button
+                      type="button"
+                      onClick={() => setStoreSelectedBranch('All')}
+                      style={{
+                        padding: '3px 8px',
+                        fontSize: 11,
+                        fontWeight: storeSelectedBranch === 'All' ? 700 : 500,
+                        borderRadius: 4,
+                        border: 'none',
+                        background: storeSelectedBranch === 'All' ? 'var(--primary)' : 'transparent',
+                        color: storeSelectedBranch === 'All' ? '#000000' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s'
+                      }}
+                    >
+                      All
+                    </button>
+                  )}
+                  {['Branch 1', 'Branch 2', 'Branch 3'].map(b => {
+                    const isSelected = storeSelectedBranch === b || 
+                      (b === 'Branch 1' && /restaurant\s*1/i.test(storeSelectedBranch)) ||
+                      (b === 'Branch 3' && /restaurant\s*3/i.test(storeSelectedBranch));
+                    return (
+                      <button
+                        key={b}
+                        type="button"
+                        onClick={() => !storeIsBranchLocked && setStoreSelectedBranch(b)}
+                        disabled={storeIsBranchLocked && !isSelected}
+                        style={{
+                          padding: '3px 8px',
+                          fontSize: 11,
+                          fontWeight: isSelected ? 700 : 500,
+                          borderRadius: 4,
+                          border: 'none',
+                          background: isSelected ? 'var(--primary)' : 'transparent',
+                          color: isSelected ? '#000000' : 'var(--text-muted)',
+                          cursor: storeIsBranchLocked ? 'not-allowed' : 'pointer',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        {formatBranchLabel(b)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ width: 1, height: 18, background: 'var(--border)' }} />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Store:</span>
+                <select
+                  value={selectedStoreId || 'All'}
+                  onChange={(e) => setSelectedStoreId(e.target.value)}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface)',
+                    color: 'var(--text)',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    maxWidth: 180
+                  }}
+                >
+                  <option value="All">All Stores</option>
+                  {storeLocations.map(loc => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name} {storeSelectedBranch === 'All' ? `(${formatBranchLabel(loc.branch)})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
 

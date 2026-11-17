@@ -5,6 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './queryClient'
 import { AuthProvider } from './contexts/AuthContext'
 import { POSProvider } from './contexts/POSContext'
+import { StoreProvider } from './contexts/StoreContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import './index.css'
@@ -34,6 +35,7 @@ const Logs                 = lazy(() => import('./pages/Logs'))
 const EditAttendanceLogs   = lazy(() => import('./pages/EditAttendanceLogs'))
 const EmployeePortal       = lazy(() => import('./pages/EmployeePortal'))
 const InternalBranch       = lazy(() => import('./pages/InternalBranch'))
+const StoreManagement      = lazy(() => import('./pages/StoreManagement/StoreManagement'))
 
 // Minimal full-screen spinner shown while a page chunk is loading
 function PageLoader() {
@@ -61,12 +63,13 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <POSProvider>
-        <Toaster
-          position="top-right"
-          toastOptions={{ style: { fontSize: '14px', borderRadius: '8px' } }}
-          containerStyle={{ zIndex: 2147483647 }}
-        />
-        <BrowserRouter>
+          <StoreProvider>
+            <Toaster
+              position="top-right"
+              toastOptions={{ style: { fontSize: '14px', borderRadius: '8px' } }}
+              containerStyle={{ zIndex: 2147483647 }}
+            />
+            <BrowserRouter>
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/login" element={<Login />} />
@@ -94,6 +97,7 @@ export default function App() {
                 <Route path="/cancel-requests" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Cashier']}><CancelRequests /></ProtectedRoute>} />
                 <Route path="/credit"          element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Cashier']}><Credit /></ProtectedRoute>} />
                 <Route path="/internal-branch" element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator', 'Cashier', 'Order Taker']}><InternalBranch /></ProtectedRoute>} />
+                <Route path="/store"           element={<ProtectedRoute allowedRoles={['Developer', 'Admin', 'Management', 'Operator', 'Store Keeper', 'Store Manager']}><StoreManagement /></ProtectedRoute>} />
                 <Route path="/stock-management" element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><StockManagement /></ProtectedRoute>} />
                 <Route path="/product-cost"    element={<ProtectedRoute allowedRoles={['Developer', 'Admin']}><ProductCostManagement /></ProtectedRoute>} />
 
@@ -116,6 +120,7 @@ export default function App() {
             </Routes>
           </Suspense>
         </BrowserRouter>
+          </StoreProvider>
       </POSProvider>
     </AuthProvider>
     </QueryClientProvider>

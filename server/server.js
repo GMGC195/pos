@@ -1135,6 +1135,7 @@ app.use('/api/employee-portal', require('./routes/employeePortal'));
 app.use('/api/logs', require('./routes/activityLogs').router);
 app.use('/api/activity-logs', require('./routes/activityLogs').router);
 app.use('/api/internal-branch', require('./routes/internalBranch'));
+app.use('/api/store', require('./routes/store'));
 
 // Health check
 app.get('/api/health', (req, res) => {
