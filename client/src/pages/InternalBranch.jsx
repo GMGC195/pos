@@ -54,7 +54,9 @@ import {
   CheckCheck,
   Save,
   SlidersHorizontal,
-  Loader2
+  Loader2,
+  UserPlus,
+  BookmarkPlus
 } from 'lucide-react';
 
 const STANDARD_BRANCH_NAMES = ['branch 1', 'branch 2', 'branch 3', 'central kitchen'];
@@ -226,14 +228,82 @@ function DeliveryTimerBadge({ expectedDeliveryAt, status }) {
   );
 }
 
+// Universal Printer Helper: Supports Electron, hidden iframe (no popup blocker), and fallback window.open
+function printHtmlContent(html) {
+  if (!html) return;
+
+  // 1. Electron Native Printer Bridge (if running in desktop Electron)
+  if (window.electron && typeof window.electron.print === 'function') {
+    try {
+      window.electron.print({ html });
+      return;
+    } catch (e) {
+      console.warn('Electron print bridge failed, falling back to iframe:', e);
+    }
+  }
+
+  // 2. Hidden Iframe Printing: Fully immune to browser/Electron popup blockers
+  try {
+    const existing = document.getElementById('internal-branch-print-iframe');
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'internal-branch-print-iframe';
+    iframe.setAttribute('style', 'position:fixed;right:-1000px;bottom:-1000px;width:10px;height:10px;border:none;opacity:0;');
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      const runPrint = () => {
+        try {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        } catch (err) {
+          console.error('Iframe print error:', err);
+        } finally {
+          setTimeout(() => {
+            if (iframe.parentNode) {
+              iframe.parentNode.removeChild(iframe);
+            }
+          }, 3000);
+        }
+      };
+
+      if (iframe.contentWindow) {
+        iframe.contentWindow.onload = runPrint;
+      }
+      setTimeout(runPrint, 400);
+      return;
+    }
+  } catch (err) {
+    console.warn('Hidden iframe creation failed, trying window.open:', err);
+  }
+
+  // 3. Fallback to traditional window.open
+  try {
+    const printWindow = window.open('', '_blank', 'width=460,height=700');
+    if (printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      return;
+    }
+  } catch (e) {
+    console.error('Popup window error:', e);
+  }
+
+  toast.error('Printing failed. Please check browser printer settings or permissions.');
+}
+
 // Thermal / Standard Transfer Voucher Print Helper
 function printTransferSlip(t) {
   if (!t) return;
-  const printWindow = window.open('', '_blank', 'width=460,height=700');
-  if (!printWindow) {
-    toast.error('Popup blocked. Please allow popups to print transfer slip.');
-    return;
-  }
 
   const reqDate = new Date(t.request_date).toLocaleDateString();
   const reqTime = new Date(t.request_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -269,7 +339,7 @@ function printTransferSlip(t) {
     `;
   }).join('');
 
-  printWindow.document.write(`
+  const html = `
     <!DOCTYPE html>
     <html>
       <head>
@@ -457,24 +527,21 @@ function printTransferSlip(t) {
 
         <script>
           window.onload = function() {
-            window.print();
-            setTimeout(function() { window.close(); }, 800);
+            if (window.self === window.top) {
+              window.print();
+              setTimeout(function() { window.close(); }, 800);
+            }
           };
         </script>
       </body>
     </html>
-  `);
-  printWindow.document.close();
+  `;
+  printHtmlContent(html);
 }
 
 // Thermal / Standard Slip: Accepted Items Voucher (Incoming Requests)
 function printAcceptedItemsSlip(t) {
   if (!t) return;
-  const printWindow = window.open('', '_blank', 'width=460,height=700');
-  if (!printWindow) {
-    toast.error('Popup blocked. Please allow popups to print slip.');
-    return;
-  }
 
   const items = t.items || [];
   const itemsHtml = items.map((it, idx) => {
@@ -526,7 +593,7 @@ function printAcceptedItemsSlip(t) {
     `;
   }).join('');
 
-  printWindow.document.write(`
+  const html = `
     <!DOCTYPE html>
     <html>
       <head>
@@ -707,24 +774,21 @@ function printAcceptedItemsSlip(t) {
 
         <script>
           window.onload = function() {
-            window.print();
-            setTimeout(function() { window.close(); }, 800);
+            if (window.self === window.top) {
+              window.print();
+              setTimeout(function() { window.close(); }, 800);
+            }
           };
         </script>
       </body>
     </html>
-  `);
-  printWindow.document.close();
+  `;
+  printHtmlContent(html);
 }
 
 // Thermal / Standard Slip: Dispatched Goods Slip (Pending Review / Received)
 function printDispatchedItemsSlip(t) {
   if (!t) return;
-  const printWindow = window.open('', '_blank', 'width=460,height=700');
-  if (!printWindow) {
-    toast.error('Popup blocked. Please allow popups to print slip.');
-    return;
-  }
 
   const dispatchedItems = (t.items || []).filter(it => {
     const s = parseFloat(it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : (it.dispatched_qty ?? 0));
@@ -762,7 +826,7 @@ function printDispatchedItemsSlip(t) {
     `;
   }).join('');
 
-  printWindow.document.write(`
+  const html = `
     <!DOCTYPE html>
     <html>
       <head>
@@ -943,14 +1007,16 @@ function printDispatchedItemsSlip(t) {
 
         <script>
           window.onload = function() {
-            window.print();
-            setTimeout(function() { window.close(); }, 800);
+            if (window.self === window.top) {
+              window.print();
+              setTimeout(function() { window.close(); }, 800);
+            }
           };
         </script>
       </body>
     </html>
-  `);
-  printWindow.document.close();
+  `;
+  printHtmlContent(html);
 }
 
 function BranchBadge({ branch, isExternal = false }) {
@@ -1837,6 +1903,14 @@ export default function InternalBranch() {
   const [handoverToName, setHandoverToName] = useState('');
   const [dispatchNotes, setDispatchNotes] = useState('');
   const [dispatching, setDispatching] = useState(false);
+  const [handoverUsers, setHandoverUsers] = useState([]);
+  const [showRegisterHandoverModal, setShowRegisterHandoverModal] = useState(false);
+  const [newHandoverName, setNewHandoverName] = useState('');
+  const [newHandoverPhone, setNewHandoverPhone] = useState('');
+  const [newHandoverRole, setNewHandoverRole] = useState('Driver');
+  const [newHandoverVehicle, setNewHandoverVehicle] = useState('');
+  const [newHandoverBranch, setNewHandoverBranch] = useState('All');
+  const [savingHandoverUser, setSavingHandoverUser] = useState(false);
 
   // 4. Goods Receiving & Verification
   const [receiveModalTransfer, setReceiveModalTransfer] = useState(null);
@@ -2151,6 +2225,17 @@ export default function InternalBranch() {
       .finally(() => setLoadingDishes(false));
   }, [posItems, reloadPOSData]);
 
+  const fetchHandoverUsers = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/internal-branch/handover-users');
+      if (Array.isArray(res.data)) {
+        setHandoverUsers(res.data);
+      }
+    } catch (err) {
+      console.warn('Could not fetch handover users:', err);
+    }
+  }, []);
+
   // Load initial branches, dishes, and stats
   useEffect(() => {
     // Branches
@@ -2175,7 +2260,8 @@ export default function InternalBranch() {
     fetchDishes();
 
     fetchStats();
-  }, [defaultFromBranch, fetchDishes]);
+    fetchHandoverUsers();
+  }, [defaultFromBranch, fetchDishes, fetchHandoverUsers]);
 
   const queryClient = useQueryClient();
   const effectiveBranchKey = isSuperUser ? adminSelectedBranch : (user?.branch || 'Branch 1');
@@ -2382,13 +2468,42 @@ export default function InternalBranch() {
     });
   }, [queryClient]);
 
+  // Filter & Search states for Today Requests Tab
+  const [todaySearchQuery, setTodaySearchQuery] = useState('');
+  const [todayFilterBranch, setTodayFilterBranch] = useState('All');
+  const [todayFilterStatus, setTodayFilterStatus] = useState('All');
+  const [todayFilterPriority, setTodayFilterPriority] = useState('All');
+
+  // Filtered Today Transfers
+  const filteredTodayTransfers = useMemo(() => {
+    const list = todayQuery.data || [];
+    const search = (todaySearchQuery || '').trim().toLowerCase();
+    return list.filter(t => {
+      if (!t) return false;
+      const matchBranch = todayFilterBranch === 'All' || 
+        String(t.from_branch).toLowerCase() === todayFilterBranch.toLowerCase() ||
+        String(t.to_branch).toLowerCase() === todayFilterBranch.toLowerCase();
+      const matchStatus = todayFilterStatus === 'All' || 
+        String(t.status).toLowerCase() === todayFilterStatus.toLowerCase();
+      const matchPriority = todayFilterPriority === 'All' || 
+        String(t.priority).toLowerCase() === todayFilterPriority.toLowerCase();
+      const matchSearch = !search || 
+        String(t.transfer_id || '').toLowerCase().includes(search) ||
+        String(t.from_branch || '').toLowerCase().includes(search) ||
+        String(t.to_branch || '').toLowerCase().includes(search) ||
+        (Array.isArray(t.items) && t.items.some(it => String(it.dish_name || '').toLowerCase().includes(search)));
+      return matchBranch && matchStatus && matchPriority && matchSearch;
+    });
+  }, [todayQuery.data, todaySearchQuery, todayFilterBranch, todayFilterStatus, todayFilterPriority]);
+
   // Active query derived from activeTab
   const activeQuery = useMemo(() => {
+    if (activeTab === 'today') return todayQuery;
     if (activeTab === 'incoming') return incomingQuery;
     if (activeTab === 'receivals') return receivalQuery;
     if (activeTab === 'transfer_request' || activeTab === 'new') return sentQuery;
     return logsQuery;
-  }, [activeTab, incomingQuery, receivalQuery, sentQuery, logsQuery]);
+  }, [activeTab, todayQuery, incomingQuery, receivalQuery, sentQuery, logsQuery]);
 
   const transfers = activeQuery.data || [];
   const loadingTransfers = activeQuery.isLoading;
@@ -2403,6 +2518,11 @@ export default function InternalBranch() {
     const search = (sentSearchQuery || '').trim().toLowerCase();
     return list.filter(t => {
       if (!t) return false;
+      // Auto-removal: Once every item is received or status is Completed/Received, remove from Transfer Requests
+      const isCompletedOrReceived = ['Completed', 'Complete', 'Received', 'Fully Received', 'Cancelled'].includes(t.status);
+      const allItemsReceived = Array.isArray(t.items) && t.items.length > 0 && t.items.every(it => ['Received', 'Fully Received', 'Rejected'].includes(it.item_status));
+      if (isCompletedOrReceived || allItemsReceived) return false;
+
       const matchBranch = sentFilterBranch === 'All' || 
         String(t.to_branch).toLowerCase() === sentFilterBranch.toLowerCase();
       const matchPriority = sentFilterPriority === 'All' || 
@@ -2427,15 +2547,19 @@ export default function InternalBranch() {
   }, [queryClient]);
 
   const fetchTransfers = useCallback((tabOverride) => {
+    queryClient.invalidateQueries({ queryKey: ['transfers'] });
+    queryClient.invalidateQueries({ queryKey: ['todayTransfers'] });
+    queryClient.invalidateQueries({ queryKey: ['transferStats'] });
     if (tabOverride) {
-      if (tabOverride === 'incoming') incomingQuery.refetch();
+      if (tabOverride === 'today') todayQuery.refetch();
+      else if (tabOverride === 'incoming') incomingQuery.refetch();
       else if (tabOverride === 'receivals') receivalQuery.refetch();
       else if (tabOverride === 'transfer_request') sentQuery.refetch();
       else logsQuery.refetch();
     } else {
       activeQuery.refetch();
     }
-  }, [incomingQuery, receivalQuery, sentQuery, logsQuery, activeQuery]);
+  }, [queryClient, todayQuery, incomingQuery, receivalQuery, sentQuery, logsQuery, activeQuery]);
 
   // Real-time WebSockets listeners with event deduplication (prevents double toasts & sounds)
   useEffect(() => {
@@ -3333,6 +3457,48 @@ export default function InternalBranch() {
     }
   };
 
+  const handleRegisterHandoverSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!newHandoverName.trim() || savingHandoverUser) return;
+
+    try {
+      setSavingHandoverUser(true);
+      const res = await axios.post('/api/internal-branch/handover-users', {
+        name: newHandoverName.trim(),
+        role: newHandoverRole,
+        phone: newHandoverPhone.trim(),
+        vehicle_no: newHandoverVehicle.trim(),
+        branch: newHandoverBranch
+      });
+
+      const savedUser = res.data;
+      toast.success(`Handover user "${savedUser.name}" registered successfully!`);
+      setHandoverToName(savedUser.name);
+      fetchHandoverUsers();
+      setNewHandoverName('');
+      setNewHandoverPhone('');
+      setNewHandoverVehicle('');
+      setShowRegisterHandoverModal(false);
+    } catch (err) {
+      console.error('Error registering handover user:', err);
+      toast.error(err.response?.data?.error || 'Failed to register handover user');
+    } finally {
+      setSavingHandoverUser(false);
+    }
+  };
+
+  const handleDeleteHandoverUser = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to remove "${name}" from handover users?`)) return;
+    try {
+      await axios.delete(`/api/internal-branch/handover-users/${id}`);
+      toast.success(`Removed "${name}" from handover users`);
+      fetchHandoverUsers();
+    } catch (err) {
+      console.error('Error removing handover user:', err);
+      toast.error('Failed to remove handover user');
+    }
+  };
+
   // 5. Open Dispatch & Handover Modal (Stage 3: Ready to Process -> Dispatch)
   const openDispatchModal = (t, targetItemId = null) => {
     if (dispatching || isDispatchingRef.current) return;
@@ -3344,6 +3510,7 @@ export default function InternalBranch() {
     setHandoverByName(user?.name || user?.username || 'Kitchen Staff');
     setHandoverToName('');
     setDispatchNotes('');
+    fetchHandoverUsers();
     const initQtys = {};
     const initRemarks = {};
     const initSelected = {};
@@ -4458,27 +4625,6 @@ export default function InternalBranch() {
                 >
                   <Printer size={13} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => openReceiveModal(t)}
-                  style={{
-                    padding: '6px 14px',
-                    background: '#16a34a',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)'
-                  }}
-                  title="Verify and confirm receiving goods"
-                >
-                  <PackageCheck size={14} /> Verify & Receive
-                </button>
               </>
             ) : (
               <>
@@ -4917,26 +5063,26 @@ export default function InternalBranch() {
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, flexWrap: 'wrap' }}>
                                 <button
                                   type="button"
-                                  onClick={() => handleItemReceive(t, it, false)}
+                                  onClick={() => openReceiveModal(t, it.id)}
                                   disabled={Boolean(receivingItemIds[it.id])}
                                   style={{
                                     background: '#16a34a',
                                     color: '#fff',
-                                    fontSize: 10.5,
+                                    fontSize: 11,
                                     fontWeight: 700,
-                                    padding: '3px 8px',
-                                    borderRadius: 4,
+                                    padding: '4px 9px',
+                                    borderRadius: 5,
                                     border: 'none',
-                                    cursor: receivingItemIds[it.id] ? 'not-allowed' : 'pointer',
+                                    cursor: 'pointer',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: 3,
+                                    gap: 4,
                                     whiteSpace: 'nowrap',
                                     boxShadow: '0 1px 2px rgba(22, 163, 74, 0.25)'
                                   }}
-                                  title="Receive & Accept this item without printing"
+                                  title="Verify and receive this menu item"
                                 >
-                                  {receivingItemIds[it.id] ? <Loader2 size={11} className="spin" /> : <CheckCheck size={11} />} Receive
+                                  <PackageCheck size={12} /> Verify & Receive
                                 </button>
                                 <button
                                   type="button"
@@ -4945,41 +5091,21 @@ export default function InternalBranch() {
                                   style={{
                                     background: '#0284c7',
                                     color: '#fff',
-                                    fontSize: 10.5,
+                                    fontSize: 11,
                                     fontWeight: 700,
-                                    padding: '3px 8px',
-                                    borderRadius: 4,
+                                    padding: '4px 9px',
+                                    borderRadius: 5,
                                     border: 'none',
                                     cursor: receivingItemIds[it.id] ? 'not-allowed' : 'pointer',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: 3,
+                                    gap: 4,
                                     whiteSpace: 'nowrap',
                                     boxShadow: '0 1px 2px rgba(2, 132, 199, 0.25)'
                                   }}
-                                  title="Receive and print receiving voucher for this item"
+                                  title="Verify, receive and print receiving voucher for this item"
                                 >
-                                  <Printer size={11} /> Rec & Print
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => openReceiveModal(t, it.id)}
-                                  style={{
-                                    background: '#fff',
-                                    color: '#475569',
-                                    border: '1px solid #cbd5e1',
-                                    fontSize: 10.5,
-                                    fontWeight: 600,
-                                    padding: '3px 6px',
-                                    borderRadius: 4,
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 2
-                                  }}
-                                  title="Open inspection modal to enter custom received quantity or discrepancy"
-                                >
-                                  <SlidersHorizontal size={10} />
+                                  {receivingItemIds[it.id] ? <Loader2 size={11} className="spin" /> : <Printer size={12} />} Verify, Rec & Print
                                 </button>
                               </div>
                             )
@@ -5296,26 +5422,26 @@ export default function InternalBranch() {
 
               <button
                 type="button"
-                onClick={() => handleDirectReceive(t, false)}
+                onClick={() => openReceiveModal(t)}
                 disabled={receiving}
                 style={{
-                  padding: '7px 14px',
+                  padding: '7px 16px',
                   background: receiving ? '#94a3b8' : '#16a34a',
                   color: '#fff',
                   border: 'none',
                   borderRadius: 6,
-                  fontSize: 12,
+                  fontSize: 12.5,
                   fontWeight: 700,
                   cursor: receiving ? 'not-allowed' : 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 5,
+                  gap: 6,
                   boxShadow: '0 1px 3px rgba(22, 163, 74, 0.25)',
                   opacity: receiving ? 0.7 : 1
                 }}
-                title="Receive and accept all dispatched goods without printing"
+                title="Verify all items and quantities together before receiving"
               >
-                <CheckCircle2 size={14} /> Receive & Accept
+                <PackageCheck size={15} /> Verify & Receive
               </button>
 
               <button
@@ -5328,39 +5454,18 @@ export default function InternalBranch() {
                   color: '#fff',
                   border: 'none',
                   borderRadius: 6,
-                  fontSize: 12,
+                  fontSize: 12.5,
                   fontWeight: 700,
                   cursor: receiving ? 'not-allowed' : 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 5,
+                  gap: 6,
                   boxShadow: '0 1px 3px rgba(2, 132, 199, 0.25)',
                   opacity: receiving ? 0.7 : 1
                 }}
-                title="Receive and accept all dispatched goods, then automatically print receiving slip"
+                title="Verify, receive and accept all dispatched goods, then automatically print receiving slip"
               >
-                <Printer size={14} /> Receive & Print
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openReceiveModal(t)}
-                style={{
-                  padding: '7px 12px',
-                  background: '#f1f5f9',
-                  color: '#334155',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5
-                }}
-                title="Verify and adjust quantities item-by-item"
-              >
-                <PackageCheck size={14} /> Verify / Custom Qty
+                <Printer size={15} /> Verify, Receive & Print
               </button>
             </div>
           </div>
@@ -6026,7 +6131,30 @@ export default function InternalBranch() {
           )}
         </button>
 
-        {/* Tab 5: Transfer Logs */}
+        {/* Tab 5: Today History (clean without badge count, immediately after Pending Receive) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('today')}
+          style={{
+            padding: '10px 16px',
+            fontSize: 13.5,
+            fontWeight: 700,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: activeTab === 'today' ? 'var(--primary)' : '#64748b',
+            borderBottom: activeTab === 'today' ? '3px solid var(--primary)' : '3px solid transparent',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <Calendar size={17} />
+          Today History
+        </button>
+
+        {/* Tab 6: Transfer Logs */}
         <button
           type="button"
           onClick={() => setActiveTab('logs')}
@@ -6423,7 +6551,244 @@ export default function InternalBranch() {
         </div>
       )}
 
-            {/* ─────────────────────────────────────────────────────────────
+      {/* ─────────────────────────────────────────────────────────────
+          TAB: TODAY HISTORY (ALL TRANSFERS CREATED TODAY)
+      ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'today' && (
+        <div>
+          {/* Header Bar with Title, Counter and Refresh */}
+          <div style={{
+            background: '#fff',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '10px 16px',
+            marginBottom: 12,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 10,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{
+                background: '#e0f2fe',
+                color: '#0284c7',
+                padding: '5px 8px',
+                borderRadius: 7,
+                display: 'inline-flex',
+                alignItems: 'center'
+              }}>
+                <Calendar size={18} />
+              </span>
+              <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                Today History
+              </h2>
+              <span style={{
+                fontSize: 11.5,
+                fontWeight: 800,
+                padding: '2px 9px',
+                borderRadius: 12,
+                background: '#e0f2fe',
+                color: '#0369a1'
+              }}>
+                {filteredTodayTransfers.length} {filteredTodayTransfers.length === 1 ? 'Record' : 'Records'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('new')}
+                className="btn btn-primary"
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5
+                }}
+              >
+                <PlusCircle size={14} /> New Request
+              </button>
+              <button
+                type="button"
+                onClick={() => todayQuery.refetch()}
+                disabled={todayQuery.isFetching}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5
+                }}
+              >
+                <RefreshCw size={13} className={todayQuery.isFetching ? 'spin' : ''} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Filters / Search Bar for Today's Requests */}
+          <div style={{
+            background: '#fff',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '12px 16px',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap'
+          }}>
+            <div style={{ flex: '1 1 240px', position: 'relative' }}>
+              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+              <input
+                type="text"
+                placeholder="Search transfer ID, dish, or branch..."
+                value={todaySearchQuery}
+                onChange={e => setTodaySearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 10px 7px 32px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  fontSize: 12.5
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Branch:</span>
+              <select
+                value={todayFilterBranch}
+                onChange={e => setTodayFilterBranch(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600 }}
+              >
+                <option value="All">All Branches</option>
+                {branches.map(b => (
+                  <option key={'filter-today-branch-' + b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Status:</span>
+              <select
+                value={todayFilterStatus}
+                onChange={e => setTodayFilterStatus(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600 }}
+              >
+                <option value="All">All Statuses</option>
+                <option value="Pending">Pending</option>
+                <option value="Accepted">Accepted</option>
+                <option value="Ready to Process">Ready to Process</option>
+                <option value="Dispatched">Dispatched</option>
+                <option value="Partially Received">Partially Received</option>
+                <option value="Completed">Completed</option>
+                <option value="Rejected">Rejected</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Priority:</span>
+              <select
+                value={todayFilterPriority}
+                onChange={e => setTodayFilterPriority(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600 }}
+              >
+                <option value="All">All Priorities</option>
+                <option value="Normal">Normal</option>
+                <option value="High">⚡ High Priority</option>
+                <option value="Urgent">🚨 Urgent Rush</option>
+              </select>
+            </div>
+
+            {(todaySearchQuery || todayFilterBranch !== 'All' || todayFilterStatus !== 'All' || todayFilterPriority !== 'All') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTodaySearchQuery('');
+                  setTodayFilterBranch('All');
+                  setTodayFilterStatus('All');
+                  setTodayFilterPriority('All');
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#dc2626',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  padding: '4px 8px'
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+
+          {/* Today's Requests List */}
+          {todayQuery.isLoading ? (
+            <TransferCardSkeleton count={3} />
+          ) : todayQuery.isError ? (
+            <TransferErrorCard
+              title="Failed to Load Today's Requests"
+              error={todayQuery.error}
+              message={todayQuery.error?.response?.data?.error || todayQuery.error?.message || "An error occurred while loading today's requests."}
+              onRetry={() => todayQuery.refetch()}
+            />
+          ) : filteredTodayTransfers.length === 0 ? (
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px dashed #cbd5e1', padding: 44, textAlign: 'center', color: '#64748b' }}>
+              <Calendar size={40} color="#0284c7" style={{ margin: '0 auto 10px' }} />
+              <h3 style={{ margin: '0 0 6px', fontSize: 16, color: '#0f172a' }}>No Transfer History Today</h3>
+              <p style={{ margin: 0, fontSize: 13 }}>
+                No inter-branch transfer activity recorded yet for today.
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('new')}
+                className="btn btn-primary"
+                style={{ marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <PlusCircle size={16} /> Create New Transfer Request
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {todayQuery.isFetching && !todayQuery.isLoading && (
+                <div style={{ fontSize: 11, color: '#0284c7', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', background: '#e0f2fe', borderRadius: 6, alignSelf: 'flex-start' }}>
+                  <RefreshCw size={12} className="spin" /> Updating today's requests in background...
+                </div>
+              )}
+              {(() => {
+                const seenIds = new Set();
+                const uniqueToday = filteredTodayTransfers.filter(t => {
+                  if (!t || !t.id || seenIds.has(t.id)) return false;
+                  seenIds.add(t.id);
+                  return true;
+                }).sort((a, b) => {
+                  const timeA = new Date(a.created_at || a.request_date).getTime() || 0;
+                  const timeB = new Date(b.created_at || b.request_date).getTime() || 0;
+                  if (timeB !== timeA) return timeB - timeA;
+                  return (b.id || 0) - (a.id || 0);
+                });
+                return uniqueToday.map(t => renderTransferCardRow(t, false));
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
           TAB 1: DEDICATED TRANSFER REQUESTS (SENT REQUESTS - LATEST FIRST)
       ───────────────────────────────────────────────────────────── */}
       {activeTab === 'transfer_request' && (
@@ -7413,17 +7778,114 @@ export default function InternalBranch() {
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#78350f', marginBottom: 4 }}>
-                      Handover To (Driver / Branch Rep) <span style={{ color: '#dc2626' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={handoverToName}
-                      onChange={e => setHandoverToName(e.target.value)}
-                      placeholder="Driver / Staff name (e.g. Imran Khan)"
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1.5px solid #f59e0b', fontSize: 12.5, fontWeight: 700 }}
-                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label style={{ fontSize: 11.5, fontWeight: 700, color: '#78350f', margin: 0 }}>
+                        Handover To (Driver / Branch Rep) <span style={{ color: '#dc2626' }}>*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewHandoverName(handoverToName && !handoverUsers.some(u => u.name.toLowerCase() === handoverToName.toLowerCase()) ? handoverToName : '');
+                          setShowRegisterHandoverModal(true);
+                        }}
+                        style={{
+                          background: '#16a34a',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 4,
+                          padding: '2px 8px',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          boxShadow: '0 1px 2px rgba(22, 163, 74, 0.25)'
+                        }}
+                        title="Register new driver or representative user"
+                      >
+                        <UserPlus size={11} /> + Register User
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {/* Dropdown Selector */}
+                      <select
+                        value={handoverUsers.some(u => u.name === handoverToName) ? handoverToName : ''}
+                        onChange={e => {
+                          if (e.target.value === '__register__') {
+                            setNewHandoverName('');
+                            setShowRegisterHandoverModal(true);
+                          } else if (e.target.value) {
+                            setHandoverToName(e.target.value);
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          borderRadius: 6,
+                          border: '1.5px solid #f59e0b',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          background: '#fff',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="">▼ Pick Registered Driver / Staff (Dropdown)</option>
+                        {handoverUsers.map(u => (
+                          <option key={u.id || u.name} value={u.name}>
+                            {u.name} {u.role ? `• ${u.role}` : ''} {u.vehicle_no ? `(${u.vehicle_no})` : ''} {u.phone ? `[${u.phone}]` : ''}
+                          </option>
+                        ))}
+                        <option value="__register__">➕ + Register New Handover User...</option>
+                      </select>
+
+                      {/* Manual / Editable Input */}
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          type="text"
+                          required
+                          value={handoverToName}
+                          onChange={e => setHandoverToName(e.target.value)}
+                          placeholder="Or type manual name (e.g. Imran Khan)"
+                          style={{
+                            flex: 1,
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            border: '1.5px solid #f59e0b',
+                            fontSize: 12.5,
+                            fontWeight: 700,
+                            background: handoverToName ? '#fffbeb' : '#fff'
+                          }}
+                        />
+                        {handoverToName.trim() && !handoverUsers.some(u => u.name.toLowerCase() === handoverToName.trim().toLowerCase()) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewHandoverName(handoverToName.trim());
+                              setShowRegisterHandoverModal(true);
+                            }}
+                            style={{
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              border: '1px solid #f59e0b',
+                              borderRadius: 6,
+                              padding: '0 8px',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 3,
+                              whiteSpace: 'nowrap'
+                            }}
+                            title="Register this name to saved list"
+                          >
+                            <BookmarkPlus size={12} /> Save
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -7605,6 +8067,226 @@ export default function InternalBranch() {
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          1b. REGISTER HANDOVER USER / DRIVER MODAL
+      ───────────────────────────────────────────────────────────── */}
+      {showRegisterHandoverModal && (
+        <div className="modal-overlay" onClick={e => { if (e.target.classList.contains('modal-overlay')) setShowRegisterHandoverModal(false); }} style={{ zIndex: 10005 }}>
+          <div className="modal-container" style={{ maxWidth: 480, width: '92%', background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column' }}>
+            {/* Header */}
+            <div style={{ background: '#f59e0b', color: '#fff', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <UserPlus size={18} />
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>Register Handover User / Driver</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRegisterHandoverModal(false)}
+                style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form Content */}
+            <form onSubmit={handleRegisterHandoverSubmit} style={{ padding: 18 }}>
+              <p style={{ margin: '0 0 14px', fontSize: 12.5, color: '#64748b' }}>
+                Register a driver or staff representative for quick custody handover selection during internal branch dispatches.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Full Name <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={newHandoverName}
+                    onChange={e => setNewHandoverName(e.target.value)}
+                    placeholder="e.g. Imran Khan / Yasir Ali"
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 13, fontWeight: 600 }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Role / Title
+                    </label>
+                    <select
+                      value={newHandoverRole}
+                      onChange={e => setNewHandoverRole(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 12.5 }}
+                    >
+                      <option value="Driver">Driver</option>
+                      <option value="Delivery Rider">Delivery Rider</option>
+                      <option value="Branch Rep">Branch Rep</option>
+                      <option value="Kitchen Staff">Kitchen Staff</option>
+                      <option value="Logistics">Logistics</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Phone (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newHandoverPhone}
+                      onChange={e => setNewHandoverPhone(e.target.value)}
+                      placeholder="e.g. 050-1234567"
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 12.5 }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Vehicle / Bike No (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newHandoverVehicle}
+                      onChange={e => setNewHandoverVehicle(e.target.value)}
+                      placeholder="e.g. Bike #12 / Van 04"
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 12.5 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Branch
+                    </label>
+                    <select
+                      value={newHandoverBranch}
+                      onChange={e => setNewHandoverBranch(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid #cbd5e1', fontSize: 12.5 }}
+                    >
+                      <option value="All">All Branches</option>
+                      {branches.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* List of currently registered users with quick pick/delete */}
+                {handoverUsers.length > 0 && (
+                  <div style={{ marginTop: 6, background: '#f8fafc', padding: 10, borderRadius: 8, border: '1px solid #e2e8f0', maxHeight: 140, overflowY: 'auto' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 6 }}>
+                      Existing Handover Users ({handoverUsers.length}):
+                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {handoverUsers.map(u => (
+                        <div
+                          key={u.id || u.name}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: '#fff',
+                            padding: '4px 8px',
+                            borderRadius: 4,
+                            fontSize: 11.5,
+                            border: '1px solid #f1f5f9'
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, color: '#1e293b' }}>
+                            {u.name} <span style={{ color: '#64748b', fontSize: 10.5 }}>({u.role || 'Driver'})</span>
+                            {u.vehicle_no ? <span style={{ color: '#0284c7', fontSize: 10.5 }}> · {u.vehicle_no}</span> : null}
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHandoverToName(u.name);
+                                setShowRegisterHandoverModal(false);
+                                toast.success(`Selected "${u.name}" for handover!`);
+                              }}
+                              style={{
+                                background: '#fef3c7',
+                                border: '1px solid #fde68a',
+                                borderRadius: 3,
+                                padding: '2px 6px',
+                                fontSize: 10.5,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                color: '#92400e'
+                              }}
+                            >
+                              Pick
+                            </button>
+                            {typeof u.id === 'number' && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteHandoverUser(u.id, u.name)}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: '#ef4444',
+                                  cursor: 'pointer',
+                                  padding: '2px 4px',
+                                  display: 'flex',
+                                  alignItems: 'center'
+                                }}
+                                title="Remove user"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterHandoverModal(false)}
+                  style={{
+                    padding: '7px 14px',
+                    background: '#f1f5f9',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    color: '#475569'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingHandoverUser || !newHandoverName.trim()}
+                  style={{
+                    padding: '7px 16px',
+                    background: savingHandoverUser ? '#94a3b8' : '#f59e0b',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor: savingHandoverUser ? 'not-allowed' : 'pointer',
+                    color: '#fff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}
+                >
+                  {savingHandoverUser ? <Loader2 size={13} className="spin" /> : <UserPlus size={14} />}
+                  {savingHandoverUser ? 'Saving...' : 'Register & Select'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -8335,7 +9017,7 @@ export default function InternalBranch() {
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 size={16} /> Receive & Accept
+                      <PackageCheck size={16} /> Verify & Receive
                     </>
                   )}
                 </button>
@@ -8359,15 +9041,15 @@ export default function InternalBranch() {
                     pointerEvents: receiving ? 'none' : 'auto',
                     boxShadow: '0 1px 3px rgba(2, 132, 199, 0.25)'
                   }}
-                  title="Save receiving confirmation and automatically print receiving slip"
+                  title="Verify, receive confirmation and automatically print receiving slip"
                 >
                   {receiving ? (
                     <>
-                      <RefreshCw size={16} className="animate-spin" /> Saving & Printing...
+                      <RefreshCw size={16} className="animate-spin" /> Verifying & Printing...
                     </>
                   ) : (
                     <>
-                      <Printer size={16} /> Receive & Print
+                      <Printer size={16} /> Verify, Receive & Print
                     </>
                   )}
                 </button>
