@@ -2160,6 +2160,36 @@ router.post('/daily-closing', authenticateToken, isAdminOrCashier, async (req, r
   }
 });
 
+// POST /api/orders/closings/:id/resend-email - Resend Closing Email Report
+router.post('/closings/:id/resend-email', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM shift_closings WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Closing record not found' });
+    }
+    const report = result.rows[0];
+    console.log(`[Orders Route] Manual resend-email requested for Closing #${id} (${report.closing_type || 'Daily'})...`);
+    const emailResult = await sendClosingEmail(report, report.closing_type || 'Daily', { force: true });
+    if (emailResult.success) {
+      res.json({
+        success: true,
+        message: `Closing email delivered successfully via ${emailResult.provider}`,
+        provider: emailResult.provider,
+        recipients: emailResult.recipients
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: emailResult.error || 'Failed to dispatch email' 
+      });
+    }
+  } catch (err) {
+    console.error('[Orders Route] Error in resend-email:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE order
 router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
   const client = await pool.connect();

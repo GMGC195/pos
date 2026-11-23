@@ -20,6 +20,11 @@ async function ensureInternalBranchSchema() {
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_delivery_minutes INTEGER DEFAULT 30;
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50);
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS original_needed_by_time VARCHAR(50);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS proposed_needed_by_time VARCHAR(50);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_status VARCHAR(50) DEFAULT 'Normal';
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_modified_by VARCHAR(150);
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_modified_at TIMESTAMPTZ;
+      ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS time_modification_reason TEXT;
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'Transfer Request';
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'Normal';
       ALTER TABLE internal_branch_transfers ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150);
@@ -65,6 +70,12 @@ async function ensureInternalBranchSchema() {
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_by_name VARCHAR(150) DEFAULT NULL;
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ DEFAULT NULL;
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_time VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS original_needed_by_time VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS proposed_needed_by_time VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS time_status VARCHAR(50) DEFAULT 'Normal';
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS time_modified_by VARCHAR(150) DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS time_modified_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS time_modification_reason TEXT DEFAULT NULL;
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS needed_by_date VARCHAR(50) DEFAULT NULL;
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS priority VARCHAR(50) DEFAULT 'Normal';
       ALTER TABLE internal_branch_transfer_items ADD COLUMN IF NOT EXISTS dispatched_qty NUMERIC(12,2) DEFAULT NULL;
@@ -154,6 +165,34 @@ async function createBranchNotification(client, { targetBranch, message, type = 
     `, [message, type, JSON.stringify(['admin', 'developer', targetBranch])]);
   } catch (err) {
     console.warn('Failed to insert notification:', err.message);
+  }
+}
+
+// Full transfer fetcher with item details
+async function fetchFullTransfer(id) {
+  try {
+    const tRes = await pool.query(`SELECT * FROM internal_branch_transfers WHERE id = $1`, [id]);
+    if (tRes.rows.length === 0) return null;
+    const transfer = tRes.rows[0];
+    const itemsRes = await pool.query(`
+      SELECT ti.*, 
+        COALESCE(ti.image_url, i.image_url) as image_url, 
+        COALESCE(ti.price, i.price) as price,
+        COALESCE(ti.sku, i.short_code, CONCAT('SKU-', ti.item_id)) as sku,
+        COALESCE(ti.barcode, '') as barcode,
+        COALESCE(i.short_code, '') as short_code
+      FROM internal_branch_transfer_items ti 
+      LEFT JOIN items i ON ti.item_id = i.id
+      WHERE ti.transfer_id = $1 
+      ORDER BY ti.id ASC
+    `, [transfer.id]);
+    return {
+      ...transfer,
+      items: itemsRes.rows
+    };
+  } catch (err) {
+    console.error('fetchFullTransfer error:', err);
+    return null;
   }
 }
 
@@ -3518,6 +3557,291 @@ router.put('/transfers/:id/edit-request', authenticateToken, async (req, res) =>
     await client.query('ROLLBACK');
     console.error('Error modifying transfer request:', err);
     res.status(500).json({ error: err.message || 'Failed to modify transfer request' });
+  } finally {
+    client.release();
+  }
+});
+
+
+// PUT /api/internal-branch/transfers/:id/items/:itemId/modify-time - Supplying branch updates item need-by time
+router.put('/transfers/:id/items/:itemId/modify-time', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, itemId } = req.params;
+    const { needed_by_time, reason } = req.body;
+
+    if (!needed_by_time || !String(needed_by_time).trim()) {
+      return res.status(400).json({ error: 'New Need By Time is required.' });
+    }
+
+    await client.query('BEGIN');
+
+    const itRes = await client.query(`SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE`, [itemId, id]);
+    if (itRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer item not found.' });
+    }
+    const currentItem = itRes.rows[0];
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found.' });
+    }
+    const transfer = tRes.rows[0];
+
+    const origTime = currentItem.original_needed_by_time || currentItem.needed_by_time || transfer.needed_by_time || 'ASAP';
+    const modifierName = req.user.name || req.user.username || 'Supplying Staff';
+
+    await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET original_needed_by_time = COALESCE(original_needed_by_time, needed_by_time, $1),
+          proposed_needed_by_time = $2,
+          time_status = 'Time Updated',
+          time_modification_reason = $3,
+          time_modified_by = $4,
+          time_modified_at = CURRENT_TIMESTAMP
+      WHERE id = $5 AND transfer_id = $6
+    `, [origTime, String(needed_by_time).trim(), reason || null, modifierName, itemId, id]);
+
+    await client.query(`
+      UPDATE internal_branch_transfers
+      SET time_status = 'Time Updated',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [id]);
+
+    await logTransferActivity(client, {
+      transferId: id,
+      action: 'ITEM_TIME_MODIFIED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: origTime,
+      newValue: String(needed_by_time).trim(),
+      reason: reason || 'Delivery time modified by supplying branch',
+      details: `Item "${currentItem.dish_name}" need-by time changed from "${origTime}" to "${String(needed_by_time).trim()}" by ${modifierName}. Approval Required.`
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await fetchFullTransfer(id);
+    if (req.io && updated) {
+      req.io.emit('internal_transfer_time_updated', updated);
+      req.io.emit('internal_transfer_updated', updated);
+    }
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error modifying item time:', err);
+    res.status(500).json({ error: 'Failed to modify item need-by time.' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/modify-all-times - Supplying branch updates need-by time for all items
+router.put('/transfers/:id/modify-all-times', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { needed_by_time, reason } = req.body;
+
+    if (!needed_by_time || !String(needed_by_time).trim()) {
+      return res.status(400).json({ error: 'New Need By Time is required.' });
+    }
+
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found.' });
+    }
+    const transfer = tRes.rows[0];
+    const modifierName = req.user.name || req.user.username || 'Supplying Staff';
+    const origTime = transfer.original_needed_by_time || transfer.needed_by_time || 'ASAP';
+
+    await client.query(`
+      UPDATE internal_branch_transfers
+      SET original_needed_by_time = COALESCE(original_needed_by_time, needed_by_time, $1),
+          proposed_needed_by_time = $2,
+          time_status = 'Time Updated',
+          time_modification_reason = $3,
+          time_modified_by = $4,
+          time_modified_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+    `, [origTime, String(needed_by_time).trim(), reason || null, modifierName, id]);
+
+    await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET original_needed_by_time = COALESCE(original_needed_by_time, needed_by_time, $1),
+          proposed_needed_by_time = $2,
+          time_status = 'Time Updated',
+          time_modification_reason = $3,
+          time_modified_by = $4,
+          time_modified_at = CURRENT_TIMESTAMP
+      WHERE transfer_id = $5
+    `, [origTime, String(needed_by_time).trim(), reason || null, modifierName, id]);
+
+    await logTransferActivity(client, {
+      transferId: id,
+      action: 'ALL_TIMES_MODIFIED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: origTime,
+      newValue: String(needed_by_time).trim(),
+      reason: reason || 'All items delivery time modified by supplying branch',
+      details: `All items need-by time changed to "${String(needed_by_time).trim()}" by ${modifierName}. Approval Required.`
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await fetchFullTransfer(id);
+    if (req.io && updated) {
+      req.io.emit('internal_transfer_time_updated', updated);
+      req.io.emit('internal_transfer_updated', updated);
+    }
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error modifying all times:', err);
+    res.status(500).json({ error: 'Failed to modify all items need-by time.' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/items/:itemId/approve-time - Requesting branch approves modified item time
+router.put('/transfers/:id/items/:itemId/approve-time', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, itemId } = req.params;
+    await client.query('BEGIN');
+
+    const itRes = await client.query(`SELECT * FROM internal_branch_transfer_items WHERE id = $1 AND transfer_id = $2 FOR UPDATE`, [itemId, id]);
+    if (itRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found.' });
+    }
+    const item = itRes.rows[0];
+    const newTime = item.proposed_needed_by_time || item.needed_by_time;
+    const approverName = req.user.name || req.user.username || 'Requesting Branch';
+
+    await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET needed_by_time = COALESCE(proposed_needed_by_time, needed_by_time),
+          time_status = 'Approved',
+          time_modified_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND transfer_id = $2
+    `, [itemId, id]);
+
+    const pendingTimes = await client.query(`
+      SELECT COUNT(*) as count FROM internal_branch_transfer_items
+      WHERE transfer_id = $1 AND time_status = 'Time Updated'
+    `, [id]);
+
+    if (parseInt(pendingTimes.rows[0].count) === 0) {
+      await client.query(`
+        UPDATE internal_branch_transfers
+        SET needed_by_time = COALESCE(proposed_needed_by_time, needed_by_time),
+            time_status = 'Approved',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `, [id]);
+    }
+
+    await logTransferActivity(client, {
+      transferId: id,
+      action: 'ITEM_TIME_APPROVED',
+      fromBranch: req.user.branch,
+      toBranch: '',
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: item.original_needed_by_time,
+      newValue: newTime,
+      reason: 'Modified time approved by requesting branch',
+      details: `Item "${item.dish_name}" modified need-by time (${newTime}) approved by ${approverName}.`
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await fetchFullTransfer(id);
+    if (req.io && updated) {
+      req.io.emit('internal_transfer_time_approved', updated);
+      req.io.emit('internal_transfer_updated', updated);
+    }
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error approving item time:', err);
+    res.status(500).json({ error: 'Failed to approve item time.' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/internal-branch/transfers/:id/approve-time - Requesting branch approves all modified times
+router.put('/transfers/:id/approve-time', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const tRes = await client.query(`SELECT * FROM internal_branch_transfers WHERE id = $1 FOR UPDATE`, [id]);
+    if (tRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found.' });
+    }
+    const transfer = tRes.rows[0];
+    const newTime = transfer.proposed_needed_by_time || transfer.needed_by_time;
+    const approverName = req.user.name || req.user.username || 'Requesting Branch';
+
+    await client.query(`
+      UPDATE internal_branch_transfers
+      SET needed_by_time = COALESCE(proposed_needed_by_time, needed_by_time),
+          time_status = 'Approved',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [id]);
+
+    await client.query(`
+      UPDATE internal_branch_transfer_items
+      SET needed_by_time = COALESCE(proposed_needed_by_time, needed_by_time),
+          time_status = 'Approved',
+          time_modified_at = CURRENT_TIMESTAMP
+      WHERE transfer_id = $1
+    `, [id]);
+
+    await logTransferActivity(client, {
+      transferId: id,
+      action: 'ALL_TIMES_APPROVED',
+      fromBranch: transfer.from_branch,
+      toBranch: transfer.to_branch,
+      user: req.user,
+      userRole: req.user.role,
+      previousValue: transfer.original_needed_by_time,
+      newValue: newTime,
+      reason: 'Modified delivery time approved by requesting branch',
+      details: `All items modified need-by time (${newTime}) approved by ${approverName}.`
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await fetchFullTransfer(id);
+    if (req.io && updated) {
+      req.io.emit('internal_transfer_time_approved', updated);
+      req.io.emit('internal_transfer_updated', updated);
+    }
+    res.json(updated);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error approving all times:', err);
+    res.status(500).json({ error: 'Failed to approve transfer time.' });
   } finally {
     client.release();
   }

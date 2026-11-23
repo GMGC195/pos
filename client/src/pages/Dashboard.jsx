@@ -4,6 +4,7 @@ import BaseSaleSurplusChart from '../components/BaseSaleSurplusChart'
 import DailyShiftClosingGraph from '../components/DailyShiftClosingGraph'
 import DeveloperAuthModal from '../components/DeveloperAuthModal'
 import EditShiftClosingModal from '../components/EditShiftClosingModal'
+import { printClosingSlip, printTodaySummarySlip } from '../utils/thermalClosingPrinter'
 import { useNavigate } from 'react-router-dom'
 import axios from '../api'
 import { useAuth } from '../contexts/AuthContext'
@@ -44,7 +45,8 @@ import {
   FileText,
   X,
   Layers,
-  Edit3
+  Edit3,
+  Mail
 } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler)
@@ -511,353 +513,28 @@ export default function Dashboard() {
   };
 
   const printClosingReport = (report) => {
-    const fmtTime = (ts) => ts ? formatSaudiTime(ts) : '-'
-    const fmtDate = (ts) => ts ? formatSaudiDate(ts) : '-'
-    let items = []
+    printClosingSlip(report, computeDailyComparativeData);
+  };
+
+  const [isResendingEmail, setIsResendingEmail] = useState(false);
+  const handleResendClosingEmail = async (closingId) => {
+    if (!closingId || isResendingEmail) return;
+    setIsResendingEmail(true);
+    const toastId = toast.loading('Resending closing email...');
     try {
-      items = Array.isArray(report.items_summary) ? report.items_summary : JSON.parse(report.items_summary || '[]')
-    } catch (e) { items = [] }
-
-    // Top 5 selling items
-    let allFlat = []
-    items.forEach(cat => {
-      if (cat.items && Array.isArray(cat.items)) {
-        cat.items.forEach(it => {
-          allFlat.push({
-            name: it.name,
-            qty: parseInt(it.qty, 10) || 0,
-            totalPrice: parseFloat(it.amount !== undefined ? it.amount : (it.price * it.qty) || 0)
-          })
-        })
+      const res = await axios.post(`/api/orders/closings/${closingId}/resend-email`);
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Closing email sent successfully!', { id: toastId });
+      } else {
+        toast.error(res.data?.message || 'Failed to send closing email', { id: toastId });
       }
-    })
-    let sortedTop5 = []
-    if (allFlat.length > 0) {
-      const grouped = {}
-      allFlat.forEach(it => {
-        if (!grouped[it.name]) grouped[it.name] = { name: it.name, qty: 0, totalPrice: 0 }
-        grouped[it.name].qty += it.qty
-        grouped[it.name].totalPrice += it.totalPrice
-      })
-      sortedTop5 = Object.values(grouped).sort((a, b) => b.qty - a.qty).slice(0, 5)
+    } catch (err) {
+      console.error('Error resending email:', err);
+      toast.error(err.response?.data?.message || 'Failed to resend email', { id: toastId });
+    } finally {
+      setIsResendingEmail(false);
     }
-
-    // Top items by 2-hour intervals
-    let intervalsObj = {}
-    try {
-      intervalsObj = typeof report.interval_items === 'string'
-        ? JSON.parse(report.interval_items || '{}')
-        : (report.interval_items || {})
-    } catch(e) { intervalsObj = {} }
-
-    let intervalRows = []
-    if (intervalsObj && Object.keys(intervalsObj).length > 0 && report.login_time) {
-      const loginDate = new Date(report.login_time)
-      let maxIndex = 0
-      for (const key of Object.keys(intervalsObj)) {
-        if (parseInt(key) > maxIndex) maxIndex = parseInt(key)
-      }
-      for (let i = 0; i <= maxIndex; i++) {
-        const blockStartTime = new Date(loginDate.getTime() + i * 2 * 3600000)
-        const blockEndTime = new Date(loginDate.getTime() + (i + 1) * 2 * 3600000)
-        const startTimeStr = blockStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        const endTimeStr = blockEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        const itemsInBlock = intervalsObj[i] || []
-        intervalRows.push({
-          timeWindow: `${startTimeStr} - ${endTimeStr}`,
-          items: itemsInBlock
-        })
-      }
-    }
-
-    const diffVal = parseFloat(report.difference || 0)
-    const hasDiff = !isNaN(diffVal) && Math.abs(diffVal) >= 0.01
-    const diffSign = diffVal < 0 ? '-' : '+'
-    const diffLabel = diffVal < 0 ? 'SHORTAGE / کم' : 'EXCESS / زیادہ'
-
-    let shiftsArr = []
-    if (report.closing_type === 'Daily') {
-      if (typeof report.shifts_summary === 'string') {
-        try { shiftsArr = JSON.parse(report.shifts_summary) } catch(e) { shiftsArr = [] }
-      } else if (Array.isArray(report.shifts_summary)) {
-        shiftsArr = report.shifts_summary
-      }
-    }
-
-    const printWindow = window.open('', '', 'width=500,height=700')
-    const html = `
-      <html><head><title>${report.closing_type} Closing Report</title>
-      <style>
-        @page { size: 80mm auto; margin: 0; }
-        @media print {
-          html, body {
-            width: 80mm !important;
-            max-width: 80mm !important;
-            margin: 0 !important;
-            padding: 2mm 3mm !important;
-            page-break-after: avoid !important;
-            page-break-before: avoid !important;
-          }
-          * {
-            page-break-inside: avoid;
-            break-inside: avoid;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-        }
-        * {
-          box-sizing: border-box;
-          color: #000 !important;
-        }
-        body {
-          font-family: 'Courier New', Courier, monospace;
-          padding: 4px 6px;
-          max-width: 300px;
-          margin: 0 auto;
-          font-size: 11.5px;
-          line-height: 1.3;
-          color: #000 !important;
-          font-weight: 600;
-          -webkit-font-smoothing: antialiased;
-        }
-        h2 {
-          text-align: center;
-          font-size: 14.5px;
-          font-weight: 900;
-          margin: 0 0 3px;
-          color: #000 !important;
-          letter-spacing: 0.5px;
-        }
-        .center { text-align: center; }
-        .divider { border-top: 1.5px dashed #000; margin: 4px 0; }
-        .row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 11.5px; font-weight: 600; color: #000 !important; }
-        .label { color: #000 !important; font-weight: 600; }
-        .bold { font-weight: bold; color: #000 !important; }
-        .highlight { color: #000 !important; font-weight: 900; font-size: 13px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 2px; color: #000 !important; }
-        th { text-align: left; border-bottom: 1.5px solid #000; padding: 2px 0; font-size: 10.5px; color: #000 !important; font-weight: bold; }
-        td { padding: 2px 0; font-size: 11px; color: #000 !important; font-weight: 600; }
-        td:last-child { text-align: right; }
-      </style></head><body>
-      <h2>${report.closing_type === 'Daily' ? '⚡ DAILY CLOSING REPORT' : '🔄 SHIFT CLOSING REPORT'}</h2>
-      <p class="center" style="font-weight:bold;font-size:11px;margin:0 0 4px">${fmtDate(report.login_time)}</p>
-
-      ${hasDiff ? `
-        <div style="border: 2px solid #000; padding: 4px 6px; border-radius: 4px; text-align: center; margin: 3px 0 5px; font-weight: bold;">
-          <div style="font-size: 11.5px; letter-spacing: 0.5px;">DIFFERENCE: ${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)} (${diffLabel})</div>
-          ${report.difference_reason ? `<div style="font-size: 10.5px; margin-top: 2px; border-top: 1.5px dashed #000; padding-top: 2px; text-align: left; font-weight: 600;">Reason: ${report.difference_reason}</div>` : ''}
-        </div>
-      ` : ''}
-
-      ${report.closing_type === 'Daily' ? (() => {
-        const compData = computeDailyComparativeData(shiftsArr, null, null, report, report.cashier_name || 'Cashier');
-        const fmt = (v) => (v !== null && v !== undefined && !isNaN(v) ? parseFloat(v).toFixed(2) : '0.00');
-        const fmtDiff = (d) => {
-          if (d === null || d === undefined || isNaN(d)) return '-';
-          if (Math.abs(d) < 0.005) return '0.00';
-          return d > 0 ? `+${d.toFixed(2)}` : d.toFixed(2);
-        };
-
-        return `
-          <div style="border: 2px solid #000; border-radius: 4px; padding: 4px 5px; margin: 4px 0;">
-            <div style="font-weight: 900; text-align: center; font-size: 11.5px; border-bottom: 1.5px solid #000; padding-bottom: 3px; margin-bottom: 4px; text-transform: uppercase;">
-              DAILY SUMMARY: DAY + NIGHT
-            </div>
-
-            <!-- 1. NIGHT SHIFT -->
-            <div style="border: 1.5px solid #000; border-radius: 3px; padding: 3px 4px; margin-bottom: 4px;">
-              <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: 11px; border-bottom: 1.5px solid #000; padding-bottom: 2px; margin-bottom: 2px;">
-                <span>🌙 NIGHT SHIFT</span>
-                <span>${compData.nightCashier ? compData.nightCashier : ''}</span>
-              </div>
-              <table style="width: 100%; border-collapse: collapse; font-size: 10.5px; margin: 0;">
-                <thead>
-                  <tr style="border-bottom: 1.5px dashed #000; font-size: 10px; font-weight: bold;">
-                    <th style="text-align: left; padding: 1px 0;">Item</th>
-                    <th style="text-align: right; padding: 1px 0; width: 30%;">Sys</th>
-                    <th style="text-align: right; padding: 1px 0; width: 30%;">Act</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Cash sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightSysCash)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightActCash)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Card sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightSysCard)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightActCard)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Credit sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightSysCredit)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightActCredit)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Major Payments</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightSysMajor)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.nightActMajor)}</td>
-                  </tr>
-                  <tr style="border-top: 1.5px dashed #000; font-weight: 900;">
-                    <td style="padding: 2px 0;">Night Diff</td>
-                    <td colspan="2" style="text-align: right; padding: 2px 0; font-size: 11px;">
-                      ${fmtDiff(compData.nightDiff)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- 2. DAY SHIFT -->
-            <div style="border: 1.5px solid #000; border-radius: 3px; padding: 3px 4px; margin-bottom: 4px;">
-              <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: 11px; border-bottom: 1.5px solid #000; padding-bottom: 2px; margin-bottom: 2px;">
-                <span>☀️ DAY SHIFT</span>
-                <span>${compData.dayCashier ? compData.dayCashier : ''}</span>
-              </div>
-              <table style="width: 100%; border-collapse: collapse; font-size: 10.5px; margin: 0;">
-                <thead>
-                  <tr style="border-bottom: 1.5px dashed #000; font-size: 10px; font-weight: bold;">
-                    <th style="text-align: left; padding: 1px 0;">Item</th>
-                    <th style="text-align: right; padding: 1px 0; width: 30%;">Sys</th>
-                    <th style="text-align: right; padding: 1px 0; width: 30%;">Act</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Cash sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.daySysCash)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.dayActCash)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Card sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.daySysCard)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.dayActCard)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Credit sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.daySysCredit)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.dayActCredit)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 600;">Major Payments</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.daySysMajor)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 600;">${fmt(compData.dayActMajor)}</td>
-                  </tr>
-                  <tr style="border-top: 1.5px dashed #000; font-weight: 900;">
-                    <td style="padding: 2px 0;">Day Diff</td>
-                    <td colspan="2" style="text-align: right; padding: 2px 0; font-size: 11px;">
-                      ${fmtDiff(compData.dayDiff)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- 3. TOTAL COMBINED -->
-            <div style="border: 2px solid #000; border-radius: 3px; padding: 3px 4px;">
-              <div style="font-weight: 900; font-size: 11px; text-align: center; border-bottom: 1.5px solid #000; padding-bottom: 2px; margin-bottom: 2px; text-transform: uppercase;">
-                ⚡ TOTAL COMBINED (DAY + NIGHT)
-              </div>
-              <table style="width: 100%; border-collapse: collapse; font-size: 10.5px; margin: 0;">
-                <thead>
-                  <tr style="border-bottom: 1.5px dashed #000; font-size: 10px; font-weight: 900;">
-                    <th style="text-align: left; padding: 1px 0;">Item</th>
-                    <th style="text-align: right; padding: 1px 0; width: 30%; font-weight: 900;">Tot Sys</th>
-                    <th style="text-align: right; padding: 1px 0; width: 30%; font-weight: 900;">Tot Act</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 900;">Cash sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalSysCash)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalActCash)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 900;">Card sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalSysCard)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalActCard)}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 1.5px 0; font-weight: 900;">Credit sale</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalSysCredit)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalActCredit)}</td>
-                  </tr>
-                  <tr style="border-bottom: 1.5px solid #000;">
-                    <td style="padding: 1.5px 0; font-weight: 900;">Major Payments</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalSysMajor)}</td>
-                    <td style="text-align: right; padding: 1.5px 0; font-weight: 900;">${fmt(compData.totalActMajor)}</td>
-                  </tr>
-                  <tr style="font-weight: 900;">
-                    <td style="padding: 2px 0;">Total Diff</td>
-                    <td colspan="2" style="text-align: right; padding: 2px 0; font-size: 11.5px;">
-                      ${fmtDiff(compData.totalDiff)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <div style="margin-top: 2px; border-top: 1.5px dashed #000; padding-top: 2px; font-size: 9.5px; text-align: right; font-weight: 900;">
-                Cash Diff: ${fmtDiff(compData.totalCashDiff)} | Card Diff: ${fmtDiff(compData.totalCardDiff)}
-              </div>
-            </div>
-          </div>
-        `;
-      })() : ''}
-
-      <div class="divider"></div>
-      <div class="row"><span class="label">Cashier:</span><span class="bold">${report.cashier_name}</span></div>
-      <div class="row"><span class="label">Branch:</span><span class="bold">${report.branch}</span></div>
-      <div class="row"><span class="label">Active Time:</span><span class="bold">${fmtTime(report.login_time)} - ${fmtTime(report.logout_time)} (${report.total_active_time})</span></div>
-      <div class="row"><span class="label">Total Orders:</span><span class="bold">${report.total_orders}</span></div>
-
-      ${report.closing_type !== 'Daily' ? `
-        <div class="divider"></div>
-        <div class="row"><span class="label">Total Sales:</span><span class="highlight">${CURRENCY}${parseFloat(report.total_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label" style="font-size: 10.5px; padding-left: 8px;">↳ Cash:</span><span class="bold">${CURRENCY}${parseFloat(report.cash_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label" style="font-size: 10.5px; padding-left: 8px;">↳ Card:</span><span class="bold">${CURRENCY}${parseFloat(report.card_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label" style="font-size: 10.5px; padding-left: 8px;">↳ Credit:</span><span class="bold">${CURRENCY}${parseFloat(report.credit_sales || 0).toFixed(2)}</span></div>
-        <div class="row"><span class="label">Major Payments:</span><span class="bold">${CURRENCY}${parseFloat(report.major_payments || 0).toFixed(2)}</span></div>
-        <div class="row" style="font-weight: 900;"><span class="label bold">Total Received:</span><span>${CURRENCY}${(parseFloat(report.cash_sales || 0) + parseFloat(report.card_sales || 0) + parseFloat(report.major_payments || 0)).toFixed(2)}</span></div>
-      ` : ''}
-
-      <div class="divider"></div>
-      ${parseFloat(report.opening_cash || 0) > 0 ? `<div class="row"><span class="label">Opening Drawer:</span><span class="bold">${CURRENCY}${parseFloat(report.opening_cash).toFixed(2)}</span></div>` : ''}
-      <div class="row"><span class="label">Cash Counted:</span><span class="bold">${CURRENCY}${parseFloat(report.closing_cash || 0).toFixed(2)}</span></div>
-      <div class="row"><span class="label">Card Counted:</span><span class="bold">+ ${CURRENCY}${parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0)).toFixed(2)}</span></div>
-      <div class="row" style="font-weight: 900;"><span class="label bold">Total Counted:</span><span>= ${CURRENCY}${(parseFloat(report.closing_cash || 0) + parseFloat(report.closing_card !== null && report.closing_card !== undefined ? report.closing_card : (report.card_sales || 0))).toFixed(2)}</span></div>
-
-      ${report.closing_type !== 'Daily' && hasDiff ? `
-        <div class="row" style="font-weight: 900;"><span class="label bold">Difference:</span><span>${diffSign}${CURRENCY}${Math.abs(diffVal).toFixed(2)}</span></div>
-        ${report.cash_difference !== null && report.cash_difference !== undefined ? `<div class="row" style="font-size: 10.5px; font-weight: 600;"><span class="label">↳ Cash Diff:</span><span>${parseFloat(report.cash_difference) < 0 ? '-' : '+'}${CURRENCY}${Math.abs(parseFloat(report.cash_difference)).toFixed(2)}</span></div>` : ''}
-        ${report.card_difference !== null && report.card_difference !== undefined ? `<div class="row" style="font-size: 10.5px; font-weight: 600;"><span class="label">↳ Card Diff:</span><span>${parseFloat(report.card_difference) < 0 ? '-' : '+'}${CURRENCY}${Math.abs(parseFloat(report.card_difference)).toFixed(2)}</span></div>` : ''}
-        ${report.difference_reason ? `<div class="row" style="font-size: 10.5px; font-weight: 600;"><span class="label">Diff Reason:</span><span>${report.difference_reason}</span></div>` : ''}
-      ` : ''}
-
-      ${items && items.length > 0 ? `
-        <div class="divider"></div>
-        <p style="font-weight:900;margin:3px 0 2px;font-size:11.5px;">Sales by Category:</p>
-        <table>
-          <thead><tr><th style="border-bottom:1.5px solid #000;font-weight:bold;">Category</th><th style="text-align:center;border-bottom:1.5px solid #000;font-weight:bold;">Qty</th><th style="border-bottom:1.5px solid #000;font-weight:bold;">Amount</th></tr></thead>
-          <tbody>
-            ${items.map(i => `
-              <tr style="border-bottom: 1.5px dashed #000; font-weight: 600;">
-                <td style="padding: 2px 0;">${i.category}</td>
-                <td style="text-align:center; padding: 2px 0;">${i.qty}</td>
-                <td style="padding: 2px 0;">${CURRENCY}${parseFloat(i.amount || 0).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : ''}
-
-      <div class="divider"></div>
-      <p class="center" style="font-size:10.5px;font-weight:bold;margin:4px 0 0">Generated: ${formatSaudiDateTime(new Date())}</p>
-    </body></html>`
-    printWindow.document.write(html)
-    printWindow.document.close()
-    printWindow.focus()
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 300)
-  }
+  };
 
   // Attendance states (all users see these stats)
   const [attendanceStats, setAttendanceStats] = useState(null)
@@ -1126,7 +803,7 @@ export default function Dashboard() {
     }
   };
 
-  // ── Clean A4 Browser Printing with Zero Oversized Waste ──
+  // ── Clean 80mm Thermal Receipt Printing (Printhead 72mm width, Header on top, Zero Blank Paper Waste) ──
   const printTodaySummary = () => {
     if (!canViewPosAndReports) return;
     const reportDate = salesSelectedDate || new Date().toISOString().slice(0, 10);
@@ -1137,121 +814,18 @@ export default function Dashboard() {
     const totalSys = shiftAnalytics?.summary?.total_system || stats?.totalSale || 0;
     const totalAct = shiftAnalytics?.summary?.total_actual || ((stats?.cashSale || 0) + (stats?.cardSale || 0)) || totalSys;
     const totalDiff = shiftAnalytics?.summary?.total_difference || (totalAct - totalSys);
-    const diffIsPositive = totalDiff >= 0;
 
-    const printWindow = window.open('', '', 'width=850,height=700');
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Today-Shift-Summary-${reportDate}</title>
-          <style>
-            @page { size: A4 portrait; margin: 12mm; }
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 12px; font-size: 13px; line-height: 1.4; }
-            .header { border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; }
-            .brand { font-size: 20px; font-weight: 800; color: #1e3a8a; margin: 0; }
-            .sub { font-size: 12px; color: #64748b; margin: 2px 0 0; }
-            .meta-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; display: flex; justify-content: space-between; font-size: 12px; }
-            .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
-            .card { border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; background: #fff; }
-            .card-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; }
-            .card-val { font-size: 18px; font-weight: 800; margin-top: 4px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
-            th { background: #0f172a; color: #fff; padding: 8px 10px; text-align: left; font-weight: 700; }
-            td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
-            tr:nth-child(even) td { background: #f8fafc; }
-            .text-right { text-align: right; }
-            .footer { margin-top: 24px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px dashed #cbd5e1; padding-top: 10px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div>
-              <h1 class="brand">${BRAND_NAME || 'AL RAWAQ RESTAURANT'}</h1>
-              <p class="sub">Today Shift & Financial Closing Summary</p>
-            </div>
-            <div style="text-align: right; font-size: 11px; color: #64748b;">
-              <div>Printed: ${new Date().toLocaleString()}</div>
-              <div>Status: <strong>Finalized</strong></div>
-            </div>
-          </div>
-
-          <div class="meta-box">
-            <div><strong>Report Date:</strong> ${reportDate}</div>
-            <div><strong>Branch:</strong> ${branchName}</div>
-            <div><strong>Cashier(s):</strong> ${cashierName}</div>
-          </div>
-
-          <div class="cards">
-            <div class="card" style="border-color: #2563eb;">
-              <div class="card-label" style="color: #2563eb;">System Generated Sales</div>
-              <div class="card-val" style="color: #1d4ed8;">${CURRENCY} ${totalSys.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            </div>
-            <div class="card" style="border-color: #10b981;">
-              <div class="card-label" style="color: #059669;">Actual Closing Amount</div>
-              <div class="card-val" style="color: #047857;">${CURRENCY} ${totalAct.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            </div>
-            <div class="card" style="border-color: ${diffIsPositive ? '#16a34a' : '#dc2626'};">
-              <div class="card-label" style="color: ${diffIsPositive ? '#16a34a' : '#dc2626'};">Difference (Actual - System)</div>
-              <div class="card-val" style="color: ${diffIsPositive ? '#15803d' : '#b91c1c'};">${diffIsPositive ? '+' : ''}${CURRENCY} ${totalDiff.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Performance / Financial Metric</th>
-                <th class="text-right">Amount / Count</th>
-                <th>Operational Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Cash Sales</strong></td>
-                <td class="text-right"><strong>${CURRENCY} ${(stats?.cashSale || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
-                <td>Physical currency in cash drawer</td>
-              </tr>
-              <tr>
-                <td><strong>Card Sales</strong></td>
-                <td class="text-right"><strong>${CURRENCY} ${(stats?.cardSale || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
-                <td>Electronic bank terminal settlements</td>
-              </tr>
-              <tr>
-                <td><strong>Total Completed Orders</strong></td>
-                <td class="text-right"><strong>${stats?.totalOrders || 0}</strong></td>
-                <td>Finalized guest check receipts</td>
-              </tr>
-              <tr>
-                <td><strong>Total Production Cost</strong></td>
-                <td class="text-right"><strong>${CURRENCY} ${(stats?.totalProductCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
-                <td>Kitchen ingredient consumption</td>
-              </tr>
-              <tr>
-                <td><strong>Total Revenue Earned</strong></td>
-                <td class="text-right"><strong>${CURRENCY} ${(stats?.dailyRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
-                <td>Operating gross profit margin</td>
-              </tr>
-              <tr>
-                <td><strong>Target Revenue</strong></td>
-                <td class="text-right"><strong>${CURRENCY} ${(targetRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
-                <td>Daily branch target KPI</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="footer">
-            Confidential Restaurant Management Report — Generated by AL RAWAQ POS ERP — Page 1 of 1
-          </div>
-        </body>
-      </html>
-    `;
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-    }, 400);
+    printTodaySummarySlip({
+      brandName: BRAND_NAME || 'AL RAWAQ RESTAURANT',
+      reportDate,
+      branchName,
+      cashierName,
+      totalSys,
+      totalAct,
+      totalDiff,
+      stats,
+      targetRevenue
+    });
   };
 
   const exportPDF = downloadTodaySummaryPDF;
@@ -1705,6 +1279,15 @@ export default function Dashboard() {
                     style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                   >
                     <Printer size={14} /> Print Receipt
+                  </button>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleResendClosingEmail(selectedClosingObj.id)}
+                    disabled={isResendingEmail}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    title="Resend Closing Email"
+                  >
+                    <Mail size={14} /> Resend Email
                   </button>
                   <button 
                     className="btn btn-primary btn-sm"
@@ -2213,6 +1796,15 @@ export default function Dashboard() {
                   onClick={() => printClosingReport(selectedHistoryReport)}
                 >
                   <Printer size={15} /> Reprint Report
+                </button>
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => handleResendClosingEmail(selectedHistoryReport.id)}
+                  disabled={isResendingEmail}
+                  title="Resend Closing Email"
+                >
+                  <Mail size={15} /> {isResendingEmail ? 'Sending...' : 'Resend Email'}
                 </button>
               </div>
             </div>

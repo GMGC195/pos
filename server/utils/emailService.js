@@ -59,23 +59,37 @@ async function getRecipientEmails() {
 }
 
 /**
- * Build configured SMTP transporter config (supports Zoho, generic SMTP, and Gmail)
+ * Build configured SMTP transporter config (supports DB settings, Zoho, generic SMTP, and Gmail)
  */
-function getSmtpConfig() {
-  // 1. Zoho Mail Configuration (ZOHO_USER + ZOHO_PASSWORD / ZOHO_APP_PASSWORD)
-  if (process.env.ZOHO_USER && (process.env.ZOHO_PASSWORD || process.env.ZOHO_APP_PASSWORD)) {
-    const port = parseInt(process.env.ZOHO_PORT || '465', 10);
+async function getSmtpConfig() {
+  let dbConfig = null;
+  try {
+    const res = await pool.query('SELECT smtp_config FROM settings ORDER BY id ASC LIMIT 1');
+    if (res.rows.length > 0 && res.rows[0].smtp_config) {
+      dbConfig = typeof res.rows[0].smtp_config === 'string'
+        ? JSON.parse(res.rows[0].smtp_config)
+        : res.rows[0].smtp_config;
+    }
+  } catch (err) {
+    console.warn('[Email Service] Could not load smtp_config from settings table:', err.message);
+  }
+
+  // 1. Zoho Mail Configuration (Check DB settings first, then .env)
+  const zohoUser = dbConfig?.zoho_user || process.env.ZOHO_USER;
+  const zohoPass = dbConfig?.zoho_password || dbConfig?.zoho_app_password || process.env.ZOHO_PASSWORD || process.env.ZOHO_APP_PASSWORD;
+  if (zohoUser && zohoPass) {
+    const port = parseInt(dbConfig?.zoho_port || process.env.ZOHO_PORT || '465', 10);
     return {
       provider: 'Zoho Mail',
-      host: process.env.ZOHO_HOST || 'smtp.zoho.com',
+      host: dbConfig?.zoho_host || process.env.ZOHO_HOST || 'smtp.zoho.com',
       port: port,
       secure: port === 465,
       auth: {
-        user: process.env.ZOHO_USER,
-        pass: process.env.ZOHO_PASSWORD || process.env.ZOHO_APP_PASSWORD,
+        user: zohoUser.trim(),
+        pass: zohoPass.trim(),
       },
-      from: process.env.ZOHO_FROM || process.env.SMTP_FROM || process.env.RESEND_FROM_EMAIL || process.env.ZOHO_USER,
-      connectionTimeout: 10000,
+      from: dbConfig?.zoho_from || process.env.ZOHO_FROM || process.env.SMTP_FROM || process.env.RESEND_FROM_EMAIL || zohoUser.trim(),
+      connectionTimeout: 12000,
       greetingTimeout: 10000,
       socketTimeout: 15000,
       tls: { rejectUnauthorized: false }
@@ -83,19 +97,22 @@ function getSmtpConfig() {
   }
 
   // 2. Generic SMTP (Hostinger Titan, cPanel, Mailgun, Amazon SES SMTP, etc.)
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    const port = parseInt(process.env.SMTP_PORT || '465', 10);
+  const smtpHost = dbConfig?.smtp_host || process.env.SMTP_HOST;
+  const smtpUser = dbConfig?.smtp_user || process.env.SMTP_USER;
+  const smtpPass = dbConfig?.smtp_pass || process.env.SMTP_PASS;
+  if (smtpHost && smtpUser && smtpPass) {
+    const port = parseInt(dbConfig?.smtp_port || process.env.SMTP_PORT || '465', 10);
     return {
-      provider: 'SMTP (' + process.env.SMTP_HOST + ')',
-      host: process.env.SMTP_HOST,
+      provider: 'SMTP (' + smtpHost.trim() + ')',
+      host: smtpHost.trim(),
       port: port,
-      secure: process.env.SMTP_SECURE === 'true' || port === 465,
+      secure: dbConfig?.smtp_secure !== undefined ? dbConfig.smtp_secure : (process.env.SMTP_SECURE === 'true' || port === 465),
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        user: smtpUser.trim(),
+        pass: smtpPass.trim(),
       },
-      from: process.env.SMTP_FROM || process.env.RESEND_FROM_EMAIL || process.env.SMTP_USER,
-      connectionTimeout: 10000,
+      from: dbConfig?.smtp_from || process.env.SMTP_FROM || process.env.RESEND_FROM_EMAIL || smtpUser.trim(),
+      connectionTimeout: 12000,
       greetingTimeout: 10000,
       socketTimeout: 15000,
       tls: { rejectUnauthorized: false }
@@ -103,18 +120,20 @@ function getSmtpConfig() {
   }
 
   // 3. Gmail SMTP
-  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+  const gmailUser = dbConfig?.gmail_user || process.env.GMAIL_USER;
+  const gmailPass = dbConfig?.gmail_app_password || process.env.GMAIL_APP_PASSWORD;
+  if (gmailUser && gmailPass) {
     return {
       provider: 'Gmail',
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
       auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD,
+        user: gmailUser.trim(),
+        pass: gmailPass.trim(),
       },
-      from: process.env.SMTP_FROM || process.env.GMAIL_USER,
-      connectionTimeout: 10000,
+      from: dbConfig?.smtp_from || process.env.SMTP_FROM || gmailUser.trim(),
+      connectionTimeout: 12000,
       greetingTimeout: 10000,
       socketTimeout: 15000,
       tls: { rejectUnauthorized: false }
@@ -131,24 +150,24 @@ function getSmtpConfig() {
  */
 async function dispatchEmail({ to, subject, html, text }) {
   const recipients = Array.isArray(to) ? to : [to];
-  const smtpConfig = getSmtpConfig();
-  const hasResend = !!(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim());
+  const smtpConfig = await getSmtpConfig();
+  const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
+  const hasResend = !!(resendApiKey && resendApiKey.length > 5);
   const resendFrom = process.env.RESEND_FROM_EMAIL || 'reports@alrawaq.zivoxtech.com';
 
   const errors = [];
 
   // Determine priority:
   // If dedicated Zoho/SMTP is configured, try SMTP first, then Resend.
-  // If only Resend or Gmail is configured, try Resend first, then SMTP fallback.
-  const preferSmtpFirst = !!(smtpConfig && (smtpConfig.provider.includes('Zoho') || process.env.SMTP_HOST));
+  const preferSmtpFirst = !!(smtpConfig && (smtpConfig.provider.includes('Zoho') || smtpConfig.provider.includes('SMTP')));
 
   if (preferSmtpFirst && smtpConfig) {
-    // 1. Try SMTP First
+    // 1. Try Primary SMTP
     try {
       console.log(`[Email Service] Attempting delivery via ${smtpConfig.provider} to: [${recipients.join(', ')}]...`);
       const transporter = nodemailer.createTransport(smtpConfig);
       const info = await transporter.sendMail({
-        from: `Reports <${smtpConfig.from}>`,
+        from: `Al Rawaq ERP <${smtpConfig.from}>`,
         to: recipients.join(', '),
         subject: subject,
         html: html,
@@ -159,15 +178,36 @@ async function dispatchEmail({ to, subject, html, text }) {
     } catch (smtpErr) {
       console.warn(`[Email Service] ⚠️ ${smtpConfig.provider} delivery failed:`, smtpErr.message);
       errors.push(`${smtpConfig.provider}: ${smtpErr.message}`);
+
+      // If Zoho SSL on port 465 fails, attempt port 587 with STARTTLS as fallback
+      if (smtpConfig.provider.includes('Zoho') && smtpConfig.port === 465) {
+        try {
+          console.log(`[Email Service] Retrying Zoho Mail on port 587 (STARTTLS)...`);
+          const zohoTls = { ...smtpConfig, port: 587, secure: false };
+          const transporter587 = nodemailer.createTransport(zohoTls);
+          const info587 = await transporter587.sendMail({
+            from: `Al Rawaq ERP <${smtpConfig.from}>`,
+            to: recipients.join(', '),
+            subject: subject,
+            html: html,
+            text: text
+          });
+          console.log(`[Email Service] ✅ Successfully sent via Zoho Mail (Port 587): ${info587.messageId}`);
+          return { success: true, provider: 'Zoho Mail (Port 587)', messageId: info587.messageId };
+        } catch (z587Err) {
+          console.warn(`[Email Service] ⚠️ Zoho Mail (Port 587) retry failed:`, z587Err.message);
+          errors.push(`Zoho Mail (Port 587): ${z587Err.message}`);
+        }
+      }
     }
 
-    // 2. Fallback to Resend
+    // 2. Fallback to Resend API
     if (hasResend) {
       try {
         console.log(`[Email Service] Falling back to Resend API for: [${recipients.join(', ')}]...`);
-        const resend = new Resend(process.env.RESEND_API_KEY);
+        const resend = new Resend(resendApiKey);
         const resendRes = await resend.emails.send({
-          from: `Reports <${resendFrom}>`,
+          from: `Al Rawaq Reports <${resendFrom}>`,
           to: recipients,
           subject: subject,
           html: html
@@ -187,9 +227,9 @@ async function dispatchEmail({ to, subject, html, text }) {
     if (hasResend) {
       try {
         console.log(`[Email Service] Attempting delivery via Resend API to: [${recipients.join(', ')}]...`);
-        const resend = new Resend(process.env.RESEND_API_KEY);
+        const resend = new Resend(resendApiKey);
         const resendRes = await resend.emails.send({
-          from: `Reports <${resendFrom}>`,
+          from: `Al Rawaq Reports <${resendFrom}>`,
           to: recipients,
           subject: subject,
           html: html
@@ -200,18 +240,18 @@ async function dispatchEmail({ to, subject, html, text }) {
         console.log(`[Email Service] ✅ Successfully sent via Resend API: ${resendRes.data?.id || 'OK'}`);
         return { success: true, provider: 'Resend', messageId: resendRes.data?.id };
       } catch (resendErr) {
-        console.warn(`[Email Service] ⚠️ Resend delivery failed (${resendErr.message}), falling back to SMTP...`);
+        console.warn(`[Email Service] ⚠️ Resend delivery failed (${resendErr.message}), checking SMTP fallback...`);
         errors.push(`Resend: ${resendErr.message}`);
       }
     }
 
-    // 2. Fallback to SMTP
+    // 2. Fallback to SMTP (Zoho / Gmail / Custom SMTP)
     if (smtpConfig) {
       try {
         console.log(`[Email Service] Falling back to ${smtpConfig.provider} for: [${recipients.join(', ')}]...`);
         const transporter = nodemailer.createTransport(smtpConfig);
         const info = await transporter.sendMail({
-          from: `Reports <${smtpConfig.from}>`,
+          from: `Al Rawaq ERP <${smtpConfig.from}>`,
           to: recipients.join(', '),
           subject: subject,
           html: html,
@@ -228,7 +268,7 @@ async function dispatchEmail({ to, subject, html, text }) {
 
   const finalError = errors.length > 0 
     ? errors.join(' | ') 
-    : 'No active email provider configured (checked Zoho, SMTP, Gmail, Resend).';
+    : 'No active email provider configured (checked Zoho Mail, SMTP, Gmail, Resend).';
 
   console.error(`[Email Service] ❌ All email delivery attempts failed: ${finalError}`);
   return { success: false, error: finalError };
@@ -768,13 +808,13 @@ async function sendClosingEmail(report, closingType = 'Shift', options = {}) {
       return { success: false, error: 'No valid report provided' };
     }
 
-    // 1. Anti-spam deduplication check (30-second TTL)
+    // 1. Anti-spam deduplication check (30-second TTL unless options.force is true)
     const dedupeKey = options.isEdited
       ? `edit_${report.id}_${report.closing_cash}_${report.closing_card}`
       : `close_${report.id}_${closingType}`;
     
     const now = Date.now();
-    if (emailDedupeMap.has(dedupeKey)) {
+    if (!options.force && emailDedupeMap.has(dedupeKey)) {
       const lastSent = emailDedupeMap.get(dedupeKey);
       if (now - lastSent < 30000) {
         console.log(`[Email Service] ℹ️ Cooldown active: Skipping duplicate email for key [${dedupeKey}]`);

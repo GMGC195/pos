@@ -59,8 +59,14 @@ const navGroups = [
       { to: '/held-deliveries', icon: <Bike size={18} strokeWidth={2.2} />, label: 'Held Deliveries', roles: ['Developer', 'Admin', 'Management', 'Order Taker', 'Cashier'] },
       { to: '/today-sales', icon: <CalendarDays size={18} strokeWidth={2.2} />, label: "Today Sale", roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
       { to: '/credit', icon: <BookOpen size={18} strokeWidth={2.2} />, label: 'Credit (Khata)', roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
-      { to: '/internal-branch', icon: <ArrowLeftRight size={18} strokeWidth={2.2} />, label: 'Internal Branch', roles: ['Developer', 'Admin', 'Management', 'Operator', 'Cashier', 'Order Taker'] },
+      { to: '/internal-branch', icon: <ArrowLeftRight size={18} strokeWidth={2.2} />, label: 'Internal Branch', roles: ['Developer', 'Admin', 'Management', 'Cashier', 'Order Taker'] },
       { to: '/cancel-requests', icon: <Ban size={18} strokeWidth={2.2} />, label: 'Cancel Request', roles: ['Developer', 'Admin', 'Management', 'Cashier'] },
+    ]
+  },
+  {
+    title: 'Store Management',
+    items: [
+      { to: '/store', icon: <Store size={18} strokeWidth={2.2} />, label: 'Store Management', roles: ['Developer', 'Admin', 'Management', 'Operator', 'Store Keeper', 'Store Manager'] },
     ]
   },
   {
@@ -68,12 +74,6 @@ const navGroups = [
     items: [
       { to: '/sales-item', icon: <ClipboardList size={18} strokeWidth={2.2} />, label: 'Sales Item & Revenue', roles: ['Developer', 'Admin', 'Management'] },
       { to: '/reports', icon: <TrendingUp size={18} strokeWidth={2.2} />, label: 'Reports', roles: ['Developer', 'Admin', 'Management'] },
-    ]
-  },
-  {
-    title: 'Store Management',
-    items: [
-      { to: '/store', icon: <Store size={18} strokeWidth={2.2} />, label: 'Store Management', roles: ['Developer', 'Admin', 'Management', 'Operator', 'Store Keeper', 'Store Manager'] },
     ]
   },
   {
@@ -507,9 +507,10 @@ export default function Layout() {
     }
   ] : navGroups.map(group => {
     let items = group.items.filter(item => {
-      if (user?.role?.trim().toLowerCase() === 'developer') return true
-      if (!item.roles) return true
-      return item.roles.some(r => r.toLowerCase() === user?.role?.trim().toLowerCase())
+      const role = (user?.role || '').trim().toLowerCase();
+      if (role === 'developer' || role === 'admin') return true;
+      if (!item.roles) return true;
+      return item.roles.some(r => r.toLowerCase() === role);
     });
 
     if (user?.role?.trim().toLowerCase() === 'cashier') {

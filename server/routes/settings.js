@@ -48,12 +48,12 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // PUT /api/settings - Update POS settings
 router.put('/', authenticateToken, async (req, res) => {
-  const { auto_print_enabled, printer_ip, low_stock_behavior, report_emails } = req.body;
+  const { auto_print_enabled, printer_ip, low_stock_behavior, report_emails, smtp_config } = req.body;
   const userRole = (req.user?.role || '').trim().toLowerCase();
   const isAdminRole = userRole === 'admin' || userRole === 'developer';
 
-  // Protect inventory behavior and report email recipient modifications for admin/developer
-  if ((low_stock_behavior !== undefined || report_emails !== undefined) && !isAdminRole) {
+  // Protect inventory behavior, report email recipient modifications, and SMTP config for admin/developer
+  if ((low_stock_behavior !== undefined || report_emails !== undefined || smtp_config !== undefined) && !isAdminRole) {
     return res.status(403).json({ error: 'Admin access required to modify global inventory or report email settings' });
   }
 
@@ -75,22 +75,27 @@ router.put('/', authenticateToken, async (req, res) => {
       }
     }
 
+    const smtpConfigToSave = smtp_config !== undefined 
+      ? (typeof smtp_config === 'object' ? JSON.stringify(smtp_config) : smtp_config)
+      : undefined;
+
     if (check.rows.length > 0) {
       const current = check.rows[0];
       const newAutoPrint = auto_print_enabled !== undefined ? auto_print_enabled : current.auto_print_enabled;
       const newPrinterIp = printer_ip !== undefined ? printer_ip : current.printer_ip;
       const newLowStock = low_stock_behavior !== undefined ? low_stock_behavior : (current.low_stock_behavior || 'block');
       const newReportEmails = emailsToSave !== undefined ? emailsToSave : JSON.stringify(current.report_emails || ['mr.caffee25@gmail.com']);
+      const newSmtpConfig = smtpConfigToSave !== undefined ? smtpConfigToSave : current.smtp_config;
 
       result = await pool.query(
-        'UPDATE settings SET auto_print_enabled = $1, printer_ip = $2, low_stock_behavior = $3, report_emails = $4 WHERE id = $5 RETURNING *',
-        [newAutoPrint, newPrinterIp, newLowStock, newReportEmails, current.id]
+        'UPDATE settings SET auto_print_enabled = $1, printer_ip = $2, low_stock_behavior = $3, report_emails = $4, smtp_config = $5 WHERE id = $6 RETURNING *',
+        [newAutoPrint, newPrinterIp, newLowStock, newReportEmails, newSmtpConfig, current.id]
       );
     } else {
       const finalEmails = emailsToSave || JSON.stringify(['mr.caffee25@gmail.com']);
       result = await pool.query(
-        'INSERT INTO settings (auto_print_enabled, printer_ip, low_stock_behavior, report_emails) VALUES ($1, $2, $3, $4) RETURNING *',
-        [auto_print_enabled ?? false, printer_ip || '127.0.0.1', low_stock_behavior || 'block', finalEmails]
+        'INSERT INTO settings (auto_print_enabled, printer_ip, low_stock_behavior, report_emails, smtp_config) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+        [auto_print_enabled ?? false, printer_ip || '127.0.0.1', low_stock_behavior || 'block', finalEmails, smtpConfigToSave || null]
       );
     }
     
@@ -98,6 +103,59 @@ router.put('/', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error updating settings:', err);
     res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// POST /api/settings/test-email - Trigger diagnostic test email to verify SMTP / Zoho
+router.post('/test-email', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { getRecipientEmails, dispatchEmail } = require('../utils/emailService');
+    const recipients = await getRecipientEmails();
+    if (!recipients || recipients.length === 0) {
+      return res.status(400).json({ error: 'No recipient emails configured in Settings or .env' });
+    }
+
+    console.log('[Settings Route] Running test-email dispatch to:', recipients);
+    const result = await dispatchEmail({
+      to: recipients,
+      subject: '🍕 Al Rawaq ERP — Email Service Test',
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px; max-width: 560px; margin: 0 auto; background: #ffffff;">
+          <h2 style="color: #103C43; margin-top: 0;">Al Rawaq Restaurant ERP</h2>
+          <p style="font-size: 15px; color: #334155; line-height: 1.5;">
+            ✅ <strong>Email Service Verification Successful</strong><br/>
+            Your email notification service (Zoho / SMTP / Resend) is configured correctly and functioning.
+          </p>
+          <div style="background: #f8fafc; border-left: 4px solid #10b981; padding: 12px 16px; margin: 16px 0; font-size: 13px;">
+            <strong>Test Timestamp:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })} (KSA)<br/>
+            <strong>Recipients:</strong> ${recipients.join(', ')}
+          </div>
+          <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0;">
+            Sent automatically from Al Rawaq Restaurant ERP System.
+          </p>
+        </div>
+      `,
+      text: `Al Rawaq ERP Email Service Test. Verification successful. Sent at ${new Date().toISOString()}`
+    });
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: `Test email sent successfully via ${result.provider}!`,
+        provider: result.provider,
+        recipients,
+        messageId: result.messageId
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error || 'Failed to dispatch test email',
+        recipients
+      });
+    }
+  } catch (err) {
+    console.error('[Settings Route] Unexpected error in test-email:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

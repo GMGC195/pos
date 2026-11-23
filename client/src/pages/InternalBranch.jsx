@@ -240,15 +240,34 @@ function printTransferSlip(t) {
   const dispTime = t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Pending';
   const recTime = t.received_at ? new Date(t.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Pending';
 
-  const itemsHtml = (t.items || []).map((it, idx) => `
-    <tr>
-      <td style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word;">${idx + 1}. ${it.dish_name}</td>
-      <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
-      <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: 600;">${it.requested_qty}</td>
-      <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : '-'}</td>
-      <td style="width: 14%; padding: 4px 2px; text-align: right; border-bottom: 1px dashed #cbd5e1;">${it.received_qty !== null && it.received_qty !== undefined ? it.received_qty : '-'}</td>
-    </tr>
-  `).join('');
+  const itemsHtml = (t.items || []).map((it, idx) => {
+    const itemRemark = it.remarks || it.dispatch_remarks || it.receive_remarks || it.quantity_change_reason;
+    if (itemRemark) {
+      return `
+        <tr>
+          <td rowspan="2" style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word; vertical-align: top;">${idx + 1}. ${it.dish_name}</td>
+          <td style="width: 14%; padding: 4px 2px; text-align: center;">${it.uom || 'Piece'}</td>
+          <td style="width: 14%; padding: 4px 2px; text-align: center; font-weight: 600;">${it.requested_qty}</td>
+          <td style="width: 14%; padding: 4px 2px; text-align: center;">${it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : '-'}</td>
+          <td style="width: 14%; padding: 4px 2px; text-align: right;">${it.received_qty !== null && it.received_qty !== undefined ? it.received_qty : '-'}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="padding: 1px 2px 4px 2px; text-align: left; font-size: 9.5px; border-bottom: 1px dashed #cbd5e1; word-break: break-word; color: #1e293b;">
+            <span style="font-weight: 700; color: #000;">↳ Remark:</span> ${itemRemark}
+          </td>
+        </tr>
+      `;
+    }
+    return `
+      <tr>
+        <td style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word;">${idx + 1}. ${it.dish_name}</td>
+        <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.uom || 'Piece'}</td>
+        <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1; font-weight: 600;">${it.requested_qty}</td>
+        <td style="width: 14%; padding: 4px 2px; text-align: center; border-bottom: 1px dashed #cbd5e1;">${it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : '-'}</td>
+        <td style="width: 14%; padding: 4px 2px; text-align: right; border-bottom: 1px dashed #cbd5e1;">${it.received_qty !== null && it.received_qty !== undefined ? it.received_qty : '-'}</td>
+      </tr>
+    `;
+  }).join('');
 
   printWindow.document.write(`
     <!DOCTYPE html>
@@ -465,6 +484,30 @@ function printAcceptedItemsSlip(t) {
     const accQ = it.accepted_qty !== null && it.accepted_qty !== undefined ? parseFloat(it.accepted_qty) : reqQ;
 
     let statusCol = isAcc ? 'Acc' : (isRej ? 'Rej' : 'Pen');
+    const itemRemark = it.remarks || it.rejection_reason || it.modification_reason || it.quantity_change_reason;
+
+    if (itemRemark) {
+      return `
+        <tr>
+          <td rowspan="2" style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word; vertical-align: top;">
+            ${idx + 1}. ${it.dish_name}
+          </td>
+          <td style="width: 14%; padding: 4px 2px; text-align: center;">${it.uom || 'Piece'}</td>
+          <td style="width: 14%; padding: 4px 2px; text-align: center; font-weight: 600;">${reqQ}</td>
+          <td style="width: 14%; padding: 4px 2px; text-align: center; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#000')}">
+            ${isAcc ? accQ : (isRej ? '0' : '-')}
+          </td>
+          <td style="width: 14%; padding: 4px 2px; text-align: right; font-size: 10.5px; font-weight: bold; color: ${isAcc ? '#16a34a' : (isRej ? '#dc2626' : '#d97706')}">
+            ${statusCol}
+          </td>
+        </tr>
+        <tr>
+          <td colspan="4" style="padding: 1px 2px 4px 2px; text-align: left; font-size: 9.5px; border-bottom: 1px dashed #cbd5e1; word-break: break-word; color: #1e293b;">
+            <span style="font-weight: 700; color: #000;">↳ Remark:</span> ${itemRemark}
+          </td>
+        </tr>
+      `;
+    }
 
     return `
       <tr>
@@ -691,6 +734,24 @@ function printDispatchedItemsSlip(t) {
   const itemsHtml = dispatchedItems.map((it, idx) => {
     const sentQ = parseFloat(it.sent_qty !== null && it.sent_qty !== undefined ? it.sent_qty : (it.dispatched_qty ?? 0));
     const recQ = it.received_qty !== null && it.received_qty !== undefined ? parseFloat(it.received_qty) : '-';
+    const itemRemark = it.remarks || it.dispatch_remarks || it.receive_remarks || it.quantity_change_reason;
+
+    if (itemRemark) {
+      return `
+        <tr>
+          <td rowspan="2" style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word; vertical-align: top;">${idx + 1}. ${it.dish_name}</td>
+          <td style="width: 16%; padding: 4px 2px; text-align: center;">${it.uom || 'Piece'}</td>
+          <td style="width: 20%; padding: 4px 2px; text-align: center; font-weight: bold; color: #16a34a;">${sentQ}</td>
+          <td style="width: 20%; padding: 4px 2px; text-align: right;">${recQ}</td>
+        </tr>
+        <tr>
+          <td colspan="3" style="padding: 1px 2px 4px 2px; text-align: left; font-size: 9.5px; border-bottom: 1px dashed #cbd5e1; word-break: break-word; color: #1e293b;">
+            <span style="font-weight: 700; color: #000;">↳ Remark:</span> ${itemRemark}
+          </td>
+        </tr>
+      `;
+    }
+
     return `
       <tr>
         <td style="width: 44%; padding: 4px 2px; font-weight: normal; border-bottom: 1px dashed #cbd5e1; word-break: break-word;">${idx + 1}. ${it.dish_name}</td>
@@ -1116,6 +1177,32 @@ function TimeIncrementSelector({ value = '15m', onChange }) {
     }
   };
 
+  // Handle -15 mins decrement per click (e.g. 60m -> 45m -> 30m -> 15m)
+  const handleSubtract15 = () => {
+    const curVal = (value || '').trim();
+    if (isCustomMode || isClock) {
+      // Clock format HH:mm -> subtract 15 minutes
+      let [hStr, mStr] = (curVal || '12:00').split(':');
+      let hours = parseInt(hStr, 10);
+      let minutes = parseInt(mStr, 10);
+      if (isNaN(hours)) hours = 12;
+      if (isNaN(minutes)) minutes = 0;
+      minutes -= 15;
+      if (minutes < 0) {
+        hours = (hours - 1 + 24) % 24;
+        minutes += 60;
+      }
+      const newTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+      onChange(newTime);
+    } else {
+      // Minute decrement: e.g. 60m -> 45m -> 30m -> 15m (min floor 15m)
+      const match = curVal.match(/^(\d+)/);
+      let mins = match ? parseInt(match[1], 10) : 30;
+      mins = Math.max(15, mins - 15);
+      onChange(`${mins}m`);
+    }
+  };
+
   const handleDropdownChange = (e) => {
     const sel = e.target.value;
     if (sel === 'custom') {
@@ -1214,33 +1301,59 @@ function TimeIncrementSelector({ value = '15m', onChange }) {
         </select>
       )}
 
-      {/* Prominent +15m increment button */}
-      <button
-        type="button"
-        onClick={handleAdd15}
-        style={{
-          height: 38,
-          padding: '0 8px',
-          borderRadius: 6,
-          border: '1.5px solid #2563eb',
-          background: '#2563eb',
-          color: '#fff',
-          fontSize: 11.5,
-          fontWeight: 800,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 2,
-          whiteSpace: 'nowrap',
-          boxShadow: '0 1px 2px rgba(37,99,235,0.2)',
-          transition: 'all 0.1s ease',
-          flexShrink: 0
-        }}
-        title="Add 15 minutes per click (15m → 30m → 45m → 60m...)"
-      >
-        <span style={{ fontSize: 13, fontWeight: 900 }}>+</span>15m
-      </button>
+      {/* +15m and -15m increment/decrement buttons */}
+      <div style={{ display: 'inline-flex', alignItems: 'center', height: 38, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={handleAdd15}
+          style={{
+            height: 38,
+            padding: '0 7px',
+            borderRadius: '6px 0 0 6px',
+            border: '1.5px solid #2563eb',
+            borderRight: '1px solid rgba(255, 255, 255, 0.35)',
+            background: '#2563eb',
+            color: '#fff',
+            fontSize: 11.5,
+            fontWeight: 800,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1,
+            whiteSpace: 'nowrap',
+            boxShadow: '0 1px 2px rgba(37,99,235,0.2)',
+            transition: 'all 0.1s ease'
+          }}
+          title="Add 15 minutes (+15m)"
+        >
+          <span style={{ fontSize: 13, fontWeight: 900, lineHeight: 1 }}>+</span>15m
+        </button>
+        <button
+          type="button"
+          onClick={handleSubtract15}
+          style={{
+            height: 38,
+            padding: '0 7px',
+            borderRadius: '0 6px 6px 0',
+            border: '1.5px solid #2563eb',
+            background: '#1d4ed8',
+            color: '#fff',
+            fontSize: 11.5,
+            fontWeight: 800,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1,
+            whiteSpace: 'nowrap',
+            transition: 'all 0.1s ease'
+          }}
+          title="Decrease time by 15 minutes (-15m, min 15m)"
+        >
+          <span style={{ fontSize: 13, fontWeight: 900, lineHeight: 1 }}>-</span>15m
+        </button>
+      </div>
     </div>
   );
 }
@@ -1594,7 +1707,7 @@ export default function InternalBranch() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const userRole = user?.role?.trim().toLowerCase();
-  const isSuperUser = userRole === 'admin' || userRole === 'developer' || userRole === 'management' || userRole === 'general manager';
+  const isSuperUser = userRole === 'admin' || userRole === 'developer';
 
   // POS Menu System integration
   const { items: posItems, categories: posCategories, loadData: reloadPOSData } = usePOS();
@@ -2210,6 +2323,27 @@ export default function InternalBranch() {
     placeholderData: (previousData) => previousData
   });
 
+  // 4b. Dedicated Today Requests Query (All requests created today across all statuses)
+  const todayQuery = useQuery({
+    queryKey: ['todayTransfers', effectiveBranchKey, adminDirection, filterStatus, filterRequestType, filterPriority, searchQuery],
+    queryFn: async () => {
+      const params = { tab: 'today' };
+      if (isSuperUser && adminSelectedBranch !== 'All') {
+        params.branch = adminSelectedBranch;
+      }
+      if (filterStatus !== 'All') params.status = filterStatus;
+      if (filterRequestType !== 'All') params.request_type = filterRequestType;
+      if (filterPriority !== 'All') params.priority = filterPriority;
+      if (searchQuery) params.search = searchQuery;
+      const res = await axios.get('/api/internal-branch/transfers', { params });
+      return Array.isArray(res.data) ? res.data : [];
+    },
+    refetchInterval: 30000,
+    staleTime: 15000,
+    retry: 3,
+    placeholderData: (previousData) => previousData
+  });
+
   // Universal cache updater: updates any transfer matching id across all active transfer queries
   const updateTransferInCache = useCallback((updatedTransfer) => {
     if (!updatedTransfer || (!updatedTransfer.id && !updatedTransfer.transfer_id)) return;
@@ -2507,6 +2641,8 @@ export default function InternalBranch() {
     socket.on('internal_transfer_ready', handleTransferUpdated);
     socket.on('internal_transfer_item_accepted', handleTransferUpdated);
     socket.on('internal_transfer_item_rejected', handleTransferUpdated);
+    socket.on('internal_transfer_time_updated', handleTransferUpdated);
+    socket.on('internal_transfer_time_approved', handleTransferUpdated);
     socket.on('internal_transfers_refresh', fetchTransfers);
 
     return () => {
@@ -2523,6 +2659,8 @@ export default function InternalBranch() {
       socket.off('internal_transfer_ready', handleTransferUpdated);
       socket.off('internal_transfer_item_accepted', handleTransferUpdated);
       socket.off('internal_transfer_item_rejected', handleTransferUpdated);
+      socket.off('internal_transfer_time_updated', handleTransferUpdated);
+      socket.off('internal_transfer_time_approved', handleTransferUpdated);
       socket.off('internal_transfers_refresh', fetchTransfers);
     };
   }, [user, isSuperUser, audioEnabled, fetchStats, fetchTransfers]);
@@ -3615,6 +3753,7 @@ export default function InternalBranch() {
   const handleOpenEditRequestModal = (transfer) => {
     setEditTransferModal(transfer);
     setEditPriority(transfer.priority || 'Normal');
+    setEditNeededByTime(transfer.needed_by_time || '15m');
     // Day Selection
     const day = transfer.delivery_day || 'Today';
     if (day === 'Today' || day === 'Tomorrow') {
@@ -3647,14 +3786,14 @@ export default function InternalBranch() {
           price: it.price || matchedDish?.price || null,
           item_status: it.item_status || 'Pending',
           isLocked: isLocked,
-          needed_by_time: it.needed_by_time || null,
-          needed_by_date: it.needed_by_date || null
+          needed_by_time: it.needed_by_time || transfer.needed_by_time || '15m',
+          needed_by_date: it.needed_by_date || (day === 'Today' || !day ? new Date().toISOString().slice(0, 10) : (day === 'Tomorrow' ? new Date(Date.now() + 86400000).toISOString().slice(0, 10) : day))
         };
       });
       setEditDishRows(rows);
     } else {
       setEditDishRows([
-        { id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'], item_status: 'Pending', isLocked: false }
+        { id: Date.now(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', needed_by_time: transfer.needed_by_time || '15m', needed_by_date: new Date().toISOString().slice(0, 10), remarks: '', image_url: null, price: null, available_units: ['Piece'], item_status: 'Pending', isLocked: false }
       ]);
     }
   };
@@ -3720,9 +3859,10 @@ export default function InternalBranch() {
 
   const handleAddEditDishRow = () => {
     shouldScrollToNewRowRef.current = true;
+    const defaultDate = editDayOption === 'Custom Date' ? editCustomDayDate : (editDayOption === 'Tomorrow' ? new Date(Date.now() + 86400000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
     setEditDishRows(prev => [
       ...prev,
-      { id: Date.now() + Math.random(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', remarks: '', image_url: null, price: null, available_units: ['Piece'], item_status: 'Pending', isLocked: false }
+      { id: Date.now() + Math.random(), dish_name: '', item_id: null, sku: '', barcode: '', uom: 'Piece', requested_qty: '', needed_by_time: editNeededByTime || '15m', needed_by_date: defaultDate, remarks: '', image_url: null, price: null, available_units: ['Piece'], item_status: 'Pending', isLocked: false }
     ]);
   };
 
@@ -3788,6 +3928,7 @@ export default function InternalBranch() {
         items: validItems,
         priority: editPriority,
         delivery_day: finalDay,
+        needed_by_time: editNeededByTime || '15m',
         notes: editNotes,
         reason: editReason.trim()
       });
@@ -6121,12 +6262,18 @@ export default function InternalBranch() {
                           />
                         </div>
 
-                        {/* 4. Need By Date & Time (15-Minute Increment System) */}
+                        {/* 4. Need By Time & Date (15-Minute Increment System) */}
                         <div>
                           <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
-                            Need By (Date & Time)
+                            Need By (Time & Date)
                           </label>
                           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <div style={{ flex: 1, minWidth: 140 }}>
+                              <TimeIncrementSelector
+                                value={row.needed_by_time || '15m'}
+                                onChange={(val) => handleDishRowChangeTrf(row.id, 'needed_by_time', val)}
+                              />
+                            </div>
                             <input
                               type="date"
                               value={row.needed_by_date || ''}
@@ -6136,12 +6283,6 @@ export default function InternalBranch() {
                               style={{ width: 110, padding: '7px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11, height: 38, cursor: 'pointer', flexShrink: 0 }}
                               title="Click to select date"
                             />
-                            <div style={{ flex: 1, minWidth: 140 }}>
-                              <TimeIncrementSelector
-                                value={row.needed_by_time || '15m'}
-                                onChange={(val) => handleDishRowChangeTrf(row.id, 'needed_by_time', val)}
-                              />
-                            </div>
                           </div>
                         </div>
 
@@ -8778,8 +8919,8 @@ export default function InternalBranch() {
           <div
             className="modal"
             style={{
-              maxWidth: 780,
-              width: '95%',
+              maxWidth: 1080,
+              width: '96%',
               maxHeight: '92vh',
               background: '#fff',
               borderRadius: 12,
@@ -8822,7 +8963,7 @@ export default function InternalBranch() {
                   </span>
                 </div>
 
-                {/* Priority & Delivery Window Row */}
+                {/* Priority, Day Selection & Need By Time Row */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 18 }}>
                   {/* Priority */}
                   <div>
@@ -8895,6 +9036,40 @@ export default function InternalBranch() {
                       </div>
                     )}
                   </div>
+
+                  {/* Need By Time (Transfer-wide default) */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: '#334155', margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Clock size={13} color="#2563eb" /> Need By Time (Default)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const timeToApply = editNeededByTime || '15m';
+                          setEditDishRows(prev => prev.map(r => ({ ...r, needed_by_time: timeToApply })));
+                          toast.success(`Applied "${timeToApply}" to all items below!`);
+                        }}
+                        style={{
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          color: '#1d4ed8',
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          cursor: 'pointer'
+                        }}
+                        title="Set this delivery time on all dishes below"
+                      >
+                        Apply to All Items
+                      </button>
+                    </div>
+                    <TimeIncrementSelector
+                      value={editNeededByTime || '15m'}
+                      onChange={(val) => setEditNeededByTime(val)}
+                    />
+                  </div>
                 </div>
 
                 {/* Items Section Header */}
@@ -8944,9 +9119,9 @@ export default function InternalBranch() {
                         ref={idx === editDishRows.length - 1 ? lastAddedRowRef : null}
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: 'minmax(260px, 3.2fr) minmax(110px, 1.2fr) minmax(90px, 1fr) minmax(130px, 1.4fr) 36px',
+                          gridTemplateColumns: 'minmax(210px, 2.2fr) 85px 75px minmax(260px, 2.1fr) minmax(120px, 1.1fr) 36px',
                           gap: 10,
-                          alignItems: 'center',
+                          alignItems: 'end',
                           background: '#f8fafc',
                           padding: '10px 12px',
                           borderRadius: 8,
@@ -8991,7 +9166,7 @@ export default function InternalBranch() {
                             disabled={row.isLocked}
                             value={row.uom || rowUnits[0]}
                             onChange={e => handleEditDishRowChange(row.id, 'uom', e.target.value)}
-                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12.5, fontWeight: 600, background: row.isLocked ? '#f1f5f9' : '#fff' }}
+                            style={{ width: '100%', padding: '8px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, fontWeight: 600, height: 38, background: row.isLocked ? '#f1f5f9' : '#fff' }}
                           >
                             {rowUnits.map(u => (
                               <option key={u} value={u}>{u}</option>
@@ -9012,8 +9187,33 @@ export default function InternalBranch() {
                             disabled={row.isLocked}
                             value={row.requested_qty}
                             onChange={e => handleEditDishRowChange(row.id, 'requested_qty', e.target.value)}
-                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 700, textAlign: 'center', background: row.isLocked ? '#f1f5f9' : '#fff' }}
+                            style={{ width: '100%', padding: '8px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 700, textAlign: 'center', height: 38, background: row.isLocked ? '#f1f5f9' : '#fff' }}
                           />
+                        </div>
+
+                        {/* Need By Time & Date */}
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 3 }}>
+                            Need By (Time & Date)
+                          </span>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <div style={{ flex: 1, minWidth: 135 }}>
+                              <TimeIncrementSelector
+                                value={row.needed_by_time || editNeededByTime || '15m'}
+                                onChange={(val) => handleEditDishRowChange(row.id, 'needed_by_time', val)}
+                              />
+                            </div>
+                            <input
+                              type="date"
+                              disabled={row.isLocked}
+                              value={row.needed_by_date || ''}
+                              min={new Date().toISOString().slice(0, 10)}
+                              onChange={e => handleEditDishRowChange(row.id, 'needed_by_date', e.target.value)}
+                              onClick={e => { try { e.target.showPicker && e.target.showPicker(); } catch (err) {} }}
+                              style={{ width: 105, padding: '7px 4px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11, height: 38, cursor: 'pointer', flexShrink: 0, background: row.isLocked ? '#f1f5f9' : '#fff' }}
+                              title="Click to select date"
+                            />
+                          </div>
                         </div>
 
                         {/* Remarks */}
@@ -9027,19 +9227,19 @@ export default function InternalBranch() {
                             disabled={row.isLocked}
                             value={row.remarks || ''}
                             onChange={e => handleEditDishRowChange(row.id, 'remarks', e.target.value)}
-                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, background: row.isLocked ? '#f1f5f9' : '#fff' }}
+                            style={{ width: '100%', padding: '8px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, height: 38, background: row.isLocked ? '#f1f5f9' : '#fff' }}
                           />
                         </div>
 
                         {/* Delete row */}
-                        <div style={{ paddingTop: 16 }}>
+                        <div style={{ paddingBottom: 2 }}>
                           <button
                             type="button"
                             onClick={() => handleRemoveEditDishRow(row.id)}
                             disabled={row.isLocked || editDishRows.length <= 1}
                             style={{
-                              width: 32,
-                              height: 32,
+                              width: 34,
+                              height: 38,
                               borderRadius: 6,
                               border: '1px solid #fee2e2',
                               background: (row.isLocked || editDishRows.length <= 1) ? '#f8fafc' : '#fef2f2',
