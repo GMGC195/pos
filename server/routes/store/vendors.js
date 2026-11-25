@@ -44,28 +44,40 @@ router.get('/', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 router.get('/:id/items', authenticateToken, async (req, res) => {
   const { id } = req.params;
+  const { branch } = req.query;
   const vendorId = parseInt(id, 10);
   if (isNaN(vendorId)) {
     return res.status(400).json({ error: 'Valid vendor ID is required' });
   }
   try {
+    const hasBranch = branch && branch !== 'All' && branch !== 'undefined';
+    const params = hasBranch ? [vendorId, branch] : [vendorId];
+    const invJoin = hasBranch
+      ? `LEFT JOIN store_locations sl ON sl.branch = $2
+         LEFT JOIN store_inventory inv ON (inv.item_id = si.id AND inv.store_id = sl.id)`
+      : `LEFT JOIN store_inventory inv ON inv.item_id = si.id`;
+
     const result = await pool.query(`
-      SELECT DISTINCT ON (si.id)
+      SELECT
         si.id AS item_id,
         si.item_code,
         si.name AS item_name,
         si.arabic_name,
         si.primary_unit,
+        si.category_id,
         si.last_purchase_price,
         sc.name AS category_name,
-        COALESCE(vi.last_quoted_price, si.last_purchase_price, 0) AS unit_price
+        COALESCE(MAX(vi.last_quoted_price), si.last_purchase_price, 0) AS unit_price,
+        COALESCE(SUM(inv.current_stock), 0) AS available_quantity
       FROM store_items si
       LEFT JOIN store_vendor_items vi ON (vi.item_id = si.id AND vi.vendor_id = $1)
       LEFT JOIN store_categories sc ON si.category_id = sc.id
+      ${invJoin}
       WHERE si.status = 'Active'
         AND (si.default_vendor_id = $1 OR vi.vendor_id = $1)
-      ORDER BY si.id, sc.sort_order ASC, si.name ASC
-    `, [vendorId]);
+      GROUP BY si.id, si.item_code, si.name, si.arabic_name, si.primary_unit, si.category_id, si.last_purchase_price, sc.name, sc.sort_order
+      ORDER BY sc.sort_order ASC NULLS LAST, si.name ASC
+    `, params);
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching vendor items:', err);

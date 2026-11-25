@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from '../../api';
 import toast from 'react-hot-toast';
 import {
@@ -10,7 +10,11 @@ import {
   X,
   RefreshCw,
   ListChecks,
-  CheckCircle2
+  CheckCircle2,
+  FileText,
+  ArrowRight,
+  Save,
+  Check
 } from 'lucide-react';
 import { BRAND_CURRENCY } from '../../branding';
 import { getSaudiTodayDate } from '../../utils/timezone';
@@ -35,14 +39,16 @@ export default function PurchaseManagement({
     return ['admin', 'developer', 'store man', 'data entry'].includes(role);
   }, [user, readOnly]);
 
-  // Two Tabs: 'add' (Add New Purchases - default when permitted) | 'list' (See Purchases)
+  // Tabs: 'add' (Add New Purchases - default) | 'list' (See Purchases) | 'drafts' (Saved Drafts)
   const [purchaseTab, setPurchaseTab] = useState(() => (canCreatePurchase ? 'add' : 'list'));
 
   const [purchases, setPurchases] = useState([]);
+  const [drafts, setDrafts] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [storeItems, setStoreItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
 
   // See Purchases Filters
   const [vendorFilter, setVendorFilter] = useState('All');
@@ -54,9 +60,9 @@ export default function PurchaseManagement({
   // Modals
   const [showNewItemReqModal, setShowNewItemReqModal] = useState(false);
   const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Add New Purchases Form State
+  const [activeDraftId, setActiveDraftId] = useState(null);
   const [formVendorId, setFormVendorId] = useState('');
   const [formBranch, setFormBranch] = useState(
     selectedBranch && selectedBranch !== 'All' ? selectedBranch : 'Branch 1'
@@ -67,7 +73,12 @@ export default function PurchaseManagement({
   const [formPaymentStatus, setFormPaymentStatus] = useState('Paid');
   const [formNotes, setFormNotes] = useState('');
 
-  // Line items: { item_id, item_name, item_code, unit, quantity, total_price, isFromVendor }
+  // Category-wise progress state (persisted in PostgreSQL via Drafts)
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [completedCategories, setCompletedCategories] = useState([]);
+  const pendingDraftItemsRef = useRef(null);
+
+  // Line items: { item_id, item_name, item_code, unit, category_name, available_quantity, quantity, total_price, isFromVendor }
   const [lineItems, setLineItems] = useState([]);
   const [loadingVendorItems, setLoadingVendorItems] = useState(false);
 
@@ -92,13 +103,57 @@ export default function PurchaseManagement({
     }
   };
 
+  const fetchDrafts = async () => {
+    if (!canCreatePurchase) return;
+    try {
+      const res = await axios.get('/api/store/purchases/drafts', {
+        params: { branch: selectedBranch }
+      });
+      setDrafts(res.data || []);
+    } catch (err) {
+      console.error('Error fetching drafts:', err);
+    }
+  };
+
+  // Restore latest active draft on mount so category progress & entries persist across refreshes/navigation
+  const restoreActiveDraft = async () => {
+    if (!canCreatePurchase) return;
+    try {
+      const res = await axios.get('/api/store/purchases/drafts/active', {
+        params: { branch: selectedBranch }
+      });
+      const { draft, items } = res.data || {};
+      if (draft) {
+        applyDraftToForm(draft, items || []);
+      }
+    } catch (err) {
+      console.error('Error restoring active draft:', err);
+    }
+  };
+
+  const applyDraftToForm = (draft, items = []) => {
+    setActiveDraftId(draft.id);
+    pendingDraftItemsRef.current = items;
+    setFormVendorId(String(draft.vendor_id));
+    if (draft.branch) setFormBranch(draft.branch);
+    setFormInvoiceNumber(draft.invoice_number || '');
+    if (draft.invoice_date) setFormInvoiceDate(String(draft.invoice_date).slice(0, 10));
+    setFormPaymentMethod(draft.payment_method || 'Cash');
+    setFormPaymentStatus(draft.payment_status || 'Paid');
+    setFormNotes(draft.notes || '');
+    setCompletedCategories(Array.isArray(draft.completed_categories) ? draft.completed_categories : []);
+    setActiveCategory(draft.last_active_category || 'All');
+  };
+
   useEffect(() => {
     axios.get('/api/store/vendors?status=Active').then(r => setVendors(r.data || [])).catch(console.error);
     axios.get('/api/store/items?status=Active').then(r => setStoreItems(r.data || [])).catch(console.error);
+    restoreActiveDraft();
   }, []);
 
   useEffect(() => {
     fetchPurchases();
+    fetchDrafts();
   }, [selectedBranch, vendorFilter, statusFilter, fromDate, toDate]);
 
   useEffect(() => {
@@ -107,27 +162,68 @@ export default function PurchaseManagement({
     }
   }, [selectedBranch]);
 
-  // Automatically load all menu items registered under selected vendor
-  const loadVendorItems = async (vendorId) => {
+  // Automatically load all menu items registered under selected vendor + branch available qty
+  const loadVendorItems = async (vendorId, branchName) => {
     if (!vendorId || vendorId === 'All') {
       setLineItems([]);
       return;
     }
     setLoadingVendorItems(true);
     try {
-      const res = await axios.get(`/api/store/vendors/${vendorId}/items`);
+      const res = await axios.get(`/api/store/vendors/${vendorId}/items`, {
+        params: { branch: branchName }
+      });
       const vItems = res.data || [];
-      setLineItems(
-        vItems.map(it => ({
-          item_id: String(it.item_id),
-          item_name: it.item_name,
-          item_code: it.item_code,
-          unit: it.primary_unit || 'KG',
-          quantity: '',
-          total_price: '',
-          isFromVendor: true
-        }))
-      );
+      const draftItemsMap = {};
+      if (Array.isArray(pendingDraftItemsRef.current)) {
+        pendingDraftItemsRef.current.forEach(di => {
+          draftItemsMap[String(di.item_id)] = di;
+        });
+        pendingDraftItemsRef.current = null;
+      }
+
+      setLineItems(prev => {
+        // Preserve already-typed values if only branch changed for the same vendor
+        const prevMap = {};
+        prev.forEach(p => {
+          if (p.item_id) prevMap[String(p.item_id)] = p;
+        });
+
+        const mapped = vItems.map(it => {
+          const idStr = String(it.item_id);
+          const draftMatch = draftItemsMap[idStr];
+          const prevMatch = prevMap[idStr];
+          return {
+            item_id: idStr,
+            item_name: it.item_name,
+            item_code: it.item_code,
+            unit: it.primary_unit || 'KG',
+            category_name: it.category_name || 'Other',
+            available_quantity: parseFloat(it.available_quantity) || 0,
+            quantity: draftMatch ? String(draftMatch.quantity) : (prevMatch ? prevMatch.quantity : ''),
+            total_price: draftMatch ? String(draftMatch.total_price) : (prevMatch ? prevMatch.total_price : ''),
+            isFromVendor: true
+          };
+        });
+
+        // Also append any ad-hoc draft items not in vendor's default list
+        Object.values(draftItemsMap).forEach(di => {
+          if (!mapped.some(m => m.item_id === String(di.item_id))) {
+            mapped.push({
+              item_id: String(di.item_id),
+              item_name: di.item_name,
+              item_code: di.item_code,
+              unit: di.unit || 'KG',
+              category_name: di.category_name || 'Other',
+              available_quantity: 0,
+              quantity: String(di.quantity),
+              total_price: String(di.total_price),
+              isFromVendor: false
+            });
+          }
+        });
+        return mapped;
+      });
     } catch (err) {
       console.error('Error loading vendor items:', err);
       toast.error('Failed to load vendor menu items');
@@ -138,33 +234,49 @@ export default function PurchaseManagement({
 
   useEffect(() => {
     if (formVendorId) {
-      loadVendorItems(formVendorId);
+      loadVendorItems(formVendorId, formBranch);
     } else {
       setLineItems([]);
     }
-  }, [formVendorId]);
+  }, [formVendorId, formBranch]);
 
-  const handleItemSelect = (index, itemId) => {
-    const sel = storeItems.find(it => it.id === parseInt(itemId, 10));
+  // Unique categories for the selected vendor's items
+  const vendorCategories = useMemo(() => {
+    const cats = [];
+    lineItems.forEach(it => {
+      const cat = it.category_name || 'Other';
+      if (!cats.includes(cat)) cats.push(cat);
+    });
+    return cats;
+  }, [lineItems]);
+
+  // Filtered rows based on activeCategory
+  const displayedLineItems = useMemo(() => {
+    if (activeCategory === 'All') return lineItems;
+    return lineItems.filter(it => (it.category_name || 'Other') === activeCategory);
+  }, [lineItems, activeCategory]);
+
+  const handleItemSelect = (itemIdVal, rowIndexInLineItems) => {
+    const sel = storeItems.find(it => it.id === parseInt(itemIdVal, 10));
     setLineItems(prev => {
       const updated = [...prev];
-      updated[index] = {
-        ...updated[index],
-        item_id: itemId,
+      updated[rowIndexInLineItems] = {
+        ...updated[rowIndexInLineItems],
+        item_id: itemIdVal,
         item_name: sel ? sel.name : '',
         item_code: sel ? sel.item_code : '',
-        unit: sel ? sel.primary_unit : 'KG'
+        unit: sel ? sel.primary_unit : 'KG',
+        category_name: sel ? (sel.category_name || 'Other') : 'Other',
+        available_quantity: 0
       };
       return updated;
     });
   };
 
-  const handleLineChange = (index, field, val) => {
-    setLineItems(prev => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: val };
-      return updated;
-    });
+  const handleLineChange = (itemObj, field, val) => {
+    setLineItems(prev =>
+      prev.map(it => (it === itemObj ? { ...it, [field]: val } : it))
+    );
   };
 
   const addLine = () => {
@@ -175,6 +287,8 @@ export default function PurchaseManagement({
         item_name: '',
         item_code: '',
         unit: 'KG',
+        category_name: activeCategory !== 'All' ? activeCategory : 'Other',
+        available_quantity: 0,
         quantity: '',
         total_price: '',
         isFromVendor: false
@@ -200,6 +314,102 @@ export default function PurchaseManagement({
     };
   }, [lineItems]);
 
+  const persistDraftToServer = async (nextCompletedCats, nextActiveCat) => {
+    if (!formVendorId) {
+      toast.error('Please select a vendor first');
+      return null;
+    }
+    const activeLines = lineItems
+      .filter(it => it.item_id && parseFloat(it.quantity) > 0)
+      .map(it => {
+        const qty = parseFloat(it.quantity);
+        const total = parseFloat(it.total_price) || 0;
+        return {
+          item_id: parseInt(it.item_id, 10),
+          quantity: qty,
+          unit: it.unit,
+          total_price: total,
+          unit_price: qty > 0 ? Math.round((total / qty) * 10000) / 10000 : 0
+        };
+      });
+
+    const res = await axios.post('/api/store/purchases/draft', {
+      draft_id: activeDraftId,
+      vendor_id: parseInt(formVendorId, 10),
+      branch: formBranch,
+      invoice_number: formInvoiceNumber,
+      invoice_date: formInvoiceDate,
+      payment_method: formPaymentMethod,
+      payment_status: formPaymentStatus,
+      notes: formNotes,
+      completed_categories: nextCompletedCats,
+      last_active_category: nextActiveCat,
+      items: activeLines
+    });
+    if (res.data?.draft?.id) {
+      setActiveDraftId(res.data.draft.id);
+    }
+    fetchDrafts();
+    return res.data?.draft;
+  };
+
+  // Save & Next Category
+  const handleSaveAndNextCategory = async () => {
+    if (!formVendorId) return toast.error('Please select a vendor first');
+    if (vendorCategories.length === 0) return toast.error('No categories available for this vendor');
+
+    const currentCat =
+      activeCategory !== 'All'
+        ? activeCategory
+        : (vendorCategories.find(c => !completedCategories.includes(c)) || vendorCategories[0]);
+
+    const nextCompleted = completedCategories.includes(currentCat)
+      ? completedCategories
+      : [...completedCategories, currentCat];
+
+    const currentIdx = vendorCategories.indexOf(currentCat);
+    const nextCat =
+      currentIdx >= 0 && currentIdx + 1 < vendorCategories.length
+        ? vendorCategories[currentIdx + 1]
+        : (vendorCategories.find(c => !nextCompleted.includes(c)) || 'All');
+
+    setSavingDraft(true);
+    try {
+      await persistDraftToServer(nextCompleted, nextCat);
+      setCompletedCategories(nextCompleted);
+      setActiveCategory(nextCat);
+      toast.success(`Saved "${currentCat}" ✓ — switched to ${nextCat === 'All' ? 'All Categories' : nextCat}`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save category progress');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  // Explicit Save as Draft
+  const handleSaveAsDraft = async () => {
+    if (!formVendorId) return toast.error('Please select a vendor first');
+    setSavingDraft(true);
+    try {
+      await persistDraftToServer(completedCategories, activeCategory);
+      toast.success('Purchase saved as draft');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save draft');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const resetFormAfterComplete = () => {
+    setActiveDraftId(null);
+    setCompletedCategories([]);
+    setActiveCategory('All');
+    setFormInvoiceNumber('');
+    setFormNotes('');
+    setLineItems(prev => prev.map(it => ({ ...it, quantity: '', total_price: '' })));
+  };
+
+  // Finalize Purchase (either direct or completing the active draft)
   const handleSubmitPurchase = async (e) => {
     e.preventDefault();
     if (!formVendorId) return toast.error('Please select a vendor');
@@ -217,56 +427,113 @@ export default function PurchaseManagement({
       }
     }
 
+    const formattedItems = activeLines.map(it => {
+      const qty = parseFloat(it.quantity);
+      const total = parseFloat(it.total_price) || 0;
+      const unitPrice = qty > 0 ? Math.round((total / qty) * 10000) / 10000 : 0;
+      return {
+        item_id: parseInt(it.item_id, 10),
+        quantity: qty,
+        unit: it.unit,
+        unit_price: unitPrice,
+        tax_rate: 0
+      };
+    });
+
     setSaving(true);
     try {
-      const payload = {
-        vendor_id: parseInt(formVendorId, 10),
-        branch: formBranch,
-        invoice_number: formInvoiceNumber,
-        invoice_date: formInvoiceDate,
-        delivery_date: formInvoiceDate,
-        payment_method: formPaymentMethod,
-        payment_status: formPaymentStatus,
-        notes: formNotes,
-        items: activeLines.map(it => {
-          const qty = parseFloat(it.quantity);
-          const total = parseFloat(it.total_price) || 0;
-          const unitPrice = qty > 0 ? Math.round((total / qty) * 10000) / 10000 : 0;
-          return {
-            item_id: parseInt(it.item_id, 10),
-            quantity: qty,
-            unit: it.unit,
-            unit_price: unitPrice,
-            tax_rate: 0
-          };
-        })
-      };
+      if (activeDraftId) {
+        const res = await axios.post(`/api/store/purchases/${activeDraftId}/complete`, {
+          vendor_id: parseInt(formVendorId, 10),
+          branch: formBranch,
+          invoice_number: formInvoiceNumber,
+          invoice_date: formInvoiceDate,
+          payment_method: formPaymentMethod,
+          payment_status: formPaymentStatus,
+          notes: formNotes,
+          items: formattedItems
+        });
+        toast.success(res.data.message || 'Purchase completed and stock updated');
+      } else {
+        const res = await axios.post('/api/store/purchases', {
+          vendor_id: parseInt(formVendorId, 10),
+          branch: formBranch,
+          invoice_number: formInvoiceNumber,
+          invoice_date: formInvoiceDate,
+          delivery_date: formInvoiceDate,
+          payment_method: formPaymentMethod,
+          payment_status: formPaymentStatus,
+          notes: formNotes,
+          items: formattedItems
+        });
+        toast.success(res.data.message || 'Purchase saved successfully');
+      }
 
-      const res = await axios.post('/api/store/purchases', payload);
-      toast.success(res.data.message || 'Purchase saved successfully');
-      setFormInvoiceNumber('');
-      setFormNotes('');
-      setLineItems(prev => prev.map(it => ({ ...it, quantity: '', total_price: '' })));
-      await fetchPurchases();
+      resetFormAfterComplete();
+      await Promise.all([fetchPurchases(), fetchDrafts()]);
       if (onPurchaseCreated) onPurchaseCreated();
       setPurchaseTab('list');
     } catch (err) {
-      console.error('Error creating purchase:', err);
-      toast.error(err.response?.data?.error || 'Failed to register purchase');
+      console.error('Error completing purchase:', err);
+      toast.error(err.response?.data?.error || 'Failed to save purchase');
     } finally {
       setSaving(false);
     }
   };
 
+  // Reopen a saved draft from Drafts tab
+  const handleOpenDraft = async (draft) => {
+    try {
+      const res = await axios.get('/api/store/purchases/drafts/active', {
+        params: { vendor_id: draft.vendor_id, branch: draft.branch }
+      });
+      if (res.data?.draft) {
+        applyDraftToForm(res.data.draft, res.data.items || []);
+      } else {
+        applyDraftToForm(draft, []);
+      }
+      setPurchaseTab('add');
+      toast.success(`Loaded draft ${draft.purchase_number}`);
+    } catch (err) {
+      toast.error('Failed to open draft');
+    }
+  };
+
+  // Complete a draft directly from Drafts tab
+  const handleCompleteDraftDirectly = async (draft) => {
+    try {
+      const res = await axios.post(`/api/store/purchases/${draft.id}/complete`, {});
+      toast.success(res.data.message || 'Draft completed and inventory updated');
+      if (activeDraftId === draft.id) {
+        resetFormAfterComplete();
+      }
+      await Promise.all([fetchPurchases(), fetchDrafts()]);
+      if (onPurchaseCreated) onPurchaseCreated();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to complete draft');
+    }
+  };
+
+  const handleDeleteDraft = async (draft) => {
+    if (!window.confirm(`Delete draft ${draft.purchase_number}?`)) return;
+    try {
+      await axios.delete(`/api/store/purchases/drafts/${draft.id}`);
+      toast.success('Draft deleted');
+      if (activeDraftId === draft.id) {
+        resetFormAfterComplete();
+      }
+      fetchDrafts();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete draft');
+    }
+  };
+
   const handleViewDetail = async (id) => {
-    setLoadingDetail(true);
     try {
       const res = await axios.get(`/api/store/purchases/${id}`);
       setSelectedPurchaseDetail(res.data);
     } catch (err) {
       toast.error('Failed to load purchase details');
-    } finally {
-      setLoadingDetail(false);
     }
   };
 
@@ -283,7 +550,7 @@ export default function PurchaseManagement({
 
   return (
     <div className="store-module-wrap">
-      {/* Top Card: Header + Two Sub-Tabs */}
+      {/* Top Card: Header + Tabs */}
       <div className="store-card">
         <div className="store-header-row">
           <div className="store-header-left">
@@ -296,14 +563,14 @@ export default function PurchaseManagement({
                 <span className="store-badge-count">{filteredPurchases.length} Records</span>
               </h2>
               <p className="store-header-desc">
-                Select a supplier to enter received quantities and total prices, or review recorded purchases.
+                Select a supplier to enter purchases by category, save drafts, or review completed invoices.
               </p>
             </div>
           </div>
 
           <div className="store-header-actions">
             <button
-              onClick={fetchPurchases}
+              onClick={() => { fetchPurchases(); fetchDrafts(); }}
               disabled={loading}
               className="store-btn-icon"
               title="Refresh Purchases"
@@ -313,7 +580,7 @@ export default function PurchaseManagement({
           </div>
         </div>
 
-        {/* Two Tabs: Add New Purchases | See Purchases */}
+        {/* Sub-Tabs: Add New Purchases | See Purchases | Drafts */}
         <div className="store-tabs">
           {canCreatePurchase && (
             <button
@@ -333,6 +600,16 @@ export default function PurchaseManagement({
             <ListChecks size={15} />
             <span>See Purchases ({filteredPurchases.length})</span>
           </button>
+          {canCreatePurchase && (
+            <button
+              type="button"
+              onClick={() => setPurchaseTab('drafts')}
+              className={`store-tab-btn ${purchaseTab === 'drafts' ? 'active' : ''}`}
+            >
+              <FileText size={15} />
+              <span>Drafts ({drafts.length})</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -341,6 +618,31 @@ export default function PurchaseManagement({
         <form onSubmit={handleSubmitPurchase} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Supplier & Invoice Header */}
           <div className="store-card">
+            {activeDraftId && (
+              <div style={{
+                marginBottom: 12,
+                padding: '8px 12px',
+                borderRadius: 8,
+                background: 'rgba(244, 180, 0, 0.14)',
+                border: '1px solid var(--primary)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: 12
+              }}>
+                <span>
+                  <strong>Editing Saved Draft</strong> — Category progress ({completedCategories.length} completed) is automatically saved.
+                </span>
+                <button
+                  type="button"
+                  onClick={resetFormAfterComplete}
+                  style={{ background: 'none', border: 'none', color: '#92400e', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Start Fresh
+                </button>
+              </div>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
               <div>
                 <label className="store-form-label">
@@ -348,7 +650,12 @@ export default function PurchaseManagement({
                 </label>
                 <select
                   value={formVendorId}
-                  onChange={e => setFormVendorId(e.target.value)}
+                  onChange={e => {
+                    setFormVendorId(e.target.value);
+                    setActiveDraftId(null);
+                    setCompletedCategories([]);
+                    setActiveCategory('All');
+                  }}
                   required
                   className="store-form-select"
                 >
@@ -432,7 +739,64 @@ export default function PurchaseManagement({
             </div>
           </div>
 
-          {/* Vendor Items Entry Table (Desktop: Horizontal Row | Mobile: Stacked Vertical Fields) */}
+          {/* Category-Wise Switchable Filter Pills */}
+          {formVendorId && vendorCategories.length > 0 && (
+            <div className="store-card" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', marginRight: 4 }}>
+                  Categories:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveCategory('All')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 20,
+                    border: activeCategory === 'All' ? '1px solid var(--primary)' : '1px solid var(--surface-2)',
+                    background: activeCategory === 'All' ? 'var(--primary)' : 'var(--white)',
+                    color: '#000000',
+                    fontSize: 12,
+                    fontWeight: activeCategory === 'All' ? 800 : 600,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  All ({lineItems.length})
+                </button>
+                {vendorCategories.map(cat => {
+                  const isActive = activeCategory === cat;
+                  const isDone = completedCategories.includes(cat);
+                  const count = lineItems.filter(it => (it.category_name || 'Other') === cat).length;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setActiveCategory(cat)}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 20,
+                        border: isActive ? '1px solid var(--primary)' : isDone ? '1px solid #10b981' : '1px solid var(--surface-2)',
+                        background: isActive ? 'var(--primary)' : isDone ? '#ecfdf5' : 'var(--white)',
+                        color: isActive ? '#000000' : isDone ? '#065f46' : 'var(--text-primary)',
+                        fontSize: 12,
+                        fontWeight: isActive || isDone ? 700 : 500,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {isDone && <Check size={13} strokeWidth={3} />}
+                      <span>{cat} ({count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Vendor Items Entry Table */}
           <div className="store-card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{
               display: 'flex',
@@ -445,10 +809,10 @@ export default function PurchaseManagement({
             }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Menu Items Received
+                  Menu Items Received {activeCategory !== 'All' ? `— ${activeCategory}` : ''}
                 </h3>
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  Enter Quantity Received and Total Price; Per Unit Price calculates automatically.
+                  Enter Quantity Received and Total Price; Available Qty shows current {formatBranchLabel(formBranch)} stock.
                 </span>
               </div>
 
@@ -504,12 +868,13 @@ export default function PurchaseManagement({
             <div className="purchase-entry-header">
               <div>Menu Item</div>
               <div style={{ textAlign: 'right' }}>Quantity Received</div>
+              <div style={{ textAlign: 'right' }}>Available Qty</div>
               <div style={{ textAlign: 'right' }}>Total Price ({BRAND_CURRENCY})</div>
               <div style={{ textAlign: 'right' }}>Per Unit Price</div>
               <div></div>
             </div>
 
-            {/* Body */}
+            {/* Rows */}
             <div>
               {loadingVendorItems ? (
                 <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
@@ -520,15 +885,16 @@ export default function PurchaseManagement({
                 <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
                   Select a <strong>Supplier / Vendor</strong> above to automatically load all menu items supplied by that vendor.
                 </div>
-              ) : lineItems.length === 0 ? (
+              ) : displayedLineItems.length === 0 ? (
                 <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
-                  No menu items registered under this vendor yet. Use <strong>Add New Item</strong> or <strong>Add Row</strong>.
+                  No menu items in this category. Use <strong>Add New Item</strong> or switch category.
                 </div>
               ) : (
-                lineItems.map((line, idx) => {
+                displayedLineItems.map((line, idx) => {
                   const qty = parseFloat(line.quantity) || 0;
                   const total = parseFloat(line.total_price) || 0;
                   const perUnit = qty > 0 ? total / qty : 0;
+                  const lineIdxInAll = lineItems.indexOf(line);
 
                   return (
                     <div
@@ -544,7 +910,7 @@ export default function PurchaseManagement({
                               {line.item_name}
                             </div>
                             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                              {line.item_code} • Unit: <strong>{line.unit}</strong>
+                              {line.item_code} • {line.category_name} • Unit: <strong>{line.unit}</strong>
                             </div>
                           </div>
                         ) : (
@@ -552,7 +918,7 @@ export default function PurchaseManagement({
                             <label className="purchase-mobile-label">Menu Item</label>
                             <select
                               value={line.item_id}
-                              onChange={e => handleItemSelect(idx, e.target.value)}
+                              onChange={e => handleItemSelect(e.target.value, lineIdxInAll)}
                               className="store-form-select"
                               style={{ fontSize: 13 }}
                             >
@@ -581,7 +947,7 @@ export default function PurchaseManagement({
                           min="0"
                           placeholder="0"
                           value={line.quantity}
-                          onChange={e => handleLineChange(idx, 'quantity', e.target.value)}
+                          onChange={e => handleLineChange(line, 'quantity', e.target.value)}
                           className="store-form-input"
                           style={{
                             textAlign: 'right',
@@ -589,6 +955,24 @@ export default function PurchaseManagement({
                             borderColor: qty > 0 ? '#10b981' : undefined
                           }}
                         />
+                      </div>
+
+                      {/* Available Quantity (Before this purchase) */}
+                      <div>
+                        <label className="purchase-mobile-label">Available Quantity ({formatBranchLabel(formBranch)})</label>
+                        <div style={{
+                          padding: '7px 10px',
+                          borderRadius: 6,
+                          background: 'rgba(16, 60, 67, 0.06)',
+                          border: '1px solid rgba(16, 60, 67, 0.14)',
+                          textAlign: 'right',
+                          fontFamily: 'monospace',
+                          fontWeight: 700,
+                          fontSize: 12,
+                          color: 'var(--secondary, #103C43)'
+                        }}>
+                          {Number(line.available_quantity || 0).toLocaleString()} {line.unit}
+                        </div>
                       </div>
 
                       {/* 3. Total Price */}
@@ -600,7 +984,7 @@ export default function PurchaseManagement({
                           min="0"
                           placeholder="0.00"
                           value={line.total_price}
-                          onChange={e => handleLineChange(idx, 'total_price', e.target.value)}
+                          onChange={e => handleLineChange(line, 'total_price', e.target.value)}
                           className="store-form-input"
                           style={{ textAlign: 'right', fontWeight: total > 0 ? 700 : 400 }}
                         />
@@ -618,7 +1002,7 @@ export default function PurchaseManagement({
                             textAlign: 'right',
                             fontFamily: 'monospace',
                             fontWeight: 700,
-                            fontSize: 13,
+                            fontSize: 12,
                             color: qty > 0 ? 'var(--secondary, #103C43)' : 'var(--text-muted)'
                           }}
                         >
@@ -630,7 +1014,7 @@ export default function PurchaseManagement({
                       <div style={{ textAlign: 'right' }}>
                         <button
                           type="button"
-                          onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))}
+                          onClick={() => setLineItems(prev => prev.filter(it => it !== line))}
                           style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}
                           title="Remove row"
                         >
@@ -643,7 +1027,7 @@ export default function PurchaseManagement({
               )}
             </div>
 
-            {/* Footer Totals & Save */}
+            {/* Footer Totals & Action Buttons */}
             <div style={{
               display: 'flex',
               justifyContent: 'space-between',
@@ -659,15 +1043,52 @@ export default function PurchaseManagement({
                 Grand Total: <strong style={{ fontSize: 16, color: 'var(--secondary)' }}>{BRAND_CURRENCY} {formTotals.grandTotal.toFixed(2)}</strong>
               </div>
 
-              <button
-                type="submit"
-                disabled={saving}
-                className="store-btn store-btn-primary"
-                style={{ padding: '10px 22px', fontWeight: 800 }}
-              >
-                {saving ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={15} />}
-                <span>{saving ? 'Saving...' : 'Save Purchase'}</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  disabled={savingDraft || !formVendorId}
+                  onClick={handleSaveAsDraft}
+                  className="store-btn store-btn-secondary"
+                  style={{ padding: '10px 16px', fontWeight: 700 }}
+                >
+                  <Save size={15} />
+                  <span>Save as Draft</span>
+                </button>
+
+                {vendorCategories.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={savingDraft || !formVendorId}
+                    onClick={handleSaveAndNextCategory}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: 8,
+                      border: '1.5px solid var(--secondary, #103C43)',
+                      background: '#ffffff',
+                      color: 'var(--secondary, #103C43)',
+                      fontWeight: 800,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <span>Save & Next Category</span>
+                    <ArrowRight size={15} />
+                  </button>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="store-btn store-btn-primary"
+                  style={{ padding: '10px 22px', fontWeight: 800 }}
+                >
+                  {saving ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={15} />}
+                  <span>{saving ? 'Saving...' : 'Save Purchases'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </form>
@@ -677,7 +1098,6 @@ export default function PurchaseManagement({
       {purchaseTab === 'list' && (
         <>
           <div className="store-card">
-            {/* Mobile Branch Bar */}
             <div className="store-mobile-location-bar">
               <div className="store-filter-col">
                 <label className="store-filter-label">Branch</label>
@@ -694,7 +1114,6 @@ export default function PurchaseManagement({
               </div>
             </div>
 
-            {/* Filters Row */}
             <div className="store-filters-wrap">
               <div className="store-filters-row">
                 <div className="store-filter-col" style={{ flex: '1.4 1 180px' }}>
@@ -763,7 +1182,6 @@ export default function PurchaseManagement({
             </div>
           </div>
 
-          {/* Purchases Table */}
           <div className="card table-container" style={{ borderRadius: 12, border: '1px solid var(--surface-2)', background: 'var(--white)', overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
               <thead>
@@ -839,6 +1257,90 @@ export default function PurchaseManagement({
             </table>
           </div>
         </>
+      )}
+
+      {/* TAB 3: SAVED DRAFTS */}
+      {purchaseTab === 'drafts' && canCreatePurchase && (
+        <div className="card table-container" style={{ borderRadius: 12, border: '1px solid var(--surface-2)', background: 'var(--white)', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'var(--surface)', borderBottom: '1.5px solid var(--surface-2)', color: 'var(--text-secondary)' }}>
+                <th style={{ padding: '12px 16px', fontWeight: 800 }}>Draft #</th>
+                <th style={{ padding: '12px 12px', fontWeight: 800 }}>Vendor</th>
+                <th style={{ padding: '12px 12px', fontWeight: 800 }}>Branch</th>
+                <th style={{ padding: '12px 12px', fontWeight: 800 }}>Categories Done</th>
+                <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'center' }}>Items</th>
+                <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right' }}>Draft Total</th>
+                <th style={{ padding: '12px 16px', fontWeight: 800, textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drafts.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                    No saved draft purchases. Use <strong>Save as Draft</strong> or <strong>Save & Next Category</strong> in Add New Purchases.
+                  </td>
+                </tr>
+              ) : (
+                drafts.map(d => (
+                  <tr key={d.id} style={{ borderBottom: '1px solid var(--surface-2)' }}>
+                    <td style={{ padding: '12px 16px', fontWeight: 700, fontFamily: 'monospace' }}>
+                      {d.purchase_number}
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'inherit' }}>
+                        {new Date(d.updated_at || d.created_at).toLocaleString()}
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 12px', fontWeight: 700 }}>{d.vendor_name}</td>
+                    <td style={{ padding: '12px 12px', fontWeight: 700, color: 'var(--secondary)' }}>
+                      {formatBranchLabel(d.branch)}
+                    </td>
+                    <td style={{ padding: '12px 12px', fontSize: 12 }}>
+                      {Array.isArray(d.completed_categories) && d.completed_categories.length > 0
+                        ? d.completed_categories.map(c => `✓ ${c}`).join(', ')
+                        : <span style={{ color: 'var(--text-muted)' }}>In progress</span>}
+                    </td>
+                    <td style={{ padding: '12px 12px', textAlign: 'center', fontWeight: 700 }}>
+                      {d.items_count}
+                    </td>
+                    <td style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 800 }}>
+                      {BRAND_CURRENCY}{parseFloat(d.total_amount || 0).toFixed(2)}
+                    </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDraft(d)}
+                          className="store-btn store-btn-outline"
+                          style={{ height: 30, padding: '0 10px', fontSize: 12 }}
+                        >
+                          Edit Draft
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCompleteDraftDirectly(d)}
+                          className="store-btn store-btn-primary"
+                          style={{ height: 30, padding: '0 10px', fontSize: 12 }}
+                        >
+                          <CheckCircle2 size={13} />
+                          <span>Complete Purchase</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDraft(d)}
+                          className="store-action-btn delete"
+                          style={{ height: 30, width: 30 }}
+                          title="Delete Draft"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* View Purchase Detail Modal */}

@@ -45,7 +45,7 @@ router.get('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'man
       FROM store_purchases p
       JOIN store_vendors v ON p.vendor_id = v.id
       JOIN store_locations sl ON p.store_id = sl.id
-      WHERE 1=1
+      WHERE p.status != 'Draft'
     `;
     const params = [];
 
@@ -90,6 +90,224 @@ router.get('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'man
   } catch (err) {
     console.error('Error fetching purchases:', err);
     res.status(500).json({ error: 'Failed to fetch purchases' });
+  }
+});
+
+// -------------------------------------------------------------
+// GET /api/store/purchases/drafts (List saved draft purchases)
+// -------------------------------------------------------------
+router.get('/drafts', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
+  try {
+    const { branch, vendor_id } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch });
+    if (!access.ok) return;
+
+    let query = `
+      SELECT 
+        p.*,
+        v.name as vendor_name,
+        v.phone as vendor_phone,
+        (SELECT COUNT(*) FROM store_purchase_items pi WHERE pi.purchase_id = p.id) as items_count
+      FROM store_purchases p
+      JOIN store_vendors v ON p.vendor_id = v.id
+      WHERE p.status = 'Draft'
+    `;
+    const params = [];
+
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND p.branch = ANY($${params.length})`;
+    }
+    if (branch && branch !== 'All') {
+      params.push(branch);
+      query += ` AND p.branch = $${params.length}`;
+    }
+    if (vendor_id && vendor_id !== 'All') {
+      params.push(parseInt(vendor_id, 10));
+      query += ` AND p.vendor_id = $${params.length}`;
+    }
+
+    query += ' ORDER BY p.updated_at DESC, p.id DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching draft purchases:', err);
+    res.status(500).json({ error: 'Failed to fetch draft purchases' });
+  }
+});
+
+// -------------------------------------------------------------
+// GET /api/store/purchases/drafts/active (Restore latest active draft)
+// -------------------------------------------------------------
+router.get('/drafts/active', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
+  try {
+    const { vendor_id, branch } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch });
+    if (!access.ok) return;
+
+    let query = `
+      SELECT p.*, v.name as vendor_name
+      FROM store_purchases p
+      JOIN store_vendors v ON p.vendor_id = v.id
+      WHERE p.status = 'Draft'
+    `;
+    const params = [];
+
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND p.branch = ANY($${params.length})`;
+    }
+    if (vendor_id && vendor_id !== 'All') {
+      params.push(parseInt(vendor_id, 10));
+      query += ` AND p.vendor_id = $${params.length}`;
+    }
+    if (branch && branch !== 'All') {
+      params.push(branch);
+      query += ` AND p.branch = $${params.length}`;
+    }
+
+    query += ' ORDER BY p.updated_at DESC, p.id DESC LIMIT 1';
+    const dRes = await pool.query(query, params);
+    if (dRes.rows.length === 0) {
+      return res.json({ draft: null, items: [] });
+    }
+
+    const draft = dRes.rows[0];
+    const itemsRes = await pool.query(`
+      SELECT pi.*, si.name as item_name, si.item_code, sc.name as category_name
+      FROM store_purchase_items pi
+      JOIN store_items si ON pi.item_id = si.id
+      LEFT JOIN store_categories sc ON si.category_id = sc.id
+      WHERE pi.purchase_id = $1
+      ORDER BY pi.id ASC
+    `, [draft.id]);
+
+    res.json({ draft, items: itemsRes.rows });
+  } catch (err) {
+    console.error('Error restoring active draft:', err);
+    res.status(500).json({ error: 'Failed to restore active draft' });
+  }
+});
+
+// -------------------------------------------------------------
+// POST /api/store/purchases/draft (Save as Draft / Save & Next Category)
+// -------------------------------------------------------------
+router.post('/draft', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
+  const {
+    draft_id, vendor_id, branch, invoice_number, invoice_date,
+    payment_method, payment_status, notes, completed_categories,
+    last_active_category, items
+  } = req.body;
+
+  if (!vendor_id || !branch || branch === 'All') {
+    return res.status(400).json({ error: 'Vendor and branch are required to save a draft' });
+  }
+
+  const resolvedStoreId = await resolveBranchStoreId(pool, branch);
+  if (!resolvedStoreId) {
+    return res.status(400).json({ error: 'Valid branch (Branch 1, Branch 2, or Branch 3) is required' });
+  }
+
+  const access = await enforceBranchAccess(req, res, { branch, store_id: resolvedStoreId });
+  if (!access.ok) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const safeItems = Array.isArray(items) ? items.filter(it => it.item_id && parseFloat(it.quantity) > 0) : [];
+    let subtotal = 0;
+    for (const it of safeItems) {
+      const qty = parseFloat(it.quantity) || 0;
+      const lineTotal = it.total_price !== undefined ? (parseFloat(it.total_price) || 0) : qty * (parseFloat(it.unit_price) || 0);
+      subtotal += lineTotal;
+    }
+    subtotal = Math.round(subtotal * 100) / 100;
+
+    const userName = req.user?.username || req.user?.name || 'Store Staff';
+    const completedCatsJson = JSON.stringify(Array.isArray(completed_categories) ? completed_categories : []);
+    const activeCat = last_active_category || 'All';
+    const invDate = invoice_date || new Date().toISOString().slice(0, 10);
+
+    let draftRow;
+    if (draft_id) {
+      const existing = await client.query('SELECT * FROM store_purchases WHERE id = $1 FOR UPDATE', [draft_id]);
+      if (existing.rows.length > 0 && existing.rows[0].status === 'Draft') {
+        const upd = await client.query(`
+          UPDATE store_purchases
+          SET vendor_id = $1, store_id = $2, branch = $3, invoice_number = $4,
+              invoice_date = $5, delivery_date = $5, subtotal = $6, total_amount = $6,
+              payment_method = $7, payment_status = $8, notes = $9,
+              completed_categories = $10::jsonb, last_active_category = $11, updated_at = NOW()
+          WHERE id = $12
+          RETURNING *
+        `, [
+          vendor_id, resolvedStoreId, branch, invoice_number?.trim() || null,
+          invDate, subtotal, payment_method || 'Cash', payment_status || 'Unpaid',
+          notes || null, completedCatsJson, activeCat, draft_id
+        ]);
+        draftRow = upd.rows[0];
+        await client.query('DELETE FROM store_purchase_items WHERE purchase_id = $1', [draftRow.id]);
+      }
+    }
+
+    if (!draftRow) {
+      const draftNum = `DFT-${Date.now().toString().slice(-8)}-${Math.floor(10 + Math.random() * 90)}`;
+      const ins = await client.query(`
+        INSERT INTO store_purchases (
+          purchase_number, vendor_id, store_id, branch, invoice_number, invoice_date,
+          delivery_date, subtotal, tax_amount, total_amount, payment_method, payment_status,
+          status, received_by_user_id, received_by_name, notes, completed_categories, last_active_category
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 0, $7, $8, $9, 'Draft', $10, $11, $12, $13::jsonb, $14)
+        RETURNING *
+      `, [
+        draftNum, vendor_id, resolvedStoreId, branch, invoice_number?.trim() || null,
+        invDate, subtotal, payment_method || 'Cash', payment_status || 'Unpaid',
+        req.user?.id || null, userName, notes || null, completedCatsJson, activeCat
+      ]);
+      draftRow = ins.rows[0];
+    }
+
+    for (const it of safeItems) {
+      const qty = parseFloat(it.quantity);
+      const lineTotal = it.total_price !== undefined ? (parseFloat(it.total_price) || 0) : Math.round(qty * (parseFloat(it.unit_price) || 0) * 100) / 100;
+      const unitPrice = qty > 0 ? Math.round((lineTotal / qty) * 10000) / 10000 : 0;
+      await client.query(`
+        INSERT INTO store_purchase_items (
+          purchase_id, item_id, quantity, unit, unit_price, tax_rate, tax_amount, total_price
+        ) VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
+      `, [draftRow.id, it.item_id, qty, it.unit || 'KG', unitPrice, lineTotal]);
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Draft saved', draft: draftRow });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error saving draft purchase:', err);
+    res.status(500).json({ error: 'Failed to save draft purchase: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// -------------------------------------------------------------
+// DELETE /api/store/purchases/drafts/:id
+// -------------------------------------------------------------
+router.delete('/drafts/:id', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const check = await pool.query("SELECT id, branch, store_id, status FROM store_purchases WHERE id = $1", [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Draft not found' });
+    if (check.rows[0].status !== 'Draft') return res.status(400).json({ error: 'Only Draft purchases can be deleted here' });
+
+    const access = await enforceBranchAccess(req, res, { branch: check.rows[0].branch, store_id: check.rows[0].store_id });
+    if (!access.ok) return;
+
+    await pool.query("DELETE FROM store_purchases WHERE id = $1 AND status = 'Draft'", [id]);
+    res.json({ success: true, message: 'Draft deleted' });
+  } catch (err) {
+    console.error('Error deleting draft:', err);
+    res.status(500).json({ error: 'Failed to delete draft' });
   }
 });
 
@@ -362,6 +580,191 @@ router.post('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'st
     await client.query('ROLLBACK');
     console.error('Error creating purchase:', err);
     res.status(500).json({ error: 'Failed to create purchase: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// -------------------------------------------------------------
+// POST /api/store/purchases/:id/complete (Finalize a Draft Purchase)
+// -------------------------------------------------------------
+router.post('/:id/complete', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
+  const { id } = req.params;
+  const {
+    vendor_id, branch, invoice_number, invoice_date,
+    payment_method, payment_status, notes, items
+  } = req.body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const draftRes = await client.query('SELECT * FROM store_purchases WHERE id = $1 FOR UPDATE', [id]);
+    if (draftRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Draft purchase not found' });
+    }
+    const existingDraft = draftRes.rows[0];
+    if (existingDraft.status !== 'Draft') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This purchase has already been completed and stock has been updated.' });
+    }
+
+    const finalBranch = branch && branch !== 'All' ? branch : existingDraft.branch;
+    const resolvedStoreId = await resolveBranchStoreId(client, finalBranch);
+    const access = await enforceBranchAccess(req, res, { branch: finalBranch, store_id: resolvedStoreId });
+    if (!access.ok) {
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const finalVendorId = vendor_id || existingDraft.vendor_id;
+    const vCheck = await client.query('SELECT name FROM store_vendors WHERE id = $1', [finalVendorId]);
+    if (vCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+    const vendorName = vCheck.rows[0].name;
+
+    let finalItems = Array.isArray(items) && items.length > 0 ? items : null;
+    if (!finalItems) {
+      const dbItems = await client.query('SELECT * FROM store_purchase_items WHERE purchase_id = $1', [id]);
+      finalItems = dbItems.rows;
+    }
+    const activeItems = finalItems.filter(it => it.item_id && parseFloat(it.quantity) > 0);
+    if (activeItems.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'At least one item with Quantity Received > 0 is required to complete purchase.' });
+    }
+
+    let subtotal = 0;
+    for (const it of activeItems) {
+      const qty = parseFloat(it.quantity);
+      const price = parseFloat(it.unit_price) || 0;
+      if (isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) {
+        throw new Error('Invalid quantity or price for line item.');
+      }
+      subtotal += Math.round(qty * price * 100) / 100;
+    }
+    const totalAmount = Math.round(subtotal * 100) / 100;
+    const purchaseNum = await generatePurchaseNumber(client);
+    const userName = req.user?.username || req.user?.name || 'Store Staff';
+    const finalMethod = payment_method || existingDraft.payment_method || 'Cash';
+    const finalPayStatus = payment_status || existingDraft.payment_status || (finalMethod === 'Cash' ? 'Paid' : 'Unpaid');
+    const finalInvDate = invoice_date || existingDraft.invoice_date;
+
+    const upd = await client.query(`
+      UPDATE store_purchases
+      SET purchase_number = $1, vendor_id = $2, store_id = $3, branch = $4,
+          invoice_number = $5, invoice_date = $6, delivery_date = $6,
+          subtotal = $7, tax_amount = 0, total_amount = $7,
+          payment_method = $8, payment_status = $9, status = 'Received',
+          received_by_user_id = $10, received_by_name = $11, notes = $12, updated_at = NOW()
+      WHERE id = $13
+      RETURNING *
+    `, [
+      purchaseNum, finalVendorId, resolvedStoreId, finalBranch,
+      invoice_number?.trim() || existingDraft.invoice_number || null, finalInvDate,
+      totalAmount, finalMethod, finalPayStatus,
+      req.user?.id || null, userName, notes || existingDraft.notes || null, id
+    ]);
+    const completedPurchase = upd.rows[0];
+
+    await client.query('DELETE FROM store_purchase_items WHERE purchase_id = $1', [id]);
+
+    for (const it of activeItems) {
+      const qty = parseFloat(it.quantity);
+      const price = parseFloat(it.unit_price) || 0;
+      const lineTotal = Math.round(qty * price * 100) / 100;
+
+      await client.query(`
+        INSERT INTO store_purchase_items (
+          purchase_id, item_id, quantity, unit, unit_price, tax_rate, tax_amount, total_price
+        ) VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
+      `, [id, it.item_id, qty, it.unit || 'KG', price, lineTotal]);
+
+      const curInvRes = await client.query(
+        'SELECT current_stock FROM store_inventory WHERE store_id = $1 AND item_id = $2 FOR UPDATE',
+        [resolvedStoreId, it.item_id]
+      );
+      let stockBefore = 0;
+      if (curInvRes.rows.length === 0) {
+        await client.query(
+          'INSERT INTO store_inventory (store_id, item_id, current_stock, last_received_stock, updated_at) VALUES ($1, $2, $3, $3, NOW())',
+          [resolvedStoreId, it.item_id, qty]
+        );
+      } else {
+        stockBefore = parseFloat(curInvRes.rows[0].current_stock) || 0;
+        await client.query(
+          'UPDATE store_inventory SET current_stock = current_stock + $1, last_received_stock = $1, updated_at = NOW() WHERE store_id = $2 AND item_id = $3',
+          [qty, resolvedStoreId, it.item_id]
+        );
+      }
+      const stockAfter = stockBefore + qty;
+
+      await client.query(
+        'UPDATE store_items SET last_purchase_price = $1, default_vendor_id = COALESCE(default_vendor_id, $2), updated_at = NOW() WHERE id = $3',
+        [price, finalVendorId, it.item_id]
+      );
+      await client.query(
+        `INSERT INTO store_vendor_items (vendor_id, item_id, last_quoted_price)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (vendor_id, item_id) DO UPDATE SET last_quoted_price = EXCLUDED.last_quoted_price`,
+        [finalVendorId, it.item_id, price]
+      );
+      await client.query(`
+        INSERT INTO store_stock_history (
+          store_id, item_id, movement_type, reference_id, quantity_change,
+          stock_before, stock_after, unit_price, total_value, performed_by_name, reason
+        ) VALUES ($1, $2, 'PURCHASE_RECEIPT', $3, $4, $5, $6, $7, $8, $9, $10)
+      `, [
+        resolvedStoreId, it.item_id, purchaseNum, qty, stockBefore, stockAfter,
+        price, lineTotal, userName, `Completed Draft Purchase from ${vendorName}`
+      ]);
+    }
+
+    await client.query(`
+      INSERT INTO store_vendor_transactions (
+        vendor_id, purchase_id, transaction_type, amount, payment_method,
+        reference_number, performed_by_name, comments
+      ) VALUES ($1, $2, 'PURCHASE_BILL', $3, $4, $5, $6, $7)
+    `, [finalVendorId, id, totalAmount, finalMethod, purchaseNum, userName, `Completed Purchase #${purchaseNum}`]);
+
+    if (completedPurchase.payment_status === 'Paid') {
+      await client.query(`
+        INSERT INTO store_vendor_transactions (
+          vendor_id, purchase_id, transaction_type, amount, payment_method,
+          reference_number, performed_by_name, comments
+        ) VALUES ($1, $2, 'PAYMENT', $3, $4, $5, $6, $7)
+      `, [finalVendorId, id, totalAmount, finalMethod, `PAY-${purchaseNum}`, userName, `Settlement for #${purchaseNum}`]);
+    } else {
+      await client.query(
+        'UPDATE store_vendors SET current_balance = current_balance + $1, updated_at = NOW() WHERE id = $2',
+        [totalAmount, finalVendorId]
+      );
+    }
+
+    await recordActivityLog(client, {
+      module: 'Store',
+      action: 'PURCHASE_COMPLETED_FROM_DRAFT',
+      entity_id: id,
+      entity_name: purchaseNum,
+      description: `Completed draft purchase ${purchaseNum} from ${vendorName} (${activeItems.length} items, total ${totalAmount})`,
+      new_data: { branch: finalBranch, vendor_id: finalVendorId, total_amount: totalAmount },
+      performed_by: userName,
+      branch: finalBranch
+    });
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Draft purchase completed and store inventory updated.',
+      purchase: completedPurchase
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error completing draft purchase:', err);
+    res.status(500).json({ error: 'Failed to complete draft purchase: ' + err.message });
   } finally {
     client.release();
   }

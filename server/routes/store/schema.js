@@ -262,6 +262,8 @@ async function ensureStoreManagementSchema() {
       ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS request_source VARCHAR(50) DEFAULT 'Requisitions';
       ALTER TABLE store_stock_entry_items ADD COLUMN IF NOT EXISTS handover_stock NUMERIC(12,3) DEFAULT 0;
       ALTER TABLE store_stock_entry_items ADD COLUMN IF NOT EXISTS excess_consumption NUMERIC(12,3) DEFAULT 0;
+      ALTER TABLE store_purchases ADD COLUMN IF NOT EXISTS completed_categories JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE store_purchases ADD COLUMN IF NOT EXISTS last_active_category VARCHAR(150) DEFAULT 'All';
     `);
 
     // 2. Default categories seed
