@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
 const { authenticateToken, isAdmin } = require('../../middleware/auth');
+const { requireStoreRoles } = require('../../middleware/storeAuth');
 
 // -------------------------------------------------------------
 // GET /api/store/vendors (List all vendors)
@@ -35,6 +36,40 @@ router.get('/', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching vendors:', err);
     res.status(500).json({ error: 'Failed to fetch vendors' });
+  }
+});
+
+// -------------------------------------------------------------
+// GET /api/store/vendors/:id/items (All active menu items supplied by vendor)
+// -------------------------------------------------------------
+router.get('/:id/items', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const vendorId = parseInt(id, 10);
+  if (isNaN(vendorId)) {
+    return res.status(400).json({ error: 'Valid vendor ID is required' });
+  }
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT ON (si.id)
+        si.id AS item_id,
+        si.item_code,
+        si.name AS item_name,
+        si.arabic_name,
+        si.primary_unit,
+        si.last_purchase_price,
+        sc.name AS category_name,
+        COALESCE(vi.last_quoted_price, si.last_purchase_price, 0) AS unit_price
+      FROM store_items si
+      LEFT JOIN store_vendor_items vi ON (vi.item_id = si.id AND vi.vendor_id = $1)
+      LEFT JOIN store_categories sc ON si.category_id = sc.id
+      WHERE si.status = 'Active'
+        AND (si.default_vendor_id = $1 OR vi.vendor_id = $1)
+      ORDER BY si.id, sc.sort_order ASC, si.name ASC
+    `, [vendorId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching vendor items:', err);
+    res.status(500).json({ error: 'Failed to fetch vendor items' });
   }
 });
 
@@ -76,10 +111,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/vendors (Create Vendor)
 // -------------------------------------------------------------
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const {
     name, contact_person, phone, whatsapp, email,
-    address, tax_number, payment_terms, notes
+    address, tax_number, payment_terms, notes, item_ids
   } = req.body;
 
   if (!name || !name.trim()) {
@@ -99,7 +134,20 @@ router.post('/', authenticateToken, async (req, res) => {
       tax_number?.trim() || null, payment_terms || 'Cash', notes || null
     ]);
 
-    res.status(201).json(result.rows[0]);
+    const createdVendor = result.rows[0];
+    if (Array.isArray(item_ids) && item_ids.length > 0) {
+      for (const rawItemId of item_ids) {
+        const itemId = parseInt(rawItemId, 10);
+        if (!isNaN(itemId)) {
+          await pool.query(
+            `INSERT INTO store_vendor_items (vendor_id, item_id) VALUES ($1, $2) ON CONFLICT (vendor_id, item_id) DO NOTHING`,
+            [createdVendor.id, itemId]
+          );
+        }
+      }
+    }
+
+    res.status(201).json(createdVendor);
   } catch (err) {
     console.error('Error creating vendor:', err);
     res.status(500).json({ error: 'Failed to create vendor' });
@@ -109,11 +157,11 @@ router.post('/', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // PUT /api/store/vendors/:id (Update Vendor)
 // -------------------------------------------------------------
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const { id } = req.params;
   const {
     name, contact_person, phone, whatsapp, email,
-    address, tax_number, payment_terms, notes, status
+    address, tax_number, payment_terms, notes, status, item_ids
   } = req.body;
 
   try {
@@ -139,10 +187,46 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Vendor not found' });
     }
+
+    if (Array.isArray(item_ids)) {
+      const cleanItemIds = item_ids.map(x => parseInt(x, 10)).filter(x => !isNaN(x));
+      await pool.query('DELETE FROM store_vendor_items WHERE vendor_id = $1', [id]);
+      for (const itemId of cleanItemIds) {
+        await pool.query(
+          `INSERT INTO store_vendor_items (vendor_id, item_id) VALUES ($1, $2) ON CONFLICT (vendor_id, item_id) DO NOTHING`,
+          [id, itemId]
+        );
+      }
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating vendor:', err);
     res.status(500).json({ error: 'Failed to update vendor' });
+  }
+});
+
+// -------------------------------------------------------------
+// DELETE /api/store/vendors/:id (Delete or Archive Vendor)
+// -------------------------------------------------------------
+router.delete('/:id', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const purCheck = await pool.query('SELECT COUNT(*) FROM store_purchases WHERE vendor_id = $1', [id]);
+    if (parseInt(purCheck.rows[0].count, 10) > 0) {
+      const archived = await pool.query(
+        `UPDATE store_vendors SET status = 'Inactive', updated_at = NOW() WHERE id = $1 RETURNING *`,
+        [id]
+      );
+      if (archived.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+      return res.json({ message: 'Vendor has purchase history and was marked Inactive.', archived: true });
+    }
+    const delRes = await pool.query('DELETE FROM store_vendors WHERE id = $1 RETURNING id', [id]);
+    if (delRes.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+    res.json({ message: 'Vendor deleted successfully', archived: false });
+  } catch (err) {
+    console.error('Error deleting vendor:', err);
+    res.status(500).json({ error: 'Failed to delete vendor' });
   }
 });
 
@@ -240,7 +324,7 @@ const recordPaymentHandler = async (req, res) => {
   }
 };
 
-router.post('/:id/payment', authenticateToken, recordPaymentHandler);
-router.post('/:id/payments', authenticateToken, recordPaymentHandler);
+router.post('/:id/payment', authenticateToken, requireStoreRoles(['admin', 'developer']), recordPaymentHandler);
+router.post('/:id/payments', authenticateToken, requireStoreRoles(['admin', 'developer']), recordPaymentHandler);
 
 module.exports = router;

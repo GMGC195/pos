@@ -228,8 +228,14 @@ async function ensureStoreManagementSchema() {
         reviewed_at TIMESTAMPTZ,
         rejection_reason TEXT,
         approved_item_id INTEGER REFERENCES store_items(id) ON DELETE SET NULL,
+        vendor_id INTEGER REFERENCES store_vendors(id) ON DELETE SET NULL,
+        request_source VARCHAR(50) DEFAULT 'Requisitions',
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES store_vendors(id) ON DELETE SET NULL;
+      ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS request_source VARCHAR(50) DEFAULT 'Requisitions';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_branches JSONB DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS store_external_item_mappings (
         id SERIAL PRIMARY KEY,
@@ -250,6 +256,12 @@ async function ensureStoreManagementSchema() {
         description TEXT,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_branches JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES store_vendors(id) ON DELETE SET NULL;
+      ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS request_source VARCHAR(50) DEFAULT 'Requisitions';
+      ALTER TABLE store_stock_entry_items ADD COLUMN IF NOT EXISTS handover_stock NUMERIC(12,3) DEFAULT 0;
+      ALTER TABLE store_stock_entry_items ADD COLUMN IF NOT EXISTS excess_consumption NUMERIC(12,3) DEFAULT 0;
     `);
 
     // 2. Default categories seed
@@ -296,6 +308,14 @@ async function ensureStoreManagementSchema() {
         ON CONFLICT (code) DO NOTHING;
       `);
     }
+
+    // 5. Idempotent column additions for Requisitions vendor integration & User multi-branch RBAC
+    await pool.query(`
+      ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS suggested_vendor_id INTEGER REFERENCES store_vendors(id) ON DELETE SET NULL;
+      ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS source_module VARCHAR(50) DEFAULT 'Requisitions';
+      ALTER TABLE store_item_requests ADD COLUMN IF NOT EXISTS assigned_vendor_id INTEGER REFERENCES store_vendors(id) ON DELETE SET NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_branches JSONB DEFAULT '[]'::jsonb;
+    `);
 
     schemaEnsured = true;
     console.log('✅ Store Management independent schema verified and ready.');

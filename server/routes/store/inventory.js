@@ -1,14 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
-const { authenticateToken, isAdmin } = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth');
+const { requireStoreRoles, enforceBranchAccess } = require('../../middleware/storeAuth');
+const { recordActivityLog } = require('../activityLogs');
 
 // -------------------------------------------------------------
 // GET /api/store/inventory (List stock levels per location)
 // -------------------------------------------------------------
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store', 'store man', 'data entry']), async (req, res) => {
   try {
     const { store_id, branch, category_id, search, low_stock_only } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch, store_id });
+    if (!access.ok) return;
+
     let query = `
       SELECT 
         inv.*,
@@ -30,6 +35,11 @@ router.get('/', authenticateToken, async (req, res) => {
       WHERE si.status = 'Active'
     `;
     const params = [];
+
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND sl.branch = ANY($${params.length})`;
+    }
 
     if (store_id && store_id !== 'All') {
       params.push(parseInt(store_id, 10));
@@ -67,9 +77,12 @@ router.get('/', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // GET /api/store/inventory/alerts (Low-stock items requiring reorder)
 // -------------------------------------------------------------
-router.get('/alerts', authenticateToken, async (req, res) => {
+router.get('/alerts', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store', 'store man', 'data entry']), async (req, res) => {
   try {
     const { branch } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch });
+    if (!access.ok) return;
+
     let query = `
       SELECT 
         inv.*,
@@ -91,6 +104,11 @@ router.get('/alerts', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND sl.branch = ANY($${params.length})`;
+    }
+
     if (branch && branch !== 'All') {
       params.push(branch);
       query += ` AND sl.branch = $${params.length}`;
@@ -108,7 +126,7 @@ router.get('/alerts', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/inventory/adjust (Manual Stock Adjustment with Audit Reason)
 // -------------------------------------------------------------
-router.post('/adjust', authenticateToken, async (req, res) => {
+router.post('/adjust', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const { store_id, item_id, adjusted_quantity, reason, notes } = req.body;
 
   if (!store_id || !item_id || adjusted_quantity === undefined) {
@@ -158,6 +176,19 @@ router.post('/adjust', authenticateToken, async (req, res) => {
       qtyDiff, stockBefore, targetQty, userName, `${reason.trim()} ${notes ? '(' + notes.trim() + ')' : ''}`
     ]);
 
+    await recordActivityLog(client, {
+      module: 'Store',
+      action: 'STOCK_ADJUSTMENT',
+      entity_id: item_id,
+      entity_name: `Store #${store_id} Item #${item_id}`,
+      description: `Adjusted stock from ${stockBefore} to ${targetQty} (${qtyDiff >= 0 ? '+' : ''}${qtyDiff})`,
+      reason: reason.trim(),
+      old_data: { current_stock: stockBefore },
+      new_data: { current_stock: targetQty },
+      performed_by: userName,
+      branch: 'All'
+    });
+
     await client.query('COMMIT');
     res.json({
       success: true,
@@ -178,24 +209,28 @@ router.post('/adjust', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // GET /api/store/inventory/:itemId/history (Item movement audit trail)
 // -------------------------------------------------------------
-router.get('/:itemId/history', authenticateToken, async (req, res) => {
+router.get('/:itemId/history', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store', 'store man', 'data entry']), async (req, res) => {
   const { itemId } = req.params;
   const { store_id } = req.query;
 
   try {
+    const access = await enforceBranchAccess(req, res, { store_id });
+    if (!access.ok) return;
+
     let query = `
       SELECT sh.*, sl.name as store_name, sl.branch as store_branch
       FROM store_stock_history sh
       JOIN store_locations sl ON sh.store_id = sl.id
-      WHERE sh.item_id = $1
-    `;
+      WHERE sh.item_id = $1`;
     const params = [itemId];
-
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND sl.branch = ANY($${params.length})`;
+    }
     if (store_id && store_id !== 'All') {
       params.push(parseInt(store_id, 10));
       query += ` AND sh.store_id = $${params.length}`;
     }
-
     query += ' ORDER BY sh.created_at DESC LIMIT 100';
     const result = await pool.query(query, params);
     res.json(result.rows);

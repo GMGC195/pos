@@ -22,28 +22,24 @@ import {
 import { BRAND_CURRENCY } from '../../branding';
 import { useStore } from '../../contexts/StoreContext';
 import { formatBranchLabel } from './storeUtils';
+import AddNewItemRequestModal from './AddNewItemRequestModal';
 
 export default function ItemRequests({ 
   selectedBranch: propBranch, 
-  selectedStoreId: propStoreId, 
-  locations: propLocations = [], 
   user 
 }) {
   const storeContext = useStore();
   const selectedBranch = propBranch || storeContext?.selectedBranch || 'All';
-  const selectedStoreId = propStoreId || storeContext?.selectedStoreId || 'All';
-  const locations = (propLocations && propLocations.length > 0) ? propLocations : (storeContext?.locations || []);
-  const branches = storeContext?.branches || [];
+  const branches = storeContext?.branches || ['Branch 1', 'Branch 2', 'Branch 3'];
   const setSelectedBranch = storeContext?.setSelectedBranch || (() => {});
-  const setSelectedStoreId = storeContext?.setSelectedStoreId || (() => {});
   const [requests, setRequests] = useState([]);
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(false);
 
   // Filters
   const [branchFilter, setBranchFilter] = useState(selectedBranch || 'All');
-  const [storeFilter, setStoreFilter] = useState(selectedStoreId || 'All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [search, setSearch] = useState('');
 
@@ -70,7 +66,8 @@ export default function ItemRequests({
     edited_item_name: '',
     edited_category_id: '',
     edited_unit: '',
-    min_stock: 5
+    min_stock: 5,
+    vendor_id: ''
   });
   const [isApproving, setIsApproving] = useState(false);
 
@@ -79,22 +76,24 @@ export default function ItemRequests({
   const [rejectReason, setRejectReason] = useState('');
   const [isRejecting, setIsRejecting] = useState(false);
 
-  const isManagerOrAdmin = useMemo(() => {
+  const isAdminOrDev = useMemo(() => {
     const role = (user?.role || '').toLowerCase();
-    return ['admin', 'developer', 'management', 'store manager'].includes(role);
+    return ['admin', 'developer'].includes(role);
   }, [user]);
 
-  // Load Categories & Units
+  // Load Categories, Units & Vendors
   const fetchAux = async () => {
     try {
-      const [catRes, unitRes] = await Promise.all([
+      const [catRes, unitRes, venRes] = await Promise.all([
         axios.get('/api/store/locations/categories'),
-        axios.get('/api/store/locations/units')
+        axios.get('/api/store/locations/units'),
+        axios.get('/api/store/vendors?status=Active')
       ]);
       setCategories(catRes.data || []);
       setUnits(unitRes.data || []);
+      setVendors(venRes.data || []);
     } catch (err) {
-      console.error('Error fetching categories/units:', err);
+      console.error('Error fetching categories/units/vendors:', err);
     }
   };
 
@@ -104,7 +103,6 @@ export default function ItemRequests({
     try {
       const params = {};
       if (branchFilter !== 'All') params.branch = branchFilter;
-      if (storeFilter !== 'All') params.store_id = storeFilter;
       if (statusFilter !== 'All') params.status = statusFilter;
 
       const res = await axios.get('/api/store/requests', { params });
@@ -123,68 +121,16 @@ export default function ItemRequests({
 
   useEffect(() => {
     fetchRequests();
-  }, [branchFilter, storeFilter, statusFilter]);
+  }, [branchFilter, statusFilter]);
 
   // Sync with parent props
   useEffect(() => {
     if (selectedBranch && selectedBranch !== 'All') setBranchFilter(selectedBranch);
   }, [selectedBranch]);
 
-  useEffect(() => {
-    if (selectedStoreId && selectedStoreId !== 'All') setStoreFilter(selectedStoreId);
-  }, [selectedStoreId]);
-
   // Open New Request
   const handleOpenNew = () => {
-    setFormData({
-      store_id: locations.length > 0 ? locations[0].id : '',
-      branch: locations.length > 0 ? locations[0].branch : (selectedBranch !== 'All' ? selectedBranch : 'Branch 1'),
-      item_name: '',
-      category_id: categories.length > 0 ? categories[0].id : '',
-      unit: units.length > 0 ? units[0].short_code : 'kg',
-      required_quantity: 10,
-      min_stock: 5,
-      suggested_vendor: '',
-      estimated_price: 0,
-      reason: ''
-    });
     setShowNewModal(true);
-  };
-
-  // Handle Location change in New Form
-  const handleLocationChange = (locId) => {
-    const found = locations.find(l => String(l.id) === String(locId));
-    setFormData(prev => ({
-      ...prev,
-      store_id: locId,
-      branch: found ? found.branch : prev.branch
-    }));
-  };
-
-  // Submit New Request
-  const handleNewSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.item_name.trim()) {
-      toast.error('Item name is required');
-      return;
-    }
-    if (!formData.store_id) {
-      toast.error('Store location is required');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await axios.post('/api/store/requests', formData);
-      toast.success('Item request submitted for management review');
-      setShowNewModal(false);
-      fetchRequests();
-    } catch (err) {
-      console.error('Error submitting request:', err);
-      toast.error(err.response?.data?.error || 'Failed to submit requisition');
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   // Open Approve Modal
@@ -195,7 +141,8 @@ export default function ItemRequests({
       edited_item_name: req.item_name,
       edited_category_id: req.category_id || (categories.length > 0 ? categories[0].id : ''),
       edited_unit: req.unit,
-      min_stock: req.min_stock || 5
+      min_stock: req.min_stock || 5,
+      vendor_id: req.vendor_id || ''
     });
   };
 
@@ -286,17 +233,19 @@ export default function ItemRequests({
               <RefreshCw size={15} className={loading ? 'spin' : ''} />
             </button>
 
-            <button
-              onClick={handleOpenNew}
-              className="store-btn store-btn-primary"
-            >
-              <Plus size={16} />
-              <span>New Item Request</span>
-            </button>
+            {isAdminOrDev && (
+              <button
+                onClick={handleOpenNew}
+                className="store-btn store-btn-primary"
+              >
+                <Plus size={16} />
+                <span>New Item Request</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Mobile Branch & Location Bar (screens <= 768px) */}
+        {/* Mobile Branch Bar (screens <= 768px) */}
         <div className="store-mobile-location-bar">
           <div className="store-filter-col">
             <label className="store-filter-label">Branch</label>
@@ -308,28 +257,9 @@ export default function ItemRequests({
               }}
               className="store-filter-select"
             >
-              <option value="All">All</option>
+              <option value="All">All Branches</option>
               {branches.map(b => (
                 <option key={b} value={b}>{formatBranchLabel(b)}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="store-filter-col">
-            <label className="store-filter-label">Store Location</label>
-            <select
-              value={storeFilter}
-              onChange={(e) => {
-                setStoreFilter(e.target.value);
-                setSelectedStoreId(e.target.value);
-              }}
-              className="store-filter-select"
-            >
-              <option value="All">All Locations</option>
-              {locations.map(loc => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name} {branchFilter === 'All' ? `(${formatBranchLabel(loc.branch)})` : ''}
-                </option>
               ))}
             </select>
           </div>
@@ -390,7 +320,7 @@ export default function ItemRequests({
                 <th>Category</th>
                 <th style={{ textAlign: 'center' }}>Unit</th>
                 <th style={{ textAlign: 'right' }}>Req. Qty</th>
-                <th>Store Location</th>
+                <th>Branch</th>
                 <th>Requested By</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -425,6 +355,16 @@ export default function ItemRequests({
                     {/* Item Name & Reason */}
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary, #111827)' }}>{req.item_name}</div>
+                      {(req.vendor_name || req.suggested_vendor) && (
+                        <div style={{ fontSize: 11, color: '#059669', fontWeight: 600, marginTop: 2 }}>
+                          Supplier: {req.vendor_name || req.suggested_vendor}
+                        </div>
+                      )}
+                      {req.request_source && (
+                        <div style={{ fontSize: 10, color: 'var(--text-secondary, #6b7280)', marginTop: 1 }}>
+                          Source: {req.request_source}
+                        </div>
+                      )}
                       {req.reason && (
                         <div style={{ fontSize: 11, color: 'var(--text-secondary, #6b7280)', fontStyle: 'italic' }}>"{req.reason}"</div>
                       )}
@@ -454,10 +394,9 @@ export default function ItemRequests({
                       {Number(req.required_quantity || 0).toLocaleString()}
                     </td>
 
-                    {/* Location & Branch */}
+                    {/* Branch */}
                     <td>
-                      <div style={{ fontWeight: 500, fontSize: 12 }}>{req.store_name}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-secondary, #6b7280)' }}>{formatBranchLabel(req.branch)}</div>
+                      <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--secondary)' }}>{formatBranchLabel(req.branch)}</span>
                     </td>
 
                     {/* Requested By */}
@@ -485,7 +424,7 @@ export default function ItemRequests({
                     {/* Actions */}
                     <td style={{ textAlign: 'right' }}>
                       {req.status === 'Pending' ? (
-                        isManagerOrAdmin ? (
+                        isAdminOrDev ? (
                           <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
                             <button
                               type="button"
@@ -523,193 +462,15 @@ export default function ItemRequests({
       </div>
 
       {/* NEW REQUEST MODAL */}
-      {showNewModal && (
-        <div className="store-modal-overlay" onClick={() => setShowNewModal(false)}>
-          <div className="store-modal-dialog store-modal-dialog-lg" onClick={e => e.stopPropagation()}>
-            <div className="store-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div className="store-header-icon">
-                  <GitPullRequest size={20} />
-                </div>
-                <div>
-                  <h3 className="store-modal-title">Submit New Item Requisition</h3>
-                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary, #6b7280)' }}>
-                    Request a new ingredient, consumable, or store item.
-                  </p>
-                </div>
-              </div>
-              <button type="button" onClick={() => setShowNewModal(false)} className="store-modal-close">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleNewSubmit}>
-              <div className="store-modal-body">
-                {/* Store destination indicator */}
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  background: 'var(--surface-2, #f3f4f6)',
-                  border: '1px solid #e5e7eb',
-                  marginBottom: 14,
-                  fontSize: 12
-                }}>
-                  <span style={{ color: 'var(--text-secondary, #6b7280)', fontWeight: 600 }}>Destination Store:</span>
-                  {locations.length > 0 && formData.store_id ? (
-                    <span style={{ fontWeight: 700, color: 'var(--secondary, #103C43)' }}>
-                      {locations.find(l => l.id == formData.store_id)?.name} ({formatBranchLabel(formData.branch)})
-                    </span>
-                  ) : (
-                    <select
-                      value={formData.store_id}
-                      onChange={(e) => handleLocationChange(e.target.value)}
-                      required
-                      className="store-form-select"
-                      style={{ padding: '3px 8px', fontSize: 12, width: 'auto' }}
-                    >
-                      <option value="">Select Target Store</option>
-                      {locations.map(loc => (
-                        <option key={loc.id} value={loc.id}>{loc.name} ({formatBranchLabel(loc.branch)})</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                <div className="store-form-grid-3">
-                  {/* ROW 1: Requested Item Name (Full Width) */}
-                  <div className="store-form-group col-span-3">
-                    <label className="store-form-label">
-                      Requested Item Name <span style={{ color: 'var(--red, #ef4444)' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.item_name}
-                      onChange={(e) => setFormData({ ...formData, item_name: e.target.value })}
-                      required
-                      placeholder="e.g. Organic Pizza Sauce 5kg Pouch"
-                      className="store-form-input"
-                      autoFocus
-                    />
-                  </div>
-
-                  {/* ROW 2: Category, Unit, Required Qty */}
-                  <div className="store-form-group">
-                    <label className="store-form-label">Category</label>
-                    <select
-                      value={formData.category_id}
-                      onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
-                      className="store-form-select"
-                    >
-                      <option value="">Select Category</option>
-                      {categories.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="store-form-group">
-                    <label className="store-form-label">
-                      Unit <span style={{ color: 'var(--red, #ef4444)' }}>*</span>
-                    </label>
-                    <select
-                      value={formData.unit}
-                      onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                      className="store-form-select"
-                    >
-                      {units.map(u => (
-                        <option key={u.id} value={u.short_code}>{u.name} ({u.short_code})</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="store-form-group">
-                    <label className="store-form-label">Required Quantity</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      value={formData.required_quantity}
-                      onChange={(e) => setFormData({ ...formData, required_quantity: parseFloat(e.target.value) || 0 })}
-                      className="store-form-input"
-                    />
-                  </div>
-
-                  {/* ROW 3: Min Stock, Est Price, Suggested Supplier */}
-                  <div className="store-form-group">
-                    <label className="store-form-label">Target Min Stock Level</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      value={formData.min_stock}
-                      onChange={(e) => setFormData({ ...formData, min_stock: parseFloat(e.target.value) || 0 })}
-                      className="store-form-input"
-                    />
-                  </div>
-
-                  <div className="store-form-group">
-                    <label className="store-form-label">
-                      Est. Unit Price ({BRAND_CURRENCY})
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.estimated_price}
-                      onChange={(e) => setFormData({ ...formData, estimated_price: parseFloat(e.target.value) || 0 })}
-                      className="store-form-input"
-                    />
-                  </div>
-
-                  <div className="store-form-group">
-                    <label className="store-form-label">Suggested Supplier</label>
-                    <input
-                      type="text"
-                      value={formData.suggested_vendor}
-                      onChange={(e) => setFormData({ ...formData, suggested_vendor: e.target.value })}
-                      placeholder="e.g. Al Safi Danone"
-                      className="store-form-input"
-                    />
-                  </div>
-
-                  {/* ROW 4: Reason / Justification */}
-                  <div className="store-form-group col-span-3">
-                    <label className="store-form-label">Reason / Justification</label>
-                    <textarea
-                      rows="2"
-                      value={formData.reason}
-                      onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-                      placeholder="Explain why this item is needed in the store..."
-                      className="store-form-textarea"
-                    ></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <div className="store-modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setShowNewModal(false)}
-                  className="store-btn store-btn-secondary"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="store-btn store-btn-primary"
-                >
-                  {submitting && <RefreshCw size={14} className="spin" />}
-                  <span>Submit Requisition</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddNewItemRequestModal
+        isOpen={showNewModal}
+        onClose={() => setShowNewModal(false)}
+        categories={categories}
+        units={units}
+        defaultBranch={selectedBranch}
+        source="Requisitions"
+        onSuccess={fetchRequests}
+      />
 
       {/* APPROVE MODAL (MANAGERS) */}
       {approvingReq && (
@@ -778,6 +539,27 @@ export default function ItemRequests({
                       required
                       className="store-form-input"
                     />
+                  </div>
+
+                  <div className="store-form-group col-span-2">
+                    <label className="store-form-label">
+                      Assign Vendor / Supplier
+                      {approvingReq.vendor_id && (
+                        <span style={{ marginLeft: 8, fontSize: 11, color: '#059669', fontWeight: 600 }}>
+                          (Attached from {approvingReq.request_source || 'Purchases'})
+                        </span>
+                      )}
+                    </label>
+                    <select
+                      value={approveForm.vendor_id}
+                      onChange={(e) => setApproveForm({ ...approveForm, vendor_id: e.target.value })}
+                      className="store-form-select"
+                    >
+                      <option value="">-- Optional / Assign Vendor Later --</option>
+                      {vendors.map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>

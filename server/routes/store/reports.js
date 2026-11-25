@@ -2,13 +2,16 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
 const { authenticateToken } = require('../../middleware/auth');
+const { requireStoreRoles, enforceBranchAccess } = require('../../middleware/storeAuth');
 
 // -------------------------------------------------------------
 // GET /api/store/reports/consumption (Shift & Date-wise Consumption)
 // -------------------------------------------------------------
-router.get('/consumption', authenticateToken, async (req, res) => {
+router.get('/consumption', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store']), async (req, res) => {
   try {
     const { store_id, branch, from_date, to_date, shift, category_id } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch, store_id });
+    if (!access.ok) return;
 
     let query = `
       SELECT 
@@ -94,7 +97,7 @@ router.get('/consumption', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // GET /api/store/reports/purchases (Vendor-wise purchase breakdown)
 // -------------------------------------------------------------
-router.get('/purchases', authenticateToken, async (req, res) => {
+router.get('/purchases', authenticateToken, requireStoreRoles(['admin', 'developer', 'management']), async (req, res) => {
   try {
     const { branch, store_id, vendor_id, from_date, to_date } = req.query;
 
@@ -151,7 +154,7 @@ router.get('/purchases', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // GET /api/store/reports/price-comparison (3-month historical price comparison)
 // -------------------------------------------------------------
-router.get('/price-comparison', authenticateToken, async (req, res) => {
+router.get('/price-comparison', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store']), async (req, res) => {
   try {
     const { item_id } = req.query;
 

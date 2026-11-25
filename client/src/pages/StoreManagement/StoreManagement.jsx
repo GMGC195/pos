@@ -33,26 +33,22 @@ export default function StoreManagement({ user: propUser }) {
   const { user: authUser } = useAuth();
   const user = propUser || authUser;
 
-  // Store context for branch and location
+  // Store context for branch
   const {
     selectedBranch,
-    selectedStoreId,
-    selectedStore,
-    locations,
     refreshLocations
   } = useStore();
 
-  // Navigation tab state
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [dataRefreshKey, setDataRefreshKey] = useState(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const userRole = (user?.role || '').trim().toLowerCase();
 
-  // Tab definitions
-  const tabs = [
+  // Exact requested 10-tab navigation order:
+  // 1. Dashboard, 2. Purchases, 3. Stock Entry, 4. Stock History, 5. Suppliers,
+  // 6. Store Items, 7. Requisitions, 8. Consumption, 9. Price Trends, 10. Store Settings
+  const allTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'purchases', label: 'Purchases', icon: ShoppingBag },
     { id: 'entry', label: 'Stock Entry', icon: ClipboardCheck },
     { id: 'history', label: 'Stock History', icon: History },
-    { id: 'purchases', label: 'Purchases', icon: ShoppingBag },
     { id: 'vendors', label: 'Suppliers', icon: Truck },
     { id: 'items', label: 'Store Items', icon: Package },
     { id: 'requests', label: 'Requisitions', icon: GitPullRequest },
@@ -60,6 +56,35 @@ export default function StoreManagement({ user: propUser }) {
     { id: 'price-comparison', label: 'Price Trends', icon: TrendingUp },
     { id: 'settings', label: 'Store Settings', icon: Settings }
   ];
+
+  const tabs = React.useMemo(() => {
+    if (userRole === 'developer' || userRole === 'admin') return allTabs;
+    if (userRole === 'store man' || userRole === 'data entry') {
+      return allTabs.filter(t => ['purchases', 'entry', 'history', 'items'].includes(t.id));
+    }
+    if (userRole === 'management store') {
+      return allTabs.filter(t => ['dashboard', 'history', 'vendors', 'items', 'reports', 'price-comparison', 'settings'].includes(t.id));
+    }
+    if (userRole === 'management') {
+      return allTabs.filter(t => ['dashboard', 'purchases', 'history', 'vendors', 'items', 'requests', 'reports', 'price-comparison', 'settings'].includes(t.id));
+    }
+    return allTabs.filter(t => ['items', 'history'].includes(t.id));
+  }, [userRole]);
+
+  // Navigation tab state
+  const [activeTab, setActiveTab] = useState(() => {
+    if (userRole === 'store man' || userRole === 'data entry') return 'purchases';
+    return 'dashboard';
+  });
+
+  React.useEffect(() => {
+    if (tabs.length > 0 && !tabs.some(t => t.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab]);
+
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -186,11 +211,9 @@ export default function StoreManagement({ user: propUser }) {
       <div>
         {activeTab === 'dashboard' && (
           <StoreDashboard
-            key={`dashboard-${selectedStoreId}-${dataRefreshKey}`}
+            key={`dashboard-${selectedBranch}-${dataRefreshKey}`}
             selectedBranch={selectedBranch}
-            selectedStoreId={selectedStoreId}
-            selectedStore={selectedStore}
-            locations={locations}
+            user={user}
             onNavigateTab={setActiveTab}
             onRefresh={handleRefresh}
           />
@@ -198,10 +221,8 @@ export default function StoreManagement({ user: propUser }) {
 
         {activeTab === 'entry' && (
           <StockEntry
-            key={`entry-${selectedStoreId}-${dataRefreshKey}`}
+            key={`entry-${selectedBranch}-${dataRefreshKey}`}
             selectedBranch={selectedBranch}
-            selectedStoreId={selectedStoreId}
-            locations={locations}
             user={user}
             onEntrySubmitted={() => {
               setDataRefreshKey(prev => prev + 1);
@@ -211,20 +232,16 @@ export default function StoreManagement({ user: propUser }) {
 
         {activeTab === 'history' && (
           <StockHistory
-            key={`history-${selectedStoreId}-${dataRefreshKey}`}
+            key={`history-${selectedBranch}-${dataRefreshKey}`}
             selectedBranch={selectedBranch}
-            selectedStoreId={selectedStoreId}
-            locations={locations}
             user={user}
           />
         )}
 
         {activeTab === 'purchases' && (
           <PurchaseManagement
-            key={`purchases-${selectedStoreId}-${dataRefreshKey}`}
+            key={`purchases-${selectedBranch}-${dataRefreshKey}`}
             selectedBranch={selectedBranch}
-            selectedStoreId={selectedStoreId}
-            locations={locations}
             user={user}
           />
         )}
@@ -238,27 +255,24 @@ export default function StoreManagement({ user: propUser }) {
 
         {activeTab === 'items' && (
           <InventoryItems
-            key={`items-${dataRefreshKey}`}
+            key={`items-${selectedBranch}-${dataRefreshKey}`}
+            selectedBranch={selectedBranch}
             user={user}
           />
         )}
 
         {activeTab === 'requests' && (
           <ItemRequests
-            key={`requests-${selectedStoreId}-${dataRefreshKey}`}
+            key={`requests-${selectedBranch}-${dataRefreshKey}`}
             selectedBranch={selectedBranch}
-            selectedStoreId={selectedStoreId}
-            locations={locations}
             user={user}
           />
         )}
 
         {activeTab === 'reports' && (
           <ConsumptionReports
-            key={`reports-${selectedStoreId}-${dataRefreshKey}`}
+            key={`reports-${selectedBranch}-${dataRefreshKey}`}
             selectedBranch={selectedBranch}
-            selectedStoreId={selectedStoreId}
-            locations={locations}
           />
         )}
 

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
 const { authenticateToken, isAdmin } = require('../../middleware/auth');
+const { requireStoreRoles } = require('../../middleware/storeAuth');
 
 // Helper to generate next item code (e.g. STR-1001, STR-1002...)
 async function generateItemCode(client) {
@@ -31,7 +32,15 @@ router.get('/', authenticateToken, async (req, res) => {
         sc.name as category_name,
         sc.icon as category_icon,
         sv.name as default_vendor_name,
-        sv.phone as default_vendor_phone
+        sv.phone as default_vendor_phone,
+        COALESCE(
+          (SELECT json_agg(DISTINCT vi.vendor_id) FROM store_vendor_items vi WHERE vi.item_id = si.id),
+          '[]'::json
+        ) as vendor_ids,
+        COALESCE(
+          (SELECT json_agg(DISTINCT v2.name) FROM store_vendor_items vi2 JOIN store_vendors v2 ON vi2.vendor_id = v2.id WHERE vi2.item_id = si.id),
+          '[]'::json
+        ) as vendor_names
       FROM store_items si
       LEFT JOIN store_categories sc ON si.category_id = sc.id
       LEFT JOIN store_vendors sv ON si.default_vendor_id = sv.id
@@ -83,10 +92,10 @@ router.get('/next-code', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/items (Create new Store Item)
 // -------------------------------------------------------------
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const {
     name, arabic_name, item_code, category_id, primary_unit,
-    secondary_unit, unit_conversion_ratio, default_vendor_id,
+    secondary_unit, unit_conversion_ratio, default_vendor_id, vendor_ids,
     min_stock_level, reorder_quantity, last_purchase_price, notes
   } = req.body;
 
@@ -137,6 +146,19 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const newItem = insertRes.rows[0];
 
+    // Link multiple vendors if vendor_ids or default_vendor_id provided
+    const vIds = Array.isArray(vendor_ids) ? vendor_ids.map(v => parseInt(v, 10)).filter(v => !isNaN(v)) : [];
+    if (default_vendor_id && !vIds.includes(parseInt(default_vendor_id, 10))) {
+      vIds.push(parseInt(default_vendor_id, 10));
+    }
+    for (const vid of vIds) {
+      await client.query(
+        `INSERT INTO store_vendor_items (vendor_id, item_id, last_quoted_price)
+         VALUES ($1, $2, $3) ON CONFLICT (vendor_id, item_id) DO NOTHING`,
+        [vid, newItem.id, parseFloat(last_purchase_price) || 0]
+      );
+    }
+
     // Auto-initialize inventory rows across all active store locations with 0 stock
     const storesRes = await client.query('SELECT id FROM store_locations WHERE is_active = true');
     for (const store of storesRes.rows) {
@@ -161,11 +183,11 @@ router.post('/', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // PUT /api/store/items/:id (Update Store Item)
 // -------------------------------------------------------------
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const { id } = req.params;
   const {
     name, arabic_name, item_code, category_id, primary_unit,
-    secondary_unit, unit_conversion_ratio, default_vendor_id,
+    secondary_unit, unit_conversion_ratio, default_vendor_id, vendor_ids,
     min_stock_level, reorder_quantity, last_purchase_price, notes, status
   } = req.body;
 
@@ -201,6 +223,22 @@ router.put('/:id', authenticateToken, async (req, res) => {
     // Update min_stock_level on store_inventory
     if (min_stock_level !== undefined) {
       await pool.query('UPDATE store_inventory SET min_stock_level = $1 WHERE item_id = $2', [min_stock_level, id]);
+    }
+
+    // Sync multiple vendors if vendor_ids provided
+    if (Array.isArray(vendor_ids)) {
+      const cleanIds = vendor_ids.map(v => parseInt(v, 10)).filter(v => !isNaN(v));
+      if (default_vendor_id && !cleanIds.includes(parseInt(default_vendor_id, 10))) {
+        cleanIds.push(parseInt(default_vendor_id, 10));
+      }
+      await pool.query('DELETE FROM store_vendor_items WHERE item_id = $1', [id]);
+      for (const vid of cleanIds) {
+        await pool.query(
+          `INSERT INTO store_vendor_items (vendor_id, item_id, last_quoted_price)
+           VALUES ($1, $2, $3) ON CONFLICT (vendor_id, item_id) DO NOTHING`,
+          [vid, id, parseFloat(last_purchase_price) || 0]
+        );
+      }
     }
 
     res.json(updateRes.rows[0]);
@@ -243,7 +281,7 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/items/bulk (Excel / Batch import)
 // -------------------------------------------------------------
-router.post('/bulk', authenticateToken, async (req, res) => {
+router.post('/bulk', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const { items } = req.body;
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Valid items array required' });

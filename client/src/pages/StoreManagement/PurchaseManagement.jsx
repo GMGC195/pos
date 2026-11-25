@@ -1,49 +1,50 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from '../../api';
 import toast from 'react-hot-toast';
-import { 
-  ShoppingCart, 
-  Plus, 
-  Search, 
-  Filter, 
-  Trash2, 
-  Eye, 
-  Calendar, 
-  Truck, 
-  DollarSign, 
-  CheckCircle2, 
-  X, 
-  FileText,
-  Printer,
-  ChevronDown,
+import {
+  ShoppingCart,
+  Plus,
+  Search,
+  Trash2,
+  Eye,
+  X,
   RefreshCw,
-  RotateCcw
+  ListChecks,
+  CheckCircle2
 } from 'lucide-react';
-import { BRAND_CURRENCY, BRAND_NAME } from '../../branding';
-import { getSaudiTodayDate, formatSaudiDate } from '../../utils/timezone';
+import { BRAND_CURRENCY } from '../../branding';
+import { getSaudiTodayDate } from '../../utils/timezone';
 import { useStore } from '../../contexts/StoreContext';
 import { formatBranchLabel } from './storeUtils';
+import AddNewItemRequestModal from './AddNewItemRequestModal';
 
-export default function PurchaseManagement({ 
-  selectedBranch: propBranch, 
-  selectedStoreId: propStoreId, 
-  locations: propLocations = [], 
-  onPurchaseCreated 
+export default function PurchaseManagement({
+  selectedBranch: propBranch,
+  onPurchaseCreated,
+  user,
+  readOnly = false
 }) {
   const storeContext = useStore();
   const selectedBranch = propBranch || storeContext?.selectedBranch || 'All';
-  const selectedStoreId = propStoreId || storeContext?.selectedStoreId || 'All';
-  const locations = (propLocations && propLocations.length > 0) ? propLocations : (storeContext?.locations || []);
-  const branches = storeContext?.branches || [];
+  const branches = storeContext?.branches || ['Branch 1', 'Branch 2', 'Branch 3'];
   const setSelectedBranch = storeContext?.setSelectedBranch || (() => {});
-  const setSelectedStoreId = storeContext?.setSelectedStoreId || (() => {});
+
+  const canCreatePurchase = useMemo(() => {
+    if (readOnly) return false;
+    const role = (user?.role || '').trim().toLowerCase();
+    return ['admin', 'developer', 'store man', 'data entry'].includes(role);
+  }, [user, readOnly]);
+
+  // Two Tabs: 'add' (Add New Purchases - default when permitted) | 'list' (See Purchases)
+  const [purchaseTab, setPurchaseTab] = useState(() => (canCreatePurchase ? 'add' : 'list'));
+
   const [purchases, setPurchases] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [storeItems, setStoreItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Filters
+  // See Purchases Filters
   const [vendorFilter, setVendorFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [search, setSearch] = useState('');
@@ -51,32 +52,30 @@ export default function PurchaseManagement({
   const [toDate, setToDate] = useState('');
 
   // Modals
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showNewItemReqModal, setShowNewItemReqModal] = useState(false);
   const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  // New Purchase Form State
+  // Add New Purchases Form State
   const [formVendorId, setFormVendorId] = useState('');
-  const [formStoreId, setFormStoreId] = useState(selectedStoreId || '');
+  const [formBranch, setFormBranch] = useState(
+    selectedBranch && selectedBranch !== 'All' ? selectedBranch : 'Branch 1'
+  );
   const [formInvoiceNumber, setFormInvoiceNumber] = useState('');
   const [formInvoiceDate, setFormInvoiceDate] = useState(() => getSaudiTodayDate());
-  const [formDeliveryDate, setFormDeliveryDate] = useState(() => getSaudiTodayDate());
   const [formPaymentMethod, setFormPaymentMethod] = useState('Cash');
   const [formPaymentStatus, setFormPaymentStatus] = useState('Paid');
   const [formNotes, setFormNotes] = useState('');
-  
-  // Line items state
-  const [lineItems, setLineItems] = useState([
-    { item_id: '', quantity: 1, unit: 'KG', unit_price: 0, tax_rate: 0, notes: '', expiry_date: '', batch_number: '' }
-  ]);
 
-  // Load purchases list
+  // Line items: { item_id, item_name, item_code, unit, quantity, total_price, isFromVendor }
+  const [lineItems, setLineItems] = useState([]);
+  const [loadingVendorItems, setLoadingVendorItems] = useState(false);
+
   const fetchPurchases = async () => {
     setLoading(true);
     try {
       const res = await axios.get('/api/store/purchases', {
         params: {
-          store_id: selectedStoreId,
           branch: selectedBranch,
           vendor_id: vendorFilter,
           payment_status: statusFilter,
@@ -84,7 +83,7 @@ export default function PurchaseManagement({
           to_date: toDate
         }
       });
-      setPurchases(res.data);
+      setPurchases(res.data || []);
     } catch (err) {
       console.error('Error fetching purchases:', err);
       toast.error('Failed to load purchases.');
@@ -93,23 +92,58 @@ export default function PurchaseManagement({
     }
   };
 
-  // Load vendors and items options
   useEffect(() => {
-    axios.get('/api/store/vendors?status=Active').then(r => setVendors(r.data)).catch(console.error);
-    axios.get('/api/store/items?status=Active').then(r => setStoreItems(r.data)).catch(console.error);
+    axios.get('/api/store/vendors?status=Active').then(r => setVendors(r.data || [])).catch(console.error);
+    axios.get('/api/store/items?status=Active').then(r => setStoreItems(r.data || [])).catch(console.error);
   }, []);
 
   useEffect(() => {
     fetchPurchases();
-  }, [selectedStoreId, selectedBranch, vendorFilter, statusFilter, fromDate, toDate]);
+  }, [selectedBranch, vendorFilter, statusFilter, fromDate, toDate]);
 
   useEffect(() => {
-    if (selectedStoreId && !formStoreId) {
-      setFormStoreId(selectedStoreId);
+    if (selectedBranch && selectedBranch !== 'All') {
+      setFormBranch(selectedBranch);
     }
-  }, [selectedStoreId]);
+  }, [selectedBranch]);
 
-  // Line item change handlers
+  // Automatically load all menu items registered under selected vendor
+  const loadVendorItems = async (vendorId) => {
+    if (!vendorId || vendorId === 'All') {
+      setLineItems([]);
+      return;
+    }
+    setLoadingVendorItems(true);
+    try {
+      const res = await axios.get(`/api/store/vendors/${vendorId}/items`);
+      const vItems = res.data || [];
+      setLineItems(
+        vItems.map(it => ({
+          item_id: String(it.item_id),
+          item_name: it.item_name,
+          item_code: it.item_code,
+          unit: it.primary_unit || 'KG',
+          quantity: '',
+          total_price: '',
+          isFromVendor: true
+        }))
+      );
+    } catch (err) {
+      console.error('Error loading vendor items:', err);
+      toast.error('Failed to load vendor menu items');
+    } finally {
+      setLoadingVendorItems(false);
+    }
+  };
+
+  useEffect(() => {
+    if (formVendorId) {
+      loadVendorItems(formVendorId);
+    } else {
+      setLineItems([]);
+    }
+  }, [formVendorId]);
+
   const handleItemSelect = (index, itemId) => {
     const sel = storeItems.find(it => it.id === parseInt(itemId, 10));
     setLineItems(prev => {
@@ -117,8 +151,9 @@ export default function PurchaseManagement({
       updated[index] = {
         ...updated[index],
         item_id: itemId,
-        unit: sel ? sel.primary_unit : 'KG',
-        unit_price: sel ? (parseFloat(sel.last_purchase_price) || 0) : 0
+        item_name: sel ? sel.name : '',
+        item_code: sel ? sel.item_code : '',
+        unit: sel ? sel.primary_unit : 'KG'
       };
       return updated;
     });
@@ -135,81 +170,86 @@ export default function PurchaseManagement({
   const addLine = () => {
     setLineItems(prev => [
       ...prev,
-      { item_id: '', quantity: 1, unit: 'KG', unit_price: 0, tax_rate: 0, notes: '', expiry_date: '', batch_number: '' }
+      {
+        item_id: '',
+        item_name: '',
+        item_code: '',
+        unit: 'KG',
+        quantity: '',
+        total_price: '',
+        isFromVendor: false
+      }
     ]);
   };
 
-  const removeLine = (index) => {
-    if (lineItems.length === 1) return;
-    setLineItems(prev => prev.filter((_, idx) => idx !== index));
-  };
-
-  // Form Calculations
-  const formCalculations = useMemo(() => {
-    let subtotal = 0;
-    let totalTax = 0;
-
+  // Calculations: Per Unit Price = Total Price / Quantity Received
+  const formTotals = useMemo(() => {
+    let grandTotal = 0;
+    let activeCount = 0;
     lineItems.forEach(it => {
       const qty = parseFloat(it.quantity) || 0;
-      const price = parseFloat(it.unit_price) || 0;
-      const taxRate = parseFloat(it.tax_rate) || 0;
-      const lineSub = qty * price;
-      const lineTax = (lineSub * taxRate) / 100;
-      subtotal += lineSub;
-      totalTax += lineTax;
+      const total = parseFloat(it.total_price) || 0;
+      if (qty > 0) {
+        activeCount++;
+        grandTotal += total;
+      }
     });
-
     return {
-      subtotal: Math.round(subtotal * 100) / 100,
-      totalTax: Math.round(totalTax * 100) / 100,
-      totalAmount: Math.round((subtotal + totalTax) * 100) / 100
+      activeCount,
+      grandTotal: Math.round(grandTotal * 100) / 100
     };
   }, [lineItems]);
 
-  // Submit Purchase
   const handleSubmitPurchase = async (e) => {
     e.preventDefault();
     if (!formVendorId) return toast.error('Please select a vendor');
-    if (!formStoreId) return toast.error('Please select a store location');
+    if (!formBranch || formBranch === 'All') return toast.error('Please select a branch');
 
-    for (const [idx, it] of lineItems.entries()) {
-      if (!it.item_id) return toast.error(`Please select an item for row #${idx + 1}`);
-      if (parseFloat(it.quantity) <= 0) return toast.error(`Quantity for row #${idx + 1} must be greater than 0`);
-      if (parseFloat(it.unit_price) < 0) return toast.error(`Unit price for row #${idx + 1} cannot be negative`);
+    const activeLines = lineItems.filter(it => it.item_id && parseFloat(it.quantity) > 0);
+    if (activeLines.length === 0) {
+      return toast.error('Please enter Quantity Received (> 0) for at least one item');
+    }
+
+    for (const [idx, it] of activeLines.entries()) {
+      const total = parseFloat(it.total_price);
+      if (isNaN(total) || total < 0) {
+        return toast.error(`Please enter a valid Total Price for ${it.item_name || `row #${idx + 1}`}`);
+      }
     }
 
     setSaving(true);
     try {
       const payload = {
         vendor_id: parseInt(formVendorId, 10),
-        store_id: parseInt(formStoreId, 10),
-        branch: selectedBranch,
+        branch: formBranch,
         invoice_number: formInvoiceNumber,
         invoice_date: formInvoiceDate,
-        delivery_date: formDeliveryDate,
+        delivery_date: formInvoiceDate,
         payment_method: formPaymentMethod,
         payment_status: formPaymentStatus,
         notes: formNotes,
-        items: lineItems.map(it => ({
-          item_id: parseInt(it.item_id, 10),
-          quantity: parseFloat(it.quantity),
-          unit: it.unit,
-          unit_price: parseFloat(it.unit_price),
-          tax_rate: parseFloat(it.tax_rate) || 0,
-          expiry_date: it.expiry_date || null,
-          batch_number: it.batch_number || null,
-          notes: it.notes || null
-        }))
+        items: activeLines.map(it => {
+          const qty = parseFloat(it.quantity);
+          const total = parseFloat(it.total_price) || 0;
+          const unitPrice = qty > 0 ? Math.round((total / qty) * 10000) / 10000 : 0;
+          return {
+            item_id: parseInt(it.item_id, 10),
+            quantity: qty,
+            unit: it.unit,
+            unit_price: unitPrice,
+            tax_rate: 0
+          };
+        })
       };
 
       const res = await axios.post('/api/store/purchases', payload);
-      toast.success(res.data.message);
-      setShowAddModal(false);
-      // Reset form
+      toast.success(res.data.message || 'Purchase saved successfully');
       setFormInvoiceNumber('');
-      setLineItems([{ item_id: '', quantity: 1, unit: 'KG', unit_price: 0, tax_rate: 0, notes: '', expiry_date: '', batch_number: '' }]);
+      setFormNotes('');
+      setLineItems(prev => prev.map(it => ({ ...it, quantity: '', total_price: '' })));
       await fetchPurchases();
       if (onPurchaseCreated) onPurchaseCreated();
+      setPurchaseTab('list');
     } catch (err) {
       console.error('Error creating purchase:', err);
       toast.error(err.response?.data?.error || 'Failed to register purchase');
@@ -218,7 +258,6 @@ export default function PurchaseManagement({
     }
   };
 
-  // View purchase detail
   const handleViewDetail = async (id) => {
     setLoadingDetail(true);
     try {
@@ -231,10 +270,10 @@ export default function PurchaseManagement({
     }
   };
 
-  // Filtered purchases
   const filteredPurchases = useMemo(() => {
     return purchases.filter(p => {
-      const matchSearch = !search ||
+      const matchSearch =
+        !search ||
         p.vendor_name.toLowerCase().includes(search.toLowerCase()) ||
         (p.invoice_number && p.invoice_number.toLowerCase().includes(search.toLowerCase())) ||
         p.purchase_number.toLowerCase().includes(search.toLowerCase());
@@ -244,7 +283,7 @@ export default function PurchaseManagement({
 
   return (
     <div className="store-module-wrap">
-      {/* Top Card: Header & 2-Row Filters */}
+      {/* Top Card: Header + Two Sub-Tabs */}
       <div className="store-card">
         <div className="store-header-row">
           <div className="store-header-left">
@@ -254,12 +293,10 @@ export default function PurchaseManagement({
             <div className="store-header-info">
               <h2 className="store-header-title">
                 Store Purchases & Receiving
-                <span className="store-badge-count">
-                  {filteredPurchases.length} Records
-                </span>
+                <span className="store-badge-count">{filteredPurchases.length} Records</span>
               </h2>
               <p className="store-header-desc">
-                Record supplier invoices, receive ingredients into store inventory, and track payable status.
+                Select a supplier to enter received quantities and total prices, or review recorded purchases.
               </p>
             </div>
           </div>
@@ -273,596 +310,561 @@ export default function PurchaseManagement({
             >
               <RefreshCw size={15} className={loading ? 'spin' : ''} />
             </button>
+          </div>
+        </div>
+
+        {/* Two Tabs: Add New Purchases | See Purchases */}
+        <div className="store-tabs">
+          {canCreatePurchase && (
             <button
-              className="store-btn store-btn-primary"
-              onClick={() => setShowAddModal(true)}
+              type="button"
+              onClick={() => setPurchaseTab('add')}
+              className={`store-tab-btn ${purchaseTab === 'add' ? 'active' : ''}`}
             >
-              <Plus size={16} />
-              <span>Register Purchase</span>
+              <Plus size={15} />
+              <span>Add New Purchases</span>
             </button>
-          </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setPurchaseTab('list')}
+            className={`store-tab-btn ${purchaseTab === 'list' ? 'active' : ''}`}
+          >
+            <ListChecks size={15} />
+            <span>See Purchases ({filteredPurchases.length})</span>
+          </button>
         </div>
+      </div>
 
-        {/* Mobile Branch & Location Bar */}
-        <div className="store-mobile-location-bar">
-          <div className="store-filter-col">
-            <label className="store-filter-label">Branch</label>
-            <select
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
-              className="store-filter-select"
-            >
-              <option value="All">All</option>
-              {branches.map(b => (
-                <option key={b} value={b}>{formatBranchLabel(b)}</option>
-              ))}
-            </select>
-          </div>
+      {/* TAB 1: ADD NEW PURCHASES */}
+      {purchaseTab === 'add' && canCreatePurchase && (
+        <form onSubmit={handleSubmitPurchase} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Supplier & Invoice Header */}
+          <div className="store-card">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
+              <div>
+                <label className="store-form-label">
+                  Supplier / Vendor <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  value={formVendorId}
+                  onChange={e => setFormVendorId(e.target.value)}
+                  required
+                  className="store-form-select"
+                >
+                  <option value="">Select Vendor...</option>
+                  {vendors.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} {v.phone ? `(${v.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="store-filter-col">
-            <label className="store-filter-label">Store Location</label>
-            <select
-              value={selectedStoreId}
-              onChange={(e) => setSelectedStoreId(e.target.value)}
-              className="store-filter-select"
-            >
-              <option value="All">All Locations</option>
-              {locations.map(loc => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name} {selectedBranch === 'All' ? `(${formatBranchLabel(loc.branch)})` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+              <div>
+                <label className="store-form-label">
+                  Branch <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  value={formBranch}
+                  onChange={e => setFormBranch(e.target.value)}
+                  required
+                  className="store-form-select"
+                >
+                  {branches.map(b => (
+                    <option key={b} value={b}>
+                      {b} ({formatBranchLabel(b)})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        {/* Filters Container: Exactly 1 clean row on desktop */}
-        <div className="store-filters-wrap">
-          <div className="store-filters-row">
-            {/* 1. Search Invoices (FIRST, compact width) */}
-            <div className="store-filter-col" style={{ flex: '1.4 1 180px' }}>
-              <label className="store-filter-label">Search Invoices</label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <Search size={14} style={{ position: 'absolute', left: 10, color: '#9ca3af' }} />
+              <div>
+                <label className="store-form-label">Invoice Date *</label>
                 <input
-                  type="text"
-                  placeholder="Search vendor, invoice, PO..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="store-filter-input"
-                  style={{ paddingLeft: 30 }}
+                  type="date"
+                  value={formInvoiceDate}
+                  onChange={e => setFormInvoiceDate(e.target.value)}
+                  required
+                  className="store-form-input"
                 />
               </div>
-            </div>
 
-            {/* 2. Supplier */}
-            <div className="store-filter-col" style={{ flex: '1.1 1 130px' }}>
-              <label className="store-filter-label">Supplier</label>
-              <select
-                value={vendorFilter}
-                onChange={e => setVendorFilter(e.target.value)}
-                className="store-filter-select"
-              >
-                <option value="All">All Vendors</option>
-                {vendors.map(v => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
-            </div>
+              <div>
+                <label className="store-form-label">Vendor Invoice #</label>
+                <input
+                  type="text"
+                  placeholder="e.g. INV-90412"
+                  value={formInvoiceNumber}
+                  onChange={e => setFormInvoiceNumber(e.target.value)}
+                  className="store-form-input"
+                />
+              </div>
 
-            {/* 3. Payment Status */}
-            <div className="store-filter-col" style={{ flex: '0.9 1 110px' }}>
-              <label className="store-filter-label">Payment Status</label>
-              <select
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                className="store-filter-select"
-              >
-                <option value="All">All Statuses</option>
-                <option value="Paid">Paid</option>
-                <option value="Unpaid">Unpaid</option>
-                <option value="Partial">Partial</option>
-              </select>
-            </div>
+              <div>
+                <label className="store-form-label">Payment Method</label>
+                <select
+                  value={formPaymentMethod}
+                  onChange={e => {
+                    setFormPaymentMethod(e.target.value);
+                    setFormPaymentStatus(e.target.value === 'Cash' ? 'Paid' : 'Unpaid');
+                  }}
+                  className="store-form-select"
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="Credit">Credit (On Account)</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                </select>
+              </div>
 
-            {/* 4. Invoice From Date */}
-            <div className="store-filter-col" style={{ flex: '0.9 1 115px' }}>
-              <label className="store-filter-label">From Date</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={e => setFromDate(e.target.value)}
-                className="store-filter-input"
-              />
+              <div>
+                <label className="store-form-label">Payment Status</label>
+                <select
+                  value={formPaymentStatus}
+                  onChange={e => setFormPaymentStatus(e.target.value)}
+                  className="store-form-select"
+                >
+                  <option value="Paid">Paid</option>
+                  <option value="Unpaid">Unpaid</option>
+                  <option value="Partial">Partial</option>
+                </select>
+              </div>
             </div>
+          </div>
 
-            {/* 5. Invoice To Date */}
-            <div className="store-filter-col" style={{ flex: '0.9 1 115px' }}>
-              <label className="store-filter-label">To Date</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={e => setToDate(e.target.value)}
-                className="store-filter-input"
-              />
-            </div>
+          {/* Vendor Items Entry Table (Desktop: Horizontal Row | Mobile: Stacked Vertical Fields) */}
+          <div className="store-card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 10,
+              padding: '14px 16px',
+              borderBottom: '1px solid var(--surface-2, #e5e7eb)'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>
+                  Menu Items Received
+                </h3>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Enter Quantity Received and Total Price; Per Unit Price calculates automatically.
+                </span>
+              </div>
 
-            {/* Reset Button if active */}
-            {(fromDate || toDate || vendorFilter !== 'All' || statusFilter !== 'All' || search) && (
-              <div className="store-filter-col-fixed" style={{ alignSelf: 'flex-end' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button
                   type="button"
                   onClick={() => {
-                    setSearch('');
-                    setVendorFilter('All');
-                    setStatusFilter('All');
-                    setFromDate('');
-                    setToDate('');
+                    if (!formVendorId) {
+                      toast.error('Please select a vendor first so it can be attached to the item request.');
+                      return;
+                    }
+                    setShowNewItemReqModal(true);
                   }}
-                  className="store-btn store-btn-outline"
-                  style={{ height: 36, padding: '0 10px', fontSize: 12 }}
-                  title="Clear Filters"
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    color: '#065f46',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
                 >
-                  <X size={13} />
-                  <span>Reset</span>
+                  <Plus size={14} /> Add New Item
+                </button>
+                <button
+                  type="button"
+                  onClick={addLine}
+                  style={{
+                    background: 'rgba(244, 180, 0, 0.15)',
+                    color: '#000000',
+                    border: '1px solid var(--primary)',
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                >
+                  <Plus size={14} /> Add Row
                 </button>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Purchases Table */}
-      <div className="card table-container" style={{ borderRadius: 12, border: '1px solid var(--surface-2)', background: 'var(--white)', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: 'var(--surface)', borderBottom: '1.5px solid var(--surface-2)', color: 'var(--text-secondary)' }}>
-              <th style={{ padding: '12px 16px', fontWeight: 800 }}>Purchase #</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800 }}>Vendor</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800 }}>Store Location</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800 }}>Invoice Date</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right' }}>Total Amount</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'center' }}>Payment</th>
-              <th style={{ padding: '12px 16px', fontWeight: 800, textAlign: 'center' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-                  Loading purchases...
-                </td>
-              </tr>
-            ) : filteredPurchases.length === 0 ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-                  No purchase records found. Click 'Register Purchase' to record goods received.
-                </td>
-              </tr>
-            ) : (
-              filteredPurchases.map((p, idx) => (
-                <tr key={p.id} style={{ 
-                  borderBottom: '1px solid var(--surface-2)',
-                  background: idx % 2 === 0 ? 'var(--white)' : 'rgba(248, 248, 246, 0.5)'
-                }}>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ fontWeight: 800, color: 'var(--secondary)' }}>
-                      {p.purchase_number}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      Inv: {p.invoice_number || 'N/A'}
-                    </div>
-                  </td>
-
-                  <td style={{ padding: '12px 12px' }}>
-                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {p.vendor_name}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {p.vendor_phone || ''}
-                    </div>
-                  </td>
-
-                  <td style={{ padding: '12px 12px' }}>
-                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                      {p.store_name}
-                    </span>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>
-                      {p.branch}
-                    </div>
-                  </td>
-
-                  <td style={{ padding: '12px 12px', color: 'var(--text-secondary)' }}>
-                    {new Date(p.invoice_date).toLocaleDateString()}
-                  </td>
-
-                  <td style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 800, color: 'var(--text-primary)' }}>
-                    {BRAND_CURRENCY}{parseFloat(p.total_amount).toFixed(2)}
-                  </td>
-
-                  <td style={{ padding: '12px 12px', textAlign: 'center' }}>
-                    <span style={{
-                      padding: '4px 10px',
-                      borderRadius: 12,
-                      fontSize: 11,
-                      fontWeight: 800,
-                      background: p.payment_status === 'Paid' ? '#dcfce7' : '#fee2e2',
-                      color: p.payment_status === 'Paid' ? '#166534' : '#991b1b'
-                    }}>
-                      {p.payment_status} ({p.payment_method})
-                    </span>
-                  </td>
-
-                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                    <button
-                      className="btn btn-outline"
-                      onClick={() => handleViewDetail(p.id)}
-                      style={{ padding: '6px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                    >
-                      <Eye size={14} /> View
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Register Purchase Modal */}
-      {showAddModal && (
-        <div style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 10000, padding: 20
-        }}>
-          <div className="card" style={{
-            maxWidth: 900, width: '100%', maxHeight: '90vh',
-            display: 'flex', flexDirection: 'column',
-            padding: 24, borderRadius: 14, background: 'var(--white)',
-            overflow: 'hidden'
-          }}>
-            {/* Modal Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div>
-                <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-                  Register Store Purchase Invoice
-                </h3>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  Record received raw materials & packaging into store inventory.
-                </span>
-              </div>
-              <button 
-                onClick={() => setShowAddModal(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-              >
-                <X size={20} />
-              </button>
             </div>
 
-            {/* Scrollable Form Body */}
-            <form onSubmit={handleSubmitPurchase} style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
-              {/* Primary Invoice Header Details */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 18, background: 'var(--surface)', padding: 16, borderRadius: 10 }}>
-                {/* Vendor Picker */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    Vendor <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
+            {/* Desktop Column Headers */}
+            <div className="purchase-entry-header">
+              <div>Menu Item</div>
+              <div style={{ textAlign: 'right' }}>Quantity Received</div>
+              <div style={{ textAlign: 'right' }}>Total Price ({BRAND_CURRENCY})</div>
+              <div style={{ textAlign: 'right' }}>Per Unit Price</div>
+              <div></div>
+            </div>
+
+            {/* Body */}
+            <div>
+              {loadingVendorItems ? (
+                <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  <RefreshCw size={20} className="spin" style={{ margin: '0 auto 8px' }} />
+                  <div>Loading vendor menu items...</div>
+                </div>
+              ) : !formVendorId ? (
+                <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
+                  Select a <strong>Supplier / Vendor</strong> above to automatically load all menu items supplied by that vendor.
+                </div>
+              ) : lineItems.length === 0 ? (
+                <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
+                  No menu items registered under this vendor yet. Use <strong>Add New Item</strong> or <strong>Add Row</strong>.
+                </div>
+              ) : (
+                lineItems.map((line, idx) => {
+                  const qty = parseFloat(line.quantity) || 0;
+                  const total = parseFloat(line.total_price) || 0;
+                  const perUnit = qty > 0 ? total / qty : 0;
+
+                  return (
+                    <div
+                      key={`${line.item_id || 'new'}-${idx}`}
+                      className="purchase-entry-row"
+                      style={{ background: qty > 0 ? 'rgba(16, 185, 129, 0.04)' : 'transparent' }}
+                    >
+                      {/* 1. Menu Item */}
+                      <div>
+                        {line.isFromVendor ? (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>
+                              {line.item_name}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                              {line.item_code} • Unit: <strong>{line.unit}</strong>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="purchase-mobile-label">Menu Item</label>
+                            <select
+                              value={line.item_id}
+                              onChange={e => handleItemSelect(idx, e.target.value)}
+                              className="store-form-select"
+                              style={{ fontSize: 13 }}
+                            >
+                              <option value="">Select Menu Item...</option>
+                              {storeItems.map(it => (
+                                <option key={it.id} value={it.id}>
+                                  {it.name} ({it.item_code}) — {it.primary_unit}
+                                </option>
+                              ))}
+                            </select>
+                            {line.unit && line.item_id && (
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                Unit: <strong>{line.unit}</strong>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. Quantity Received */}
+                      <div>
+                        <label className="purchase-mobile-label">1. Quantity Received ({line.unit || 'Unit'})</label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          placeholder="0"
+                          value={line.quantity}
+                          onChange={e => handleLineChange(idx, 'quantity', e.target.value)}
+                          className="store-form-input"
+                          style={{
+                            textAlign: 'right',
+                            fontWeight: qty > 0 ? 700 : 400,
+                            borderColor: qty > 0 ? '#10b981' : undefined
+                          }}
+                        />
+                      </div>
+
+                      {/* 3. Total Price */}
+                      <div>
+                        <label className="purchase-mobile-label">2. Total Price ({BRAND_CURRENCY})</label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          placeholder="0.00"
+                          value={line.total_price}
+                          onChange={e => handleLineChange(idx, 'total_price', e.target.value)}
+                          className="store-form-input"
+                          style={{ textAlign: 'right', fontWeight: total > 0 ? 700 : 400 }}
+                        />
+                      </div>
+
+                      {/* 4. Per Unit Price (Auto-calculated: Total Price / Quantity Received) */}
+                      <div>
+                        <label className="purchase-mobile-label">3. Per Unit Price (Auto)</label>
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 6,
+                            background: 'var(--surface, #f9fafb)',
+                            border: '1px solid var(--surface-2, #e5e7eb)',
+                            textAlign: 'right',
+                            fontFamily: 'monospace',
+                            fontWeight: 700,
+                            fontSize: 13,
+                            color: qty > 0 ? 'var(--secondary, #103C43)' : 'var(--text-muted)'
+                          }}
+                        >
+                          {BRAND_CURRENCY} {perUnit.toFixed(2)} / {line.unit || 'unit'}
+                        </div>
+                      </div>
+
+                      {/* Remove Row */}
+                      <div style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))}
+                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}
+                          title="Remove row"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer Totals & Save */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              padding: '14px 16px',
+              background: 'var(--surface, #f9fafb)',
+              borderTop: '1px solid var(--surface-2, #e5e7eb)'
+            }}>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Items with quantity: <strong>{formTotals.activeCount}</strong> &nbsp;|&nbsp;
+                Grand Total: <strong style={{ fontSize: 16, color: 'var(--secondary)' }}>{BRAND_CURRENCY} {formTotals.grandTotal.toFixed(2)}</strong>
+              </div>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="store-btn store-btn-primary"
+                style={{ padding: '10px 22px', fontWeight: 800 }}
+              >
+                {saving ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={15} />}
+                <span>{saving ? 'Saving...' : 'Save Purchase'}</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {/* TAB 2: SEE PURCHASES */}
+      {purchaseTab === 'list' && (
+        <>
+          <div className="store-card">
+            {/* Mobile Branch Bar */}
+            <div className="store-mobile-location-bar">
+              <div className="store-filter-col">
+                <label className="store-filter-label">Branch</label>
+                <select
+                  value={selectedBranch}
+                  onChange={e => setSelectedBranch(e.target.value)}
+                  className="store-filter-select"
+                >
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b} value={b}>{formatBranchLabel(b)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Filters Row */}
+            <div className="store-filters-wrap">
+              <div className="store-filters-row">
+                <div className="store-filter-col" style={{ flex: '1.4 1 180px' }}>
+                  <label className="store-filter-label">Search Invoices</label>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <Search size={14} style={{ position: 'absolute', left: 10, color: '#9ca3af' }} />
+                    <input
+                      type="text"
+                      placeholder="Search vendor, invoice, PO..."
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      className="store-filter-input"
+                      style={{ paddingLeft: 30 }}
+                    />
+                  </div>
+                </div>
+
+                <div className="store-filter-col" style={{ flex: '1.1 1 130px' }}>
+                  <label className="store-filter-label">Supplier</label>
                   <select
-                    value={formVendorId}
-                    onChange={e => setFormVendorId(e.target.value)}
-                    required
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
+                    value={vendorFilter}
+                    onChange={e => setVendorFilter(e.target.value)}
+                    className="store-filter-select"
                   >
-                    <option value="">Select Vendor...</option>
+                    <option value="All">All Vendors</option>
                     {vendors.map(v => (
-                      <option key={v.id} value={v.id}>{v.name} ({v.phone || 'No phone'})</option>
+                      <option key={v.id} value={v.id}>{v.name}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Store Location */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    Store Location <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
+                <div className="store-filter-col" style={{ flex: '1 1 120px' }}>
+                  <label className="store-filter-label">Payment Status</label>
                   <select
-                    value={formStoreId}
-                    onChange={e => setFormStoreId(e.target.value)}
-                    required
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
+                    value={statusFilter}
+                    onChange={e => setStatusFilter(e.target.value)}
+                    className="store-filter-select"
                   >
-                    <option value="">Select Store Location...</option>
-                    {locations.map(loc => (
-                      <option key={loc.id} value={loc.id}>{formatBranchLabel(loc.branch)} — {loc.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Vendor Invoice Number */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    Vendor Invoice #
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. INV-90412"
-                    value={formInvoiceNumber}
-                    onChange={e => setFormInvoiceNumber(e.target.value)}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
-                  />
-                </div>
-
-                {/* Invoice Date */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    Invoice Date <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={formInvoiceDate}
-                    onChange={e => setFormInvoiceDate(e.target.value)}
-                    required
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
-                  />
-                </div>
-
-                {/* Payment Method */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    Payment Method
-                  </label>
-                  <select
-                    value={formPaymentMethod}
-                    onChange={e => {
-                      setFormPaymentMethod(e.target.value);
-                      if (e.target.value === 'Cash') setFormPaymentStatus('Paid');
-                      else setFormPaymentStatus('Unpaid');
-                    }}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
-                  >
-                    <option value="Cash">Cash</option>
-                    <option value="Credit">Credit (On Account)</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                  </select>
-                </div>
-
-                {/* Payment Status */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    Payment Status
-                  </label>
-                  <select
-                    value={formPaymentStatus}
-                    onChange={e => setFormPaymentStatus(e.target.value)}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
-                  >
+                    <option value="All">All Statuses</option>
                     <option value="Paid">Paid</option>
                     <option value="Unpaid">Unpaid</option>
                     <option value="Partial">Partial</option>
                   </select>
                 </div>
-              </div>
 
-              {/* Line Items Section */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>
-                    Purchased Goods & Materials
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={addLine}
-                    style={{
-                      background: 'rgba(244, 180, 0, 0.15)',
-                      color: '#000000',
-                      border: '1px solid var(--primary)',
-                      padding: '5px 12px',
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    <Plus size={14} /> Add Row
-                  </button>
+                <div className="store-filter-col" style={{ flex: '0.9 1 115px' }}>
+                  <label className="store-filter-label">From Date</label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={e => setFromDate(e.target.value)}
+                    className="store-filter-input"
+                  />
                 </div>
 
-                <div style={{ border: '1px solid var(--surface-2)', borderRadius: 8, overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--surface)', borderBottom: '1px solid var(--surface-2)' }}>
-                        <th style={{ padding: '8px 10px', textAlign: 'left', minWidth: 200 }}>Store Item *</th>
-                        <th style={{ padding: '8px 8px', textAlign: 'right', width: 90 }}>Quantity *</th>
-                        <th style={{ padding: '8px 8px', textAlign: 'left', width: 75 }}>Unit</th>
-                        <th style={{ padding: '8px 8px', textAlign: 'right', width: 100 }}>Unit Price *</th>
-                        <th style={{ padding: '8px 8px', textAlign: 'right', width: 75 }}>Tax %</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'right', width: 110 }}>Total ({BRAND_CURRENCY})</th>
-                        <th style={{ padding: '8px 8px', width: 40 }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lineItems.map((line, idx) => {
-                        const lineSub = (parseFloat(line.quantity) || 0) * (parseFloat(line.unit_price) || 0);
-                        const lineTax = (lineSub * (parseFloat(line.tax_rate) || 0)) / 100;
-                        const lineTotal = lineSub + lineTax;
-
-                        return (
-                          <tr key={idx} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                            <td style={{ padding: '8px 10px' }}>
-                              <select
-                                value={line.item_id}
-                                onChange={e => handleItemSelect(idx, e.target.value)}
-                                required
-                                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--surface-2)', outline: 'none', fontSize: 12 }}
-                              >
-                                <option value="">Select Item...</option>
-                                {storeItems.map(it => (
-                                  <option key={it.id} value={it.id}>
-                                    {it.name} ({it.item_code}) — {it.primary_unit}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-
-                            <td style={{ padding: '8px 8px', textAlign: 'right' }}>
-                              <input
-                                type="number"
-                                step="any"
-                                min="0.001"
-                                value={line.quantity}
-                                onChange={e => handleLineChange(idx, 'quantity', e.target.value)}
-                                required
-                                style={{ width: '100%', padding: '6px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--surface-2)', outline: 'none' }}
-                              />
-                            </td>
-
-                            <td style={{ padding: '8px 8px' }}>
-                              <input
-                                type="text"
-                                value={line.unit}
-                                onChange={e => handleLineChange(idx, 'unit', e.target.value)}
-                                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--surface-2)', outline: 'none' }}
-                              />
-                            </td>
-
-                            <td style={{ padding: '8px 8px', textAlign: 'right' }}>
-                              <input
-                                type="number"
-                                step="any"
-                                min="0"
-                                value={line.unit_price}
-                                onChange={e => handleLineChange(idx, 'unit_price', e.target.value)}
-                                required
-                                style={{ width: '100%', padding: '6px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--surface-2)', outline: 'none' }}
-                              />
-                            </td>
-
-                            <td style={{ padding: '8px 8px', textAlign: 'right' }}>
-                              <input
-                                type="number"
-                                step="any"
-                                min="0"
-                                max="100"
-                                value={line.tax_rate}
-                                onChange={e => handleLineChange(idx, 'tax_rate', e.target.value)}
-                                placeholder="0"
-                                style={{ width: '100%', padding: '6px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--surface-2)', outline: 'none' }}
-                              />
-                            </td>
-
-                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>
-                              {lineTotal.toFixed(2)}
-                            </td>
-
-                            <td style={{ padding: '8px 8px', textAlign: 'center' }}>
-                              <button
-                                type="button"
-                                disabled={lineItems.length === 1}
-                                onClick={() => removeLine(idx)}
-                                style={{ background: 'none', border: 'none', color: lineItems.length === 1 ? '#ccc' : '#ef4444', cursor: 'pointer' }}
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                <div className="store-filter-col" style={{ flex: '0.9 1 115px' }}>
+                  <label className="store-filter-label">To Date</label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={e => setToDate(e.target.value)}
+                    className="store-filter-input"
+                  />
                 </div>
               </div>
-
-              {/* Summary Totals Box */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-                <div style={{ width: 260, background: 'var(--surface)', padding: 12, borderRadius: 8, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                    <span>Subtotal:</span>
-                    <strong>{BRAND_CURRENCY}{formCalculations.subtotal.toFixed(2)}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                    <span>VAT / Tax:</span>
-                    <strong>{BRAND_CURRENCY}{formCalculations.totalTax.toFixed(2)}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1.5px solid var(--surface-2)', paddingTop: 6, fontSize: 15, fontWeight: 800, color: 'var(--secondary)' }}>
-                    <span>Total Amount:</span>
-                    <span>{BRAND_CURRENCY}{formCalculations.totalAmount.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                  Notes / Receipt Reference
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Driver delivery, batch #9042, inspected by store keeper"
-                  value={formNotes}
-                  onChange={e => setFormNotes(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1.5px solid var(--surface-2)', outline: 'none', fontSize: 13 }}
-                />
-              </div>
-
-              {/* Modal Action Buttons */}
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={saving}
-                  onClick={() => setShowAddModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={saving}
-                  style={{ fontWeight: 800, padding: '10px 20px' }}
-                >
-                  {saving ? 'Processing...' : 'Confirm & Receive Goods'}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
+
+          {/* Purchases Table */}
+          <div className="card table-container" style={{ borderRadius: 12, border: '1px solid var(--surface-2)', background: 'var(--white)', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: 'var(--surface)', borderBottom: '1.5px solid var(--surface-2)', color: 'var(--text-secondary)' }}>
+                  <th style={{ padding: '12px 16px', fontWeight: 800 }}>Purchase #</th>
+                  <th style={{ padding: '12px 12px', fontWeight: 800 }}>Vendor</th>
+                  <th style={{ padding: '12px 12px', fontWeight: 800 }}>Branch</th>
+                  <th style={{ padding: '12px 12px', fontWeight: 800 }}>Invoice Date</th>
+                  <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right' }}>Total Amount</th>
+                  <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'center' }}>Payment</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 800, textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                      <RefreshCw size={24} className="spin" style={{ margin: '0 auto 8px' }} />
+                      <div>Loading purchase invoices...</div>
+                    </td>
+                  </tr>
+                ) : filteredPurchases.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                      No purchase records found matching the current filters.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPurchases.map((p, idx) => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid var(--surface-2)', background: idx % 2 === 0 ? 'var(--white)' : 'rgba(248, 248, 246, 0.5)' }}>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--secondary)' }}>{p.purchase_number}</div>
+                        {p.invoice_number && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Inv: {p.invoice_number}</div>}
+                      </td>
+                      <td style={{ padding: '12px 12px' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{p.vendor_name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{p.vendor_phone || ''}</div>
+                      </td>
+                      <td style={{ padding: '12px 12px' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--secondary)' }}>{formatBranchLabel(p.branch)}</span>
+                      </td>
+                      <td style={{ padding: '12px 12px', color: 'var(--text-secondary)' }}>
+                        {new Date(p.invoice_date).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        {BRAND_CURRENCY}{parseFloat(p.total_amount).toFixed(2)}
+                      </td>
+                      <td style={{ padding: '12px 12px', textAlign: 'center' }}>
+                        <span style={{
+                          padding: '3px 8px',
+                          borderRadius: 12,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          background: p.payment_status === 'Paid' ? '#dcfce7' : '#fee2e2',
+                          color: p.payment_status === 'Paid' ? '#166534' : '#991b1b'
+                        }}>
+                          {p.payment_status} ({p.payment_method})
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        <button
+                          className="btn btn-outline"
+                          onClick={() => handleViewDetail(p.id)}
+                          style={{ padding: '6px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <Eye size={14} /> View
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
-      {/* Purchase Detail Modal */}
+      {/* View Purchase Detail Modal */}
       {selectedPurchaseDetail && (
         <div style={{
           position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.65)',
-          backdropFilter: 'blur(4px)',
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(3px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 10000, padding: 20
         }}>
-          <div className="card" style={{ maxWidth: 700, width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: 24, borderRadius: 14, background: 'var(--white)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--surface-2)', paddingBottom: 14, marginBottom: 16 }}>
+          <div className="card" style={{ maxWidth: 680, width: '100%', padding: 24, borderRadius: 14, background: 'var(--white)', maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
-                <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-                  Purchase Order #{selectedPurchaseDetail.purchase?.purchase_number}
+                <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>
+                  Purchase Invoice: {selectedPurchaseDetail.purchase?.purchase_number}
                 </h3>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Invoice: {selectedPurchaseDetail.purchase?.invoice_number || 'N/A'} • {new Date(selectedPurchaseDetail.purchase?.invoice_date).toLocaleDateString()}
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Invoice #{selectedPurchaseDetail.purchase?.invoice_number || 'N/A'} • {new Date(selectedPurchaseDetail.purchase?.invoice_date).toLocaleDateString()}
                 </span>
               </div>
-              <button 
-                onClick={() => setSelectedPurchaseDetail(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-              >
+              <button onClick={() => setSelectedPurchaseDetail(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <X size={20} />
               </button>
             </div>
 
-            {/* Vendor & Location Info */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, background: 'var(--surface)', padding: 14, borderRadius: 8, fontSize: 13, marginBottom: 18 }}>
               <div>
                 <span style={{ color: 'var(--text-secondary)', display: 'block' }}>Vendor:</span>
@@ -870,28 +872,25 @@ export default function PurchaseManagement({
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{selectedPurchaseDetail.purchase?.vendor_phone}</div>
               </div>
               <div>
-                <span style={{ color: 'var(--text-secondary)', display: 'block' }}>Store Destination:</span>
-                <strong>{selectedPurchaseDetail.purchase?.store_name}</strong>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{selectedPurchaseDetail.purchase?.branch}</div>
+                <span style={{ color: 'var(--text-secondary)', display: 'block' }}>Branch:</span>
+                <strong>{formatBranchLabel(selectedPurchaseDetail.purchase?.branch)}</strong>
               </div>
             </div>
 
-            {/* Items Table */}
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 18 }}>
               <thead>
                 <tr style={{ background: 'var(--surface)', borderBottom: '1px solid var(--surface-2)' }}>
                   <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item</th>
                   <th style={{ padding: '8px 8px', textAlign: 'right' }}>Qty</th>
-                  <th style={{ padding: '8px 8px', textAlign: 'right' }}>Price</th>
-                  <th style={{ padding: '8px 8px', textAlign: 'right' }}>Tax</th>
-                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Total</th>
+                  <th style={{ padding: '8px 8px', textAlign: 'right' }}>Per Unit Price</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Total Price</th>
                 </tr>
               </thead>
               <tbody>
                 {selectedPurchaseDetail.items?.map((it, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid var(--surface-2)' }}>
-                    <td style={{ padding: '8px 10px' }}>
-                      <strong>{it.item_name}</strong>
+                    <td style={{ padding: '8px 10px', fontWeight: 700 }}>
+                      {it.item_name}
                       <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{it.item_code}</div>
                     </td>
                     <td style={{ padding: '8px 8px', textAlign: 'right' }}>
@@ -899,9 +898,6 @@ export default function PurchaseManagement({
                     </td>
                     <td style={{ padding: '8px 8px', textAlign: 'right' }}>
                       {BRAND_CURRENCY}{parseFloat(it.unit_price).toFixed(2)}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right' }}>
-                      {BRAND_CURRENCY}{parseFloat(it.tax_amount).toFixed(2)}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>
                       {BRAND_CURRENCY}{parseFloat(it.total_price).toFixed(2)}
@@ -911,24 +907,26 @@ export default function PurchaseManagement({
               </tbody>
             </table>
 
-            {/* Grand Total */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
-              <div style={{ textAlign: 'right', fontSize: 16, fontWeight: 800, color: 'var(--secondary)' }}>
-                Total Paid: {BRAND_CURRENCY}{parseFloat(selectedPurchaseDetail.purchase?.total_amount).toFixed(2)}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--secondary)' }}>
+                Total: {BRAND_CURRENCY}{parseFloat(selectedPurchaseDetail.purchase?.total_amount).toFixed(2)}
               </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                className="btn btn-secondary"
-                onClick={() => setSelectedPurchaseDetail(null)}
-              >
+              <button className="btn btn-secondary" onClick={() => setSelectedPurchaseDetail(null)}>
                 Close
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Add New Item Requisition Modal (auto-attaches selected vendor) */}
+      <AddNewItemRequestModal
+        isOpen={showNewItemReqModal}
+        onClose={() => setShowNewItemReqModal(false)}
+        defaultBranch={formBranch || selectedBranch}
+        source="Purchases"
+        attachedVendor={vendors.find(v => String(v.id) === String(formVendorId)) || null}
+      />
     </div>
   );
 }

@@ -2,11 +2,12 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
 const { authenticateToken } = require('../../middleware/auth');
+const { requireStoreRoles } = require('../../middleware/storeAuth');
 
 // -------------------------------------------------------------
 // GET /api/store/dashboard/metrics
 // -------------------------------------------------------------
-router.get('/metrics', authenticateToken, async (req, res) => {
+router.get('/metrics', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store']), async (req, res) => {
   try {
     const { store_id, branch } = req.query;
 
@@ -114,7 +115,7 @@ router.get('/metrics', authenticateToken, async (req, res) => {
         sh.*,
         si.name as item_name,
         si.item_code,
-        sl.name as store_name
+        sl.branch as branch
       FROM store_stock_history sh
       JOIN store_items si ON sh.item_id = si.id
       JOIN store_locations sl ON sh.store_id = sl.id
@@ -138,7 +139,7 @@ router.get('/metrics', authenticateToken, async (req, res) => {
       SELECT 
         p.*,
         v.name as vendor_name,
-        sl.name as store_name
+        sl.branch as branch
       FROM store_purchases p
       JOIN store_vendors v ON p.vendor_id = v.id
       JOIN store_locations sl ON p.store_id = sl.id

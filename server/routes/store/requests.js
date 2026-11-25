@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
-const { authenticateToken, isAdmin } = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth');
+const { requireStoreRoles, enforceBranchAccess, resolveBranchStoreId } = require('../../middleware/storeAuth');
+const { recordActivityLog } = require('../activityLogs');
 
 // Helper to generate request number (e.g. REQ-20261117-001)
 async function generateRequestNumber(client) {
@@ -28,22 +30,32 @@ async function generateRequestNumber(client) {
 // -------------------------------------------------------------
 // GET /api/store/requests (List item requests with filters)
 // -------------------------------------------------------------
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store']), async (req, res) => {
   try {
     const { branch, store_id, status } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch, store_id });
+    if (!access.ok) return;
+
     let query = `
       SELECT 
         ir.*,
         sc.name as category_name,
         sl.name as store_name,
-        si.item_code as approved_item_code
+        si.item_code as approved_item_code,
+        sv.name as vendor_name
       FROM store_item_requests ir
       LEFT JOIN store_categories sc ON ir.category_id = sc.id
       JOIN store_locations sl ON ir.store_id = sl.id
       LEFT JOIN store_items si ON ir.approved_item_id = si.id
+      LEFT JOIN store_vendors sv ON ir.vendor_id = sv.id
       WHERE 1=1
     `;
     const params = [];
+
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND sl.branch = ANY($${params.length})`;
+    }
 
     if (branch && branch !== 'All') {
       params.push(branch);
@@ -72,43 +84,85 @@ router.get('/', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/requests (Submit new item request)
 // -------------------------------------------------------------
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
   const {
     store_id, branch, item_name, category_id, unit,
-    required_quantity, min_stock, suggested_vendor, estimated_price, reason
+    required_quantity, min_stock, suggested_vendor, estimated_price, reason,
+    vendor_id, request_source
   } = req.body;
 
-  if (!store_id || !item_name || !item_name.trim() || !unit) {
-    return res.status(400).json({ error: 'Store location, item name, and unit are required' });
+  if ((!store_id && (!branch || branch === 'All')) || !item_name || !item_name.trim() || !unit) {
+    return res.status(400).json({ error: 'Branch, item name, and unit are required' });
   }
+
+  const resolvedStoreId = store_id && store_id !== 'All' ? parseInt(store_id, 10) : await resolveBranchStoreId(pool, branch);
+  if (!resolvedStoreId) {
+    return res.status(400).json({ error: 'Valid branch (Branch 1, Branch 2, or Branch 3) is required' });
+  }
+
+  const access = await enforceBranchAccess(req, res, { branch, store_id: resolvedStoreId });
+  if (!access.ok) return;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const sCheck = await client.query('SELECT branch FROM store_locations WHERE id = $1', [store_id]);
+    const sCheck = await client.query('SELECT branch FROM store_locations WHERE id = $1', [resolvedStoreId]);
     if (sCheck.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Store location not found' });
+      return res.status(404).json({ error: 'Branch store not found' });
     }
-    const finalBranch = branch || sCheck.rows[0].branch;
+    const finalBranch = sCheck.rows[0].branch;
     const reqNum = await generateRequestNumber(client);
     const userName = req.user?.username || req.user?.name || 'Staff';
+    const source = request_source?.trim() || 'Requisitions';
+
+    // When requested from Stock Entry, do not auto-assign any vendor
+    let finalVendorId = null;
+    let finalSuggestedVendor = suggested_vendor?.trim() || null;
+
+    if (source === 'Stock Entry') {
+      finalVendorId = null;
+      finalSuggestedVendor = null;
+    } else if (vendor_id) {
+      const parsedVendorId = parseInt(vendor_id, 10);
+      if (!isNaN(parsedVendorId)) {
+        const vCheck = await client.query('SELECT id, name FROM store_vendors WHERE id = $1', [parsedVendorId]);
+        if (vCheck.rows.length > 0) {
+          finalVendorId = vCheck.rows[0].id;
+          if (!finalSuggestedVendor) {
+            finalSuggestedVendor = vCheck.rows[0].name;
+          }
+        }
+      }
+    }
 
     const insertRes = await client.query(`
       INSERT INTO store_item_requests (
         request_number, store_id, branch, item_name, category_id,
         unit, required_quantity, min_stock, suggested_vendor, estimated_price,
-        requested_by_user_id, requested_by_name, reason, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Pending')
+        requested_by_user_id, requested_by_name, reason, vendor_id, request_source, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'Pending')
       RETURNING *
     `, [
-      reqNum, store_id, finalBranch, item_name.trim(),
+      reqNum, resolvedStoreId, finalBranch, item_name.trim(),
       category_id ? parseInt(category_id, 10) : null, unit.trim(),
       parseFloat(required_quantity) || 1.0, parseFloat(min_stock) || 5.0,
-      suggested_vendor?.trim() || null, parseFloat(estimated_price) || 0,
-      req.user?.id || null, userName, reason?.trim() || null
+      finalSuggestedVendor, parseFloat(estimated_price) || 0,
+      req.user?.id || null, userName, reason?.trim() || null,
+      finalVendorId, source
     ]);
+
+    await recordActivityLog(client, {
+      module: 'Store',
+      action: 'REQUISITION_CREATED',
+      entity_id: insertRes.rows[0].id,
+      entity_name: reqNum,
+      description: `Submitted item request '${item_name.trim()}' from ${source}${finalSuggestedVendor ? ` (Vendor: ${finalSuggestedVendor})` : ''}`,
+      new_data: { store_id: resolvedStoreId, branch: finalBranch, vendor_id: finalVendorId, source },
+      performed_by: userName,
+      branch: finalBranch
+    });
 
     await client.query('COMMIT');
     res.status(201).json({
@@ -128,19 +182,14 @@ router.post('/', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/requests/:id/approve (Management Approves & Auto-Creates Item)
 // -------------------------------------------------------------
-router.post('/:id/approve', authenticateToken, async (req, res) => {
+router.post('/:id/approve', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const { id } = req.params;
   const reqId = parseInt(id, 10);
   if (isNaN(reqId)) {
     return res.status(400).json({ error: 'Valid integer request ID is required' });
   }
 
-  const role = req.user?.role?.trim().toLowerCase();
-  if (!['admin', 'developer', 'management', 'store manager'].includes(role)) {
-    return res.status(403).json({ error: 'Only Managers and Admins can approve item requests' });
-  }
-
-  const { edited_item_name, edited_category_id, edited_unit, min_stock, item_code } = req.body;
+  const { edited_item_name, edited_category_id, edited_unit, min_stock, item_code, vendor_id } = req.body;
 
   const client = await pool.connect();
   try {
@@ -180,19 +229,32 @@ router.post('/:id/approve', authenticateToken, async (req, res) => {
       finalCode = `STR-${seq}`;
     }
 
+    const finalVendorId = vendor_id !== undefined && vendor_id !== '' && vendor_id !== null
+      ? parseInt(vendor_id, 10)
+      : (itemReq.vendor_id || null);
+
     // Create item in store_items catalog
     const insItemRes = await client.query(`
       INSERT INTO store_items (
-        item_code, name, category_id, primary_unit, min_stock_level,
+        item_code, name, category_id, primary_unit, default_vendor_id, min_stock_level,
         last_purchase_price, notes, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'Active')
-      RETURNING id, item_code, name
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active')
+      RETURNING id, item_code, name, default_vendor_id
     `, [
-      finalCode, finalName, finalCatId, finalUnit, finalMinStock,
+      finalCode, finalName, finalCatId, finalUnit, finalVendorId, finalMinStock,
       itemReq.estimated_price || 0, `Created via Request #${itemReq.request_number}`
     ]);
 
     const createdItem = insItemRes.rows[0];
+
+    // Preserve vendor-item relationship in store_vendor_items if vendor is assigned
+    if (finalVendorId) {
+      await client.query(`
+        INSERT INTO store_vendor_items (vendor_id, item_id, last_quoted_price)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (vendor_id, item_id) DO NOTHING
+      `, [finalVendorId, createdItem.id, itemReq.estimated_price || 0]);
+    }
 
     // Initialize inventory for this store location
     await client.query(`
@@ -207,10 +269,22 @@ router.post('/:id/approve', authenticateToken, async (req, res) => {
       SET status = 'Approved',
           reviewed_by_name = $1,
           reviewed_at = NOW(),
-          approved_item_id = $2
-      WHERE id = $3
+          approved_item_id = $2,
+          vendor_id = COALESCE($3, vendor_id)
+      WHERE id = $4
       RETURNING *
-    `, [reviewerName, createdItem.id, id]);
+    `, [reviewerName, createdItem.id, finalVendorId, id]);
+
+    await recordActivityLog(client, {
+      module: 'Store',
+      action: 'REQUISITION_APPROVED',
+      entity_id: id,
+      entity_name: itemReq.request_number,
+      description: `Approved requisition ${itemReq.request_number} -> created item '${createdItem.name}' (${createdItem.item_code})`,
+      new_data: { item_id: createdItem.id, vendor_id: finalVendorId },
+      performed_by: reviewerName,
+      branch: itemReq.branch
+    });
 
     await client.query('COMMIT');
     res.json({
@@ -231,7 +305,7 @@ router.post('/:id/approve', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/requests/:id/reject (Management Rejects with Reason)
 // -------------------------------------------------------------
-router.post('/:id/reject', authenticateToken, async (req, res) => {
+router.post('/:id/reject', authenticateToken, requireStoreRoles(['admin', 'developer']), async (req, res) => {
   const { id } = req.params;
   const reqId = parseInt(id, 10);
   if (isNaN(reqId)) {
@@ -239,11 +313,6 @@ router.post('/:id/reject', authenticateToken, async (req, res) => {
   }
 
   const { rejection_reason } = req.body;
-
-  const role = req.user?.role?.trim().toLowerCase();
-  if (!['admin', 'developer', 'management', 'store manager'].includes(role)) {
-    return res.status(403).json({ error: 'Only Managers and Admins can reject item requests' });
-  }
 
   if (!rejection_reason || !rejection_reason.trim()) {
     return res.status(400).json({ error: 'A mandatory rejection reason is required' });

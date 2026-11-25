@@ -66,7 +66,7 @@ const navGroups = [
   {
     title: 'Store Management',
     items: [
-      { to: '/store', icon: <Store size={18} strokeWidth={2.2} />, label: 'Store Management', roles: ['Developer', 'Admin', 'Management', 'Operator', 'Store Keeper', 'Store Manager'] },
+      { to: '/store', icon: <Store size={18} strokeWidth={2.2} />, label: 'Store Management', roles: ['Developer', 'Admin', 'Management', 'Management Store', 'Store Man', 'Data Entry', 'Operator', 'Store Keeper', 'Store Manager'] },
     ]
   },
   {
@@ -102,13 +102,10 @@ const navGroups = [
 export default function Layout() {
   const { user, logout, updateUser } = useAuth()
   const {
-    branches: storeBranches,
     selectedBranch: storeSelectedBranch,
     setSelectedBranch: setStoreSelectedBranch,
-    locations: storeLocations,
-    selectedStoreId,
-    setSelectedStoreId,
-    isBranchLocked: storeIsBranchLocked
+    isBranchLocked: storeIsBranchLocked,
+    allowedBranches: storeAllowedBranches
   } = useStore()
   const navigate = useNavigate()
   const [alerts, setAlerts] = useState([])
@@ -989,7 +986,7 @@ export default function Layout() {
                   border: '1px solid var(--border)',
                   gap: 2
                 }}>
-                  {!storeIsBranchLocked && (
+                  {!storeIsBranchLocked && !storeAllowedBranches && (
                     <button
                       type="button"
                       onClick={() => setStoreSelectedBranch('All')}
@@ -1008,7 +1005,7 @@ export default function Layout() {
                       All
                     </button>
                   )}
-                  {['Branch 1', 'Branch 2', 'Branch 3'].map(b => {
+                  {(storeAllowedBranches || ['Branch 1', 'Branch 2', 'Branch 3']).map(b => {
                     const isSelected = storeSelectedBranch === b || 
                       (b === 'Branch 1' && /restaurant\s*1/i.test(storeSelectedBranch)) ||
                       (b === 'Branch 3' && /restaurant\s*3/i.test(storeSelectedBranch));
@@ -1035,35 +1032,6 @@ export default function Layout() {
                     );
                   })}
                 </div>
-              </div>
-
-              <div style={{ width: 1, height: 18, background: 'var(--border)' }} />
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Store:</span>
-                <select
-                  value={selectedStoreId || 'All'}
-                  onChange={(e) => setSelectedStoreId(e.target.value)}
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    borderRadius: 6,
-                    border: '1px solid var(--border)',
-                    background: 'var(--surface)',
-                    color: 'var(--text)',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    maxWidth: 180
-                  }}
-                >
-                  <option value="All">All Stores</option>
-                  {storeLocations.map(loc => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.name} {storeSelectedBranch === 'All' ? `(${formatBranchLabel(loc.branch)})` : ''}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
           )}

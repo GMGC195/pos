@@ -15,11 +15,16 @@ import {
   X, 
   CreditCard,
   History,
-  Building2
+  Building2,
+  Trash2
 } from 'lucide-react';
 import { BRAND_CURRENCY } from '../../branding';
 
-export default function VendorManagement() {
+export default function VendorManagement({ user }) {
+  const canWrite = useMemo(() => {
+    const role = (user?.role || '').trim().toLowerCase();
+    return role === 'admin' || role === 'developer';
+  }, [user]);
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -29,6 +34,8 @@ export default function VendorManagement() {
   const [showModal, setShowModal] = useState(false);
   const [editingVendor, setEditingVendor] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [allStoreItems, setAllStoreItems] = useState([]);
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
 
   // Ledger / Payment Modal
   const [selectedVendorLedger, setSelectedVendorLedger] = useState(null);
@@ -71,7 +78,11 @@ export default function VendorManagement() {
     fetchVendors();
   }, [statusFilter]);
 
-  const handleOpenModal = (vendor = null) => {
+  useEffect(() => {
+    axios.get('/api/store/items?status=Active').then(r => setAllStoreItems(r.data || [])).catch(() => {});
+  }, []);
+
+  const handleOpenModal = async (vendor = null) => {
     if (vendor) {
       setEditingVendor(vendor);
       setName(vendor.name || '');
@@ -83,6 +94,12 @@ export default function VendorManagement() {
       setTaxNumber(vendor.tax_number || '');
       setPaymentTerms(vendor.payment_terms || 'Cash');
       setNotes(vendor.notes || '');
+      try {
+        const res = await axios.get(`/api/store/vendors/${vendor.id}/items`);
+        setSelectedItemIds((res.data || []).map(it => it.item_id));
+      } catch {
+        setSelectedItemIds([]);
+      }
     } else {
       setEditingVendor(null);
       setName('');
@@ -94,8 +111,20 @@ export default function VendorManagement() {
       setTaxNumber('');
       setPaymentTerms('Cash');
       setNotes('');
+      setSelectedItemIds([]);
     }
     setShowModal(true);
+  };
+
+  const handleDeleteVendor = async (vendor) => {
+    if (!window.confirm(`Delete or deactivate supplier "${vendor.name}"?`)) return;
+    try {
+      const res = await axios.delete(`/api/store/vendors/${vendor.id}`);
+      toast.success(res.data?.message || 'Supplier deleted');
+      await fetchVendors();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete supplier');
+    }
   };
 
   const handleSaveVendor = async (e) => {
@@ -113,7 +142,8 @@ export default function VendorManagement() {
         address,
         tax_number: taxNumber,
         payment_terms: paymentTerms,
-        notes
+        notes,
+        item_ids: selectedItemIds
       };
 
       if (editingVendor) {
@@ -243,6 +273,7 @@ export default function VendorManagement() {
           </select>
         </div>
 
+        {canWrite && (
         <button
           className="btn btn-primary"
           onClick={() => handleOpenModal()}
@@ -257,6 +288,7 @@ export default function VendorManagement() {
         >
           <Plus size={16} /> Add Vendor
         </button>
+        )}
       </div>
 
       {/* Vendors Table */}
@@ -343,13 +375,26 @@ export default function VendorManagement() {
                       >
                         <History size={13} /> Statement
                       </button>
-                      <button
-                        className="btn btn-outline"
-                        onClick={() => handleOpenModal(v)}
-                        style={{ padding: '6px 10px', fontSize: 12 }}
-                      >
-                        <Edit size={13} />
-                      </button>
+                      {canWrite && (
+                      <>
+                        <button
+                          className="btn btn-outline"
+                          onClick={() => handleOpenModal(v)}
+                          style={{ padding: '6px 10px', fontSize: 12 }}
+                          title="Edit Supplier & Menu Items"
+                        >
+                          <Edit size={13} />
+                        </button>
+                        <button
+                          className="btn btn-outline"
+                          onClick={() => handleDeleteVendor(v)}
+                          style={{ padding: '6px 10px', fontSize: 12, color: '#ef4444', borderColor: '#fecaca' }}
+                          title="Delete Supplier"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -493,6 +538,58 @@ export default function VendorManagement() {
                 />
               </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                  Supplied Menu Items ({selectedItemIds.length} selected)
+                </label>
+                <div style={{
+                  maxHeight: 150,
+                  overflowY: 'auto',
+                  border: '1.5px solid var(--surface-2)',
+                  borderRadius: 8,
+                  padding: 8,
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
+                  gap: 6,
+                  background: 'var(--surface)'
+                }}>
+                  {allStoreItems.length === 0 ? (
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No active store items found.</span>
+                  ) : allStoreItems.map(it => {
+                    const checked = selectedItemIds.includes(it.id);
+                    return (
+                      <label
+                        key={it.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 12,
+                          padding: '4px 8px',
+                          borderRadius: 6,
+                          background: checked ? 'rgba(244, 180, 0, 0.14)' : 'white',
+                          border: checked ? '1px solid var(--primary)' : '1px solid var(--surface-2)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setSelectedItemIds(prev =>
+                              checked ? prev.filter(x => x !== it.id) : [...prev, it.id]
+                            );
+                          }}
+                        />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {it.name} ({it.primary_unit})
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
                 <button
                   type="button"
@@ -536,6 +633,7 @@ export default function VendorManagement() {
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {canWrite && (
                 <button
                   className="btn btn-primary"
                   onClick={() => setShowPaymentModal(true)}
@@ -543,6 +641,7 @@ export default function VendorManagement() {
                 >
                   Record Payment
                 </button>
+                )}
                 <button onClick={() => setSelectedVendorLedger(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                   <X size={20} />
                 </button>

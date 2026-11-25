@@ -21,11 +21,20 @@ import {
 } from 'lucide-react';
 import { BRAND_CURRENCY } from '../../branding';
 import { getSaudiTodayDate } from '../../utils/timezone';
+import AddNewItemRequestModal from './AddNewItemRequestModal';
+
+function isTodayOrYesterdaySaudi(dateStr) {
+  if (!dateStr) return false;
+  const today = getSaudiTodayDate();
+  const [y, m, d] = today.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  const yesterday = dt.toISOString().slice(0, 10);
+  return dateStr === today || dateStr === yesterday;
+}
 
 export default function StockEntry({ 
   selectedBranch, 
-  selectedStoreId, 
-  locations = [], 
   onEntrySubmitted,
   user 
 }) {
@@ -45,18 +54,23 @@ export default function StockEntry({
   // Modals
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showReopenModal, setShowReopenModal] = useState(false);
+  const [showNewItemReqModal, setShowNewItemReqModal] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [reopening, setReopening] = useState(false);
 
-  const isManagerOrAdmin = useMemo(() => {
-    const r = (user?.role || '').toLowerCase();
-    return ['admin', 'developer', 'management', 'store manager'].includes(r);
-  }, [user]);
+  const userRole = (user?.role || '').trim().toLowerCase();
+  const isAdminOrDev = ['admin', 'developer'].includes(userRole);
+  const isOperationalRole = ['store man', 'data entry'].includes(userRole);
+  const isReadOnlyRole = ['management', 'management store'].includes(userRole);
+  const isDateEditable = isAdminOrDev || (isOperationalRole && isTodayOrYesterdaySaudi(entryDate));
+  const canReopenEntry = isAdminOrDev || (isOperationalRole && isTodayOrYesterdaySaudi(entryDate));
+  const isSheetLocked = isSubmitted || isReadOnlyRole || !isDateEditable;
 
-  // Load sheet data whenever store, date or shift changes
+  // Load sheet data whenever branch, date or shift changes
+  const isValidBranch = selectedBranch && selectedBranch !== 'All' && selectedBranch !== 'undefined';
+
   const fetchSheetData = useCallback(async () => {
-    const validStoreId = parseInt(selectedStoreId, 10);
-    if (!selectedStoreId || selectedStoreId === 'All' || selectedStoreId === 'undefined' || isNaN(validStoreId)) {
+    if (!isValidBranch) {
       setItems([]);
       setStoreDetails(null);
       setExistingEntry(null);
@@ -67,7 +81,7 @@ export default function StockEntry({
     try {
       const res = await axios.get('/api/store/entries/sheet-data', {
         params: {
-          store_id: validStoreId,
+          branch: selectedBranch,
           entry_date: entryDate,
           shift
         }
@@ -82,28 +96,30 @@ export default function StockEntry({
     } finally {
       setLoading(false);
     }
-  }, [selectedStoreId, entryDate, shift]);
+  }, [selectedBranch, isValidBranch, entryDate, shift]);
 
   useEffect(() => {
     fetchSheetData();
   }, [fetchSheetData]);
 
-  // Update In-Hand Stock locally and recompute consumption in realtime
-  const handleInHandChange = (itemId, val) => {
-    if (isSubmitted) return;
-    const numVal = val === '' ? 0 : parseFloat(val);
+  // Update Handover Stock manually (never autofilled) and recompute Remaining / Consumed
+  const handleHandoverChange = (itemId, val) => {
+    if (isSheetLocked) return;
+    const handover = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
 
     setItems(prevItems => prevItems.map(it => {
       if (it.item_id === itemId) {
-        const inHand = isNaN(numVal) ? 0 : numVal;
         const prev = parseFloat(it.previous_stock) || 0;
         const recv = parseFloat(it.received_stock) || 0;
-        // Formula: Consumption = (Prev + Recv) - InHand
-        const consumption = Math.max(0, (prev + recv) - inHand);
+        const totalAvailable = prev + recv;
+        const remaining = Math.max(0, totalAvailable - handover);
+        const excess = Math.max(0, handover - totalAvailable);
         return {
           ...it,
-          in_hand_stock: val,
-          calculated_consumption: consumption
+          handover_stock: val,
+          in_hand_stock: remaining,
+          calculated_consumption: handover,
+          excess_consumption: excess
         };
       }
       return it;
@@ -112,19 +128,22 @@ export default function StockEntry({
 
   // Update Received Stock manually if goods arrived mid-shift
   const handleReceivedChange = (itemId, val) => {
-    if (isSubmitted) return;
-    const numVal = val === '' ? 0 : parseFloat(val);
+    if (isSheetLocked) return;
+    const recv = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
 
     setItems(prevItems => prevItems.map(it => {
       if (it.item_id === itemId) {
-        const recv = isNaN(numVal) ? 0 : numVal;
         const prev = parseFloat(it.previous_stock) || 0;
-        const inHand = parseFloat(it.in_hand_stock) || 0;
-        const consumption = Math.max(0, (prev + recv) - inHand);
+        const handover = parseFloat(it.handover_stock) || 0;
+        const totalAvailable = prev + recv;
+        const remaining = Math.max(0, totalAvailable - handover);
+        const excess = Math.max(0, handover - totalAvailable);
         return {
           ...it,
           received_stock: val,
-          calculated_consumption: consumption
+          in_hand_stock: remaining,
+          calculated_consumption: handover,
+          excess_consumption: excess
         };
       }
       return it;
@@ -173,21 +192,29 @@ export default function StockEntry({
     setSaving(true);
     try {
       const payload = {
-        store_id: selectedStoreId,
-        branch: selectedBranch || storeDetails?.branch,
+        branch: selectedBranch,
         entry_date: entryDate,
         shift,
         action: actionType, // 'DRAFT' | 'SUBMIT'
-        items: items.map(it => ({
-          item_id: it.item_id,
-          unit: it.unit,
-          previous_stock: parseFloat(it.previous_stock) || 0,
-          received_stock: parseFloat(it.received_stock) || 0,
-          in_hand_stock: parseFloat(it.in_hand_stock) || 0,
-          calculated_consumption: parseFloat(it.calculated_consumption) || 0,
-          unit_cost: parseFloat(it.unit_cost) || 0,
-          notes: it.notes || ''
-        }))
+        items: items.map(it => {
+          const prev = parseFloat(it.previous_stock) || 0;
+          const recv = parseFloat(it.received_stock) || 0;
+          const totalAvailable = prev + recv;
+          const handover = Math.max(0, parseFloat(it.handover_stock) || 0);
+          const remaining = Math.max(0, totalAvailable - handover);
+          return {
+            item_id: it.item_id,
+            unit: it.unit,
+            previous_stock: prev,
+            received_stock: recv,
+            handover_stock: handover,
+            in_hand_stock: remaining,
+            calculated_consumption: handover,
+            excess_consumption: Math.max(0, handover - totalAvailable),
+            unit_cost: parseFloat(it.unit_cost) || 0,
+            notes: it.notes || ''
+          };
+        })
       };
 
       const res = await axios.post('/api/store/entries/save', payload);
@@ -228,19 +255,17 @@ export default function StockEntry({
     }
   };
 
-  const isValidStore = selectedStoreId && selectedStoreId !== 'All' && selectedStoreId !== 'undefined' && !isNaN(parseInt(selectedStoreId, 10));
-
-  if (!isValidStore) {
+  if (!isValidBranch) {
     return (
       <div className="store-card" style={{ padding: '48px 24px', textAlign: 'center', margin: '20px auto', maxWidth: 600 }}>
         <div className="store-header-icon" style={{ width: 56, height: 56, margin: '0 auto 16px', borderRadius: 14 }}>
           <Building2 size={28} />
         </div>
         <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 8px', color: 'var(--text-primary, #111827)' }}>
-          Select a Store Location
+          Select a Branch
         </h3>
         <p style={{ color: 'var(--text-secondary, #6b7280)', fontSize: 13, margin: '0 0 20px', lineHeight: 1.5 }}>
-          Shift inventory counting is recorded per physical branch store. Please select a specific store location (e.g. Branch 1 Main Store) from the top bar to view or submit physical stock counts.
+          Shift inventory counting and handovers are recorded per branch. Please select <strong>B1 (Branch 1)</strong>, <strong>B2 (Branch 2)</strong>, or <strong>B3 (Branch 3)</strong> from the top bar.
         </p>
       </div>
     );
@@ -356,9 +381,30 @@ export default function StockEntry({
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {!isReadOnlyRole && (
+            <button
+              type="button"
+              onClick={() => setShowNewItemReqModal(true)}
+              style={{
+                background: 'rgba(16, 185, 129, 0.12)',
+                color: '#065f46',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                padding: '9px 14px',
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              + Add New Item
+            </button>
+          )}
           {isSubmitted ? (
-            isManagerOrAdmin && (
+            canReopenEntry && (
               <button 
                 className="btn"
                 onClick={() => setShowReopenModal(true)}
@@ -379,7 +425,7 @@ export default function StockEntry({
                 <RotateCcw size={15} /> Reopen for Correction
               </button>
             )
-          ) : (
+          ) : !isSheetLocked ? (
             <>
               <button
                 className="btn"
@@ -401,7 +447,7 @@ export default function StockEntry({
               >
                 <Save size={15} /> Save Draft
               </button>
-              <button
+              <button 
                 className="btn"
                 disabled={saving || loading || items.length === 0}
                 onClick={() => setShowConfirmModal(true)}
@@ -423,6 +469,10 @@ export default function StockEntry({
                 <CheckCircle2 size={16} /> Submit Shift
               </button>
             </>
+          ) : (
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Lock size={14} /> Read-Only (Older than yesterday)
+            </span>
           )}
 
           <button 
@@ -453,7 +503,7 @@ export default function StockEntry({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Info size={16} color="var(--secondary)" />
           <span>
-            <strong>Consumption Formula:</strong> Previous Stock + Received Stock - In-Hand Stock = <strong>Calculated Consumption</strong>
+            <strong>Stock Formula:</strong> Total Available = Available + Received &nbsp;|&nbsp; Remaining = Total Available - Handover (never negative)
           </span>
         </div>
         <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>
@@ -511,27 +561,26 @@ export default function StockEntry({
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface)', borderBottom: '1.5px solid var(--surface-2)', color: 'var(--text-secondary)' }}>
-              <th style={{ padding: '12px 16px', fontWeight: 800 }}>Item & Code</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800 }}>Category / Unit</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right' }}>Previous Stock</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right' }}>Received Stock</th>
-              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right', minWidth: 120 }}>
-                In-Hand Stock <span style={{ color: '#ef4444' }}>*</span>
+              <th style={{ padding: '12px 16px', fontWeight: 800 }}>Item Name</th>
+              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right' }}>Available Stock</th>
+              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right' }}>Received</th>
+              <th style={{ padding: '12px 12px', fontWeight: 800, textAlign: 'right', minWidth: 130 }}>
+                Handover <span style={{ color: '#ef4444' }}>*</span>
               </th>
-              <th style={{ padding: '12px 16px', fontWeight: 800, textAlign: 'right' }}>Consumption</th>
+              <th style={{ padding: '12px 16px', fontWeight: 800, textAlign: 'right', minWidth: 170 }}>Consumed / Remaining</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                <td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
                   <RefreshCw size={24} className="spin" style={{ margin: '0 auto 8px' }} />
                   <div>Loading counting sheet...</div>
                 </td>
               </tr>
             ) : filteredItems.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                <td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
                   No store items found matching search or filter.
                 </td>
               </tr>
@@ -539,88 +588,94 @@ export default function StockEntry({
               filteredItems.map((it, idx) => {
                 const prev = parseFloat(it.previous_stock) || 0;
                 const recv = parseFloat(it.received_stock) || 0;
-                const inHand = parseFloat(it.in_hand_stock) || 0;
-                const consumption = parseFloat(it.calculated_consumption) || 0;
-                const isUnderStocked = inHand < prev;
+                const totalAvailable = prev + recv;
+                const handover = parseFloat(it.handover_stock) || 0;
+                const remaining = Math.max(0, totalAvailable - handover);
+                const excess = Math.max(0, handover - totalAvailable);
 
                 return (
                   <tr key={it.item_id} style={{ 
                     borderBottom: '1px solid var(--surface-2)',
                     background: idx % 2 === 0 ? 'var(--white)' : 'rgba(248, 248, 246, 0.5)'
                   }}>
+                    {/* 1. Item Name */}
                     <td style={{ padding: '12px 16px' }}>
                       <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
                         {it.item_name}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {it.item_code} {it.arabic_name ? `• ${it.arabic_name}` : ''}
+                        {it.item_code} • {it.category_name || 'General'} • <strong>{it.unit}</strong>
+                        {it.arabic_name ? ` • ${it.arabic_name}` : ''}
                       </div>
                     </td>
 
-                    <td style={{ padding: '12px 12px' }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                        {it.category_name || 'General'}
-                      </span>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary-dark)' }}>
-                        {it.unit}
-                      </div>
-                    </td>
-
-                    {/* Previous Stock (Locked from last closing) */}
-                    <td style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                      {prev} {it.unit}
-                    </td>
-
-                    {/* Received Stock (Editable or pulled from purchases) */}
+                    {/* 2. Available Stock (Read-only from inventory) */}
                     <td style={{ padding: '12px 12px', textAlign: 'right' }}>
-                      {isSubmitted ? (
+                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {prev} {it.unit}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        Total Avail: {totalAvailable} {it.unit}
+                      </div>
+                    </td>
+
+                    {/* 3. Received Stock (From Purchases + manual additions) */}
+                    <td style={{ padding: '12px 12px', textAlign: 'right' }}>
+                      {isSheetLocked ? (
                         <span style={{ fontWeight: 700, color: recv > 0 ? '#10b981' : 'var(--text-muted)' }}>
                           +{recv} {it.unit}
                         </span>
                       ) : (
-                        <input
-                          type="number"
-                          step="any"
-                          min="0"
-                          value={it.received_stock}
-                          onChange={e => handleReceivedChange(it.item_id, e.target.value)}
-                          placeholder="0"
-                          style={{
-                            width: 80,
-                            padding: '6px 8px',
-                            textAlign: 'right',
-                            borderRadius: 6,
-                            border: '1.5px solid var(--surface-2)',
-                            background: 'var(--surface)',
-                            outline: 'none',
-                            fontWeight: 700,
-                            fontSize: 13,
-                            color: recv > 0 ? '#10b981' : 'var(--text-primary)'
-                          }}
-                        />
+                        <div>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={it.received_stock}
+                            onChange={e => handleReceivedChange(it.item_id, e.target.value)}
+                            placeholder="0"
+                            style={{
+                              width: 85,
+                              padding: '6px 8px',
+                              textAlign: 'right',
+                              borderRadius: 6,
+                              border: '1.5px solid var(--surface-2)',
+                              background: 'var(--surface)',
+                              outline: 'none',
+                              fontWeight: 700,
+                              fontSize: 13,
+                              color: recv > 0 ? '#10b981' : 'var(--text-primary)'
+                            }}
+                          />
+                          {Number(it.purchased_received || 0) > 0 && (
+                            <div style={{ fontSize: 10, color: '#059669', marginTop: 2 }}>
+                              Purchases: +{it.purchased_received}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </td>
 
-                    {/* In-Hand Stock Input */}
+                    {/* 4. Handover Input (Manual only, NEVER autofilled) */}
                     <td style={{ padding: '12px 12px', textAlign: 'right' }}>
-                      {isSubmitted ? (
+                      {isSheetLocked ? (
                         <span style={{ fontWeight: 800, fontSize: 14, color: 'var(--text-primary)' }}>
-                          {inHand} {it.unit}
+                          {handover} {it.unit}
                         </span>
                       ) : (
                         <input
                           type="number"
                           step="any"
                           min="0"
-                          value={it.in_hand_stock}
-                          onChange={e => handleInHandChange(it.item_id, e.target.value)}
-                          placeholder="0"
+                          value={it.handover_stock ?? ''}
+                          onChange={e => handleHandoverChange(it.item_id, e.target.value)}
+                          placeholder="Enter qty"
                           style={{
-                            width: 95,
+                            width: 100,
                             padding: '6px 8px',
                             textAlign: 'right',
                             borderRadius: 6,
-                            border: inHand < 0 ? '1.5px solid #ef4444' : '1.5px solid var(--primary)',
+                            border: excess > 0 ? '1.5px solid #ef4444' : '1.5px solid var(--primary)',
                             background: '#fffdf5',
                             outline: 'none',
                             fontWeight: 800,
@@ -631,19 +686,46 @@ export default function StockEntry({
                       )}
                     </td>
 
-                    {/* Calculated Consumption Output */}
+                    {/* 5. Consumed / Remaining Output */}
                     <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                      <span style={{
-                        display: 'inline-block',
-                        padding: '4px 8px',
-                        borderRadius: 6,
-                        fontWeight: 800,
-                        fontSize: 13,
-                        background: consumption > 0 ? '#fee2e2' : '#f3f4f6',
-                        color: consumption > 0 ? '#dc2626' : '#6b7280'
-                      }}>
-                        {consumption} {it.unit}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '3px 8px',
+                          borderRadius: 6,
+                          fontWeight: 700,
+                          fontSize: 12,
+                          background: handover > 0 ? '#fee2e2' : '#f3f4f6',
+                          color: handover > 0 ? '#dc2626' : '#6b7280'
+                        }}>
+                          Consumed: {handover} {it.unit}
+                        </span>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '3px 8px',
+                          borderRadius: 6,
+                          fontWeight: 700,
+                          fontSize: 12,
+                          background: '#ecfdf5',
+                          color: '#065f46'
+                        }}>
+                          Remaining: {remaining} {it.unit}
+                        </span>
+                        {excess > 0 && (
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 7px',
+                            borderRadius: 6,
+                            fontWeight: 800,
+                            fontSize: 11,
+                            background: '#fef3c7',
+                            color: '#b45309',
+                            border: '1px solid #f59e0b'
+                          }}>
+                            Excess Req: +{excess} {it.unit}
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -775,6 +857,14 @@ export default function StockEntry({
           </div>
         </div>
       )}
+      {/* Add New Item Requisition Modal (Stock Entry — no vendor auto-assigned) */}
+      <AddNewItemRequestModal
+        isOpen={showNewItemReqModal}
+        onClose={() => setShowNewItemReqModal(false)}
+        defaultBranch={selectedBranch}
+        source="Stock Entry"
+        attachedVendor={null}
+      />
     </div>
   );
 }

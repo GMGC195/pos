@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
-const { authenticateToken, isAdmin } = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth');
+const { requireStoreRoles, enforceBranchAccess, resolveBranchStoreId, isTodayOrYesterday, isOperationalStoreRole, getRole } = require('../../middleware/storeAuth');
+const { recordActivityLog } = require('../activityLogs');
 
 // Helper to generate unique entry number (e.g. ENT-20261117-001)
 async function generateEntryNumber(client) {
@@ -28,19 +30,27 @@ async function generateEntryNumber(client) {
 // -------------------------------------------------------------
 // GET /api/store/entries/sheet-data (Get counting sheet with previous stock)
 // -------------------------------------------------------------
-router.get('/sheet-data', authenticateToken, async (req, res) => {
-  const { store_id, entry_date, shift } = req.query;
+router.get('/sheet-data', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
+  const { store_id, branch, entry_date, shift } = req.query;
 
-  if (!store_id || store_id === 'All' || store_id === 'undefined' || !entry_date || !shift) {
-    return res.status(400).json({ error: 'A specific store location, entry date, and shift are required' });
+  if ((!store_id || store_id === 'All' || store_id === 'undefined') && (!branch || branch === 'All')) {
+    return res.status(400).json({ error: 'A specific branch (Branch 1, Branch 2, or Branch 3), entry date, and shift are required' });
+  }
+  if (!entry_date || !shift) {
+    return res.status(400).json({ error: 'Entry date and shift are required' });
   }
 
-  const parsedStoreId = parseInt(store_id, 10);
-  if (isNaN(parsedStoreId)) {
-    return res.status(400).json({ error: 'Invalid store location ID' });
+  let parsedStoreId = store_id && store_id !== 'All' && store_id !== 'undefined' ? parseInt(store_id, 10) : null;
+  if (!parsedStoreId || isNaN(parsedStoreId)) {
+    parsedStoreId = await resolveBranchStoreId(pool, branch);
+  }
+  if (!parsedStoreId) {
+    return res.status(400).json({ error: 'Invalid branch or store location ID' });
   }
 
   try {
+    const access = await enforceBranchAccess(req, res, { branch, store_id: parsedStoreId });
+    if (!access.ok) return;
     const storeLocRes = await pool.query('SELECT * FROM store_locations WHERE id = $1', [parsedStoreId]);
     if (storeLocRes.rows.length === 0) {
       return res.status(404).json({ error: 'Store location not found' });
@@ -99,6 +109,13 @@ router.get('/sheet-data', authenticateToken, async (req, res) => {
       if (savedItemsMap[item.item_id]) {
         // Use saved values from draft or submitted entry
         const saved = savedItemsMap[item.item_id];
+        const prev = parseFloat(saved.previous_stock) || 0;
+        const recv = parseFloat(saved.received_stock) || 0;
+        const handover = parseFloat(saved.handover_stock ?? saved.calculated_consumption) || 0;
+        const totalAvail = prev + recv;
+        const remaining = Math.max(0, totalAvail - handover);
+        const excess = Math.max(0, handover - totalAvail);
+
         sheetItems.push({
           item_id: item.item_id,
           item_name: item.item_name,
@@ -107,18 +124,31 @@ router.get('/sheet-data', authenticateToken, async (req, res) => {
           unit: saved.unit || item.unit,
           category_name: item.category_name,
           category_icon: item.category_icon,
-          previous_stock: parseFloat(saved.previous_stock) || 0,
-          received_stock: parseFloat(saved.received_stock) || 0,
-          in_hand_stock: parseFloat(saved.in_hand_stock) || 0,
-          calculated_consumption: parseFloat(saved.calculated_consumption) || 0,
+          previous_stock: prev,
+          received_stock: recv,
+          purchased_received: recv,
+          handover_stock: handover,
+          in_hand_stock: remaining,
+          calculated_consumption: handover,
+          excess_consumption: excess,
           unit_cost: parseFloat(saved.unit_cost || item.last_purchase_price) || 0,
           notes: saved.notes || ''
         });
       } else {
-        // Resolve last closing stock
+        // Check if any purchase deliveries occurred on this date for this item
+        const purRes = await pool.query(`
+          SELECT COALESCE(SUM(pi.quantity), 0) as total_received
+          FROM store_purchase_items pi
+          JOIN store_purchases p ON pi.purchase_id = p.id
+          WHERE p.store_id = $1 AND pi.item_id = $2 AND p.invoice_date = $3 AND p.status = 'Received'
+        `, [parsedStoreId, item.item_id, entry_date]);
+
+        const autoReceived = parseFloat(purRes.rows[0]?.total_received) || 0;
+
+        // Resolve last closing/remaining stock
         let prevStock = 0;
 
-        // Subquery: find closing stock from last submitted entry for this store & item
+        // Subquery: find remaining stock from last submitted entry for this store & item
         const lastEntryRes = await pool.query(`
           SELECT sei.in_hand_stock 
           FROM store_stock_entry_items sei
@@ -134,20 +164,11 @@ router.get('/sheet-data', authenticateToken, async (req, res) => {
         if (lastEntryRes.rows.length > 0) {
           prevStock = parseFloat(lastEntryRes.rows[0].in_hand_stock) || 0;
         } else {
-          // Fallback to current inventory stock
-          prevStock = parseFloat(item.current_inv_stock) || 0;
+          // Fallback to current inventory stock MINUS today's purchase receipts so purchases are never counted twice
+          prevStock = Math.max(0, (parseFloat(item.current_inv_stock) || 0) - autoReceived);
         }
 
-        // Check if any purchase deliveries occurred on this date for this item
-        const purRes = await pool.query(`
-          SELECT COALESCE(SUM(pi.quantity), 0) as total_received
-          FROM store_purchase_items pi
-          JOIN store_purchases p ON pi.purchase_id = p.id
-          WHERE p.store_id = $1 AND pi.item_id = $2 AND p.invoice_date = $3 AND p.status = 'Received'
-        `, [parsedStoreId, item.item_id, entry_date]);
-
-        const autoReceived = parseFloat(purRes.rows[0]?.total_received) || 0;
-
+        // Handover is NEVER autofilled — starts empty ('') for manual entry
         sheetItems.push({
           item_id: item.item_id,
           item_name: item.item_name,
@@ -158,8 +179,11 @@ router.get('/sheet-data', authenticateToken, async (req, res) => {
           category_icon: item.category_icon,
           previous_stock: prevStock,
           received_stock: autoReceived,
-          in_hand_stock: prevStock + autoReceived, // default in-hand
+          purchased_received: autoReceived,
+          handover_stock: '',
+          in_hand_stock: prevStock + autoReceived,
           calculated_consumption: 0,
+          excess_consumption: 0,
           unit_cost: parseFloat(item.last_purchase_price) || 0,
           notes: ''
         });
@@ -181,15 +205,30 @@ router.get('/sheet-data', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/entries/save (Save Draft or Submit Shift)
 // -------------------------------------------------------------
-router.post('/save', authenticateToken, async (req, res) => {
-  const { store_id, branch, entry_date, shift, action, items, notes } = req.body;
+router.post('/save', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
+  const { store_id: rawStoreId, branch, entry_date, shift, action, items, notes } = req.body;
 
-  if (!store_id || !entry_date || !shift) {
-    return res.status(400).json({ error: 'Store ID, entry date, and shift are required' });
+  if ((!rawStoreId && (!branch || branch === 'All')) || !entry_date || !shift) {
+    return res.status(400).json({ error: 'Branch, entry date, and shift are required' });
   }
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'At least one item row is required' });
+  }
+
+  const store_id = rawStoreId && rawStoreId !== 'All' ? parseInt(rawStoreId, 10) : await resolveBranchStoreId(pool, branch);
+  if (!store_id) {
+    return res.status(400).json({ error: 'Valid branch (Branch 1, Branch 2, or Branch 3) is required' });
+  }
+
+  const access = await enforceBranchAccess(req, res, { branch, store_id });
+  if (!access.ok) return;
+
+  const role = getRole(req);
+  if (isOperationalStoreRole(role) && !isTodayOrYesterday(entry_date)) {
+    return res.status(403).json({
+      error: 'Entries older than yesterday are read-only for your role. You can only edit or submit today\'s and yesterday\'s entries.'
+    });
   }
 
   const isSubmit = action?.toString().toUpperCase() === 'SUBMIT';
@@ -256,14 +295,17 @@ router.post('/save', authenticateToken, async (req, res) => {
     // 2. Clear old items for this entry
     await client.query('DELETE FROM store_stock_entry_items WHERE entry_id = $1', [entry.id]);
 
-    // 3. Insert fresh items and calculate consumption
+    // 3. Insert fresh items and calculate remaining / consumed stock
     for (const it of items) {
       const prev = Math.max(0, parseFloat(it.previous_stock) || 0);
       const recv = Math.max(0, parseFloat(it.received_stock) || 0);
-      const inHand = Math.max(0, parseFloat(it.in_hand_stock) || 0);
+      const totalAvailable = prev + recv;
+      const handover = Math.max(0, parseFloat(it.handover_stock !== undefined && it.handover_stock !== '' ? it.handover_stock : it.calculated_consumption) || 0);
 
-      // Formula: Consumption = Previous + Received - InHand
-      const consumption = Math.max(0, (prev + recv) - inHand);
+      // Remaining Stock = Total Available - Handover (never negative)
+      const inHand = Math.max(0, totalAvailable - handover);
+      const consumption = handover;
+      const excessConsumption = Math.max(0, handover - totalAvailable);
       const unitCost = parseFloat(it.unit_cost) || 0;
       const totalCost = Math.round(consumption * unitCost * 100) / 100;
       totalConsumptionVal += totalCost;
@@ -271,11 +313,11 @@ router.post('/save', authenticateToken, async (req, res) => {
       await client.query(`
         INSERT INTO store_stock_entry_items (
           entry_id, item_id, unit, previous_stock, received_stock,
-          in_hand_stock, calculated_consumption, unit_cost, total_cost, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          in_hand_stock, calculated_consumption, handover_stock, excess_consumption, unit_cost, total_cost, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       `, [
         entry.id, it.item_id, it.unit || 'KG',
-        prev, recv, inHand, consumption, unitCost, totalCost, it.notes || null
+        prev, recv, inHand, consumption, handover, excessConsumption, unitCost, totalCost, it.notes || null
       ]);
 
       // If SUBMITTING, atomically update store_inventory and write audit history
@@ -328,6 +370,17 @@ router.post('/save', authenticateToken, async (req, res) => {
       WHERE id = $3
     `, [items.length, totalConsumptionVal, entry.id]);
 
+    await recordActivityLog(client, {
+      module: 'Store',
+      action: isSubmit ? 'STOCK_ENTRY_SUBMITTED' : 'STOCK_ENTRY_DRAFT_SAVED',
+      entity_id: entry.id,
+      entity_name: entry.entry_number,
+      description: `${isSubmit ? 'Submitted' : 'Saved draft'} stock entry ${entry.entry_number} (${entry_date} ${shift})`,
+      new_data: { store_id, branch: finalBranch, total_items: items.length, total_consumption_value: totalConsumptionVal },
+      performed_by: userName,
+      branch: finalBranch
+    });
+
     await client.query('COMMIT');
     res.json({
       success: true,
@@ -347,9 +400,12 @@ router.post('/save', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // GET /api/store/entries/history (List past submissions)
 // -------------------------------------------------------------
-router.get('/history', authenticateToken, async (req, res) => {
+router.get('/history', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store', 'store man', 'data entry']), async (req, res) => {
   try {
     const { store_id, branch, from_date, to_date, status, shift } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch, store_id });
+    if (!access.ok) return;
+
     let query = `
       SELECT 
         se.*,
@@ -360,6 +416,11 @@ router.get('/history', authenticateToken, async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND sl.branch = ANY($${params.length})`;
+    }
 
     if (store_id && store_id !== 'All') {
       params.push(parseInt(store_id, 10));
@@ -403,7 +464,7 @@ router.get('/history', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // GET /api/store/entries/:id (Detail view of single entry)
 // -------------------------------------------------------------
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'management store', 'store man', 'data entry']), async (req, res) => {
   const { id } = req.params;
   try {
     const entryRes = await pool.query(`
@@ -416,6 +477,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (entryRes.rows.length === 0) {
       return res.status(404).json({ error: 'Entry not found' });
     }
+
+    const access = await enforceBranchAccess(req, res, { branch: entryRes.rows[0].store_branch, store_id: entryRes.rows[0].store_id });
+    if (!access.ok) return;
 
     const itemsRes = await pool.query(`
       SELECT 
@@ -444,22 +508,40 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/entries/:id/reopen (Admin / Manager Reopen with Audit Reason)
 // -------------------------------------------------------------
-router.post('/:id/reopen', authenticateToken, async (req, res) => {
+router.post('/:id/reopen', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
   const { id } = req.params;
   const { reason } = req.body;
-
-  const role = req.user?.role?.trim().toLowerCase();
-  if (!['admin', 'developer', 'management', 'store manager'].includes(role)) {
-    return res.status(403).json({ error: 'Only Managers and Admins can reopen finalized shifts' });
-  }
 
   if (!reason || !reason.trim()) {
     return res.status(400).json({ error: 'A mandatory reason is required to reopen a finalized shift' });
   }
 
-  const userName = req.user?.username || req.user?.name || 'Manager';
+  const userName = req.user?.username || req.user?.name || 'Staff';
+  const role = getRole(req);
 
   try {
+    const existingRes = await pool.query(
+      'SELECT se.*, sl.branch as store_branch FROM store_stock_entries se JOIN store_locations sl ON se.store_id = sl.id WHERE se.id = $1',
+      [id]
+    );
+    if (existingRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Entry not found' });
+    }
+    const existing = existingRes.rows[0];
+
+    const access = await enforceBranchAccess(req, res, { branch: existing.store_branch, store_id: existing.store_id });
+    if (!access.ok) return;
+
+    if (isOperationalStoreRole(role) && !isTodayOrYesterday(existing.entry_date)) {
+      return res.status(403).json({
+        error: 'You can only reopen today\'s and yesterday\'s entries. Entries older than yesterday are read-only.'
+      });
+    }
+
+    if (existing.status !== 'Submitted') {
+      return res.status(400).json({ error: 'Entry is not in Submitted status' });
+    }
+
     const result = await pool.query(`
       UPDATE store_stock_entries
       SET status = 'Reopened',
@@ -471,9 +553,16 @@ router.post('/:id/reopen', authenticateToken, async (req, res) => {
       RETURNING *
     `, [userName, reason.trim(), id]);
 
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'Entry not found or is not in Submitted status' });
-    }
+    await recordActivityLog(pool, {
+      module: 'Store',
+      action: 'STOCK_ENTRY_REOPENED',
+      entity_id: id,
+      entity_name: existing.entry_number,
+      description: `Reopened stock entry ${existing.entry_number} (${existing.entry_date} ${existing.shift})`,
+      reason: reason.trim(),
+      performed_by: userName,
+      branch: existing.store_branch
+    });
 
     res.json({
       success: true,

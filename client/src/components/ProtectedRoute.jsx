@@ -20,6 +20,7 @@ export default function ProtectedRoute({ children, allowedRoles }) {
     // If not allowed, seamlessly redirect to appropriate role home page (no Access Denied UI)
     if (userRole === 'salary pay operator') return <Navigate to="/" replace />
     if (userRole === 'order taker' || userRole === 'operator' || userRole === 'cashier') return <Navigate to="/pos" replace />
+    if (userRole === 'store man' || userRole === 'data entry' || userRole === 'management store') return <Navigate to="/store" replace />
     if (userRole === 'employee') return <Navigate to="/employee-portal" replace />
     if (userRole === 'hr manager') return <Navigate to="/employees" replace />
     

@@ -69,7 +69,7 @@ export default function InventoryItems({ user }) {
 
   const isAdminOrDev = useMemo(() => {
     const role = (user?.role || '').toLowerCase();
-    return ['admin', 'developer', 'management'].includes(role);
+    return ['admin', 'developer'].includes(role);
   }, [user]);
 
   // Load auxiliary data (categories, units, vendors)
@@ -130,6 +130,7 @@ export default function InventoryItems({ user }) {
         secondary_unit: '',
         unit_conversion_ratio: 1,
         default_vendor_id: '',
+        vendor_ids: [],
         min_stock_level: 5,
         reorder_quantity: 10,
         last_purchase_price: 0,
@@ -146,6 +147,7 @@ export default function InventoryItems({ user }) {
         secondary_unit: '',
         unit_conversion_ratio: 1,
         default_vendor_id: '',
+        vendor_ids: [],
         min_stock_level: 5,
         reorder_quantity: 10,
         last_purchase_price: 0,
@@ -168,6 +170,7 @@ export default function InventoryItems({ user }) {
       secondary_unit: item.secondary_unit || '',
       unit_conversion_ratio: item.unit_conversion_ratio || 1,
       default_vendor_id: item.default_vendor_id || '',
+      vendor_ids: Array.isArray(item.vendor_ids) ? item.vendor_ids : (item.default_vendor_id ? [item.default_vendor_id] : []),
       min_stock_level: item.min_stock_level || 0,
       reorder_quantity: item.reorder_quantity || 0,
       last_purchase_price: item.last_purchase_price || 0,
@@ -746,17 +749,71 @@ export default function InventoryItems({ user }) {
 
                   {/* ROW 3: Default Supplier, Secondary Unit, Conversion Ratio */}
                   <div className="store-form-group">
-                    <label className="store-form-label">Default Supplier</label>
+                    <label className="store-form-label">Primary Supplier</label>
                     <select
                       value={formData.default_vendor_id}
-                      onChange={(e) => setFormData({ ...formData, default_vendor_id: e.target.value })}
+                      onChange={(e) => {
+                        const vid = e.target.value;
+                        const parsed = vid ? parseInt(vid, 10) : null;
+                        const curr = Array.isArray(formData.vendor_ids) ? formData.vendor_ids : [];
+                        const nextIds = parsed && !curr.includes(parsed) ? [...curr, parsed] : curr;
+                        setFormData({ ...formData, default_vendor_id: vid, vendor_ids: nextIds });
+                      }}
                       className="store-form-select"
                     >
-                      <option value="">None / Multiple</option>
+                      <option value="">None / Select</option>
                       {vendors.map(v => (
                         <option key={v.id} value={v.id}>{v.name}</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="store-form-group col-span-3">
+                    <label className="store-form-label">
+                      Assigned Suppliers (Multiple Vendors Supported — {(formData.vendor_ids || []).length} selected)
+                    </label>
+                    <div style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                      padding: 10,
+                      borderRadius: 8,
+                      border: '1px solid var(--border, #e5e7eb)',
+                      background: 'var(--surface, #f9fafb)',
+                      maxHeight: 110,
+                      overflowY: 'auto'
+                    }}>
+                      {vendors.map(v => {
+                        const curr = Array.isArray(formData.vendor_ids) ? formData.vendor_ids : [];
+                        const checked = curr.includes(v.id);
+                        return (
+                          <label
+                            key={v.id}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              background: checked ? 'rgba(244, 180, 0, 0.14)' : 'white',
+                              border: checked ? '1px solid var(--primary)' : '1px solid #e5e7eb',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const next = checked ? curr.filter(id => id !== v.id) : [...curr, v.id];
+                                setFormData({ ...formData, vendor_ids: next });
+                              }}
+                            />
+                            <span>{v.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div className="store-form-group">

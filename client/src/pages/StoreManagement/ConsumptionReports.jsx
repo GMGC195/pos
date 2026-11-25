@@ -24,17 +24,12 @@ import { useStore } from '../../contexts/StoreContext';
 import { formatBranchLabel, SHIFT_OPTIONS } from './storeUtils';
 
 export default function ConsumptionReports({ 
-  selectedBranch: propBranch, 
-  selectedStoreId: propStoreId, 
-  locations: propLocations = [] 
+  selectedBranch: propBranch
 }) {
   const storeContext = useStore();
   const selectedBranch = propBranch || storeContext?.selectedBranch || 'All';
-  const selectedStoreId = propStoreId || storeContext?.selectedStoreId || 'All';
-  const locations = (propLocations && propLocations.length > 0) ? propLocations : (storeContext?.locations || []);
-  const branches = storeContext?.branches || [];
+  const branches = storeContext?.branches || ['Branch 1', 'Branch 2', 'Branch 3'];
   const setSelectedBranch = storeContext?.setSelectedBranch || (() => {});
-  const setSelectedStoreId = storeContext?.setSelectedStoreId || (() => {});
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState({
     total_records: 0,
@@ -47,7 +42,6 @@ export default function ConsumptionReports({
   // Filters
   const [viewMode, setViewMode] = useState('detailed'); // 'detailed' | 'grouped'
   const [branchFilter, setBranchFilter] = useState(selectedBranch || 'All');
-  const [storeFilter, setStoreFilter] = useState(selectedStoreId || 'All');
   const [shiftFilter, setShiftFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [fromDate, setFromDate] = useState(() => {
@@ -73,7 +67,6 @@ export default function ConsumptionReports({
     try {
       const params = {};
       if (branchFilter !== 'All') params.branch = branchFilter;
-      if (storeFilter !== 'All') params.store_id = storeFilter;
       if (shiftFilter !== 'All') params.shift = shiftFilter;
       if (categoryFilter !== 'All') params.category_id = categoryFilter;
       if (fromDate) params.from_date = fromDate;
@@ -100,16 +93,12 @@ export default function ConsumptionReports({
 
   useEffect(() => {
     fetchReport();
-  }, [branchFilter, storeFilter, shiftFilter, categoryFilter, fromDate, toDate]);
+  }, [branchFilter, shiftFilter, categoryFilter, fromDate, toDate]);
 
   // Sync with parent props
   useEffect(() => {
     if (selectedBranch && selectedBranch !== 'All') setBranchFilter(selectedBranch);
   }, [selectedBranch]);
-
-  useEffect(() => {
-    if (selectedStoreId && selectedStoreId !== 'All') setStoreFilter(selectedStoreId);
-  }, [selectedStoreId]);
 
   // Quick Date Range Helpers
   const setPresetRange = (preset) => {
@@ -173,7 +162,6 @@ export default function ConsumptionReports({
         'Date': r.entry_date,
         'Shift': r.shift,
         'Branch': r.branch,
-        'Store Location': r.store_name,
         'Item Code': r.item_code,
         'Item Name': r.item_name,
         'Arabic Name': r.arabic_name || '',
@@ -278,7 +266,7 @@ export default function ConsumptionReports({
           </div>
         </div>
 
-        {/* Mobile Branch & Store Location Bar (only on screens <= 768px) */}
+        {/* Mobile Branch Bar (only on screens <= 768px) */}
         <div className="store-mobile-location-bar">
           <div className="store-filter-col">
             <label className="store-filter-label">Branch</label>
@@ -293,25 +281,6 @@ export default function ConsumptionReports({
               <option value="All">All Branches</option>
               {branches.map(b => (
                 <option key={b} value={b}>{formatBranchLabel(b)}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="store-filter-col">
-            <label className="store-filter-label">Store Location</label>
-            <select
-              value={storeFilter}
-              onChange={(e) => {
-                setStoreFilter(e.target.value);
-                setSelectedStoreId(e.target.value);
-              }}
-              className="store-filter-select"
-            >
-              <option value="All">All Store Locations</option>
-              {locations.map(loc => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name} ({formatBranchLabel(loc.branch)})
-                </option>
               ))}
             </select>
           </div>
@@ -510,7 +479,7 @@ export default function ConsumptionReports({
                   <tr>
                     <th>Date</th>
                     <th>Shift</th>
-                    <th>Store Location</th>
+                    <th>Branch</th>
                     <th>Item Code</th>
                     <th>Item Name</th>
                     <th style={{ textAlign: 'center' }}>Unit</th>
@@ -554,8 +523,8 @@ export default function ConsumptionReports({
                             {r.shift}
                           </span>
                         </td>
-                        <td style={{ fontSize: 12 }}>
-                          {r.store_name}
+                        <td style={{ fontSize: 12, fontWeight: 700, color: 'var(--secondary)' }}>
+                          {formatBranchLabel(r.branch)}
                         </td>
                         <td style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary-dark, #d97706)' }}>
                           {r.item_code}

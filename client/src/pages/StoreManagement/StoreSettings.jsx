@@ -1,44 +1,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from '../../api';
 import toast from 'react-hot-toast';
-import { 
-  Settings, 
-  Building2, 
-  Layers, 
-  Scale, 
-  Plus, 
-  Edit3, 
-  Trash2, 
-  CheckCircle2, 
-  X, 
-  RefreshCw, 
-  ShieldCheck,
-  AlertCircle
+import {
+  Settings,
+  Layers,
+  Scale,
+  Plus,
+  Edit3,
+  Trash2,
+  X,
+  RefreshCw
 } from 'lucide-react';
-import { formatBranchLabel } from './storeUtils';
 import './storeManagement.css';
 
-export default function StoreSettings({ user, onLocationsChanged }) {
-  const [activeTab, setActiveTab] = useState('locations'); // 'locations' | 'categories' | 'units'
+export default function StoreSettings({ user }) {
+  const [activeTab, setActiveTab] = useState('categories'); // 'categories' | 'units'
 
-  // Data states
-  const [locations, setLocations] = useState([]);
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
-  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(false);
-
-  // Location Modal
-  const [showLocModal, setShowLocModal] = useState(false);
-  const [editingLoc, setEditingLoc] = useState(null);
-  const [locForm, setLocForm] = useState({
-    name: '',
-    branch: '',
-    code: '',
-    store_type: 'Branch Store',
-    description: '',
-    is_active: true
-  });
 
   // Category Modal
   const [showCatModal, setShowCatModal] = useState(false);
@@ -53,6 +33,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
 
   // Unit Modal
   const [showUnitModal, setShowUnitModal] = useState(false);
+  const [editingUnit, setEditingUnit] = useState(null);
   const [unitForm, setUnitForm] = useState({
     name: '',
     short_code: '',
@@ -63,23 +44,18 @@ export default function StoreSettings({ user, onLocationsChanged }) {
 
   const isManagerOrAdmin = useMemo(() => {
     const role = (user?.role || '').toLowerCase();
-    return ['admin', 'developer', 'management', 'store manager'].includes(role);
+    return ['admin', 'developer'].includes(role);
   }, [user]);
 
-  // Load all settings data
   const fetchAllSettings = async () => {
     setLoading(true);
     try {
-      const [locsRes, catsRes, unitsRes, branchesRes] = await Promise.all([
-        axios.get('/api/store/locations/locations'),
+      const [catsRes, unitsRes] = await Promise.all([
         axios.get('/api/store/locations/categories'),
-        axios.get('/api/store/locations/units'),
-        axios.get('/api/store/locations/branches')
+        axios.get('/api/store/locations/units')
       ]);
-      setLocations(locsRes.data || []);
       setCategories(catsRes.data || []);
       setUnits(unitsRes.data || []);
-      setBranches(branchesRes.data || []);
     } catch (err) {
       console.error('Error fetching settings:', err);
       toast.error('Failed to load store settings');
@@ -93,63 +69,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
   }, []);
 
   // -------------------------------------------------------------
-  // LOCATION HANDLERS
-  // -------------------------------------------------------------
-  const handleOpenNewLoc = () => {
-    setEditingLoc(null);
-    setLocForm({
-      name: '',
-      branch: branches[0] || 'Branch 1',
-      code: '',
-      store_type: 'Branch Store',
-      description: '',
-      is_active: true
-    });
-    setShowLocModal(true);
-  };
-
-  const handleEditLoc = (loc) => {
-    setEditingLoc(loc);
-    setLocForm({
-      name: loc.name,
-      branch: loc.branch,
-      code: loc.code || '',
-      store_type: loc.store_type || 'Branch Store',
-      description: loc.description || '',
-      is_active: loc.is_active !== false
-    });
-    setShowLocModal(true);
-  };
-
-  const handleSaveLoc = async (e) => {
-    e.preventDefault();
-    if (!locForm.name.trim() || !locForm.branch) {
-      toast.error('Location name and branch are required');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      if (editingLoc) {
-        await axios.put(`/api/store/locations/locations/${editingLoc.id}`, locForm);
-        toast.success('Store location updated');
-      } else {
-        await axios.post('/api/store/locations/locations', locForm);
-        toast.success('Store location created');
-      }
-      setShowLocModal(false);
-      fetchAllSettings();
-      if (onLocationsChanged) onLocationsChanged();
-    } catch (err) {
-      console.error('Error saving location:', err);
-      toast.error(err.response?.data?.error || 'Failed to save location');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // -------------------------------------------------------------
-  // CATEGORY HANDLERS
+  // CATEGORY CRUD HANDLERS
   // -------------------------------------------------------------
   const handleOpenNewCat = () => {
     setEditingCat(null);
@@ -181,7 +101,6 @@ export default function StoreSettings({ user, onLocationsChanged }) {
       toast.error('Category name is required');
       return;
     }
-
     setSaving(true);
     try {
       if (editingCat) {
@@ -194,21 +113,42 @@ export default function StoreSettings({ user, onLocationsChanged }) {
       setShowCatModal(false);
       fetchAllSettings();
     } catch (err) {
-      console.error('Error saving category:', err);
       toast.error(err.response?.data?.error || 'Failed to save category');
     } finally {
       setSaving(false);
     }
   };
 
+  const handleDeleteCat = async (cat) => {
+    if (!window.confirm(`Delete category "${cat.name}"?`)) return;
+    try {
+      await axios.delete(`/api/store/locations/categories/${cat.id}`);
+      toast.success('Category deleted');
+      fetchAllSettings();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete category');
+    }
+  };
+
   // -------------------------------------------------------------
-  // UNIT HANDLERS
+  // UNIT CRUD HANDLERS
   // -------------------------------------------------------------
   const handleOpenNewUnit = () => {
+    setEditingUnit(null);
     setUnitForm({
       name: '',
       short_code: '',
       conversion_factor: 1.0
+    });
+    setShowUnitModal(true);
+  };
+
+  const handleEditUnit = (unit) => {
+    setEditingUnit(unit);
+    setUnitForm({
+      name: unit.name,
+      short_code: unit.short_code,
+      conversion_factor: parseFloat(unit.conversion_factor) || 1.0
     });
     setShowUnitModal(true);
   };
@@ -219,24 +159,37 @@ export default function StoreSettings({ user, onLocationsChanged }) {
       toast.error('Unit name and short code are required');
       return;
     }
-
     setSaving(true);
     try {
-      await axios.post('/api/store/locations/units', unitForm);
-      toast.success('Measurement unit created');
+      if (editingUnit) {
+        await axios.put(`/api/store/locations/units/${editingUnit.id}`, unitForm);
+        toast.success('Measurement unit updated');
+      } else {
+        await axios.post('/api/store/locations/units', unitForm);
+        toast.success('Measurement unit created');
+      }
       setShowUnitModal(false);
       fetchAllSettings();
     } catch (err) {
-      console.error('Error saving unit:', err);
       toast.error(err.response?.data?.error || 'Failed to save unit');
     } finally {
       setSaving(false);
     }
   };
 
+  const handleDeleteUnit = async (unit) => {
+    if (!window.confirm(`Delete unit "${unit.name} (${unit.short_code})"?`)) return;
+    try {
+      await axios.delete(`/api/store/locations/units/${unit.id}`);
+      toast.success('Unit deleted');
+      fetchAllSettings();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete unit');
+    }
+  };
+
   return (
     <div className="store-module-wrap">
-      {/* Header and Sub-Tabs Card */}
       <div className="store-card">
         <div className="store-header-row">
           <div className="store-header-left">
@@ -246,7 +199,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
             <div className="store-header-info">
               <h2 className="store-header-title">Store Master Configuration</h2>
               <p className="store-header-desc">
-                Manage branch physical stores, dynamic product categories, and measurement units.
+                Manage product categories and measurement units across Branch 1, Branch 2, and Branch 3.
               </p>
             </div>
           </div>
@@ -263,16 +216,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
           </div>
         </div>
 
-        {/* Tab Switcher */}
         <div className="store-tabs">
-          <button
-            onClick={() => setActiveTab('locations')}
-            className={`store-tab-btn ${activeTab === 'locations' ? 'active' : ''}`}
-          >
-            <Building2 size={14} />
-            <span>Store Locations ({locations.length})</span>
-          </button>
-
           <button
             onClick={() => setActiveTab('categories')}
             className={`store-tab-btn ${activeTab === 'categories' ? 'active' : ''}`}
@@ -291,88 +235,13 @@ export default function StoreSettings({ user, onLocationsChanged }) {
         </div>
       </div>
 
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 1: STORE LOCATIONS */}
-      {/* ------------------------------------------------------------- */}
-      {activeTab === 'locations' && (
-        <div className="store-card">
-          <div className="store-header-row" style={{ borderBottom: 'none', marginBottom: 12 }}>
-            <div className="store-header-info">
-              <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Branch Store Locations</h3>
-              <p className="store-header-desc">Stores holding physical inventory per restaurant branch.</p>
-            </div>
-            {isManagerOrAdmin && (
-              <button
-                onClick={handleOpenNewLoc}
-                className="store-btn store-btn-primary"
-              >
-                <Plus size={15} />
-                <span>Add Store Location</span>
-              </button>
-            )}
-          </div>
-
-          <div className="store-table-card">
-            <table className="store-table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Store Name</th>
-                  <th>Branch</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                  <th style={{ textAlign: 'center' }}>Status</th>
-                  <th style={{ textAlign: 'right' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {locations.map(loc => (
-                  <tr key={loc.id}>
-                    <td style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary-dark, #d97706)' }}>{loc.code}</td>
-                    <td style={{ fontWeight: 600 }}>{loc.name}</td>
-                    <td>
-                      <span className="store-badge-count">{formatBranchLabel(loc.branch)}</span>
-                    </td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{loc.store_type}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{loc.description || '-'}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className="store-badge-count" style={{
-                        background: loc.is_active !== false ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: loc.is_active !== false ? '#059669' : '#dc2626',
-                        borderColor: loc.is_active !== false ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'
-                      }}>
-                        {loc.is_active !== false ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {isManagerOrAdmin && (
-                        <button
-                          onClick={() => handleEditLoc(loc)}
-                          className="store-btn-icon"
-                          style={{ width: 30, height: 30 }}
-                          title="Edit Location"
-                        >
-                          <Edit3 size={14} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 2: STORE CATEGORIES */}
-      {/* ------------------------------------------------------------- */}
+      {/* TAB 1: CATEGORIES */}
       {activeTab === 'categories' && (
         <div className="store-card">
           <div className="store-header-row" style={{ borderBottom: 'none', marginBottom: 12 }}>
             <div className="store-header-info">
-              <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Dynamic Item Categories</h3>
-              <p className="store-header-desc">Classify store items into organized groups.</p>
+              <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Item Categories</h3>
+              <p className="store-header-desc">Organize store inventory into clear groups.</p>
             </div>
             {isManagerOrAdmin && (
               <button
@@ -389,42 +258,40 @@ export default function StoreSettings({ user, onLocationsChanged }) {
             <table className="store-table">
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'center' }}>Icon</th>
+                  <th style={{ width: 60 }}>Order</th>
                   <th>Category Name</th>
                   <th>Description</th>
-                  <th style={{ textAlign: 'center' }}>Sort Order</th>
-                  <th style={{ textAlign: 'center' }}>Status</th>
-                  <th style={{ textAlign: 'right' }}>Action</th>
+                  {isManagerOrAdmin && <th style={{ textAlign: 'right' }}>Actions</th>}
                 </tr>
               </thead>
               <tbody>
                 {categories.map(cat => (
                   <tr key={cat.id}>
-                    <td style={{ textAlign: 'center', fontSize: 16 }}>{cat.icon || '📦'}</td>
+                    <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>#{cat.sort_order}</td>
                     <td style={{ fontWeight: 600 }}>{cat.name}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{cat.description || '-'}</td>
-                    <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{cat.sort_order}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className="store-badge-count" style={{
-                        background: cat.is_active !== false ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: cat.is_active !== false ? '#059669' : '#dc2626',
-                        borderColor: cat.is_active !== false ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'
-                      }}>
-                        {cat.is_active !== false ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {isManagerOrAdmin && (
-                        <button
-                          onClick={() => handleEditCat(cat)}
-                          className="store-btn-icon"
-                          style={{ width: 30, height: 30 }}
-                          title="Edit Category"
-                        >
-                          <Edit3 size={14} />
-                        </button>
-                      )}
-                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{cat.description || '—'}</td>
+                    {isManagerOrAdmin && (
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            onClick={() => handleEditCat(cat)}
+                            className="store-btn-icon"
+                            style={{ width: 30, height: 30 }}
+                            title="Edit Category"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCat(cat)}
+                            className="store-action-btn delete"
+                            style={{ width: 30, height: 30 }}
+                            title="Delete Category"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -433,9 +300,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
         </div>
       )}
 
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 3: UNITS OF MEASUREMENT */}
-      {/* ------------------------------------------------------------- */}
+      {/* TAB 2: UNITS OF MEASUREMENT */}
       {activeTab === 'units' && (
         <div className="store-card">
           <div className="store-header-row" style={{ borderBottom: 'none', marginBottom: 12 }}>
@@ -461,6 +326,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
                   <th>Unit Name</th>
                   <th style={{ textAlign: 'center' }}>Short Code</th>
                   <th style={{ textAlign: 'right' }}>Base Conversion Factor</th>
+                  {isManagerOrAdmin && <th style={{ textAlign: 'right' }}>Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -475,112 +341,32 @@ export default function StoreSettings({ user, onLocationsChanged }) {
                     <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>
                       {Number(u.conversion_factor || 1).toFixed(2)}
                     </td>
+                    {isManagerOrAdmin && (
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            onClick={() => handleEditUnit(u)}
+                            className="store-btn-icon"
+                            style={{ width: 30, height: 30 }}
+                            title="Edit Unit"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUnit(u)}
+                            className="store-action-btn delete"
+                            style={{ width: 30, height: 30 }}
+                            title="Delete Unit"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-      )}
-
-      {/* LOCATION MODAL */}
-      {showLocModal && (
-        <div className="store-modal-overlay" onClick={() => setShowLocModal(false)}>
-          <div className="store-modal-dialog" onClick={e => e.stopPropagation()}>
-            <div className="store-modal-header">
-              <h3 className="store-modal-title">
-                <Building2 size={18} style={{ color: 'var(--primary-dark, #d97706)' }} />
-                <span>{editingLoc ? 'Edit Store Location' : 'New Store Location'}</span>
-              </h3>
-              <button type="button" onClick={() => setShowLocModal(false)} className="store-modal-close">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveLoc}>
-              <div className="store-modal-body">
-                <div className="store-form-grid-2">
-                  <div className="store-form-group col-span-2">
-                    <label className="store-form-label">Store Name *</label>
-                    <input
-                      type="text"
-                      value={locForm.name}
-                      onChange={(e) => setLocForm({ ...locForm, name: e.target.value })}
-                      required
-                      placeholder="e.g. Main Dry Store"
-                      className="store-form-input"
-                    />
-                  </div>
-
-                  <div className="store-form-group">
-                    <label className="store-form-label">Branch *</label>
-                    <select
-                      value={locForm.branch}
-                      onChange={(e) => setLocForm({ ...locForm, branch: e.target.value })}
-                      className="store-form-select"
-                    >
-                      {branches.map(b => (
-                        <option key={b} value={b}>{formatBranchLabel(b)}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="store-form-group">
-                    <label className="store-form-label">Store Code (Optional)</label>
-                    <input
-                      type="text"
-                      value={locForm.code}
-                      onChange={(e) => setLocForm({ ...locForm, code: e.target.value })}
-                      placeholder="Auto-generated if empty"
-                      className="store-form-input"
-                      style={{ fontFamily: 'monospace' }}
-                    />
-                  </div>
-
-                  <div className="store-form-group col-span-2">
-                    <label className="store-form-label">Store Type</label>
-                    <select
-                      value={locForm.store_type}
-                      onChange={(e) => setLocForm({ ...locForm, store_type: e.target.value })}
-                      className="store-form-select"
-                    >
-                      <option value="Branch Store">Branch Store</option>
-                      <option value="Central Warehouse">Central Warehouse</option>
-                      <option value="Freezer Store">Freezer Store</option>
-                      <option value="Chilled Room">Chilled Room</option>
-                    </select>
-                  </div>
-
-                  <div className="store-form-group col-span-2">
-                    <label className="store-form-label">Description / Notes</label>
-                    <textarea
-                      rows="2"
-                      value={locForm.description}
-                      onChange={(e) => setLocForm({ ...locForm, description: e.target.value })}
-                      className="store-form-textarea"
-                    ></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <div className="store-modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setShowLocModal(false)}
-                  className="store-btn store-btn-secondary"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="store-btn store-btn-primary"
-                >
-                  {saving && <RefreshCw size={14} className="spin" />}
-                  <span>Save Location</span>
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
@@ -592,7 +378,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
             <div className="store-modal-header">
               <h3 className="store-modal-title">
                 <Layers size={18} style={{ color: 'var(--primary-dark, #d97706)' }} />
-                <span>{editingCat ? 'Edit Category' : 'New Category'}</span>
+                <span>{editingCat ? 'Edit Category' : 'Add Store Category'}</span>
               </h3>
               <button type="button" onClick={() => setShowCatModal(false)} className="store-modal-close">
                 <X size={18} />
@@ -609,23 +395,12 @@ export default function StoreSettings({ user, onLocationsChanged }) {
                       value={catForm.name}
                       onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
                       required
-                      placeholder="e.g. Dairy & Cheeses"
+                      placeholder="e.g. Frozen Toppings"
                       className="store-form-input"
                     />
                   </div>
 
-                  <div className="store-form-group">
-                    <label className="store-form-label">Icon / Emoji</label>
-                    <input
-                      type="text"
-                      value={catForm.icon}
-                      onChange={(e) => setCatForm({ ...catForm, icon: e.target.value })}
-                      placeholder="e.g. 🧀 or 🥫"
-                      className="store-form-input"
-                    />
-                  </div>
-
-                  <div className="store-form-group">
+                  <div className="store-form-group col-span-2">
                     <label className="store-form-label">Sort Order</label>
                     <input
                       type="number"
@@ -648,18 +423,8 @@ export default function StoreSettings({ user, onLocationsChanged }) {
               </div>
 
               <div className="store-modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setShowCatModal(false)}
-                  className="store-btn store-btn-secondary"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="store-btn store-btn-primary"
-                >
+                <button type="button" onClick={() => setShowCatModal(false)} className="store-btn store-btn-secondary">Cancel</button>
+                <button type="submit" disabled={saving} className="store-btn store-btn-primary">
                   {saving && <RefreshCw size={14} className="spin" />}
                   <span>Save Category</span>
                 </button>
@@ -676,7 +441,7 @@ export default function StoreSettings({ user, onLocationsChanged }) {
             <div className="store-modal-header">
               <h3 className="store-modal-title">
                 <Scale size={18} style={{ color: 'var(--primary-dark, #d97706)' }} />
-                <span>Add Unit of Measurement</span>
+                <span>{editingUnit ? 'Edit Unit of Measurement' : 'Add Unit of Measurement'}</span>
               </h3>
               <button type="button" onClick={() => setShowUnitModal(false)} className="store-modal-close">
                 <X size={18} />
@@ -725,18 +490,8 @@ export default function StoreSettings({ user, onLocationsChanged }) {
               </div>
 
               <div className="store-modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setShowUnitModal(false)}
-                  className="store-btn store-btn-secondary"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="store-btn store-btn-primary"
-                >
+                <button type="button" onClick={() => setShowUnitModal(false)} className="store-btn store-btn-secondary">Cancel</button>
+                <button type="submit" disabled={saving} className="store-btn store-btn-primary">
                   {saving && <RefreshCw size={14} className="spin" />}
                   <span>Save Unit</span>
                 </button>

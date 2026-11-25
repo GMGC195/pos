@@ -138,6 +138,7 @@ export default function Settings() {
     role: 'Operator',
     shift: '',
     branch: '',
+    assigned_branches: [],
     employee_id: ''
   })
   
@@ -545,16 +546,27 @@ export default function Settings() {
 
   const handleCreateUser = async (e) => {
     e.preventDefault()
-    setLoading(true)
     const payload = { ...userForm };
     if (['Order Taker', 'Cashier'].includes(payload.role) && !payload.branch) payload.branch = 'Branch 1';
     if (payload.role === 'Operator' && !payload.branch) payload.branch = 'Restaurant 1';
+    if (payload.role === 'Store Man') {
+      if (!payload.branch) payload.branch = 'Branch 1';
+      payload.assigned_branches = [payload.branch];
+    }
+    if (payload.role === 'Data Entry') {
+      const branchesArr = Array.isArray(payload.assigned_branches) ? payload.assigned_branches : [];
+      if (branchesArr.length === 0) {
+        return toast.error('Please select at least one branch for Data Entry');
+      }
+      payload.branch = branchesArr.join(', ');
+    }
+    setLoading(true)
     
     try {
       await api.post('/api/auth/users', payload)
       toast.success('User created successfully')
       setIsAddingUser(false)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '', employee_id: '' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '', assigned_branches: [], employee_id: '' })
       setShowUserPass(false)
       setShowShiftDropdown(false)
       setShowBranchDropdown(false)
@@ -568,16 +580,27 @@ export default function Settings() {
 
   const handleUpdateUser = async (e) => {
     e.preventDefault()
-    setLoading(true)
     const payload = { ...userForm };
     if (['Order Taker', 'Cashier'].includes(payload.role) && !payload.branch) payload.branch = 'Branch 1';
     if (payload.role === 'Operator' && !payload.branch) payload.branch = 'Restaurant 1';
+    if (payload.role === 'Store Man') {
+      if (!payload.branch) payload.branch = 'Branch 1';
+      payload.assigned_branches = [payload.branch];
+    }
+    if (payload.role === 'Data Entry') {
+      const branchesArr = Array.isArray(payload.assigned_branches) ? payload.assigned_branches : [];
+      if (branchesArr.length === 0) {
+        return toast.error('Please select at least one branch for Data Entry');
+      }
+      payload.branch = branchesArr.join(', ');
+    }
+    setLoading(true)
     
     try {
       await api.put(`/api/auth/users/${editingUser.id}`, payload)
       toast.success('User updated successfully')
       setEditingUser(null)
-      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '', employee_id: '' })
+      setUserForm({ username: '', email: '', password: '', role: 'Operator', shift: '', branch: '', assigned_branches: [], employee_id: '' })
       setShowUserPass(false)
       setShowShiftDropdown(false)
       setShowBranchDropdown(false)
@@ -608,6 +631,9 @@ export default function Settings() {
 
   const openEdit = (u) => {
     setEditingUser(u)
+    const parsedAssigned = Array.isArray(u.assigned_branches) && u.assigned_branches.length > 0
+      ? u.assigned_branches
+      : (u.branch ? u.branch.split(',').map(s => s.trim()).filter(Boolean) : []);
     setUserForm({
       username: u.username,
       email: u.email,
@@ -615,6 +641,7 @@ export default function Settings() {
       role: u.role,
       shift: u.shift || '',
       branch: u.branch || '',
+      assigned_branches: parsedAssigned,
       employee_id: u.employee_id || ''
     })
     setIsAddingUser(true)
@@ -1542,15 +1569,27 @@ export default function Settings() {
                           onChange={e => {
                             const newRole = e.target.value;
                             let newBranch = userForm.branch;
-                            if (['Order Taker', 'Cashier'].includes(newRole) && (!newBranch || newBranch.startsWith('Restaurant'))) newBranch = 'Branch 1';
-                            else if (newRole === 'Operator' && (!newBranch || newBranch.startsWith('Branch'))) newBranch = 'Restaurant 1';
-                            else if (!['Order Taker', 'Cashier', 'Operator', 'Employee'].includes(newRole)) newBranch = '';
+                            let newAssigned = userForm.assigned_branches || [];
+                            if (['Order Taker', 'Cashier', 'Store Man'].includes(newRole) && (!newBranch || !newBranch.startsWith('Branch'))) {
+                              newBranch = 'Branch 1';
+                              newAssigned = ['Branch 1'];
+                            } else if (newRole === 'Data Entry') {
+                              newAssigned = newAssigned.length > 0 ? newAssigned : ['Branch 1'];
+                              newBranch = newAssigned.join(', ');
+                            } else if (newRole === 'Operator' && (!newBranch || newBranch.startsWith('Branch'))) {
+                              newBranch = 'Restaurant 1';
+                              newAssigned = [];
+                            } else if (!['Order Taker', 'Cashier', 'Operator', 'Employee', 'Store Man', 'Data Entry'].includes(newRole)) {
+                              newBranch = '';
+                              newAssigned = [];
+                            }
                             
                             setUserForm({
                               ...userForm, 
                               role: newRole, 
                               shift: newRole === 'Operator' ? (userForm.shift || 'Morning') : '',
-                              branch: newBranch
+                              branch: newBranch,
+                              assigned_branches: newAssigned
                             });
                           }}
                         >
@@ -1561,16 +1600,19 @@ export default function Settings() {
                           <option value="Salary Pay Operator">Salary Pay Operator</option>
                           <option value="HR Manager">HR Manager</option>
                           <option value="Management">Management</option>
+                          <option value="Management Store">Management Store</option>
+                          <option value="Store Man">Store Man</option>
+                          <option value="Data Entry">Data Entry</option>
                           <option value="Employee">Employee</option>
                           {user?.role?.toLowerCase() === 'developer' && <option value="Developer">Developer</option>}
                         </select>
                       </div>
-                      {(userForm.role === 'Order Taker' || userForm.role === 'Cashier' || userForm.role === 'Operator') && (
+                      {(userForm.role === 'Order Taker' || userForm.role === 'Cashier' || userForm.role === 'Operator' || userForm.role === 'Store Man') && (
                         <div className="form-group">
-                          <label>Assigned Restaurant</label>
+                          <label>{userForm.role === 'Store Man' ? 'Assigned Store Branch *' : 'Assigned Restaurant'}</label>
                           <select 
                             value={userForm.branch || (userForm.role === 'Operator' ? 'Restaurant 1' : 'Branch 1')}
-                            onChange={e => setUserForm({...userForm, branch: e.target.value})}
+                            onChange={e => setUserForm({...userForm, branch: e.target.value, assigned_branches: [e.target.value]})}
                           >
                             {userForm.role === 'Operator' ? (
                               <>
@@ -1586,6 +1628,56 @@ export default function Settings() {
                               </>
                             )}
                           </select>
+                        </div>
+                      )}
+                      {userForm.role === 'Data Entry' && (
+                        <div className="form-group">
+                          <label>Assigned Branches (Multi-Select) *</label>
+                          <div style={{
+                            display: 'flex',
+                            gap: 10,
+                            flexWrap: 'wrap',
+                            padding: '10px 12px',
+                            border: '1.5px solid var(--surface-2)',
+                            borderRadius: 12,
+                            background: 'var(--surface)'
+                          }}>
+                            {['Branch 1', 'Branch 2', 'Branch 3'].map(b => {
+                              const checked = (userForm.assigned_branches || []).includes(b);
+                              return (
+                                <label
+                                  key={b}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    padding: '6px 12px',
+                                    borderRadius: 8,
+                                    border: checked ? '1.5px solid var(--primary)' : '1px solid var(--surface-2)',
+                                    background: checked ? 'rgba(244, 180, 0, 0.14)' : 'white',
+                                    cursor: 'pointer',
+                                    fontSize: 13,
+                                    fontWeight: checked ? 700 : 500
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      const curr = userForm.assigned_branches || [];
+                                      const next = checked ? curr.filter(x => x !== b) : [...curr, b];
+                                      setUserForm({
+                                        ...userForm,
+                                        assigned_branches: next,
+                                        branch: next.join(', ')
+                                      });
+                                    }}
+                                  />
+                                  <span>{b}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                                             {userForm.role === 'Employee' && (
@@ -1975,7 +2067,7 @@ export default function Settings() {
                       background: 'var(--surface-1)',
                       overflowX: 'auto'
                     }}>
-                      {['Admin', 'Management', 'Operator', 'Salary Pay Operator', 'Cashier', 'Order Taker'].map(r => (
+                      {['Admin', 'Management', 'Management Store', 'Store Man', 'Data Entry', 'Operator', 'Salary Pay Operator', 'Cashier', 'Order Taker'].map(r => (
                         <button
                           key={r}
                           onClick={() => setUserRoleFilter(r)}

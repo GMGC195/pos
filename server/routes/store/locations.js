@@ -1,42 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
-const { authenticateToken, isAdmin, isAdminOrManagement } = require('../../middleware/auth');
+const { authenticateToken, isAdmin } = require('../../middleware/auth');
+const { getUserAllowedBranches, enforceBranchAccess } = require('../../middleware/storeAuth');
 
-// Helper to check store manager or admin
+// Only Admin & Developer can modify store locations, categories, or units
 const isStoreAdminOrManager = (req, res, next) => {
   const role = req.user?.role?.trim().toLowerCase();
-  if (['admin', 'developer', 'management', 'store manager'].includes(role)) {
+  if (['admin', 'developer'].includes(role)) {
     next();
   } else {
-    res.status(403).json({ error: 'Store management authorization required' });
+    res.status(403).json({ error: 'Admin or Developer authorization required' });
   }
 };
 
 // -------------------------------------------------------------
-// BRANCHES (Dynamic Discovery)
+// BRANCHES (Canonical Active Branches: B1, B2, B3)
 // -------------------------------------------------------------
 router.get('/branches', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT DISTINCT b FROM (
-        SELECT branch AS b FROM store_locations WHERE branch IS NOT NULL AND branch != ''
-        UNION
-        SELECT branch AS b FROM users WHERE branch IS NOT NULL AND branch != '' AND branch != 'All'
-        UNION
-        SELECT 'Branch 1' AS b
-        UNION
-        SELECT 'Branch 2' AS b
-        UNION
-        SELECT 'Branch 3' AS b
-        UNION
-        SELECT 'Central Kitchen' AS b
-      ) sub
-      WHERE b IS NOT NULL AND b != ''
-      ORDER BY b ASC
-    `);
-    const branches = result.rows.map(r => r.b);
-    res.json(branches);
+    const allowed = getUserAllowedBranches(req.user);
+    if (allowed !== null) {
+      return res.json(allowed);
+    }
+    res.json(['Branch 1', 'Branch 2', 'Branch 3']);
   } catch (err) {
     console.error('Error fetching store branches:', err);
     res.status(500).json({ error: 'Failed to fetch branches' });
@@ -49,12 +36,28 @@ router.get('/branches', authenticateToken, async (req, res) => {
 router.get('/locations', authenticateToken, async (req, res) => {
   try {
     const { branch } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch });
+    if (!access.ok) return;
+
     let query = 'SELECT * FROM store_locations WHERE 1=1';
     const params = [];
 
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND branch = ANY($${params.length})`;
+    }
+
     if (branch && branch !== 'All') {
-      params.push(branch);
-      query += ` AND branch = $${params.length}`;
+      if (/branch\s*1\b/i.test(branch) || /restaurant\s*1\b/i.test(branch) || branch === 'B1') {
+        query += " AND (branch = 'Branch 1' OR branch = 'Restaurant 1')";
+      } else if (/branch\s*2\b/i.test(branch) || /restaurant\s*2\b/i.test(branch) || branch === 'B2') {
+        query += " AND (branch = 'Branch 2' OR branch = 'Restaurant 2')";
+      } else if (/branch\s*3\b/i.test(branch) || /restaurant\s*3\b/i.test(branch) || branch === 'B3') {
+        query += " AND (branch = 'Branch 3' OR branch = 'Restaurant 3')";
+      } else {
+        params.push(branch);
+        query += ` AND branch = $${params.length}`;
+      }
     }
 
     query += ' ORDER BY branch ASC, name ASC';
@@ -254,6 +257,45 @@ router.post('/units', authenticateToken, isStoreAdminOrManager, async (req, res)
       return res.status(400).json({ error: 'A unit with this short code already exists' });
     }
     res.status(500).json({ error: 'Failed to create unit' });
+  }
+});
+
+router.put('/units/:id', authenticateToken, isStoreAdminOrManager, async (req, res) => {
+  const { id } = req.params;
+  const { name, short_code, conversion_factor, is_active } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE store_units
+       SET name = COALESCE($1, name),
+           short_code = COALESCE($2, short_code),
+           conversion_factor = COALESCE($3, conversion_factor),
+           is_active = COALESCE($4, is_active)
+       WHERE id = $5 RETURNING *`,
+      [name?.trim() || null, short_code?.trim().toUpperCase() || null, conversion_factor !== undefined ? parseFloat(conversion_factor) : null, is_active, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Unit not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating unit:', err);
+    res.status(500).json({ error: 'Failed to update unit' });
+  }
+});
+
+router.delete('/units/:id', authenticateToken, isStoreAdminOrManager, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const uRes = await pool.query('SELECT short_code FROM store_units WHERE id = $1', [id]);
+    if (uRes.rows.length === 0) return res.status(404).json({ error: 'Unit not found' });
+    const shortCode = uRes.rows[0].short_code;
+    const itemCheck = await pool.query('SELECT COUNT(*) FROM store_items WHERE UPPER(primary_unit) = UPPER($1)', [shortCode]);
+    if (parseInt(itemCheck.rows[0].count, 10) > 0) {
+      return res.status(400).json({ error: 'Cannot delete unit that is assigned to existing store items.' });
+    }
+    await pool.query('DELETE FROM store_units WHERE id = $1', [id]);
+    res.json({ message: 'Unit deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting unit:', err);
+    res.status(500).json({ error: 'Failed to delete unit' });
   }
 });
 

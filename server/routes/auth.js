@@ -15,6 +15,32 @@ const transporter = nodemailer.createTransport({
 });
 
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { recordActivityLog } = require('./activityLogs');
+
+const VALID_STORE_BRANCHES = ['Branch 1', 'Branch 2', 'Branch 3'];
+
+function normalizeUserBranches(role, branch, assigned_branches) {
+  const r = (role || '').trim().toLowerCase();
+  if (r === 'store man') {
+    const b = VALID_STORE_BRANCHES.includes(branch) ? branch : null;
+    if (!b) return { error: 'Store Man must be assigned to a single valid branch (Branch 1, Branch 2, or Branch 3).' };
+    return { finalBranch: b, finalAssignedBranches: [b] };
+  }
+  if (r === 'data entry') {
+    let arr = Array.isArray(assigned_branches)
+      ? assigned_branches
+      : (typeof assigned_branches === 'string' && assigned_branches.trim() ? assigned_branches.split(',').map(s => s.trim()) : (branch ? [branch] : []));
+    arr = [...new Set(arr.filter(b => VALID_STORE_BRANCHES.includes(b)))];
+    if (arr.length === 0) {
+      return { error: 'Data Entry user must be assigned to at least one valid branch (Branch 1, Branch 2, or Branch 3).' };
+    }
+    return { finalBranch: arr.join(', '), finalAssignedBranches: arr };
+  }
+  return {
+    finalBranch: branch || null,
+    finalAssignedBranches: branch ? [branch] : []
+  };
+}
 
 // Helper to generate 6-digit OTP
 function generateOTP() {
@@ -46,9 +72,13 @@ router.post('/login', async (req, res) => {
     // Update last_login
     await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
 
+    const assignedBranches = Array.isArray(user.assigned_branches) && user.assigned_branches.length > 0
+      ? user.assigned_branches
+      : (user.branch ? [user.branch] : []);
+
     // Generate JWT token
     const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch, must_change_password: user.must_change_password, employee_id: user.employee_id },
+      { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch, assigned_branches: assignedBranches, must_change_password: user.must_change_password, employee_id: user.employee_id },
       process.env.JWT_SECRET || 'fallback_secret',
       { expiresIn: '10d' }
     );
@@ -56,7 +86,7 @@ router.post('/login', async (req, res) => {
     res.json({
       message: 'Login successful',
       token,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch, must_change_password: user.must_change_password, employee_id: user.employee_id }
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, shift: user.shift, branch: user.branch, assigned_branches: assignedBranches, must_change_password: user.must_change_password, employee_id: user.employee_id }
     });
   } catch (err) {
     console.error(err);
@@ -92,9 +122,10 @@ router.post('/change-password', authenticateToken, async (req, res) => {
 router.get('/users', authenticateToken, isAdmin, async (req, res) => {
   try {
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER').catch(() => {});
+    await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_branches JSONB DEFAULT '[]'::jsonb").catch(() => {});
     const result = await pool.query(`
       SELECT 
-        u.id, u.username, u.email, u.role, u.shift, u.branch, u.created_at, u.employee_id,
+        u.id, u.username, u.email, u.role, u.shift, u.branch, u.assigned_branches, u.created_at, u.employee_id,
         e.name AS employee_name, e.employee_id AS employee_code, e.role AS employee_role, e.branch AS employee_branch, e.department AS employee_department
       FROM users u
       LEFT JOIN employees e ON u.employee_id = e.id
@@ -129,10 +160,11 @@ router.get('/employee-options', authenticateToken, isAdmin, async (req, res) => 
 // POST /api/auth/users (Admin only)
 // -------------------------------------------------------------
 router.post('/users', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role, shift, branch, employee_id } = req.body;
+  const { username, email, password, role, shift, branch, assigned_branches, employee_id } = req.body;
 
   try {
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER').catch(() => {});
+    await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_branches JSONB DEFAULT '[]'::jsonb").catch(() => {});
 
     // Check if user exists
     const check = await pool.query('SELECT * FROM users WHERE username = $1 OR email = $2', [username, email]);
@@ -150,15 +182,31 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
       }
     }
 
+    const branchNorm = normalizeUserBranches(role, branch, assigned_branches);
+    if (branchNorm.error) {
+      return res.status(400).json({ error: branchNorm.error });
+    }
+
     const password_hash = await bcrypt.hash(password, 10);
-    let finalBranch = branch;
+    let finalBranch = branchNorm.finalBranch;
     if (['Order Taker', 'Cashier'].includes(role) && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Branch 1';
     if (role === 'Operator' && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Restaurant 1';
 
     const result = await pool.query(
-      'INSERT INTO users (username, email, password_hash, role, shift, branch, employee_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, username, email, role, shift, branch, employee_id',
-      [username, email, password_hash, role || 'Operator', shift || null, finalBranch || null, parsedEmpId]
+      'INSERT INTO users (username, email, password_hash, role, shift, branch, assigned_branches, employee_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, username, email, role, shift, branch, assigned_branches, employee_id',
+      [username, email, password_hash, role || 'Operator', shift || null, finalBranch || null, JSON.stringify(branchNorm.finalAssignedBranches), parsedEmpId]
     );
+
+    await recordActivityLog(pool, {
+      module: 'Store',
+      action: 'USER_CREATED',
+      entity_id: result.rows[0].id,
+      entity_name: result.rows[0].username,
+      description: `Created user '${result.rows[0].username}' with role '${result.rows[0].role}'`,
+      new_data: { role: result.rows[0].role, branch: result.rows[0].branch, assigned_branches: result.rows[0].assigned_branches },
+      performed_by: req.user?.username || 'Admin',
+      branch: result.rows[0].branch || 'All'
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -171,14 +219,15 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
 // PUT /api/auth/users/:id (Admin only)
 // -------------------------------------------------------------
 router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
-  const { username, email, password, role, shift, branch, employee_id } = req.body;
+  const { username, email, password, role, shift, branch, assigned_branches, employee_id } = req.body;
   const { id } = req.params;
 
   try {
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER').catch(() => {});
+    await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_branches JSONB DEFAULT '[]'::jsonb").catch(() => {});
 
     // Protection: Cannot edit a Developer user
-    const role_check = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
+    const role_check = await pool.query('SELECT role, branch, assigned_branches, username FROM users WHERE id = $1', [id]);
     if (role_check.rows[0]?.role?.toLowerCase() === 'developer' && req.user.role?.toLowerCase() !== 'developer') {
       return res.status(403).json({ error: 'Only Developers can modify Developer accounts' });
     }
@@ -193,22 +242,40 @@ router.put('/users/:id', authenticateToken, isAdmin, async (req, res) => {
       }
     }
 
-    let finalBranch = branch;
+    const branchNorm = normalizeUserBranches(role, branch, assigned_branches);
+    if (branchNorm.error) {
+      return res.status(400).json({ error: branchNorm.error });
+    }
+
+    let finalBranch = branchNorm.finalBranch;
     if (['Order Taker', 'Cashier'].includes(role) && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Branch 1';
     if (role === 'Operator' && (!finalBranch || finalBranch.trim() === '')) finalBranch = 'Restaurant 1';
 
-    let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4, branch = $5, employee_id = $6';
-    const params = [username, email, role, shift || null, finalBranch || null, parsedEmpId, id];
+    let query = 'UPDATE users SET username = $1, email = $2, role = $3, shift = $4, branch = $5, assigned_branches = $6, employee_id = $7';
+    const params = [username, email, role, shift || null, finalBranch || null, JSON.stringify(branchNorm.finalAssignedBranches), parsedEmpId, id];
 
     if (password) {
       const password_hash = await bcrypt.hash(password, 10);
-      query += ', password_hash = $8 WHERE id = $7';
+      query += ', password_hash = $9 WHERE id = $8';
       params.push(password_hash);
     } else {
-      query += ' WHERE id = $7';
+      query += ' WHERE id = $8';
     }
 
-    const result = await pool.query(query + ' RETURNING id, username, email, role, shift, branch, employee_id', params);
+    const result = await pool.query(query + ' RETURNING id, username, email, role, shift, branch, assigned_branches, employee_id', params);
+
+    await recordActivityLog(pool, {
+      module: 'Store',
+      action: 'USER_UPDATED',
+      entity_id: id,
+      entity_name: username,
+      description: `Updated user '${username}' role/branch assignment`,
+      old_data: role_check.rows[0] || null,
+      new_data: { role, branch: finalBranch, assigned_branches: branchNorm.finalAssignedBranches },
+      performed_by: req.user?.username || 'Admin',
+      branch: finalBranch || 'All'
+    });
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);

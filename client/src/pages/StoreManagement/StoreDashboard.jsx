@@ -28,8 +28,11 @@ export default function StoreDashboard({
   onRefresh,
   selectedBranch,
   selectedStore,
-  selectedStoreId 
+  selectedStoreId,
+  user
 }) {
+  const userRole = (user?.role || '').trim().toLowerCase();
+  const canOperateShiftOrPurchase = userRole === 'admin' || userRole === 'developer';
   const [internalMetrics, setInternalMetrics] = useState(propMetrics || null);
   const [internalMovements, setInternalMovements] = useState(propRecentMovements || []);
   const [internalPurchases, setInternalPurchases] = useState(propRecentPurchases || []);
@@ -40,7 +43,6 @@ export default function StoreDashboard({
     try {
       const params = {};
       if (selectedBranch && selectedBranch !== 'All') params.branch = selectedBranch;
-      if (selectedStoreId && selectedStoreId !== 'All') params.store_id = selectedStoreId;
       const res = await axios.get('/api/store/dashboard/metrics', { params });
       if (res.data) {
         setInternalMetrics(res.data.metrics);
@@ -52,7 +54,7 @@ export default function StoreDashboard({
     } finally {
       setInternalLoading(false);
     }
-  }, [selectedBranch, selectedStoreId]);
+  }, [selectedBranch]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -102,7 +104,7 @@ export default function StoreDashboard({
             fontWeight: 700,
             letterSpacing: '0.03em'
           }}>
-            {formatBranchLabel(selectedBranch)} {selectedStore?.name ? `— ${selectedStore.name}` : ''}
+            {selectedBranch === 'All' ? 'All Branches' : formatBranchLabel(selectedBranch)}
           </span>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0, letterSpacing: -0.3 }}>
             Store Management Overview
@@ -111,44 +113,48 @@ export default function StoreDashboard({
 
         {/* Quick Action Buttons */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button 
-            className="btn" 
-            onClick={() => onNavigateTab('entry')}
-            style={{ 
-              background: 'var(--primary)', 
-              color: '#000000', 
-              fontWeight: 700, 
-              padding: '8px 14px', 
-              borderRadius: 8,
-              border: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              cursor: 'pointer',
-              fontSize: 13
-            }}
-          >
-            <Clock size={15} /> Count Shift Stock
-          </button>
-          <button 
-            className="btn" 
-            onClick={() => onNavigateTab('purchases')}
-            style={{ 
-              background: '#ffffff', 
-              color: 'var(--secondary)', 
-              fontWeight: 700, 
-              padding: '8px 14px', 
-              borderRadius: 8,
-              border: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              cursor: 'pointer',
-              fontSize: 13
-            }}
-          >
-            <ShoppingCart size={15} /> Add Purchase
-          </button>
+          {canOperateShiftOrPurchase && (
+            <>
+              <button 
+                className="btn" 
+                onClick={() => onNavigateTab('entry')}
+                style={{ 
+                  background: 'var(--primary)', 
+                  color: '#000000', 
+                  fontWeight: 700, 
+                  padding: '8px 14px', 
+                  borderRadius: 8,
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  cursor: 'pointer',
+                  fontSize: 13
+                }}
+              >
+                <Clock size={15} /> Count Shift Stock
+              </button>
+              <button 
+                className="btn" 
+                onClick={() => onNavigateTab('purchases')}
+                style={{ 
+                  background: '#ffffff', 
+                  color: 'var(--secondary)', 
+                  fontWeight: 700, 
+                  padding: '8px 14px', 
+                  borderRadius: 8,
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  cursor: 'pointer',
+                  fontSize: 13
+                }}
+              >
+                <ShoppingCart size={15} /> Add Purchase
+              </button>
+            </>
+          )}
           <button 
             className="btn" 
             onClick={handleRefreshClick}
@@ -279,7 +285,7 @@ export default function StoreDashboard({
             </h3>
             <button 
               className="btn btn-outline" 
-              onClick={() => onNavigateTab('inventory')}
+              onClick={() => onNavigateTab('items')}
               style={{ fontSize: 12, padding: '4px 10px' }}
             >
               View Inventory
@@ -318,7 +324,7 @@ export default function StoreDashboard({
                           {item.item_name} <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({item.item_code})</span>
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                          {item.movement_type.replace(/_/g, ' ')} • {item.store_name}
+                          {item.movement_type.replace(/_/g, ' ')} • {formatBranchLabel(item.branch)}
                         </div>
                       </div>
                     </div>

@@ -28,23 +28,17 @@ import { formatBranchLabel, SHIFT_OPTIONS } from './storeUtils';
 
 export default function StockHistory({ 
   selectedBranch: propBranch, 
-  selectedStoreId: propStoreId, 
-  locations: propLocations = [], 
   user 
 }) {
   const storeContext = useStore();
   const selectedBranch = propBranch || storeContext?.selectedBranch || 'All';
-  const selectedStoreId = propStoreId || storeContext?.selectedStoreId || 'All';
-  const locations = (propLocations && propLocations.length > 0) ? propLocations : (storeContext?.locations || []);
-  const branches = storeContext?.branches || [];
+  const branches = storeContext?.branches || ['Branch 1', 'Branch 2', 'Branch 3'];
   const setSelectedBranch = storeContext?.setSelectedBranch || (() => {});
-  const setSelectedStoreId = storeContext?.setSelectedStoreId || (() => {});
 
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
 
   // Filters
-  const [storeFilter, setStoreFilter] = useState(selectedStoreId || 'All');
   const [branchFilter, setBranchFilter] = useState(selectedBranch || 'All');
   const [shiftFilter, setShiftFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -66,28 +60,31 @@ export default function StockHistory({
   const [reopenReason, setReopenReason] = useState('');
   const [reopening, setReopening] = useState(false);
 
-  const isManagerOrAdmin = useMemo(() => {
-    const role = (user?.role || '').toLowerCase();
-    return ['admin', 'developer', 'management', 'store manager'].includes(role);
-  }, [user]);
+  const userRole = (user?.role || '').trim().toLowerCase();
+  const isAdminOrDev = userRole === 'admin' || userRole === 'developer';
+  const isOperationalRole = userRole === 'store man' || userRole === 'data entry';
 
-  // Keep filters synced if topbar/parent passes branch/store
+  const canReopenEntry = (entry) => {
+    if (!entry || entry.status !== 'Submitted') return false;
+    if (isAdminOrDev) return true;
+    if (!isOperationalRole) return false;
+    const today = getSaudiTodayDate();
+    const [y, m, d] = today.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    const yesterday = dt.toISOString().slice(0, 10);
+    const entryDateStr = String(entry.entry_date || '').slice(0, 10);
+    return entryDateStr === today || entryDateStr === yesterday;
+  };
+
+  // Keep filters synced if topbar/parent passes branch
   useEffect(() => {
     setBranchFilter(selectedBranch || 'All');
   }, [selectedBranch]);
 
-  useEffect(() => {
-    setStoreFilter(selectedStoreId || 'All');
-  }, [selectedStoreId]);
-
   const handleBranchChange = (newBranch) => {
     setBranchFilter(newBranch);
     setSelectedBranch(newBranch);
-  };
-
-  const handleStoreChange = (newStoreId) => {
-    setStoreFilter(newStoreId);
-    setSelectedStoreId(newStoreId);
   };
 
   const handleResetFilters = () => {
@@ -106,7 +103,6 @@ export default function StockHistory({
     setLoading(true);
     try {
       const params = {};
-      if (storeFilter !== 'All') params.store_id = storeFilter;
       if (branchFilter !== 'All') params.branch = branchFilter;
       if (shiftFilter !== 'All') params.shift = shiftFilter;
       if (statusFilter !== 'All') params.status = statusFilter;
@@ -125,7 +121,7 @@ export default function StockHistory({
 
   useEffect(() => {
     fetchEntries();
-  }, [storeFilter, branchFilter, shiftFilter, statusFilter, fromDate, toDate]);
+  }, [branchFilter, shiftFilter, statusFilter, fromDate, toDate]);
 
   // View Details
   const handleViewDetails = async (entry) => {
@@ -207,7 +203,7 @@ export default function StockHistory({
     return entries.filter(e => 
       (e.entry_number || '').toLowerCase().includes(q) ||
       (e.submitted_by_name || '').toLowerCase().includes(q) ||
-      (e.store_name || '').toLowerCase().includes(q)
+      (e.store_branch || e.branch || '').toLowerCase().includes(q)
     );
   }, [entries, searchQuery]);
 
@@ -253,7 +249,7 @@ export default function StockHistory({
           </div>
         </div>
 
-        {/* Mobile Branch & Location Bar (shows only on screens <= 768px) */}
+        {/* Mobile Branch Bar (shows only on screens <= 768px) */}
         <div className="store-mobile-location-bar">
           <div className="store-filter-col">
             <label className="store-filter-label">Branch</label>
@@ -262,25 +258,9 @@ export default function StockHistory({
               onChange={(e) => handleBranchChange(e.target.value)}
               className="store-filter-select"
             >
-              <option value="All">All</option>
+              <option value="All">All Branches</option>
               {branches.map(b => (
                 <option key={b} value={b}>{formatBranchLabel(b)}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="store-filter-col">
-            <label className="store-filter-label">Store Location</label>
-            <select
-              value={storeFilter}
-              onChange={(e) => handleStoreChange(e.target.value)}
-              className="store-filter-select"
-            >
-              <option value="All">All Locations</option>
-              {locations.map(loc => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name} {branchFilter === 'All' ? `(${formatBranchLabel(loc.branch)})` : ''}
-                </option>
               ))}
             </select>
           </div>
@@ -379,7 +359,6 @@ export default function StockHistory({
                 <th style={{ width: 110 }}>Entry #</th>
                 <th>Date</th>
                 <th>Shift</th>
-                <th>Store Location</th>
                 <th>Branch</th>
                 <th style={{ textAlign: 'center' }}>Items Count</th>
                 <th style={{ textAlign: 'right' }}>Consumption Value</th>
@@ -428,11 +407,6 @@ export default function StockHistory({
                       }}>
                         {ent.shift === 'Day' ? '☀️ Day' : '🌙 Night'}
                       </span>
-                    </td>
-
-                    {/* Store */}
-                    <td style={{ fontWeight: 600, fontSize: 12 }}>
-                      {ent.store_name}
                     </td>
 
                     {/* Branch */}
@@ -502,7 +476,7 @@ export default function StockHistory({
                     </span>
                   </h3>
                   <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary, #6b7280)' }}>
-                    {selectedEntry.store_name} ({selectedEntry.store_branch}) • {selectedEntry.entry_date} ({selectedEntry.shift} Shift)
+                    {formatBranchLabel(selectedEntry.store_branch || selectedEntry.branch)} • {selectedEntry.entry_date} ({selectedEntry.shift} Shift)
                   </p>
                 </div>
               </div>
@@ -644,7 +618,7 @@ export default function StockHistory({
             {/* Modal Footer with Reopen action */}
             <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between">
               <div>
-                {isManagerOrAdmin && selectedEntry.status === 'Submitted' && (
+                {canReopenEntry(selectedEntry) ? (
                   <button
                     onClick={() => setShowReopenModal(true)}
                     className="px-3.5 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
@@ -652,7 +626,11 @@ export default function StockHistory({
                     <RotateCcw size={14} />
                     Reopen Shift for Corrections
                   </button>
-                )}
+                ) : isOperationalRole && selectedEntry.status === 'Submitted' ? (
+                  <span style={{ fontSize: 12, color: '#9ca3af', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <Lock size={13} /> Read-Only (Entries older than yesterday cannot be reopened)
+                  </span>
+                ) : null}
               </div>
 
               <button

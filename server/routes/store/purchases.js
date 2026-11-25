@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../db');
-const { authenticateToken, isAdmin } = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth');
+const { requireStoreRoles, enforceBranchAccess, resolveBranchStoreId } = require('../../middleware/storeAuth');
+const { recordActivityLog } = require('../activityLogs');
 
 // Helper to generate unique purchase number (e.g. PUR-20261117-001)
 async function generatePurchaseNumber(client) {
@@ -28,9 +30,12 @@ async function generatePurchaseNumber(client) {
 // -------------------------------------------------------------
 // GET /api/store/purchases (List purchases with filters)
 // -------------------------------------------------------------
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'store man', 'data entry']), async (req, res) => {
   try {
     const { store_id, branch, vendor_id, from_date, to_date, payment_status } = req.query;
+    const access = await enforceBranchAccess(req, res, { branch, store_id });
+    if (!access.ok) return;
+
     let query = `
       SELECT 
         p.*,
@@ -43,6 +48,11 @@ router.get('/', authenticateToken, async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+
+    if (access.allowedBranches) {
+      params.push(access.allowedBranches);
+      query += ` AND p.branch = ANY($${params.length})`;
+    }
 
     if (store_id && store_id !== 'All') {
       params.push(parseInt(store_id, 10));
@@ -86,7 +96,7 @@ router.get('/', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // GET /api/store/purchases/:id (Purchase details with line items)
 // -------------------------------------------------------------
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireStoreRoles(['admin', 'developer', 'management', 'store man', 'data entry']), async (req, res) => {
   const { id } = req.params;
   try {
     const pRes = await pool.query(`
@@ -106,6 +116,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (pRes.rows.length === 0) {
       return res.status(404).json({ error: 'Purchase record not found' });
     }
+
+    const access = await enforceBranchAccess(req, res, { branch: pRes.rows[0].branch, store_id: pRes.rows[0].store_id });
+    if (!access.ok) return;
 
     const itemsRes = await pool.query(`
       SELECT 
@@ -134,19 +147,27 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // -------------------------------------------------------------
 // POST /api/store/purchases (Register Purchase & update Store Stock)
 // -------------------------------------------------------------
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireStoreRoles(['admin', 'developer', 'store man', 'data entry']), async (req, res) => {
   const {
     vendor_id, store_id, branch, invoice_number, invoice_date,
     delivery_date, payment_method, payment_status, notes, items
   } = req.body;
 
-  if (!vendor_id || !store_id || !invoice_date) {
-    return res.status(400).json({ error: 'Vendor, store location, and invoice date are required' });
+  if (!vendor_id || (!store_id && (!branch || branch === 'All')) || !invoice_date) {
+    return res.status(400).json({ error: 'Vendor, branch, and invoice date are required' });
   }
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'At least one line item is required' });
   }
+
+  const resolvedStoreId = store_id && store_id !== 'All' ? parseInt(store_id, 10) : await resolveBranchStoreId(pool, branch);
+  if (!resolvedStoreId) {
+    return res.status(400).json({ error: 'Valid branch (Branch 1, Branch 2, or Branch 3) is required' });
+  }
+
+  const access = await enforceBranchAccess(req, res, { branch, store_id: resolvedStoreId });
+  if (!access.ok) return;
 
   const client = await pool.connect();
   try {
@@ -174,13 +195,13 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    const sCheck = await client.query('SELECT branch, name FROM store_locations WHERE id = $1', [store_id]);
+    const sCheck = await client.query('SELECT branch, name FROM store_locations WHERE id = $1', [resolvedStoreId]);
     if (sCheck.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Store location not found' });
+      return res.status(404).json({ error: 'Branch store not found' });
     }
     const store = sCheck.rows[0];
-    const finalBranch = branch || store.branch;
+    const finalBranch = store.branch;
     const userName = req.user?.username || req.user?.name || 'Store Staff';
 
     // 2. Calculate totals
@@ -212,7 +233,7 @@ router.post('/', authenticateToken, async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'Received', $13, $14, $15)
       RETURNING *
     `, [
-      purchaseNum, vendor_id, store_id, finalBranch, invoice_number?.trim() || null,
+      purchaseNum, vendor_id, resolvedStoreId, finalBranch, invoice_number?.trim() || null,
       invoice_date, delivery_date || invoice_date, subtotal, totalTax, totalAmount,
       payment_method || 'Cash', payment_status || (payment_method === 'Cash' ? 'Paid' : 'Unpaid'),
       req.user?.id || null, userName, notes || null
@@ -242,14 +263,14 @@ router.post('/', authenticateToken, async (req, res) => {
       // Atomic inventory increment in store_inventory
       const curInvRes = await client.query(`
         SELECT current_stock FROM store_inventory WHERE store_id = $1 AND item_id = $2 FOR UPDATE
-      `, [store_id, it.item_id]);
+      `, [resolvedStoreId, it.item_id]);
 
       let stockBefore = 0;
       if (curInvRes.rows.length === 0) {
         await client.query(`
           INSERT INTO store_inventory (store_id, item_id, current_stock, last_received_stock, updated_at)
           VALUES ($1, $2, $3, $3, NOW())
-        `, [store_id, it.item_id, qty]);
+        `, [resolvedStoreId, it.item_id, qty]);
         stockBefore = 0;
       } else {
         stockBefore = parseFloat(curInvRes.rows[0].current_stock) || 0;
@@ -259,7 +280,7 @@ router.post('/', authenticateToken, async (req, res) => {
               last_received_stock = $1,
               updated_at = NOW()
           WHERE store_id = $2 AND item_id = $3
-        `, [qty, store_id, it.item_id]);
+        `, [qty, resolvedStoreId, it.item_id]);
       }
 
       const stockAfter = stockBefore + qty;
@@ -286,7 +307,7 @@ router.post('/', authenticateToken, async (req, res) => {
           stock_before, stock_after, unit_price, total_value, performed_by_name, reason
         ) VALUES ($1, $2, 'PURCHASE_RECEIPT', $3, $4, $5, $6, $7, $8, $9, $10)
       `, [
-        store_id, it.item_id, purchaseNum, qty, stockBefore, stockAfter,
+        resolvedStoreId, it.item_id, purchaseNum, qty, stockBefore, stockAfter,
         price, lineTotal, userName, `Purchased from ${vendorName} (Inv: ${invoice_number || 'N/A'})`
       ]);
     }
@@ -319,6 +340,17 @@ router.post('/', authenticateToken, async (req, res) => {
         UPDATE store_vendors SET current_balance = current_balance + $1, updated_at = NOW() WHERE id = $2
       `, [totalAmount, vendor_id]);
     }
+
+    await recordActivityLog(client, {
+      module: 'Store',
+      action: 'PURCHASE_CREATED',
+      entity_id: createdPurchase.id,
+      entity_name: purchaseNum,
+      description: `Registered purchase ${purchaseNum} from ${vendorName} (${items.length} items, total ${totalAmount})`,
+      new_data: { store_id, branch: store.branch, vendor_id, total_amount: totalAmount },
+      performed_by: userName,
+      branch: store.branch
+    });
 
     await client.query('COMMIT');
     res.status(201).json({

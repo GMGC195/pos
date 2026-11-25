@@ -2,9 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { ensureStoreManagementSchema } = require('./schema');
 const { authenticateToken, blockSalaryPayOperator } = require('../../middleware/auth');
+const { requireStoreRoles } = require('../../middleware/storeAuth');
+
+const ALL_STORE_ROLES = ['developer', 'admin', 'management', 'management store', 'store man', 'data entry'];
 
 // Block Salary Pay Operator from Store Management
 router.use(blockSalaryPayOperator);
+
+// Require authenticated user with a valid Store Management role
+router.use(authenticateToken, requireStoreRoles(ALL_STORE_ROLES));
 
 // Auto-verify and ensure independent schema tables exist
 ensureStoreManagementSchema();
